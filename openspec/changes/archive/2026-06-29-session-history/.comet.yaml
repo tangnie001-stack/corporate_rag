@@ -1,0 +1,23 @@
+workflow: full
+phase: archive
+context_compression: off
+build_mode: subagent-driven-development
+build_pause: null
+subagent_dispatch: confirmed
+tdd_mode: tdd
+review_mode: standard
+isolation: branch
+verify_mode: full
+auto_transition: true
+base_ref: 574681cbe6aaf7c3cd881ce7503b296c16b0f974
+design_doc: docs/superpowers/specs/2026-06-27-session-history-design.md
+plan: docs/superpowers/plans/2026-06-27-session-history-plan.md
+verify_result: pass
+verification_report: docs/superpowers/reports/2026-06-27-session-history-verify.md
+branch_status: handled
+created_at: 2026-06-27
+verified_at: 2026-06-27
+archived: false
+handoff_context: openspec/changes/session-history/.comet/handoff/design-context.json
+handoff_hash: 89ba5c37884ca62492bc77285bfcbe19185596af34fec26f3d0d70c982333c04
+build_command: ruff check src/api/ src/chat_manager.py src/config/queries.py src/mysql_db.py

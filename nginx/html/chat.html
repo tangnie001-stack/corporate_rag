@@ -1,0 +1,225 @@
+<!-- nginx/html/chat.html -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Corporate RAG — 智能问答</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['IBM Plex Sans', 'system-ui', '-apple-system', 'sans-serif'],
+                    },
+                },
+            },
+        };
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body class="bg-slate-50 min-h-screen font-sans text-slate-900">
+
+    <!-- ====== Sidebar ====== -->
+    <aside id="sidebar" class="fixed top-0 left-0 z-30 h-screen w-64 bg-slate-900 text-slate-300 flex flex-col transition-transform duration-300 -translate-x-full md:translate-x-0">
+        <div class="px-5 py-5 border-b border-slate-700">
+            <h1 clCorporate RAGass="text-lg font-semibold text-white flex items-center gap-2">
+                <span class="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white text-sm font-bold">FQ</span>
+                Corporate RAG
+            </h1>
+            <p class="text-xs text-slate-500 mt-1">金融文档智能问答系统</p>
+        </div>
+        <nav class="px-3 py-4 border-b border-slate-700">
+            <a href="/" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium bg-blue-600/10 text-blue-400">
+                <span>💬</span> 智能问答
+            </a>
+            <a href="/Knowledgebase" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-800 mt-1">
+                <span>📚</span> 知识库管理
+            </a>
+        </nav>
+        <div class="flex-1 overflow-hidden flex flex-col">
+            <div class="px-3 py-3 flex items-center justify-between border-b border-slate-700/50">
+                <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">会话历史</span>
+                <button onclick="newSession()" class="w-7 h-7 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 flex items-center justify-center transition-colors" title="新建会话">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                </button>
+            </div>
+            <div class="sidebar-session-list flex-1 overflow-y-auto px-2 py-2"></div>
+        </div>
+    </aside>
+
+    <!-- ====== Mobile Overlay ====== -->
+    <div id="sidebar-overlay" onclick="toggleSidebar()" class="sidebar-overlay fixed inset-0 z-20 bg-black/50 hidden md:hidden"></div>
+
+    <!-- ====== Hamburger (mobile) ====== -->
+    <button onclick="toggleSidebar()" class="fixed top-3 left-3 z-10 md:hidden w-9 h-9 rounded-lg bg-white border border-slate-200 shadow-sm flex items-center justify-center text-slate-600">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+    </button>
+
+    <!-- ====== User Area (top-right) ====== -->
+    <div id="user-area" class="fixed top-14 md:top-5 right-3 z-10 flex items-center gap-3">
+        <!-- Populated by updateUserArea() -->
+    </div>
+
+    <!-- ====== Clickaway handler for user dropdown ====== -->
+    <div id="user-dropdown-backdrop" class="fixed inset-0 z-0 hidden"></div>
+
+    <!-- ====== Mobile Hamburger end ====== -->
+
+    <!-- ====== Chat Container ====== -->
+    <main class="md:ml-64 md:pr-48 lg:pr-48 h-screen flex flex-col">
+        <!-- Header -->
+        <div class="flex-shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 md:px-6 lg:px-8 pt-14 md:pt-5 pb-3 border-b border-slate-200 bg-white/80 backdrop-blur-sm">
+            <h2 class="text-lg font-bold text-slate-900 flex items-center gap-2">
+                <span>💬</span> 智能问答
+            </h2>
+            <div class="flex items-center gap-3">
+                <select id="kb-select" class="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none min-w-[160px]">
+                    <option value="">加载中...</option>
+                </select>
+                <button onclick="resetSession()" class="flex items-center gap-1.5 px-3 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                    <span class="hidden sm:inline">新会话</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Messages -->
+        <div id="chat-messages" class="flex-1 overflow-y-auto px-4 md:px-6 lg:px-8 py-4 space-y-1">
+            <!-- Welcome empty state -->
+            <div class="flex flex-col items-center justify-center h-full text-slate-400">
+                <div class="w-16 h-16 rounded-2xl bg-blue-50 flex items-center justify-center text-3xl mb-4">💬</div>
+                <p class="text-sm font-medium text-slate-600 mb-1">开始智能问答</p>
+                <p class="text-xs text-slate-400 mb-6">选择知识库，输入您的金融文档相关问题</p>
+                <div class="flex flex-wrap gap-2 justify-center max-w-md">
+                    <button onclick="quickQuestion('本季度营收情况如何？')" class="px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg text-slate-600 hover:border-blue-300 hover:text-blue-600 transition-colors">本季度营收情况如何？</button>
+                    <button onclick="quickQuestion('分析一下主要财务指标')" class="px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg text-slate-600 hover:border-blue-300 hover:text-blue-600 transition-colors">分析一下主要财务指标</button>
+                    <button onclick="quickQuestion('净利润同比增长多少？')" class="px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg text-slate-600 hover:border-blue-300 hover:text-blue-600 transition-colors">净利润同比增长多少？</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Input Area -->
+        <div class="flex-shrink-0 border-t border-slate-200 bg-white px-4 md:px-6 lg:px-8 py-3">
+            <div class="flex items-end gap-3 max-w-4xl mx-auto">
+                <div class="flex-1 relative">
+                    <input type="text" id="chat-input"
+                        class="w-full px-4 py-3 pr-12 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-shadow bg-slate-50"
+                        placeholder="输入您的金融问题..."
+                        autofocus>
+                </div>
+                <button onclick="sendMessage()"
+                    class="flex-shrink-0 w-11 h-11 bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition-colors flex items-center justify-center shadow-sm">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"/></svg>
+                </button>
+            </div>
+            <p class="text-[10px] text-slate-400 text-center mt-2">AI 基于知识库文档内容生成回答，仅供参考</p>
+        </div>
+    </main>
+
+    <!-- ====== Toast ====== -->
+    <div id="toast" class="fixed top-8 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-5 py-3 rounded-xl text-white text-sm shadow-xl max-w-2xl hidden" style="background-color: #059669; word-break: break-word; text-align: center; white-space: pre-wrap;">
+        <span class="toast-icon w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-xs flex-shrink-0">✓</span>
+        <span class="toast-text flex-1 min-w-0"></span>
+    </div>
+
+    <!-- ====== Scripts ====== -->
+    <script src="js/api.js?v=11"></script>
+    <script src="js/chat.js?v=2"></script>
+    <script>
+        let _userId = '';
+
+        (async function checkAuth() {
+            try {
+                const r = await fetch('/api/auth/verify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Trace-ID': generateTraceId() },
+                    body: JSON.stringify({}),
+                });
+                const d = await r.json();
+                if (d.code === 'SUCCESS' && d.data?.valid) {
+                    _userId = d.data.user_id || '';
+                    updateUserArea(d.data.user_id);
+                } else {
+                    updateUserArea(null);
+                }
+            } catch (e) {
+                updateUserArea(null);
+            }
+        })();
+
+        function updateUserArea(userId) {
+            const el = document.getElementById('user-area');
+            if (!userId) {
+                el.innerHTML = '<a href="/login.html?redirect=' + encodeURIComponent(location.pathname) + '" class="inline-flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-sm font-medium rounded-lg shadow-sm transition-all hover:shadow-md">登录</a>';
+                return;
+            }
+            el.innerHTML = [
+                '<div class="relative">',
+                '<button onclick="toggleUserDropdown(event)" class="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-sm hover:shadow-md transition-shadow cursor-pointer">',
+                '<svg class="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/></svg>',
+                '</button>',
+                '<div id="user-dropdown" class="absolute right-0 top-full mt-2 w-40 bg-white rounded-xl border border-slate-200 shadow-lg py-1.5 hidden">',
+                '<button onclick="handleLogout()" class="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors flex items-center gap-2 cursor-pointer">',
+                '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>',
+                '退出登录',
+                '</button>',
+                '</div>',
+                '</div>',
+            ].join('');
+        }
+
+        function toggleUserDropdown(e) {
+            if (e) e.stopPropagation();
+            const dd = document.getElementById('user-dropdown');
+            const bk = document.getElementById('user-dropdown-backdrop');
+            const open = dd.classList.contains('hidden');
+            dd.classList.toggle('hidden', !open);
+            bk.classList.toggle('hidden', !open);
+            if (open) {
+                setTimeout(() => document.addEventListener('click', closeOnClickOutside), 0);
+            }
+        }
+
+        function closeOnClickOutside(e) {
+            const dd = document.getElementById('user-dropdown');
+            const ua = document.getElementById('user-area');
+            if (!ua.contains(e.target)) {
+                closeUserDropdown();
+                document.removeEventListener('click', closeOnClickOutside);
+            }
+        }
+
+        function closeUserDropdown() {
+            document.getElementById('user-dropdown').classList.add('hidden');
+            document.getElementById('user-dropdown-backdrop').classList.add('hidden');
+            document.removeEventListener('click', closeOnClickOutside);
+        }
+
+        async function handleLogout() {
+            try {
+                await fetch('/api/auth/logout', { method: 'POST' });
+            } catch (_) {}
+            document.cookie = 'token=; path=/; max-age=0';
+            location.href = '/login.html';
+        }
+
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('sidebar-overlay');
+            sidebar.classList.toggle('-translate-x-full');
+            overlay.classList.toggle('hidden');
+        }
+
+        function quickQuestion(q) {
+            document.getElementById('chat-input').value = q;
+            sendMessage();
+        }
+    </script>
+</body>
+</html>

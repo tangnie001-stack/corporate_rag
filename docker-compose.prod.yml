@@ -1,0 +1,239 @@
+# 生产部署配置文件
+# 使用方式: docker compose -f docker-compose.prod.yml up -d
+# 相比 docker-compose.yml 的调整:
+#   1. 移除 mem_reservation（生产不需要软保障）
+#   2. 调大 mem_limit 适配生产数据量
+#   3. 内部服务不暴露端口，仅 nginx 对外
+#   4. 重启策略改为 always
+
+services:
+  mysql:
+    image: mysql:8.0
+    mem_limit: 4g
+    container_name: corporate-rag-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-financial_qa}
+    # 生产不对外暴露端口
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./deploy/mysql/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_PASSWORD:?}"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+    networks:
+      - app-network
+
+  redis:
+    image: redis:7-alpine
+    mem_limit: 2g
+    container_name: corporate-rag-redis
+    restart: always
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    volumes:
+      - redis_data:/data
+    command: redis-server --requirepass ${REDIS_PASSWORD:?}
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    networks:
+      - app-network
+
+  postgres:
+    image: postgres:15-alpine
+    mem_limit: 4g
+    container_name: corporate-rag-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: langfuse
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: ${LANGFUSE_POSTGRES_PASS:?LANGFUSE_POSTGRES_PASS is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks:
+      - app-network
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.12-alpine
+    mem_limit: 8g
+    container_name: corporate-rag-clickhouse
+    restart: always
+    user: "101:101"
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD is required}
+      TZ: UTC
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./deploy/clickhouse/keeper_and_cluster.xml:/etc/clickhouse-server/config.d/keeper_and_cluster.xml
+    # 生产不对外暴露端口
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://127.0.0.1:8123/ping || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - app-network
+
+  minio:
+    image: minio/minio:latest
+    mem_limit: 2g
+    container_name: corporate-rag-minio
+    restart: always
+    entrypoint: sh
+    command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+    # 生产按需暴露，如用外部 S3 客户端则保留
+    ports:
+      - "${MINIO_S3_PORT:-9000}:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - app-network
+
+  langfuse-worker:
+    image: langfuse/langfuse-worker:3
+    mem_limit: 2g
+    container_name: corporate-rag-langfuse-worker
+    restart: always
+    depends_on: &langfuse-depends
+      clickhouse: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+      minio: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    # 不对外暴露端口
+    environment: &langfuse-env
+      DATABASE_URL: postgresql://langfuse:${LANGFUSE_POSTGRES_PASS:?}@postgres:5432/langfuse
+      NEXTAUTH_URL: ${NEXTAUTH_URL:?NEXTAUTH_URL is required}
+      SALT: ${LANGFUSE_SALT:?LANGFUSE_SALT is required}
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:?LANGFUSE_ENCRYPTION_KEY is required}
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:${CLICKHOUSE_PASSWORD:?}@clickhouse:9000
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_AUTH: ${REDIS_PASSWORD:?}
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?}
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?}
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
+      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?}
+      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?}
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+      TELEMETRY_ENABLED: ${TELEMETRY_ENABLED:-false}
+    networks:
+      - app-network
+
+  langfuse-web:
+    image: langfuse/langfuse:3
+    mem_limit: 2g
+    container_name: corporate-rag-langfuse-web
+    restart: always
+    depends_on: *langfuse-depends
+    # 生产典型场景：通过反代暴露，或直接暴露供团队使用
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      <<: *langfuse-env
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?NEXTAUTH_SECRET is required}
+      LANGFUSE_ENABLE_BACKGROUND_MIGRATIONS: "false"
+      LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID:-}
+      LANGFUSE_INIT_ORG_NAME: ${LANGFUSE_INIT_ORG_NAME:-}
+      LANGFUSE_INIT_PROJECT_NAME: ${LANGFUSE_INIT_PROJECT_NAME:-}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:-}
+      LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME:-}
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-}
+    networks:
+      - app-network
+
+  nginx:
+    build: ./nginx
+    mem_limit: 256m
+    container_name: corporate-rag-nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - app
+    networks:
+      - app-network
+
+  app:
+    build: .
+    mem_limit: 4g
+    container_name: corporate-rag-app
+    restart: always
+    # 生产用多 worker 提升并发
+    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --workers 4
+    env_file:
+      - .env
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?}
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?}
+    volumes:
+      - app_logs:/data/logs
+      - chroma_onnx_cache:/root/.cache/chroma
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - app-network
+
+volumes:
+  mysql_data:
+    name: corporate_rag_mysql_data
+  redis_data:
+    name: corporate_rag_redis_data
+  postgres_data:
+    name: corporate_rag_postgres_data
+  clickhouse_data:
+    name: corporate_rag_clickhouse_data
+  minio_data:
+    name: corporate_rag_minio_data
+  app_logs:
+    name: corporate_rag_app_logs
+  chroma_onnx_cache:
+    name: corporate_rag_chroma_onnx_cache
+
+networks:
+  app-network:
+    name: corporate_rag_network

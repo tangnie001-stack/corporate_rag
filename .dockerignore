@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.env
+.env.local
+.git/
+.gitignore
+chroma_persist/
+mysql_data/
+redis_data/
+logs/
+test_docs/
+old/
+docs/
+*.md
+!README.md

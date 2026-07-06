@@ -1,0 +1,6 @@
+services:
+  app:
+    volumes:
+      - ./src:/app/src
+      - ./tests:/app/tests
+      - ./test_docs:/app/test_docs

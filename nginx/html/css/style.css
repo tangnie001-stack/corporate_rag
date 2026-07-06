@@ -1,0 +1,397 @@
+/* nginx/html/css/style.css
+ * Custom styles complementing Tailwind CSS CDN.
+ * Tailwind handles all layout, spacing, colors — this file only covers
+ * animations, scrollbar customization, and chat bubble extras. */
+
+/* ====== Scrollbar ====== */
+#chat-messages::-webkit-scrollbar,
+.sidebar-kb-list::-webkit-scrollbar,
+.sidebar-session-list::-webkit-scrollbar {
+    width: 6px;
+}
+#chat-messages::-webkit-scrollbar-track,
+.sidebar-kb-list::-webkit-scrollbar-track,
+.sidebar-session-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+#chat-messages::-webkit-scrollbar-thumb,
+.sidebar-kb-list::-webkit-scrollbar-thumb,
+.sidebar-session-list::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 3px;
+}
+#chat-messages::-webkit-scrollbar-thumb:hover,
+.sidebar-kb-list::-webkit-scrollbar-thumb:hover,
+.sidebar-session-list::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+}
+
+/* ====== Chat bubble tail (pseudo-elements) ====== */
+.message-bubble.user::after {
+    content: '';
+    position: absolute;
+    bottom: 6px;
+    right: -6px;
+    width: 12px;
+    height: 12px;
+    background: #2563eb;
+    transform: rotate(45deg);
+    border-radius: 2px;
+}
+.message-bubble.assistant::after {
+    content: '';
+    position: absolute;
+    bottom: 6px;
+    left: -6px;
+    width: 12px;
+    height: 12px;
+    background: #ffffff;
+    border-left: 1px solid #e2e8f0;
+    border-bottom: 1px solid #e2e8f0;
+    transform: rotate(45deg);
+    border-radius: 2px;
+}
+
+/* ====== Skeleton shimmer ====== */
+@keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+}
+.skeleton {
+    background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 4px;
+}
+
+/* ====== Fade in for messages ====== */
+@keyframes messageIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+.message-bubble {
+    animation: messageIn 0.25s ease-out;
+}
+
+/* ====== Toast slide ====== */
+@keyframes toastIn {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+@keyframes toastOut {
+    from { transform: translateX(0); opacity: 1; }
+    to { transform: translateX(100%); opacity: 0; }
+}
+.toast-enter {
+    animation: toastIn 0.3s ease-out forwards;
+}
+.toast-leave {
+    animation: toastOut 0.3s ease-in forwards;
+}
+
+/* ====== Modal backdrop blur ====== */
+.modal-backdrop {
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
+
+/* ====== Spinner ====== */
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+.spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid #e2e8f0;
+    border-top-color: #2563eb;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+}
+
+/* ====== Markdown content styling ====== */
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4 {
+    font-weight: 600;
+    margin-top: 12px;
+    margin-bottom: 6px;
+}
+.markdown-body h1 { font-size: 1.25rem; }
+.markdown-body h2 { font-size: 1.125rem; }
+.markdown-body h3 { font-size: 1rem; }
+.markdown-body p { margin-bottom: 8px; }
+.markdown-body ul, .markdown-body ol {
+    padding-left: 1.5rem;
+    margin-bottom: 8px;
+}
+.markdown-body li { margin-bottom: 4px; }
+.markdown-body code {
+    background: #f1f5f9;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.875em;
+    font-family: 'SF Mono', Monaco, monospace;
+}
+.markdown-body pre {
+    background: #1e293b;
+    color: #e2e8f0;
+    padding: 12px 16px;
+    border-radius: 8px;
+    overflow-x: auto;
+    margin: 8px 0;
+    font-size: 0.875em;
+}
+.markdown-body pre code {
+    background: none;
+    padding: 0;
+    color: inherit;
+}
+.markdown-body table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 8px 0;
+    font-size: 0.875em;
+}
+.markdown-body th, .markdown-body td {
+    border: 1px solid #e2e8f0;
+    padding: 8px 12px;
+    text-align: left;
+}
+.markdown-body th {
+    background: #f8fafc;
+    font-weight: 600;
+}
+.markdown-body blockquote {
+    border-left: 3px solid #2563eb;
+    padding-left: 12px;
+    margin: 8px 0;
+    color: #64748b;
+}
+.markdown-body a {
+    color: #2563eb;
+    text-decoration: underline;
+}
+
+/* ====== Typing cursor for streaming ====== */
+.typing-cursor::after {
+    content: '▍';
+    animation: blink 1s step-end infinite;
+    color: #2563eb;
+}
+@keyframes blink {
+    50% { opacity: 0; }
+}
+
+/* ====== Status badge ====== */
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+.status-badge.ready {
+    background: #dcfce7;
+    color: #166534;
+}
+.status-badge.processing {
+    background: #fef9c3;
+    color: #854d0e;
+}
+.status-badge.error {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+/* ====== Chunk preview cards ====== */
+.chunk-card {
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    overflow: hidden;
+    transition: box-shadow 0.2s ease, border-color 0.2s ease;
+    background: #ffffff;
+}
+.chunk-card:hover {
+    border-color: #cbd5e1;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+.chunk-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    background: #f8fafc;
+    border-bottom: 1px solid #e2e8f0;
+}
+.chunk-card-number {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #64748b;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+.chunk-card-number::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #3b82f6;
+    flex-shrink: 0;
+}
+.chunk-card-meta {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 0.7rem;
+    color: #94a3b8;
+    font-weight: 500;
+}
+.chunk-card-meta span {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+}
+.chunk-card-body {
+    padding: 14px;
+}
+.chunk-card-body pre {
+    font-family: 'SF Mono', 'Cascadia Code', 'JetBrains Mono', 'Consolas', monospace;
+    font-size: 0.8125rem;
+    line-height: 1.65;
+    color: #1e293b;
+    white-space: pre-wrap;
+    word-break: break-word;
+    background: #fafbfc;
+    border: 1px solid #f1f5f9;
+    border-radius: 6px;
+    padding: 12px 14px;
+    max-height: 220px;
+    overflow-y: auto;
+}
+
+/* Chunk modal entrance */
+@keyframes modalIn {
+    from { opacity: 0; transform: translateY(12px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.chunk-modal-panel {
+    animation: modalIn 0.25s ease-out;
+}
+
+/* Chunk card entrance stagger */
+.chunk-card {
+    animation: cardIn 0.3s ease-out both;
+}
+@keyframes cardIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* ====== Loading skeleton for chunk list ====== */
+.chunk-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 48px 0;
+    color: #94a3b8;
+}
+.chunk-loading .spinner {
+    width: 24px;
+    height: 24px;
+    border-width: 2.5px;
+}
+.chunk-loading span {
+    margin-top: 12px;
+    font-size: 0.875rem;
+}
+
+/* ====== Chunk pagination ====== */
+#chunk-pagination button {
+    transition: all 0.15s ease;
+}
+#chunk-pagination button:hover:not(:disabled) {
+    background: #e2e8f0;
+    border-color: #cbd5e1;
+}
+#chunk-pagination button:active:not(:disabled) {
+    transform: scale(0.97);
+}
+
+/* ====== Line clamp utility ====== */
+.line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* ====== Session sidebar items ====== */
+.session-item {
+    position: relative;
+    user-select: none;
+}
+
+.session-item .delete-btn {
+    display: flex;
+    opacity: 0;
+    transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+
+.session-item:hover .delete-btn {
+    opacity: 1;
+}
+
+.session-item:active {
+    transform: scale(0.98);
+}
+
+/* ====== Error / warning state banners ====== */
+.error-banner {
+    background-color: #fef3c7;
+    border: 1px solid #fcd34d;
+    color: #92400e;
+    border-radius: 0.5rem;
+    padding: 0.75rem 1rem;
+    margin: 0.5rem 0;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+}
+.empty-state {
+    color: #9ca3af;
+    text-align: center;
+    padding: 2rem 0;
+    font-size: 0.875rem;
+}
+
+/* ====== Citation items ====== */
+.citation-item {
+    transition: all 0.2s ease;
+}
+.citation-item:hover {
+    background-color: #f8fafc;
+}
+mark {
+    background-color: #fef08a;
+    color: #854d0e;
+    padding: 0 2px;
+    border-radius: 2px;
+}
+.citation-score {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 0.65rem;
+    font-weight: 600;
+    background-color: #dbeafe;
+    color: #1d4ed8;
+}

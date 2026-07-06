@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+.eggs/
+.venv/
+venv/
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+
+# Docker volume data
+/data/chroma_persist
+/data/
+chroma_data/
+mysql_data/
+redis_data/
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+.claude/
+.codebuddy/
+
+# Playwright CLI artifacts
+.playwright-cli/
+
+# Test docs
+test_docs/
+
+# Output
+outputs/
+
+old/
