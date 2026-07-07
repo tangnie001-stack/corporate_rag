@@ -1,8 +1,10 @@
 """Tests for AppService business logic layer."""
 
-from unittest.mock import ANY, MagicMock, patch
+import pytest
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 from src.app_service import AppService
+from src.infra.api_error import ApiError
 
 
 class TestAppServiceInit:
@@ -69,28 +71,97 @@ class TestAppServiceKBs:
     @patch("src.app_service.MySQLDB")
     @patch("src.app_service.VectorStore")
     @patch("src.app_service.DocRouter")
-    def test_delete_kb_success(self, mock_router, mock_vs, mock_db, mock_rag):
-        """删除知识库应同时清理向量数据和 MySQL 记录。"""
+    async def test_delete_kb_success(self, mock_router, mock_vs, mock_db, mock_rag):
+        """删除知识库应软删除文档、清理向量、软删除 KB。"""
         db = MagicMock()
-        db.delete_kb.return_value = True
+        db.soft_delete_documents_by_kb = AsyncMock()
+        db.soft_delete_kb = AsyncMock(return_value=True)
         vs = MagicMock()
+        vs.delete_collection = MagicMock(return_value=None)  # not async
         svc = AppService(mysql_db=db, vector_store=vs)
-        ok, msg = svc.delete_knowledge_base("kb_id")
+        ok, msg = await svc.delete_knowledge_base("kb_id")
         assert ok is True
+        db.soft_delete_documents_by_kb.assert_called_once_with("kb_id")
         vs.delete_collection.assert_called_once_with("kb_id")
+        db.soft_delete_kb.assert_called_once_with("kb_id")
 
     @patch("src.app_service.RAGChain")
     @patch("src.app_service.MySQLDB")
     @patch("src.app_service.VectorStore")
     @patch("src.app_service.DocRouter")
-    def test_delete_kb_not_found(self, mock_router, mock_vs, mock_db, mock_rag):
+    async def test_delete_kb_not_found(self, mock_router, mock_vs, mock_db, mock_rag):
         """删除不存在的知识库应返回 False 并提示。"""
         db = MagicMock()
-        db.delete_kb.return_value = False
+        db.soft_delete_documents_by_kb = AsyncMock()
+        db.soft_delete_kb = AsyncMock(return_value=False)
         svc = AppService(mysql_db=db)
-        ok, msg = svc.delete_knowledge_base("nonexistent")
+        ok, msg = await svc.delete_knowledge_base("nonexistent")
         assert ok is False
         assert "不存在" in msg
+
+
+class TestAppServiceDeleteDocument:
+    """文档删除测试。"""
+
+    @patch("src.app_service.RAGChain")
+    @patch("src.app_service.MySQLDB")
+    @patch("src.app_service.VectorStore")
+    @patch("src.app_service.DocRouter")
+    async def test_delete_not_found(self, mock_router, mock_vs, mock_db, mock_rag):
+        """删除不存在的文档应抛 DOC_NOT_FOUND。"""
+        db = MagicMock()
+        db.get_document = AsyncMock(return_value=None)
+        svc = AppService(mysql_db=db)
+        with pytest.raises(ApiError) as exc:
+            await svc.delete_document("kb", "nonexistent", "user")
+        assert exc.value.code == "DOC_NOT_FOUND"
+
+    @patch("src.app_service.RAGChain")
+    @patch("src.app_service.MySQLDB")
+    @patch("src.app_service.VectorStore")
+    @patch("src.app_service.DocRouter")
+    async def test_delete_not_owner(self, mock_router, mock_vs, mock_db, mock_rag):
+        """非上传者删除应抛 DOC_DELETE_NOT_ALLOWED。"""
+        db = MagicMock()
+        db.get_document = AsyncMock(return_value={
+            "id": "d1", "user_id": "owner", "status": "ready", "filename": "t.pdf"
+        })
+        svc = AppService(mysql_db=db)
+        with pytest.raises(ApiError) as exc:
+            await svc.delete_document("kb", "d1", "other_user")
+        assert exc.value.code == "DOC_DELETE_NOT_ALLOWED"
+
+    @patch("src.app_service.RAGChain")
+    @patch("src.app_service.MySQLDB")
+    @patch("src.app_service.VectorStore")
+    @patch("src.app_service.DocRouter")
+    async def test_delete_processing_status(self, mock_router, mock_vs, mock_db, mock_rag):
+        """处理中的文档应抛 DOC_STATUS_CONFLICT。"""
+        db = MagicMock()
+        db.get_document = AsyncMock(return_value={
+            "id": "d1", "user_id": "user", "status": "processing", "filename": "t.pdf"
+        })
+        svc = AppService(mysql_db=db)
+        with pytest.raises(ApiError) as exc:
+            await svc.delete_document("kb", "d1", "user")
+        assert exc.value.code == "DOC_STATUS_CONFLICT"
+
+    @patch("src.app_service.RAGChain")
+    @patch("src.app_service.MySQLDB")
+    @patch("src.app_service.VectorStore")
+    @patch("src.app_service.DocRouter")
+    async def test_delete_success(self, mock_router, mock_vs, mock_db, mock_rag):
+        """正常删除应返回 deleted 状态。"""
+        db = MagicMock()
+        db.get_document = AsyncMock(return_value={
+            "id": "d1", "user_id": "user", "status": "ready", "filename": "t.pdf"
+        })
+        db.soft_delete_document = AsyncMock(return_value=True)
+        vs = MagicMock()
+        svc = AppService(mysql_db=db, vector_store=vs)
+        result = await svc.delete_document("kb", "d1", "user")
+        assert result == {"doc_id": "d1", "filename": "t.pdf", "status": "deleted"}
+        vs.delete_document.assert_called_once_with("kb", "d1")
 
 
 class TestAppServiceUpload:
