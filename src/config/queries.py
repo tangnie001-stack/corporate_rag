@@ -138,16 +138,15 @@ SELECT id FROM knowledge_base WHERE user_id = %s AND name = %s
 SELECT_ALL_KNOWLEDGE_BASES: str = """\
 SELECT k.id, k.user_id, k.name, COUNT(d.id) AS doc_count
 FROM knowledge_base k
-LEFT JOIN document d ON d.kb_id = k.id
-WHERE k.user_id = %s
+LEFT JOIN document d ON d.kb_id = k.id AND d.status != 'deleted'
+WHERE k.user_id = %s AND k.status != 'deleted'
 GROUP BY k.id, k.user_id, k.name
 ORDER BY k.created_at DESC
 """
 
-# 删除知识库。参数：[kb_id]。
-# 通过 ON DELETE CASCADE 自动清除该库下所有文档和对话历史。
-DELETE_KNOWLEDGE_BASE_BY_ID: str = """\
-DELETE FROM knowledge_base WHERE id = %s
+# 软删除知识库。参数：[kb_id]。标记为 deleted，保留记录。
+SOFT_DELETE_KNOWLEDGE_BASE_BY_ID: str = """\
+UPDATE knowledge_base SET status = 'deleted' WHERE id = %s
 """
 
 # ====== 文档 CRUD ======
@@ -177,7 +176,25 @@ SELECT_DOCUMENTS_BY_KB_ID: str = """\
 SELECT id, user_id, kb_id, filename, file_type, file_size, file_path, hash,
        status, processing_state, processing_progress, processing_message,
        error_msg, chunk_strategy, chunk_count, meta_info, created_at
-FROM document WHERE kb_id = %s ORDER BY created_at DESC
+FROM document WHERE kb_id = %s AND status != 'deleted' ORDER BY created_at DESC
+"""
+
+# 按 ID 查询文档。参数：[doc_id]。用于删除前校验文档存在、归属和状态。
+SELECT_DOCUMENT_BY_ID: str = """\
+SELECT id, user_id, kb_id, filename, file_type, file_size, file_path, hash,
+       status, processing_state, processing_progress, processing_message,
+       error_msg, chunk_strategy, chunk_count, meta_info, created_at
+FROM document WHERE id = %s
+"""
+
+# 软删除文档。参数：[doc_id]。标记为 deleted，保留记录。
+SOFT_DELETE_DOCUMENT: str = """\
+UPDATE document SET status = 'deleted' WHERE id = %s
+"""
+
+# 软删除某知识库下的所有文档。参数：[kb_id]。
+SOFT_DELETE_DOCUMENTS_BY_KB: str = """\
+UPDATE document SET status = 'deleted' WHERE kb_id = %s
 """
 
 # ====== 会话 CRUD ======
