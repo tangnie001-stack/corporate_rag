@@ -104,6 +104,7 @@ class AppService:
         # 2. 删除 ChromaDB collection（防御性清理，collection 不存在不报错）
         try:
             await asyncio.to_thread(self.vector_store.delete_collection, kb_id)
+            logger.info("ChromaDB delete_collection: kb_id={}", kb_id)
         except Exception:
             logger.warning("ChromaDB delete collection failed for kb={}", kb_id)
 

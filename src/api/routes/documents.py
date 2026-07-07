@@ -154,6 +154,8 @@ async def upload_document(
     if not await asyncio.to_thread(fs.upload, minio_key, contents):
         raise ApiError(Code.FILE_UPLOAD_FAILED, Code.FILE_UPLOAD_FAILED_MSG, 500)
 
+    logger.info("MinIO upload: key={} size={}", minio_key, len(contents))
+
     # 再写入 MySQL 元信息
     await svc.db.add_document(
         doc_id,
@@ -208,6 +210,8 @@ async def _process_document_task(
             contents = await asyncio.to_thread(FileStore().download, minio_key)
             if contents is None:
                 raise RuntimeError(f"无法从 MinIO 下载文档: {minio_key}")
+
+            logger.info("MinIO download: key={} size={}", minio_key, len(contents) if contents else 0)
 
             # 临时文件 — 同步 I/O，to_thread
             tmp = await asyncio.to_thread(

@@ -213,7 +213,7 @@ class VectorStore:
             documents=documents,
             metadatas=metadatas,
         )
-        logger.info("Added {} chunks to collection '{}'", len(ids), collection.name)
+        logger.info("ChromaDB add_chunks: kb_id={} doc_id={} count={}", kb_id, doc_id, len(chunks))
         return len(ids)
 
     def similarity_search(self, kb_id: str, query: str, k: int = 5) -> list[dict]:
@@ -261,6 +261,7 @@ class VectorStore:
                         else None,
                     }
                 )
+        logger.info("ChromaDB search: kb_id={} query_len={} results={}", kb_id, len(query), len(formatted))
         return formatted
 
     def delete_collection(self, kb_id: str) -> bool:
@@ -410,7 +411,7 @@ class VectorStore:
             if results["ids"]:
                 collection.delete(ids=results["ids"])
                 count = len(results["ids"])
-                logger.info("Deleted {} chunks for doc_id={}", count, doc_id)
+                logger.info("ChromaDB delete_document: kb_id={} doc_id={} deleted={}", kb_id, doc_id, count)
                 return count
             return 0
         except NotFoundError:
