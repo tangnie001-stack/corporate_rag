@@ -18,6 +18,7 @@ CREATE TABLE knowledge_base (
     user_id     VARCHAR(36)  NOT NULL DEFAULT '',
     name        VARCHAR(255) NOT NULL,
     description TEXT,
+    status      VARCHAR(20)  NOT NULL DEFAULT 'active',
     created_at  DATETIME     DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uk_user_kb (user_id, name)
@@ -41,7 +42,7 @@ CREATE TABLE document (
     chunk_count         INTEGER      DEFAULT 0,
     meta_info           JSON,
     created_at          DATETIME     DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (kb_id) REFERENCES knowledge_base(id) ON DELETE CASCADE,
+    FOREIGN KEY (kb_id) REFERENCES knowledge_base(id),
     INDEX idx_user_kb (user_id, kb_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
