@@ -6,6 +6,8 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
+import os
+
 from loguru import logger
 
 from src.api.routes import (
@@ -49,6 +51,20 @@ app = FastAPI(
     version="0.2.0",
     lifespan=lifespan,
     docs_url="/docs",
+)
+
+# 日志目录（开发环境 logs/，Docker 设 /data/logs/）
+LOG_DIR = os.getenv("LOG_DIR", "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+
+_LOG_FORMAT = "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<7} | {extra[trace_id]:32} | {message}"
+logger.remove()
+logger.add(
+    f"{LOG_DIR}/app_{{time:YYYY-MM-DD}}.log",
+    format=_LOG_FORMAT,
+    rotation="1 day",
+    retention="7 days",
+    level="INFO",
 )
 
 # 配置 loguru 自动注入 trace_id
