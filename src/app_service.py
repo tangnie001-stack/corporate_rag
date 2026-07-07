@@ -26,6 +26,8 @@ from src.parsers.router import DocRouter
 from src.rag_chain import RAGChain, RAGContext
 from src.infra.chunking.validator import ChunkData, validate_chunks
 from src.infra.db.vector_store import VectorStore
+from src.config.response_codes import Code
+from src.infra.api_error import ApiError
 
 
 class AppService:
@@ -88,7 +90,7 @@ class AppService:
         return await self.db.get_or_create_kb(user_id, name, description)
 
     async def delete_knowledge_base(self, kb_id: str) -> tuple[bool, str]:
-        """删除知识库（同时清除 MySQL 记录和 ChromaDB 向量数据）。
+        """软删除知识库（文档标 deleted → ChromaDB 删 collection → KB 标 deleted）。
 
         Args:
             kb_id: 知识库 UUID
@@ -96,14 +98,19 @@ class AppService:
         Returns:
             (成功标记, 消息) 元组
         """
-        # 先删除 MySQL 记录，再清除向量数据（ChromaDB collection）
-        # 先 MySQL 再向量的顺序确保：如果 MySQL 删除失败（抛异常），
-        # 向量数据不会被误删，避免产生孤数据
-        ok = await self.db.delete_kb(kb_id)
-        # 无论 MySQL 是否找到记录，都尝试清理 ChromaDB（防御性清理）
-        await asyncio.to_thread(self.vector_store.delete_collection, kb_id)
+        # 1. 软删除所有关联文档
+        await self.db.soft_delete_documents_by_kb(kb_id)
+
+        # 2. 删除 ChromaDB collection（防御性清理，collection 不存在不报错）
+        try:
+            await asyncio.to_thread(self.vector_store.delete_collection, kb_id)
+        except Exception:
+            logger.warning("ChromaDB delete collection failed for kb={}", kb_id)
+
+        # 3. 软删除知识库
+        ok = await self.db.soft_delete_kb(kb_id)
         if ok:
-            logger.info("Deleted knowledge base: {}", kb_id)
+            logger.info("Knowledge base soft-deleted: {}", kb_id)
             return True, "知识库已删除"
         logger.warning("Knowledge base '{}' not found for deletion", kb_id)
         return False, "知识库不存在"
@@ -120,6 +127,67 @@ class AppService:
             文档信息字典列表，不存在时返回空列表
         """
         return await self.db.get_documents(kb_id)
+
+    async def delete_document(
+        self, kb_id: str, doc_id: str, user_id: str
+    ) -> dict:
+        """删除文档：ChromaDB 删向量 → MySQL 标 deleted。
+
+        Args:
+            kb_id: 知识库 UUID
+            doc_id: 文档 UUID
+            user_id: 当前用户 ID（从 request.state 获取）
+
+        Returns:
+            {"doc_id": str, "filename": str, "status": "deleted"}
+
+        Raises:
+            ApiError(DOC_NOT_FOUND): 文档不存在
+            ApiError(DOC_DELETE_NOT_ALLOWED): 非上传者
+            ApiError(DOC_STATUS_CONFLICT): 状态不可删
+        """
+        # 1. 查文档
+        doc = await self.db.get_document(doc_id)
+        if not doc:
+            raise ApiError(Code.DOC_NOT_FOUND, Code.DOC_NOT_FOUND_MSG, 404)
+
+        # 2. 校验权限
+        if doc["user_id"] != user_id:
+            raise ApiError(
+                Code.DOC_DELETE_NOT_ALLOWED,
+                Code.DOC_DELETE_NOT_ALLOWED_MSG,
+                403,
+            )
+
+        # 3. 校验状态
+        if doc["status"] not in ("ready", "failed"):
+            raise ApiError(
+                Code.DOC_STATUS_CONFLICT,
+                Code.DOC_STATUS_CONFLICT_MSG,
+                409,
+            )
+
+        # 4. ChromaDB 删向量（不在意结果——document 记录保留可重试）
+        try:
+            await asyncio.to_thread(
+                self.vector_store.delete_document, kb_id, doc_id
+            )
+        except Exception:
+            logger.warning(
+                "ChromaDB delete failed for doc_id={}, will retry", doc_id
+            )
+
+        # 5. MySQL 标 deleted
+        deleted = await self.db.soft_delete_document(doc_id)
+        if not deleted:
+            raise ApiError(Code.DOC_NOT_FOUND, Code.DOC_NOT_FOUND_MSG, 404)
+
+        logger.info("Document deleted: {} ({})", doc["filename"], doc_id)
+        return {
+            "doc_id": doc_id,
+            "filename": doc["filename"],
+            "status": "deleted",
+        }
 
     def upload_and_process(self, kb_id: str, file_path: str, filename: str) -> dict:
         """上传文档并执行完整处理流水线：解析 -> MySQL 记录 -> 向量化入库。
