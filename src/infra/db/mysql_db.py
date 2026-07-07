@@ -37,7 +37,6 @@ from src.config.queries import (
     CREATE_TABLE_KNOWLEDGE_BASE,
     CREATE_TABLE_SESSIONS,
     CREATE_TABLE_USERS,
-    DELETE_KNOWLEDGE_BASE_BY_ID,
     DELETE_MESSAGES_BY_SESSION,
     DELETE_SESSION,
     DROP_CONVERSATION_HISTORY_FK,
@@ -48,12 +47,16 @@ from src.config.queries import (
     INSERT_USER,
     SELECT_ALL_KNOWLEDGE_BASES,
     SELECT_DOCUMENTS_BY_KB_ID,
+    SELECT_DOCUMENT_BY_ID,
     SELECT_KNOWLEDGE_BASE_ID_BY_NAME,
     SELECT_MESSAGES_BY_SESSION,
     SELECT_SESSION_BY_ID,
     SELECT_SESSIONS,
     SELECT_USER_BY_ACCOUNT,
     SELECT_USER_BY_TOKEN,
+    SOFT_DELETE_DOCUMENT,
+    SOFT_DELETE_DOCUMENTS_BY_KB,
+    SOFT_DELETE_KNOWLEDGE_BASE_BY_ID,
     UPDATE_DOCUMENT_STATUS,
     UPDATE_USER_TOKEN,
 )
@@ -237,6 +240,53 @@ class MySQLDB:
                     ),
                 )
             await conn.commit()
+
+    async def get_document(self, doc_id: str) -> dict | None:
+        """按 ID 查询文档记录。
+
+        Args:
+            doc_id: 文档 UUID
+
+        Returns:
+            dict，包含 document 表全部字段；不存在返回 None
+        """
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute(SELECT_DOCUMENT_BY_ID, (doc_id,))
+                return await cursor.fetchone()
+
+    async def soft_delete_document(self, doc_id: str) -> bool:
+        """软删除文档（标记 status = 'deleted'）。
+
+        Args:
+            doc_id: 文档 UUID
+
+        Returns:
+            True 表示更新了记录，False 表示文档不存在
+        """
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(SOFT_DELETE_DOCUMENT, (doc_id,))
+                await conn.commit()
+                return cursor.rowcount > 0
+
+    async def soft_delete_documents_by_kb(self, kb_id: str) -> int:
+        """软删除某知识库下的所有文档。
+
+        Args:
+            kb_id: 知识库 UUID
+
+        Returns:
+            被更新的文档数量
+        """
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(SOFT_DELETE_DOCUMENTS_BY_KB, (kb_id,))
+                await conn.commit()
+                return cursor.rowcount
 
     async def create_session(
         self, session_id: str, title: str, kb_id: str, user_id: str = ""
@@ -507,22 +557,21 @@ class MySQLDB:
             await conn.commit()  # 关闭隐式只读事务
             return result
 
-    async def delete_kb(self, kb_id: str) -> bool:
-        """删除知识库及其关联的所有文档和对话历史（CASCADE）。
+    async def soft_delete_kb(self, kb_id: str) -> bool:
+        """软删除知识库（标记 status = 'deleted'，保留记录供 Job 清理 MinIO 用）。
 
         Args:
             kb_id: 知识库 UUID
 
         Returns:
-            True 表示删除成功，False 表示该知识库不存在
+            True 表示更新了记录，False 表示知识库不存在
         """
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             async with conn.cursor() as cursor:
-                await cursor.execute(DELETE_KNOWLEDGE_BASE_BY_ID, (kb_id,))
-                deleted = cursor.rowcount
-            await conn.commit()
-            return deleted > 0
+                await cursor.execute(SOFT_DELETE_KNOWLEDGE_BASE_BY_ID, (kb_id,))
+                await conn.commit()
+                return cursor.rowcount > 0
 
     async def get_documents(self, kb_id: str) -> list[dict]:
         """获取指定知识库下的所有文档列表（按创建时间倒序）。
