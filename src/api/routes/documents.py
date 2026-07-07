@@ -63,6 +63,12 @@ class DocumentChunksRequest(BaseModel):
     page_size: int = 50
 
 
+class DocumentDeleteRequest(BaseModel):
+    """删除文档请求体。"""
+    kb_id: str
+    doc_id: str
+
+
 class UploadDocumentResponse(BaseModel):
     """文档上传响应。"""
     doc_id: str
@@ -306,6 +312,24 @@ async def get_document_status(body: DocumentStatusRequest):
         "processing_progress": doc.get("processing_progress", 0),
         "processing_message": doc.get("processing_message", ""),
     }
+
+
+@router.post("/kbs/documents/delete")
+async def delete_document(request: Request, body: DocumentDeleteRequest):
+    """删除文档（软删除）：ChromaDB 清向量 → MySQL 标 deleted。
+
+    Args:
+        body: 删除请求体，含 kb_id 和 doc_id
+
+    Returns:
+        dict: {"doc_id": str, "filename": str, "status": "deleted"}
+
+    Raises:
+        ApiError: DOC_NOT_FOUND / DOC_DELETE_NOT_ALLOWED / DOC_STATUS_CONFLICT
+    """
+    svc = _get_service()
+    user_id = getattr(request.state, "user_id", "") if request else ""
+    return await svc.delete_document(body.kb_id, body.doc_id, user_id)
 
 
 @router.post("/kbs/documents/chunks")
