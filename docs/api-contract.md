@@ -114,6 +114,34 @@ Response 200:
 {"code": "SUCCESS", "message": "操作成功", "data": {"items": [...], "total": 42, "page": 1, "page_size": 50}}
 ```
 
+### Delete document
+
+`POST /api/kbs/documents/delete`
+Content-Type: `application/json`
+Body: `{"kb_id": "uuid", "doc_id": "uuid"}`
+
+Permissions: Only the uploader can delete their own documents.
+
+Response 200:
+```json
+{"code": "SUCCESS", "message": "操作成功", "data": {"doc_id": "uuid", "filename": "report.pdf", "status": "deleted"}}
+```
+
+Error 403 (not owner):
+```json
+{"code": "DOC_DELETE_NOT_ALLOWED", "message": "只能删除自己上传的文档"}
+```
+
+Error 404 (not found):
+```json
+{"code": "DOC_NOT_FOUND", "message": "文档不存在"}
+```
+
+Error 409 (wrong status):
+```json
+{"code": "DOC_STATUS_CONFLICT", "message": "文档当前状态不允许删除，仅 ready 和 failed 状态的文档可删除"}
+```
+
 ## Chat (SSE Streaming)
 
 ### Stream chat response
