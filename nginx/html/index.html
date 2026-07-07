@@ -258,6 +258,7 @@
         })();
 
         function updateUserArea(userId) {
+            _userId = userId || '';
             const el = document.getElementById('user-area');
             if (!userId) {
                 el.innerHTML = '<a href="/login.html?redirect=' + encodeURIComponent(location.pathname) + '" class="inline-flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-sm font-medium rounded-lg shadow-sm transition-all hover:shadow-md">登录</a>';
