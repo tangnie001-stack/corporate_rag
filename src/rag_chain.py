@@ -167,15 +167,21 @@ class RAGChain:
             )
             bm25_t = asyncio.to_thread(self.bm25.search, kb_id, query, TOP_K_RETRIEVAL)
             d, b = await asyncio.gather(dense_t, bm25_t)
-            return rrf_fusion(d, b)
+            results = rrf_fusion(d, b)
+            logger.info("RAG search: kb_id={} query_len={} results={}", kb_id, len(query), len(results))
+            return results
 
         if not kb_id:
-            return await asyncio.to_thread(
+            results = await asyncio.to_thread(
                 self.vector_store.similarity_search_all, query, k=TOP_K_RETRIEVAL
             )
-        return await asyncio.to_thread(
+            logger.info("RAG search: kb_id={} query_len={} results={}", kb_id, len(query), len(results))
+            return results
+        results = await asyncio.to_thread(
             self.vector_store.similarity_search, kb_id, query, k=TOP_K_RETRIEVAL
         )
+        logger.info("RAG search: kb_id={} query_len={} results={}", kb_id, len(query), len(results))
+        return results
 
     def rerank(self, query: str, results: list[dict]) -> list[RAGContext]:
         """对检索结果进行 Reranker 精排，返回 RAGContext 列表。
@@ -187,7 +193,9 @@ class RAGChain:
         Returns:
             精排后的 RAGContext 列表
         """
-        return self._rerank_results(query, results)
+        contexts = self._rerank_results(query, results)
+        logger.info("RAG rerank: before={} after={}", len(results), len(contexts))
+        return contexts
 
     def stream_answer(
         self,
@@ -628,12 +636,18 @@ class RAGChain:
         last_error: Optional[Exception] = None
         full_output = ""
         self.last_token_usage = {}
+        _stream_start = time.monotonic()
+        _first_token = True
         for attempt in range(1, RETRY_MAX_ATTEMPTS + 1):
             try:
                 stream = self.llm.stream(messages)
                 for chunk in stream:
                     content = chunk.content if hasattr(chunk, "content") else str(chunk)
                     if content:
+                        if _first_token:
+                            _first_token = False
+                            latency = (time.monotonic() - _stream_start) * 1000
+                            logger.info("RAG first_token_latency={:.0f}ms", latency)
                         full_output += content
                         yield content
                     # 捕获 DashScope 返回的精确 token 用量

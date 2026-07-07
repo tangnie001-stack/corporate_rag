@@ -195,6 +195,7 @@ async def _process_document_task(
         filename: 文件名
         ext: 文件扩展名（含点号，如 .pdf）
     """
+    logger.info("process_task start: doc_id={} filename={}", doc_id, filename)
     async with _process_semaphore:
         tmp_path = None
         try:
