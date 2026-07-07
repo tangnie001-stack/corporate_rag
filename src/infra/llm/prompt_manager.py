@@ -7,20 +7,19 @@
 """
 
 import json
-import logging
 import time
 from typing import Optional
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
-logger = logging.getLogger(__name__)
+from loguru import logger
+
+from src.config.prompts import FINANCIAL_SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
 
 # 本地兜底的 prompt 常量（与 src/config/prompts.py 一致）
 _INLINE_CITATION_INSTRUCTION: str = (
     '\n引用文档时请在句末标注编号 [1][2]，例如："营收3943亿元[1]"。\n'
 )
-
-from src.config.prompts import FINANCIAL_SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
 
 _FALLBACK_SYSTEM_PROMPT: str = FINANCIAL_SYSTEM_PROMPT + _INLINE_CITATION_INSTRUCTION
 _FALLBACK_USER_TEMPLATE: str = USER_PROMPT_TEMPLATE

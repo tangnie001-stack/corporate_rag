@@ -5,7 +5,8 @@
 """
 
 import json
-import logging
+
+from loguru import logger
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -13,8 +14,6 @@ from starlette.responses import JSONResponse, Response
 
 from src.config.response_codes import Code
 from src.infra.api_error import ApiError
-
-logger = logging.getLogger(__name__)
 
 
 class ResponseEnvelopeMiddleware(BaseHTTPMiddleware):
