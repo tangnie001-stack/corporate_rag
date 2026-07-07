@@ -240,6 +240,10 @@ class MySQLDB:
                     ),
                 )
             await conn.commit()
+        logger.info(
+            "SQL add_document: doc_id={} kb_id={} filename={} status={}",
+            doc_id, kb_id, filename, status,
+        )
 
     async def get_document(self, doc_id: str) -> dict | None:
         """按 ID 查询文档记录。
@@ -254,7 +258,9 @@ class MySQLDB:
         async with pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cursor:
                 await cursor.execute(SELECT_DOCUMENT_BY_ID, (doc_id,))
-                return await cursor.fetchone()
+                row = await cursor.fetchone()
+        logger.info("SQL get_document: doc_id={} found={}", doc_id, row is not None)
+        return row
 
     async def soft_delete_document(self, doc_id: str) -> bool:
         """软删除文档（标记 status = 'deleted'）。
@@ -270,7 +276,9 @@ class MySQLDB:
             async with conn.cursor() as cursor:
                 await cursor.execute(SOFT_DELETE_DOCUMENT, (doc_id,))
                 await conn.commit()
-                return cursor.rowcount > 0
+                rowcount = cursor.rowcount
+        logger.info("SQL soft_delete_document: doc_id={} rows_affected={}", doc_id, rowcount)
+        return rowcount > 0
 
     async def soft_delete_documents_by_kb(self, kb_id: str) -> int:
         """软删除某知识库下的所有文档。
@@ -286,7 +294,9 @@ class MySQLDB:
             async with conn.cursor() as cursor:
                 await cursor.execute(SOFT_DELETE_DOCUMENTS_BY_KB, (kb_id,))
                 await conn.commit()
-                return cursor.rowcount
+                rowcount = cursor.rowcount
+        logger.info("SQL soft_delete_documents_by_kb: kb_id={} rows_affected={}", kb_id, rowcount)
+        return rowcount
 
     async def create_session(
         self, session_id: str, title: str, kb_id: str, user_id: str = ""
@@ -456,6 +466,10 @@ class MySQLDB:
                     ),
                 )
             await conn.commit()
+        logger.info(
+            "SQL update_document_status: doc_id={} status={} chunk_count={}",
+            doc_id, status, chunk_count,
+        )
 
     # ====== 用户 CRUD ======
 
@@ -571,7 +585,9 @@ class MySQLDB:
             async with conn.cursor() as cursor:
                 await cursor.execute(SOFT_DELETE_KNOWLEDGE_BASE_BY_ID, (kb_id,))
                 await conn.commit()
-                return cursor.rowcount > 0
+                ok = cursor.rowcount > 0
+        logger.info("SQL soft_delete_kb: kb_id={} found={}", kb_id, ok)
+        return ok
 
     async def get_documents(self, kb_id: str) -> list[dict]:
         """获取指定知识库下的所有文档列表（按创建时间倒序）。
@@ -587,4 +603,5 @@ class MySQLDB:
             async with conn.cursor() as cursor:
                 await cursor.execute(SELECT_DOCUMENTS_BY_KB_ID, (kb_id,))
                 rows = await cursor.fetchall()
-            return rows
+        logger.info("SQL get_documents: kb_id={} count={}", kb_id, len(rows))
+        return rows
