@@ -119,7 +119,7 @@ class MySQLDB:
           - conversation_history: 对话历史（session_id, role, content, sources, tokens）
           - sessions: 会话记录（id, user_id, title, kb_id）
 
-        所有外键设置了 ON DELETE CASCADE，删除知识库时自动清理关联文档和历史记录。
+        外键保留引用完整性，删除操作为应用层软删除（不再使用 ON DELETE CASCADE）。
         """
         pool = await self._get_pool()
         async with pool.acquire() as conn:

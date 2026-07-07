@@ -19,7 +19,7 @@ SQL 语句集中管理而非散落各处的好处：
 # 所有 id 使用 VARCHAR(36) 存储 UUID，而非自增 INT：
 #   - 分布式环境下不会冲突（后续可能多个 app 实例同时创建）
 #   - 对外暴露的 API 中不易被枚举遍历
-# 外键统一使用 ON DELETE CASCADE，删除知识库时自动清理关联文档和历史。
+# 外键保留引用完整性，不再使用 ON DELETE CASCADE（改为应用层软删除）。
 
 # 用户表。一条记录 = 一个注册用户。
 # 密码存储的是 bcrypt 哈希值（空字符串代表未注册/游客）。
@@ -144,7 +144,7 @@ GROUP BY k.id, k.user_id, k.name
 ORDER BY k.created_at DESC
 """
 
-# 软删除知识库。参数：[kb_id]。标记为 deleted，保留记录。
+# 软删除知识库。参数：[kb_id]。标记为 deleted，保留记录（不再使用 ON DELETE CASCADE）。
 SOFT_DELETE_KNOWLEDGE_BASE_BY_ID: str = """\
 UPDATE knowledge_base SET status = 'deleted' WHERE id = %s
 """
