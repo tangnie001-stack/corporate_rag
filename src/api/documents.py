@@ -58,7 +58,18 @@ async def get_documents(body: DocumentListRequest, request: Request = None) -> l
     svc = _get_service()
     docs = await svc.get_documents(body.kb_id)
     logger.info("Documents list: kb_id={} count={}", body.kb_id, len(docs))
-    return [DocumentListResponse(**d) for d in docs]
+    return [
+        DocumentListResponse(
+            id=d["id"],
+            filename=d["filename"],
+            file_type=d["file_type"],
+            file_size=d["file_size"],
+            status=d["status"],
+            created_at=d["created_at"].isoformat() if hasattr(d["created_at"], "isoformat") else d["created_at"],
+            chunk_count=d.get("chunk_count", 0),
+        )
+        for d in docs
+    ]
 
 
 @router.post("/kbs/documents/upload", status_code=202)

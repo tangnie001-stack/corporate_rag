@@ -1,0 +1,6 @@
+- generic [ref=e2]:
+  - heading "Corporate RAG" [level=1] [ref=e3]
+  - paragraph [ref=e4]: 登录后管理知识库与文档
+  - textbox "账号" [ref=e5]
+  - textbox "密码" [ref=e6]
+  - button "登录" [ref=e7] [cursor=pointer]
