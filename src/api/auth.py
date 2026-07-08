@@ -1,13 +1,13 @@
 """认证端点 — login/verify/logout/anonymous。"""
 
 import uuid
-from typing import Optional
 
 from fastapi import APIRouter, Cookie
 from fastapi.responses import JSONResponse
 from loguru import logger
-from pydantic import BaseModel
 
+from src.api.model.request import LoginRequest
+from src.api.model.response import LoginResponse, VerifyResponse
 from src.app_service import AppService
 from src.config.response_codes import Code
 from src.infra.errors import AuthError
@@ -23,24 +23,6 @@ def _get_service() -> AppService:
     if _service is None:
         _service = AppService()
     return _service
-
-
-class LoginRequest(BaseModel):
-    """登录请求体。"""
-    account: str  # 账号
-    password: str  # 密码（明文，服务端做 hash 比对）
-
-
-class LoginResponse(BaseModel):
-    """登录成功响应。"""
-    token: str  # 登录 token，后续请求通过 Cookie 携带
-    user_id: str  # 用户 UUID
-
-
-class VerifyResponse(BaseModel):
-    """Token 校验响应。"""
-    valid: bool  # token 是否有效
-    user_id: Optional[str] = None  # 对应用户 UUID，无效时为 None
 
 
 @router.post("/auth/login")

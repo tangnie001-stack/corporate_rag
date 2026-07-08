@@ -1,14 +1,10 @@
 """健康检查端点。"""
 
 from fastapi import APIRouter
-from pydantic import BaseModel
+
+from src.api.model.response import HealthResponse
 
 router = APIRouter()
-
-
-class HealthResponse(BaseModel):
-    """健康检查响应。"""
-    status: str  # 服务状态，固定 "ok"
 
 
 @router.get("/health")

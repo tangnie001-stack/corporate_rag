@@ -5,12 +5,12 @@
 """
 
 import asyncio
-from typing import Optional
 
 from fastapi import APIRouter
 from loguru import logger
-from pydantic import BaseModel
 
+from src.api.model.request import SessionMessagesRequest, SessionDeleteRequest
+from src.api.model.response import SessionItem, MessageItem, SessionDeleteResponse
 from src.app_service import AppService
 from src.config.response_codes import Code
 from src.infra.errors import BusinessError
@@ -33,40 +33,6 @@ def _get_service() -> AppService:
     if _service is None:
         _service = AppService()
     return _service
-
-
-class SessionMessagesRequest(BaseModel):
-    """会话消息请求体。"""
-    session_id: str
-
-
-class SessionDeleteRequest(BaseModel):
-    """会话删除请求体。"""
-    session_id: str
-
-
-class SessionItem(BaseModel):
-    """会话列表项。"""
-    id: str
-    title: str
-    kb_id: str
-    kb_name: str
-    message_count: int
-    created_at: Optional[str] = None  # 创建时间
-    updated_at: Optional[str] = None  # 最后更新时间
-
-
-class MessageItem(BaseModel):
-    """会话消息项。"""
-    role: str
-    content: str
-    sources: Optional[str] = None  # 引用来源（JSON 字符串）
-    created_at: Optional[str] = None  # 创建时间
-
-
-class SessionDeleteResponse(BaseModel):
-    """会话删除响应。"""
-    success: bool
 
 
 @router.post("/sessions/list")

@@ -1,12 +1,12 @@
 """知识库 CRUD 端点。"""
 
 from fastapi import APIRouter, Request
-from pydantic import BaseModel
 
+from src.api.model.request import CreateKBRequest, KBDeleteRequest
+from src.api.model.response import CreateKBResponse, KBItem, KBDeleteResponse
+from src.app_service import AppService
 from src.config.response_codes import Code
 from src.infra.errors import BusinessError
-
-from src.app_service import AppService
 
 router = APIRouter()
 
@@ -27,48 +27,6 @@ def _get_service() -> AppService:
     if _service is None:
         _service = AppService()
     return _service
-
-
-class CreateKBRequest(BaseModel):
-    """创建知识库的请求体。
-
-    Attributes:
-        name: 知识库名称
-        description: 知识库描述（可选，默认为空字符串）
-    """
-
-    name: str  # 知识库名称（必填）
-    description: str = ""  # 知识库描述（可选）
-
-
-class CreateKBResponse(BaseModel):
-    """创建知识库的响应体。
-
-    Attributes:
-        id: 知识库 UUID
-        created: 是否为新创建（False 表示名称重复返回已有库）
-    """
-
-    id: str  # 知识库 UUID
-    created: bool  # 是否为新创建
-
-
-class KBItem(BaseModel):
-    """知识库列表项。"""
-    id: str  # 知识库 UUID
-    name: str  # 知识库名称
-    doc_count: int  # 包含的文档数量
-
-
-class KBDeleteRequest(BaseModel):
-    """删除知识库请求体。"""
-    kb_id: str  # 要删除的知识库 UUID
-
-
-class KBDeleteResponse(BaseModel):
-    """删除知识库的响应体。"""
-    success: bool  # 是否删除成功
-    message: str  # 删除结果描述
 
 
 @router.post("/kbs/list")

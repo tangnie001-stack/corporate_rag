@@ -13,8 +13,9 @@ import uuid
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from loguru import logger
-from pydantic import BaseModel
 
+from src.api.model.request import DocumentListRequest, DocumentStatusRequest, DocumentChunksRequest, DocumentDeleteRequest
+from src.api.model.response import UploadDocumentResponse, DocumentListResponse, DocumentStatusResponse, ChunkItem, ChunksResponse, DocumentDeleteResponse
 from src.app_service import AppService
 from src.config.response_codes import Code
 from src.infra.errors import BusinessError, SystemError
@@ -42,83 +43,6 @@ def _get_service() -> AppService:
 
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 单文件上传上限 10MB
 ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt"}
-
-
-class DocumentListRequest(BaseModel):
-    """文档列表请求体。"""
-
-    kb_id: str  # 知识库 UUID
-
-
-class DocumentStatusRequest(BaseModel):
-    """文档状态请求体。"""
-
-    kb_id: str  # 知识库 UUID
-    doc_id: str  # 文档 UUID
-
-
-class DocumentChunksRequest(BaseModel):
-    """分块预览请求体。"""
-
-    kb_id: str  # 知识库 UUID
-    doc_id: str  # 文档 UUID
-    page: int = 1  # 页码，从 1 开始
-    page_size: int = 50  # 每页条数
-
-
-class UploadDocumentResponse(BaseModel):
-    """文档上传响应。"""
-
-    doc_id: str  # 文档 UUID
-    status: str
-    filename: str
-    dedup: bool = False
-
-
-class DocumentListResponse(BaseModel):
-    """文档列表项。"""
-    id: str
-    filename: str
-    file_type: str
-    file_size: int
-    status: str
-    created_at: str
-    chunk_count: int = 0
-
-
-class DocumentStatusResponse(BaseModel):
-    """文档处理状态响应。"""
-    status: str
-    chunk_count: int = 0
-    progress: int = 0
-    error: str = ""  # 错误信息
-    processing_state: str | None = None  # 处理阶段
-    processing_progress: int = 0  # 当前阶段进度
-    processing_message: str = ""  # 当前阶段描述
-
-
-class ChunkItem(BaseModel):
-    """分块预览项。"""
-    chunk_id: str
-    content: str
-    page: int = 1  # 页码，从 1 开始
-    tokens: int = 0
-    char_count: int
-    block_type: str = "text"  # 块类型（text / table / list）
-    parent_content: str | None = None  # 父级块内容
-
-
-class ChunksResponse(BaseModel):
-    """分块预览响应。"""
-    items: list[ChunkItem]  # 当前页分块列表
-    total: int
-    page: int
-    page_size: int
-
-
-class DocumentDeleteResponse(BaseModel):
-    """文档删除响应。"""
-    success: bool
 
 
 @router.post("/kbs/documents/list")
@@ -416,13 +340,6 @@ async def get_document_chunks(body: DocumentChunksRequest) -> ChunksResponse:
     return ChunksResponse(
         items=items, total=result["total"], page=result["page"], page_size=result["page_size"],
     )
-
-
-class DocumentDeleteRequest(BaseModel):
-    """文档删除请求体。"""
-
-    kb_id: str  # 知识库 UUID
-    doc_id: str  # 文档 UUID
 
 
 @router.post("/kbs/documents/delete")
