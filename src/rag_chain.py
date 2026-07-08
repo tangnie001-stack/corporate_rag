@@ -33,7 +33,7 @@ from src.config import (
 from src.infra.llm.langfuse_tracing import LangfuseTracer
 from src.infra.llm.prompt_manager import PromptManager
 from src.infra.search.query_router import QueryRouter
-from src.models import get_embeddings, get_llm, get_rerank
+from src.models import get_embeddings, get_llm, get_rerank, with_retry
 from src.infra.search.bm25_index import BM25Index, rrf_fusion
 from src.infra.db.vector_store import VectorStore
 from src.infra.db.mysql_db import MySQLDB
@@ -465,33 +465,18 @@ class RAGChain:
             return []
 
         docs = [r["content"] for r in results]
-        last_error: Optional[Exception] = None
 
-        # 指数退避重试 Reranker API 调用
-        for attempt in range(1, RETRY_MAX_ATTEMPTS + 1):
-            try:
-                reranked = self.reranker.rerank(query, docs)
-                break
-            except Exception as e:
-                last_error = e
-                if attempt < RETRY_MAX_ATTEMPTS:
-                    wait = RETRY_INITIAL_INTERVAL * (
-                        RETRY_BACKOFF_FACTOR ** (attempt - 1)
-                    )
-                    logger.warning(
-                        "Rerank failed (attempt {}/{}): {}. Retrying in {:.1f}s...",
-                        attempt,
-                        RETRY_MAX_ATTEMPTS,
-                        e,
-                        wait,
-                    )
-                    time.sleep(wait)
-        else:
-            # 所有重试失败：降级使用原始检索顺序（distance 分数作为 score）
+        # 使用统一重试装饰器调用 Reranker，失败后降级为原始顺序
+        try:
+            reranked = with_retry(
+                self.reranker.rerank, max_attempts=RETRY_MAX_ATTEMPTS,
+                initial_interval=RETRY_INITIAL_INTERVAL, backoff=RETRY_BACKOFF_FACTOR,
+            )(query, docs)
+        except Exception as e:
             logger.warning(
                 "Rerank failed after {} attempts (using raw order): {}",
                 RETRY_MAX_ATTEMPTS,
-                last_error,
+                e,
             )
             reranked = [
                 {"index": i, "relevance_score": r.get("distance", 0)}

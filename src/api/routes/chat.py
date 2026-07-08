@@ -385,14 +385,16 @@ async def _persist_conversation(
     # 创建会话（如首次消息）。title = 首条消息前 20 字
     title = query[:20]
 
-    async def retry(factory, max_retries=3):
+    # 持久化重试 — 使用指数退避（与 models.py 的 with_retry 策略一致）
+    async def retry(factory, max_retries=3, initial_interval=0.5, backoff=2.0):
         for i in range(max_retries):
             try:
                 await factory()
                 return
             except Exception as e:
                 if i < max_retries - 1:
-                    await asyncio.sleep(0.5 * (i + 1))
+                    wait = initial_interval * (backoff ** i)
+                    await asyncio.sleep(wait)
                 else:
                     logger.warning(
                         "Persist failed after {} retries: {}", max_retries, e

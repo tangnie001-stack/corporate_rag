@@ -41,8 +41,9 @@ def with_retry(
     max_attempts: int = RETRY_MAX_ATTEMPTS,
     initial_interval: float = RETRY_INITIAL_INTERVAL,
     backoff: float = RETRY_BACKOFF_FACTOR,
+    retryable_exceptions: tuple = (Exception,),
 ) -> Callable:
-    """通用重试装饰器 — 支持指数退避策略。
+    """通用重试装饰器 — 支持指数退避策略和精确异常类型匹配。
 
     用法灵活，可以不带参数或带参数使用：
         @with_retry
@@ -51,11 +52,15 @@ def with_retry(
         @with_retry(max_attempts=5, initial_interval=2.0)
         def my_func(): ...
 
+        @with_retry(retryable_exceptions=(TimeoutError, ConnectionError))
+        def my_func(): ...
+
     Args:
         func: 被装饰的函数（由 Python 自动传入）
         max_attempts: 最大重试次数（默认 3 次）
         initial_interval: 首次重试等待时间（秒）
         backoff: 退避因子（每次等待时间乘以此值，如 2.0 表示翻倍）
+        retryable_exceptions: 可重试的异常类型元组（默认所有 Exception）
 
     Returns:
         包装后的函数，失败时自动重试，超过次数后抛出最后一次的异常
@@ -63,7 +68,7 @@ def with_retry(
     # 当使用 @with_retry(max_attempts=5) 带参形式时，func 为 None
     # 返回一个 lambda，让 Python 再次调用 with_retry 并传入真正的 func
     if func is None:
-        return lambda f: with_retry(f, max_attempts, initial_interval, backoff)
+        return lambda f: with_retry(f, max_attempts, initial_interval, backoff, retryable_exceptions)
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
@@ -71,7 +76,7 @@ def with_retry(
         for attempt in range(1, max_attempts + 1):
             try:
                 return func(*args, **kwargs)
-            except Exception as e:
+            except retryable_exceptions as e:
                 last_error = e
                 if attempt < max_attempts:
                     # 指数退避：wait = initial * backoff^(attempt-1)
