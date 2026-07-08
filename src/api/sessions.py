@@ -5,6 +5,7 @@
 """
 
 import asyncio
+from typing import Optional
 
 from fastapi import APIRouter
 from loguru import logger
@@ -44,41 +45,63 @@ class SessionDeleteRequest(BaseModel):
     session_id: str
 
 
+class SessionItem(BaseModel):
+    """会话列表项。"""
+    id: str
+    title: str
+    kb_id: str
+    kb_name: str
+    message_count: int
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class MessageItem(BaseModel):
+    """会话消息项。"""
+    role: str
+    content: str
+    sources: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class SessionDeleteResponse(BaseModel):
+    """会话删除响应。"""
+    success: bool
+
+
 @router.post("/sessions/list")
-async def list_sessions():
+async def list_sessions() -> list[SessionItem]:
     """列出最近 50 个会话。
 
     始终返回 200 + 数组，无会话时返回 []。
 
     Returns:
-        list[dict]: 会话列表，每项含 id、title、kb_id、kb_name、
-        message_count、created_at、updated_at
+        list[SessionItem]: 会话列表
     """
     svc = _get_service()
     sessions = await svc.db.get_sessions()
-    # row 是 DictCursor 返回的 OrderedDict，转普通 dict 确保 JSON 序列化兼容
     result = []
     for row in sessions:
         result.append(
-            {
-                "id": row["id"],
-                "title": row["title"],
-                "kb_id": row["kb_id"],
-                "kb_name": row["kb_name"],
-                "message_count": row["message_count"],
-                "created_at": row["created_at"].isoformat()
+            SessionItem(
+                id=row["id"],
+                title=row["title"],
+                kb_id=row["kb_id"],
+                kb_name=row["kb_name"],
+                message_count=row["message_count"],
+                created_at=row["created_at"].isoformat()
                 if row.get("created_at")
                 else None,
-                "updated_at": row["updated_at"].isoformat()
+                updated_at=row["updated_at"].isoformat()
                 if row.get("updated_at")
                 else None,
-            }
+            )
         )
     return result
 
 
 @router.post("/sessions/messages")
-async def get_session_messages(body: SessionMessagesRequest):
+async def get_session_messages(body: SessionMessagesRequest) -> list[MessageItem]:
     """获取会话消息历史。
 
     先验证会话存在，再返回消息列表。
@@ -88,7 +111,7 @@ async def get_session_messages(body: SessionMessagesRequest):
         body: 会话消息请求体，含 session_id
 
     Returns:
-        list[dict]: 消息列表，每项含 role、content、sources、created_at
+        list[MessageItem]: 消息列表
 
     Raises:
         BusinessError: 会话不存在时返回 404
@@ -102,20 +125,21 @@ async def get_session_messages(body: SessionMessagesRequest):
     messages = await svc.db.get_messages(session_id)
     result = []
     for row in messages:
-        msg = {
-            "role": row["role"],
-            "content": row["content"],
-            "sources": row.get("sources"),
-            "created_at": row["created_at"].isoformat()
-            if row.get("created_at")
-            else None,
-        }
-        result.append(msg)
+        result.append(
+            MessageItem(
+                role=row["role"],
+                content=row["content"],
+                sources=row.get("sources"),
+                created_at=row["created_at"].isoformat()
+                if row.get("created_at")
+                else None,
+            )
+        )
     return result
 
 
 @router.post("/sessions/delete")
-async def delete_session(body: SessionDeleteRequest):
+async def delete_session(body: SessionDeleteRequest) -> SessionDeleteResponse:
     """删除会话及其所有消息。
 
     执行顺序:
@@ -128,7 +152,7 @@ async def delete_session(body: SessionDeleteRequest):
         body: 会话删除请求体，含 session_id
 
     Returns:
-        dict: {"success": true}
+        SessionDeleteResponse: 删除结果
 
     Raises:
         BusinessError: 会话不存在时返回 404
@@ -145,4 +169,4 @@ async def delete_session(body: SessionDeleteRequest):
         raise BusinessError(Code.SESSION_NOT_FOUND, Code.SESSION_NOT_FOUND_MSG, 404)
 
     logger.info("Deleted session: {}", session_id)
-    return {"success": True}
+    return SessionDeleteResponse(success=True)

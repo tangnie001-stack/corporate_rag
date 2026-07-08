@@ -75,20 +75,66 @@ class UploadDocumentResponse(BaseModel):
     dedup: bool = False
 
 
+class DocumentListResponse(BaseModel):
+    """文档列表项。"""
+    id: str
+    filename: str
+    file_type: str
+    file_size: int
+    status: str
+    created_at: str
+    chunk_count: int = 0
+
+
+class DocumentStatusResponse(BaseModel):
+    """文档处理状态响应。"""
+    status: str
+    chunk_count: int = 0
+    progress: int = 0
+    error: str = ""
+    processing_state: str | None = None
+    processing_progress: int = 0
+    processing_message: str = ""
+
+
+class ChunkItem(BaseModel):
+    """分块预览项。"""
+    chunk_id: str
+    content: str
+    page: int = 1
+    tokens: int = 0
+    char_count: int
+    block_type: str = "text"
+    parent_content: str | None = None
+
+
+class ChunksResponse(BaseModel):
+    """分块预览响应。"""
+    items: list[ChunkItem]
+    total: int
+    page: int
+    page_size: int
+
+
+class DocumentDeleteResponse(BaseModel):
+    """文档删除响应。"""
+    success: bool
+
+
 @router.post("/kbs/documents/list")
-async def get_documents(body: DocumentListRequest, request: Request = None):
+async def get_documents(body: DocumentListRequest, request: Request = None) -> list[DocumentListResponse]:
     """列出知识库中的所有文档。
 
     Args:
         body: 文档列表请求体，含 kb_id
 
     Returns:
-        list[dict]: 文档列表，每项含 id、filename、status 等字段
+        list[DocumentListResponse]: 文档列表
     """
     svc = _get_service()
     docs = await svc.get_documents(body.kb_id)
     logger.info("Documents list: kb_id={} count={}", body.kb_id, len(docs))
-    return docs
+    return [DocumentListResponse(**d) for d in docs]
 
 
 @router.post("/kbs/documents/upload", status_code=202)
@@ -96,7 +142,7 @@ async def upload_document(
     file: UploadFile = File(...),
     kb_id: str = Form(...),
     request: Request = None,
-):
+) -> UploadDocumentResponse:
     """上传文档并立即返回（异步处理）。
 
     文档在后台经历：解析 → 分块 → 入库 → ready/failed。
@@ -154,12 +200,9 @@ async def upload_document(
             logger.info(
                 "Duplicate document detected: {} (hash={})", file.filename, file_hash
             )
-            return {
-                "doc_id": d["id"],
-                "status": d["status"],
-                "filename": d["filename"],
-                "dedup": True,
-            }
+            return UploadDocumentResponse(
+                doc_id=d["id"], status=d["status"], filename=d["filename"], dedup=True,
+            )
 
     # 先写入 MinIO 存储
     doc_id = str(uuid.uuid4())
@@ -200,7 +243,7 @@ async def upload_document(
         len(contents),
     )
 
-    return {"doc_id": doc_id, "status": "processing", "filename": file.filename}
+    return UploadDocumentResponse(doc_id=doc_id, status="processing", filename=file.filename)
 
 
 async def _process_document_task(
@@ -315,42 +358,40 @@ async def _process_document_task(
 
 
 @router.post("/kbs/documents/status")
-async def get_document_status(body: DocumentStatusRequest):
+async def get_document_status(body: DocumentStatusRequest) -> DocumentStatusResponse:
     """获取文档的处理状态。
 
     Args:
         body: 文档状态请求体，含 kb_id 和 doc_id
 
     Returns:
-        dict: 含 status、chunk_count、progress、error 以及处理阶段详情的状态信息
+        DocumentStatusResponse: 含 status、chunk_count、progress、error 以及处理阶段详情
     """
     svc = _get_service()
     docs = await svc.db.get_documents(body.kb_id)
     doc = next((d for d in docs if d["id"] == body.doc_id), None)
     if not doc:
-        return {"status": "not_found", "progress": 0}
-    return {
-        "status": doc["status"],
-        "chunk_count": doc.get("chunk_count", 0),
-        "progress": doc.get("processing_progress", 0),
-        "error": doc.get("error_msg", ""),
-        "processing_state": doc.get("processing_state"),
-        "processing_progress": doc.get("processing_progress", 0),
-        "processing_message": doc.get("processing_message", ""),
-    }
+        return DocumentStatusResponse(status="not_found")
+    return DocumentStatusResponse(
+        status=doc["status"],
+        chunk_count=doc.get("chunk_count", 0),
+        progress=doc.get("processing_progress", 0),
+        error=doc.get("error_msg", ""),
+        processing_state=doc.get("processing_state"),
+        processing_progress=doc.get("processing_progress", 0),
+        processing_message=doc.get("processing_message", ""),
+    )
 
 
 @router.post("/kbs/documents/chunks")
-async def get_document_chunks(body: DocumentChunksRequest):
+async def get_document_chunks(body: DocumentChunksRequest) -> ChunksResponse:
     """分页预览已处理文档的分块内容。
 
     Args:
         body: 分块预览请求体，含 kb_id、doc_id、page、page_size
 
     Returns:
-        dict: 含 items（当前页分块列表）、total（总量）、
-        page（当前页码）、page_size（每页条数）。
-        每项分块含 chunk_id、content（前 500 字）、page、tokens、char_count。
+        ChunksResponse: 含 items（当前页分块列表）、total（总量）、page、page_size
     """
     svc = _get_service()
     result = await asyncio.to_thread(
@@ -361,23 +402,20 @@ async def get_document_chunks(body: DocumentChunksRequest):
         page_size=body.page_size,
     )
     items = [
-        {
-            "chunk_id": c["id"],
-            "content": c["content"][:500],
-            "page": c.get("metadata", {}).get("page", 1),
-            "tokens": c.get("metadata", {}).get("tokens", 0),
-            "char_count": len(c["content"]),
-            "block_type": c.get("metadata", {}).get("block_type", "text"),
-            "parent_content": c.get("metadata", {}).get("parent_content"),
-        }
+        ChunkItem(
+            chunk_id=c["id"],
+            content=c["content"][:500],
+            page=c.get("metadata", {}).get("page", 1),
+            tokens=c.get("metadata", {}).get("tokens", 0),
+            char_count=len(c["content"]),
+            block_type=c.get("metadata", {}).get("block_type", "text"),
+            parent_content=c.get("metadata", {}).get("parent_content"),
+        )
         for c in result["items"]
     ]
-    return {
-        "items": items,
-        "total": result["total"],
-        "page": result["page"],
-        "page_size": result["page_size"],
-    }
+    return ChunksResponse(
+        items=items, total=result["total"], page=result["page"], page_size=result["page_size"],
+    )
 
 
 class DocumentDeleteRequest(BaseModel):
@@ -388,18 +426,18 @@ class DocumentDeleteRequest(BaseModel):
 
 
 @router.post("/kbs/documents/delete")
-async def delete_document(body: DocumentDeleteRequest):
+async def delete_document(body: DocumentDeleteRequest) -> DocumentDeleteResponse:
     """软删除文档（标记为 deleted），同时删除向量库中的分块。
 
     Args:
         body: 文档删除请求体，含 kb_id 和 doc_id
 
     Returns:
-        dict: 含 success 布尔值
+        DocumentDeleteResponse: 含 success 布尔值
     """
     svc = _get_service()
     ok = await svc.db.soft_delete_document(body.doc_id)
     if ok:
         svc.vector_store.delete_document(body.kb_id, body.doc_id)
         logger.info("Document deleted: kb_id={} doc_id={}", body.kb_id, body.doc_id)
-    return {"success": ok}
+    return DocumentDeleteResponse(success=ok)

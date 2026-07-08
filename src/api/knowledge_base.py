@@ -53,22 +53,44 @@ class CreateKBResponse(BaseModel):
     created: bool
 
 
+class KBItem(BaseModel):
+    """知识库列表项。
+
+    Attributes:
+        id: 知识库 UUID
+        name: 知识库名称
+        doc_count: 包含的文档数量
+    """
+    id: str
+    name: str
+    doc_count: int
+
+
 class KBDeleteRequest(BaseModel):
     """删除知识库请求体。"""
     kb_id: str
 
 
+class KBDeleteResponse(BaseModel):
+    """删除知识库的响应体。"""
+    success: bool
+    message: str
+
+
 @router.post("/kbs/list")
-async def list_knowledge_bases(request: Request):
-    """列出所有知识库。
+async def list_knowledge_bases(request: Request) -> list[KBItem]:
+    """列出当前用户的所有知识库。
+
+    Args:
+        request: 请求对象，从 state 中获取 user_id
 
     Returns:
-        list[dict]: 知识库列表，每项含 id、name、doc_count
+        list[KBItem]: 知识库列表，每项含 id、name、doc_count
     """
     svc = _get_service()
     user_id = getattr(request.state, "user_id", "")
     kbs = await svc.list_knowledge_bases(user_id)
-    return kbs
+    return [KBItem(id=kb["id"], name=kb["name"], doc_count=kb["doc_count"]) for kb in kbs]
 
 
 @router.post("/kbs", status_code=201)
@@ -92,14 +114,14 @@ async def create_knowledge_base(
 
 
 @router.post("/kbs/delete")
-async def delete_knowledge_base(body: KBDeleteRequest):
+async def delete_knowledge_base(body: KBDeleteRequest) -> KBDeleteResponse:
     """删除知识库及其向量数据。
 
     Args:
         body: 删除请求体，包含 kb_id
 
     Returns:
-        dict: {"success": true, "message": "..."}
+        KBDeleteResponse: 删除结果和提示消息
 
     Raises:
         BusinessError: 知识库不存在时返回 404
@@ -108,4 +130,4 @@ async def delete_knowledge_base(body: KBDeleteRequest):
     success, message = await svc.delete_knowledge_base(body.kb_id)
     if not success:
         raise BusinessError(Code.KB_NOT_FOUND, Code.KB_NOT_FOUND_MSG, 404)
-    return {"success": True, "message": message}
+    return KBDeleteResponse(success=True, message=message)

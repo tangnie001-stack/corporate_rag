@@ -1,15 +1,21 @@
 """健康检查端点。"""
 
 from fastapi import APIRouter
+from pydantic import BaseModel
 
 router = APIRouter()
 
 
+class HealthResponse(BaseModel):
+    """健康检查响应。"""
+    status: str
+
+
 @router.get("/health")
-async def health_check():
+async def health_check() -> HealthResponse:
     """基本健康检查 — 服务运行中返回 status ok。
 
     Returns:
-        dict: {"status": "ok"}
+        HealthResponse: {"status": "ok"}
     """
-    return {"status": "ok"}
+    return HealthResponse(status="ok")

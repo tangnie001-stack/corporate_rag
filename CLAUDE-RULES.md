@@ -35,3 +35,41 @@ AppError (基类)
 
 - **降级型 / 拦截型** → `logger.warning`（不带 traceback，可控的预期行为）
 - **透传型 / 兜底** → `logger.exception`（带完整 traceback，异常堆栈必须落盘）
+
+## API 路由类型标注
+
+所有路由 handler 必须标注请求体和返回类型：
+
+- **请求体**：用 Pydantic `BaseModel` 标注（利用 FastAPI 自动校验）
+- **返回类型**：用 Pydantic `BaseModel` 标注，描述 `data` 字段的结构
+  - 原始返回值直接描述业务数据结构，不包含 `code`/`message` 包装（由 `ResponseEnvelopeMiddleware` 统一包装）
+  - SSE 流式接口标注 `StreamingResponse`
+  - 文件上传等返回 `JSONResponse` 的标注 `JSONResponse`
+
+```python
+class LoginResponse(BaseModel):
+    token: str
+    user_id: str
+
+@router.post("/auth/login")
+async def login(body: LoginRequest) -> LoginResponse:
+    ...
+    return LoginResponse(token=token, user_id=user_id)
+```
+
+## 代码注释标准
+
+### 文档字符串（docstring）
+
+- **模块 docstring**：文件顶部，说明模块用途和核心导出
+- **类 docstring**：说明类实例代表什么，`Attributes:` 节列出公开属性
+- **函数 docstring**：`Args:` / `Returns:` / `Raises:` 三节
+  - Args：每个参数一行，`名称: 描述` 格式
+  - Returns：描述返回值的语义
+  - Raises：列出接口相关的异常，`异常名: 描述`
+  - 生成器函数用 `Yields:` 代替 `Returns:`
+- **覆写方法**：若有 `@override` 且行为不变，无需 docstring；否则需要
+- **基本原则**：
+  - 公共 API / 非平凡函数 / 逻辑不明显的函数 **必须** 有 docstring
+  - 注释不描述代码语法（假设读者懂 Python），而是说明意图和背景
+  - 注释一律用**中文**
