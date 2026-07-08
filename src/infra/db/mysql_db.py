@@ -91,6 +91,7 @@ class MySQLDB:
                 db=MYSQL_DATABASE,
                 charset="utf8mb4",
                 cursorclass=aiomysql.DictCursor,
+                autocommit=True,
                 minsize=2,
                 maxsize=10,
                 connect_timeout=10,
