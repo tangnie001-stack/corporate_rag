@@ -9,19 +9,19 @@
 const API_BASE = '/api';
 
 /**
- * 生成全链路追踪 ID（UUID v4 格式）。
+ * 生成全链路追踪 ID（带 trace_ 前缀，便于区分其他 UUID）。
  *
  * 优先使用浏览器内置 crypto.randomUUID()，
  * 不支持时 fallback 到纯 JS 实现。
  *
- * @returns {string} 36 位 UUID
+ * @returns {string} 带 trace_ 前缀的追踪 ID
  */
 function generateTraceId() {
-    return crypto.randomUUID?.() ||
+    return 'trace_' + (crypto.randomUUID?.() ||
         'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
             const r = Math.random() * 16 | 0;
             return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
-        });
+        }));
 }
 
 /**

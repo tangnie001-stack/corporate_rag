@@ -321,12 +321,8 @@ function sendMessage() {
     statusDiv.innerHTML = '<span class="spinner"></span> 思考中...';
     contentDiv.appendChild(statusDiv);
 
-    // 生成 trace_id 用于全链路追踪
-    const traceId = crypto.randomUUID?.() ||
-        'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-            const r = Math.random() * 16 | 0;
-            return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
-        });
+    // 生成 trace_id 用于全链路追踪（使用 api.js 中的统一方法）
+    const traceId = generateTraceId();
 
     const params = new URLSearchParams({
         session_id: currentSessionId,

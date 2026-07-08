@@ -20,7 +20,7 @@ async def trace_id_middleware(
     if not trace_id:
         trace_id = request.query_params.get("trace_id")
     if not trace_id:
-        trace_id = str(uuid.uuid4())
+        trace_id = f"trace_{uuid.uuid4()}"
 
     # 2. 注入 request.state 和 contextvar
     request.state.trace_id = trace_id
