@@ -165,8 +165,8 @@ class ChatManager:
                     "ChatManager: Redis reconnected, switched back from InMemory"
                 )
             except Exception:
-                # Redis 仍不可用，保持 InMemory 不变
-                pass
+                logger.warning("Redis ping 失败，持续使用 InMemory 模式")
+                self._in_memory = True
             return
 
         # Redis 模式：检测连接是否存活
@@ -316,11 +316,12 @@ class ChatManager:
                 self._redis = c
                 self._in_memory = False
             except Exception:
-                pass
+                logger.warning("Redis 同步连接失败，尝试重连")
             return
         try:
             await self._redis.ping()
         except Exception:
+            logger.warning("Redis 初始化失败，切换到 InMemory 模式")
             self._redis = None
             self._in_memory = True
 

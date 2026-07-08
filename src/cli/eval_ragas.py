@@ -27,6 +27,10 @@ from typing import Optional
 
 from loguru import logger
 
+from src.core.logging import setup_logging
+
+setup_logging(write_to_file=False)
+
 # ---- RAGAS 评估库 ----
 from datasets import Dataset
 from ragas import evaluate

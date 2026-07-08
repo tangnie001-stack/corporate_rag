@@ -6,10 +6,9 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
-import os
-
 from loguru import logger
 
+from src.core.logging import setup_logging
 from src.api.routes import (
     health_router,
     kb_router,
@@ -19,7 +18,6 @@ from src.api.routes import (
 )
 from src.api.routes import auth as auth_routes
 from src.config.response_codes import Code
-from src.infra.llm.trace_context import current_trace_id as _trace_var
 from src.middleware.auth import auth_middleware
 from src.middleware.response_envelope import ResponseEnvelopeMiddleware
 from src.middleware.trace_id import trace_id_middleware
@@ -53,41 +51,35 @@ app = FastAPI(
     docs_url="/docs",
 )
 
-# 日志目录（开发环境 logs/，Docker 设 /data/logs/）
-LOG_DIR = os.getenv("LOG_DIR", "logs")
-os.makedirs(LOG_DIR, exist_ok=True)
 
-_LOG_FORMAT = "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<7} | {extra[trace_id]:32} | {message}"
-logger.remove()
-logger.add(
-    f"{LOG_DIR}/app_{{time:YYYY-MM-DD}}.log",
-    format=_LOG_FORMAT,
-    rotation="1 day",
-    retention="7 days",
-    level="INFO",
-)
+# 配置 Loguru — 收拢到统一模块
+setup_logging(write_to_file=True, configure_trace_id=True)
 
-# 配置 loguru 自动注入 trace_id
-def _trace_id_patcher(record):
-    record["extra"]["trace_id"] = _trace_var.get() or ""
-
-
-logger.configure(extra={"trace_id": ""}, patcher=_trace_id_patcher)
 
 # 异常处理器 — 将 FastAPI 内置异常包装为统一格式（直接返回 JSON，不经过中间件）
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     from starlette.responses import JSONResponse
+
     code = Code.NOT_FOUND if exc.status_code == 404 else Code.UNKNOWN_ERROR
-    msg = exc.detail or (Code.NOT_FOUND_MSG if exc.status_code == 404 else Code.UNKNOWN_ERROR_MSG)
-    return JSONResponse({"code": code, "message": msg, "data": None}, status_code=exc.status_code)
+    msg = exc.detail or (
+        Code.NOT_FOUND_MSG if exc.status_code == 404 else Code.UNKNOWN_ERROR_MSG
+    )
+    return JSONResponse(
+        {"code": code, "message": msg, "data": None}, status_code=exc.status_code
+    )
 
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     from starlette.responses import JSONResponse
+
     return JSONResponse(
-        {"code": Code.VALIDATION_ERROR, "message": Code.VALIDATION_ERROR_MSG, "data": None},
+        {
+            "code": Code.VALIDATION_ERROR,
+            "message": Code.VALIDATION_ERROR_MSG,
+            "data": None,
+        },
         status_code=422,
     )
 
