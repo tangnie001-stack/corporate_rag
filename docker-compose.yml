@@ -76,7 +76,7 @@ services:
       CLICKHOUSE_DB: default
       CLICKHOUSE_USER: clickhouse
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-clickhouse}
-      TZ: UTC
+      TZ: Asia/Shanghai
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - ./deploy/clickhouse/keeper_and_cluster.xml:/etc/clickhouse-server/config.d/keeper_and_cluster.xml
@@ -189,6 +189,8 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
+    environment:
+      TZ: Asia/Shanghai
     depends_on:
       - app
     networks:
@@ -206,6 +208,7 @@ services:
     env_file:
       - .env
     environment:
+      TZ: Asia/Shanghai
       MYSQL_HOST: mysql
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-corporate_rag_pass}
       REDIS_HOST: redis
