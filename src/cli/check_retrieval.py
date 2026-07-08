@@ -46,7 +46,7 @@ def main() -> None:
     with MySQLDB() as db:
         kb_id = db.get_kb_by_name(args.kb)
         if not kb_id:
-            print(f"Error: Knowledge base '{args.kb}' not found.")
+            logger.error("Error: Knowledge base '{}' not found.", args.kb)
             print("Available KBs:")
             for kid, name in db.get_all_kb():
                 print(f"  - {name} ({kid})")
