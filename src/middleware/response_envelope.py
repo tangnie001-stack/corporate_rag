@@ -9,6 +9,7 @@ status_code >= 400 的响应直接透传。
 """
 
 import json
+from collections.abc import Awaitable, Callable
 
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
@@ -20,7 +21,9 @@ from src.config.response_codes import Code
 _SKIP_PATHS = {"/api/health", "/api/chat/stream"}
 
 
-async def response_envelope_middleware(request: Request, call_next) -> Response:
+async def response_envelope_middleware(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
     """统一响应包装中间件。
 
     成功响应 → 读 body 包进 {"code":"SUCCESS", "data": ...}。

@@ -5,13 +5,16 @@
 """
 
 import uuid
+from collections.abc import Awaitable, Callable
 
 from fastapi import Request, Response
 
 from src.infra.llm.trace_context import current_trace_id
 
 
-async def trace_id_middleware(request: Request, call_next):
+async def trace_id_middleware(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
     # 1. 获取 trace_id：header → query → auto-generate
     trace_id = request.headers.get("X-Trace-ID")
     if not trace_id:

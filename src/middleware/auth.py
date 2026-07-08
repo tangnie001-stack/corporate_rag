@@ -6,6 +6,7 @@ fallback 为 user_id Cookie（匿名用户，仅用于 chat/sessions）。
 """
 
 import uuid as uuid_mod
+from collections.abc import Awaitable, Callable
 
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
@@ -25,7 +26,9 @@ def _get_service() -> AppService:
     return _service
 
 
-async def auth_middleware(request: Request, call_next):
+async def auth_middleware(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
     path = request.url.path
 
     # 认证端点无需鉴权
