@@ -46,7 +46,7 @@ ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt"}
 
 
 @router.post("/kbs/documents/list")
-async def get_documents(body: DocumentListRequest, request: Request = None) -> list[DocumentListResponse]:
+async def get_documents(body: DocumentListRequest, request: Request = None):
     """列出知识库中的所有文档。
 
     Args:

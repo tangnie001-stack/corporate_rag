@@ -45,6 +45,7 @@ AppError (基类)
   - 原始返回值直接描述业务数据结构，不包含 `code`/`message` 包装（由 `ResponseEnvelopeMiddleware` 统一包装）
   - SSE 流式接口标注 `StreamingResponse`
   - 文件上传等返回 `JSONResponse` 的标注 `JSONResponse`
+  - 注意：`-> list[SomeModel]` 在 Pydantic v2 下可能引发响应数据异常，列表返回建议省略返回类型或使用 `response_model` 参数
 
 ```python
 class LoginResponse(BaseModel):
