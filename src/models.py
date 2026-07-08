@@ -87,7 +87,9 @@ def with_retry(
                     )
                     time.sleep(wait)
         # 所有重试均失败，记录错误并抛出最后一次异常
-        logger.error("{} failed after {} attempts", func.__name__, max_attempts)
+        logger.exception(
+            "{} failed after {} attempts: {}", func.__name__, max_attempts, last_error
+        )
         raise last_error
 
     return wrapper

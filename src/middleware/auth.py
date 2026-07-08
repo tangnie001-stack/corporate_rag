@@ -2,16 +2,17 @@
 
 优先校验 token Cookie（登录用户），
 fallback 为 user_id Cookie（匿名用户，仅用于 chat/sessions）。
+错误路径通过 raise AuthError 由 ResponseEnvelopeMiddleware 统一处理。
 """
 
 import uuid as uuid_mod
 
 from fastapi import Request, Response
-from fastapi.responses import JSONResponse
 
 from src.app_service import AppService
 from src.config.response_codes import Code
 from src.infra.auth.user_auth import UserAuth
+from src.infra.errors import AuthError
 from src.infra.llm.trace_context import current_user_id
 
 _service: AppService | None = None
@@ -35,18 +36,12 @@ async def auth_middleware(request: Request, call_next):
     if path.startswith("/api/kbs"):
         token = request.cookies.get("token")
         if not token:
-            return JSONResponse(
-                {"code": Code.AUTH_REQUIRED, "message": Code.AUTH_REQUIRED_MSG, "data": None},
-                status_code=401,
-            )
+            raise AuthError(Code.AUTH_REQUIRED, Code.AUTH_REQUIRED_MSG, status=401)
         uid = await UserAuth.get_user_id_from_token_async(
             _get_service().redis_client, token
         )
         if not uid:
-            return JSONResponse(
-                {"code": Code.AUTH_TOKEN_EXPIRED, "message": Code.AUTH_TOKEN_EXPIRED_MSG, "data": None},
-                status_code=401,
-            )
+            raise AuthError(Code.AUTH_TOKEN_EXPIRED, Code.AUTH_TOKEN_EXPIRED_MSG, status=401)
         request.state.user_id = uid
         current_user_id.set(uid)
         return await call_next(request)

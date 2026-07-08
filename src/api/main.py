@@ -22,6 +22,7 @@ from src.middleware.auth import auth_middleware
 from src.middleware.response_envelope import ResponseEnvelopeMiddleware
 from src.middleware.trace_id import trace_id_middleware
 from src.infra.db.mysql_db import MySQLDB
+from src.infra.errors import AppError
 
 
 @asynccontextmanager
@@ -56,11 +57,32 @@ app = FastAPI(
 setup_logging(write_to_file=True, configure_trace_id=True)
 
 
-# 异常处理器 — 将 FastAPI 内置异常包装为统一格式（直接返回 JSON，不经过中间件）
+# 异常处理器 — 所有 Router 层异常在此集中处理，补充 traceback 日志
+
+
+@app.exception_handler(AppError)
+async def app_error_handler(request: Request, exc: AppError):
+    from starlette.responses import JSONResponse
+
+    # BusinessError 等已知业务异常用 warning 级别
+    # SystemError 等基础设施异常用 exception 级别（含完整 traceback）
+    if exc.status >= 500:
+        logger.exception("基础设施异常: {} {}", exc.code, exc.message)
+    else:
+        logger.warning("业务异常: {} {}", exc.code, exc.message)
+
+    # TODO: ARMS Prometheus 接入后在此处打 exception_total.inc()
+    return JSONResponse(
+        {"code": exc.code, "message": exc.message, "data": None},
+        status_code=exc.status,
+    )
+
+
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     from starlette.responses import JSONResponse
 
+    logger.exception("HTTP 异常: {} {}", exc.status_code, exc.detail)
     code = Code.NOT_FOUND if exc.status_code == 404 else Code.UNKNOWN_ERROR
     msg = exc.detail or (
         Code.NOT_FOUND_MSG if exc.status_code == 404 else Code.UNKNOWN_ERROR_MSG
@@ -74,6 +96,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     from starlette.responses import JSONResponse
 
+    logger.exception("参数校验异常: {}", exc.errors())
     return JSONResponse(
         {
             "code": Code.VALIDATION_ERROR,
@@ -81,6 +104,18 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             "data": None,
         },
         status_code=422,
+    )
+
+
+@app.exception_handler(Exception)
+async def unknown_exception_handler(request: Request, exc: Exception):
+    from starlette.responses import JSONResponse
+
+    logger.exception("未处理的系统异常: {} {}", request.method, request.url)
+    # TODO: ARMS Prometheus 接入后在此处打 exception_total.inc()
+    return JSONResponse(
+        {"code": Code.INTERNAL_ERROR, "message": Code.INTERNAL_ERROR_MSG, "data": None},
+        status_code=500,
     )
 
 
