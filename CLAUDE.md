@@ -43,7 +43,7 @@ docker compose up -d --build        # 部署
 
 ## 规则
 - 架构规约（异常处理 / 响应包装 / 日志约定）详见 @CLAUDE-RULES.md
-- API 路由 handler 必须标注请求体和返回类型（请求用 Pydantic BaseModel，返回也用 Pydantic BaseModel 描述 data 结构，SSE ��注 StreamingResponse；注意 `-> list[Model]` 在 Pydantic v2 下有 bug，列表返回可省略类型）
+- API 路由 handler 必须标注请求体和返回类型（请求用 Pydantic BaseModel，返回也用 Pydantic BaseModel 描述 data 结构，SSE 标注 StreamingResponse）
 - git 操作由你手动执行，不会自动 commit/push
 - `old/` 是历史快照，不改也不引用
 - API Key 和 Token 通过 `.env` 加载，日志中脱敏；连接串不记录到日志

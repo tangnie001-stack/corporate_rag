@@ -46,7 +46,7 @@ ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt"}
 
 
 @router.post("/kbs/documents/list")
-async def get_documents(body: DocumentListRequest, request: Request = None):
+async def get_documents(body: DocumentListRequest, request: Request = None) -> list[DocumentListResponse]:
     """列出知识库中的所有文档。
 
     Args:
@@ -58,7 +58,7 @@ async def get_documents(body: DocumentListRequest, request: Request = None):
     svc = _get_service()
     docs = await svc.get_documents(body.kb_id)
     logger.info("Documents list: kb_id={} count={}", body.kb_id, len(docs))
-    result = [
+    return [
         DocumentListResponse(
             id=d["id"],
             filename=d["filename"],
@@ -70,7 +70,6 @@ async def get_documents(body: DocumentListRequest, request: Request = None):
         )
         for d in docs
     ]
-    return result
 
 
 @router.post("/kbs/documents/upload", status_code=202)

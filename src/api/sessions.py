@@ -36,7 +36,7 @@ def _get_service() -> AppService:
 
 
 @router.post("/sessions/list")
-async def list_sessions():
+async def list_sessions() -> list[SessionItem]:
     """列出最近 50 个会话。
 
     始终返回 200 + 数组，无会话时返回 []。
@@ -67,7 +67,7 @@ async def list_sessions():
 
 
 @router.post("/sessions/messages")
-async def get_session_messages(body: SessionMessagesRequest):
+async def get_session_messages(body: SessionMessagesRequest) -> list[MessageItem]:
     """获取会话消息历史。
 
     先验证会话存在，再返回消息列表。
