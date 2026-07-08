@@ -42,7 +42,7 @@ docker compose up -d --build        # 部署
 4. 改前端时用 playwright-cli 验证交互
 
 ## 规则
-- 架构规约（异常处理 / 响应包装 / 日志约定）详见 @CLAUDE-RULES.md
+- 架构规约（异常处理 / 响应包装 / 日志约定 / 排查规范）详见 @CLAUDE-RULES.md
 - API 路由 handler 必须标注请求体和返回类型（请求用 Pydantic BaseModel，返回也用 Pydantic BaseModel 描述 data 结构，SSE 标注 StreamingResponse）
 - git 操作由你手动执行，不会自动 commit/push
 - `old/` 是历史快照，不改也不引用
