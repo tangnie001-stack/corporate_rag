@@ -457,11 +457,12 @@
 
         async function handleDeleteDoc() {
             if (!deleteDocInfo) return;
+            const { kbId, docId } = deleteDocInfo;
+            hideDeleteModal();
             try {
-                hideDeleteModal();
                 const r = await apiRequest('/kbs/documents/delete', {
                     method: 'POST',
-                    body: JSON.stringify({ kb_id: deleteDocInfo.kbId, doc_id: deleteDocInfo.docId }),
+                    body: JSON.stringify({ kb_id: kbId, doc_id: docId }),
                 });
                 if (!r.success) throw new Error('删除失败');
                 showToast('文档已删除');
