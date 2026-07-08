@@ -30,7 +30,7 @@ def _get_service() -> AppService:
 
 
 @router.post("/kbs/list")
-async def list_knowledge_bases(request: Request) -> list[KBItem]:
+async def list_knowledge_bases(request: Request):
     """列出当前用户的所有知识库。
 
     Args:
