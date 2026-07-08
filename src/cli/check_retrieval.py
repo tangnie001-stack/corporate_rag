@@ -21,12 +21,11 @@ import sys
 from loguru import logger
 
 from src.core.logging import setup_logging
-
-setup_logging(write_to_file=False)
-
 from src.infra.db.mysql_db import MySQLDB
 from src.infra.db.vector_store import VectorStore
 from src.config import TOP_K_RERANK
+
+setup_logging(write_to_file=False)
 
 
 def main() -> None:

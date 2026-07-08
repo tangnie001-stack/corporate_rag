@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from src.app_service import AppService
 from src.config.response_codes import Code
-from src.infra.api_error import ApiError
+from src.infra.errors import AuthError
 from src.infra.auth.user_auth import UserAuth
 
 router = APIRouter()
@@ -36,7 +36,7 @@ async def login(body: LoginRequest):
     user = await svc.db.get_user_by_account(body.account)
     if user:
         if user["password"] != pw_hash:
-            raise ApiError(Code.AUTH_WRONG_PASSWORD, Code.AUTH_WRONG_PASSWORD_MSG, 401)
+            raise AuthError(Code.AUTH_WRONG_PASSWORD, Code.AUTH_WRONG_PASSWORD_MSG, 401)
         user_id = user["id"]
     else:
         user_id = str(uuid.uuid4())

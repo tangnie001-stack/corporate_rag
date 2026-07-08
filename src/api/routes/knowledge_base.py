@@ -4,7 +4,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 from src.config.response_codes import Code
-from src.infra.api_error import ApiError
+from src.infra.errors import BusinessError
 
 from src.app_service import AppService
 
@@ -102,10 +102,10 @@ async def delete_knowledge_base(body: KBDeleteRequest):
         dict: {"success": true, "message": "..."}
 
     Raises:
-        ApiError: 知识库不存在时返回 404
+        BusinessError: 知识库不存在时返回 404
     """
     svc = _get_service()
     success, message = await svc.delete_knowledge_base(body.kb_id)
     if not success:
-        raise ApiError(Code.KB_NOT_FOUND, Code.KB_NOT_FOUND_MSG, 404)
+        raise BusinessError(Code.KB_NOT_FOUND, Code.KB_NOT_FOUND_MSG, 404)
     return {"success": True, "message": message}

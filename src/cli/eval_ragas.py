@@ -29,8 +29,6 @@ from loguru import logger
 
 from src.core.logging import setup_logging
 
-setup_logging(write_to_file=False)
-
 # ---- RAGAS 评估库 ----
 from datasets import Dataset
 from ragas import evaluate
@@ -48,6 +46,8 @@ from src.config import settings
 from src.config.qa_pairs import QUESTIONS, GROUND_TRUTH
 from src.models import get_llm, get_embeddings
 from src.rag_chain import RAGChain
+
+setup_logging(write_to_file=False)
 
 
 # 默认输出目录

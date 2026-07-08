@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 from src.app_service import AppService
 from src.config.response_codes import Code
-from src.infra.api_error import ApiError
+from src.infra.errors import BusinessError, SystemError
 from src.infra.chunking.router import ChunkRouter
 from src.infra.chunking.validator import ChunkData, validate_chunks
 from src.infra.db.file_store import FileStore
@@ -46,31 +46,29 @@ ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt"}
 
 class DocumentListRequest(BaseModel):
     """文档列表请求体。"""
+
     kb_id: str
 
 
 class DocumentStatusRequest(BaseModel):
     """文档状态请求体。"""
+
     kb_id: str
     doc_id: str
 
 
 class DocumentChunksRequest(BaseModel):
     """分块预览请求体。"""
+
     kb_id: str
     doc_id: str
     page: int = 1
     page_size: int = 50
 
 
-class DocumentDeleteRequest(BaseModel):
-    """删除文档请求体。"""
-    kb_id: str
-    doc_id: str
-
-
 class UploadDocumentResponse(BaseModel):
     """文档上传响应。"""
+
     doc_id: str
     status: str
     filename: str
@@ -89,6 +87,7 @@ async def get_documents(body: DocumentListRequest, request: Request = None):
     """
     svc = _get_service()
     docs = await svc.get_documents(body.kb_id)
+    logger.info("Documents list: kb_id={} count={}", body.kb_id, len(docs))
     return docs
 
 
@@ -112,14 +111,27 @@ async def upload_document(
         dict: 含 doc_id、status、filename、dedup 的立即返回结果
 
     Raises:
-        ApiError 413: 文件超过 10MB 上限
-        ApiError 400: 不支持的文件类型
-        ApiError 500: 上传到存储服务失败
+        BusinessError 413: 文件超过 10MB 上限
+        BusinessError 400: 不支持的文件类型
+        SystemError 500: 上传到存储服务失败
     """
     user_id = getattr(request.state, "user_id", "") if request else ""
     contents = await file.read()
+    logger.info(
+        "Upload request: filename={} size={} kb_id={} user_id={}",
+        file.filename,
+        len(contents),
+        kb_id,
+        user_id[:8] + "..." if user_id else "",
+    )
     if len(contents) > MAX_UPLOAD_SIZE:
-        raise ApiError(Code.FILE_TOO_LARGE, Code.FILE_TOO_LARGE_MSG, 413)
+        logger.warning(
+            "Upload rejected (too large): filename={} size={} max={}",
+            file.filename,
+            len(contents),
+            MAX_UPLOAD_SIZE,
+        )
+        raise BusinessError(Code.FILE_TOO_LARGE, Code.FILE_TOO_LARGE_MSG, 413)
 
     ext = (
         f".{file.filename.rsplit('.', 1)[-1].lower()}"
@@ -127,7 +139,10 @@ async def upload_document(
         else ""
     )
     if ext not in ALLOWED_EXTENSIONS:
-        raise ApiError(Code.FILE_TYPE_UNSUPPORTED, Code.FILE_TYPE_UNSUPPORTED_MSG, 400)
+        logger.warning(
+            "Upload rejected (unsupported type): filename={} ext={}", file.filename, ext
+        )
+        raise BusinessError(Code.FILE_TYPE_UNSUPPORTED, Code.FILE_TYPE_UNSUPPORTED_MSG, 400)
 
     svc = _get_service()
 
@@ -152,9 +167,10 @@ async def upload_document(
     minio_key = FileStore.build_path(user_id, kb_id, doc_id, file.filename)
     fs = FileStore()
     if not await asyncio.to_thread(fs.upload, minio_key, contents):
-        raise ApiError(Code.FILE_UPLOAD_FAILED, Code.FILE_UPLOAD_FAILED_MSG, 500)
-
-    logger.info("MinIO upload: key={} size={}", minio_key, len(contents))
+        logger.error(
+            "Upload failed (MinIO): filename={} key={}", file.filename, minio_key
+        )
+        raise SystemError(Code.FILE_UPLOAD_FAILED, Code.FILE_UPLOAD_FAILED_MSG, 500)
 
     # 再写入 MySQL 元信息
     await svc.db.add_document(
@@ -176,6 +192,14 @@ async def upload_document(
         _process_document_task(svc, kb_id, doc_id, minio_key, file.filename, ext)
     )
 
+    logger.info(
+        "Upload success: doc_id={} filename={} kb_id={} size={}",
+        doc_id,
+        file.filename,
+        kb_id,
+        len(contents),
+    )
+
     return {"doc_id": doc_id, "status": "processing", "filename": file.filename}
 
 
@@ -195,7 +219,6 @@ async def _process_document_task(
         filename: 文件名
         ext: 文件扩展名（含点号，如 .pdf）
     """
-    logger.info("process_task start: doc_id={} filename={}", doc_id, filename)
     async with _process_semaphore:
         tmp_path = None
         try:
@@ -211,8 +234,6 @@ async def _process_document_task(
             contents = await asyncio.to_thread(FileStore().download, minio_key)
             if contents is None:
                 raise RuntimeError(f"无法从 MinIO 下载文档: {minio_key}")
-
-            logger.info("MinIO download: key={} size={}", minio_key, len(contents) if contents else 0)
 
             # 临时文件 — 同步 I/O，to_thread
             tmp = await asyncio.to_thread(
@@ -319,24 +340,6 @@ async def get_document_status(body: DocumentStatusRequest):
     }
 
 
-@router.post("/kbs/documents/delete")
-async def delete_document(request: Request, body: DocumentDeleteRequest):
-    """删除文档（软删除）：ChromaDB 清向量 → MySQL 标 deleted。
-
-    Args:
-        body: 删除请求体，含 kb_id 和 doc_id
-
-    Returns:
-        dict: {"doc_id": str, "filename": str, "status": "deleted"}
-
-    Raises:
-        ApiError: DOC_NOT_FOUND / DOC_DELETE_NOT_ALLOWED / DOC_STATUS_CONFLICT
-    """
-    svc = _get_service()
-    user_id = getattr(request.state, "user_id", "") if request else ""
-    return await svc.delete_document(body.kb_id, body.doc_id, user_id)
-
-
 @router.post("/kbs/documents/chunks")
 async def get_document_chunks(body: DocumentChunksRequest):
     """分页预览已处理文档的分块内容。
@@ -375,3 +378,28 @@ async def get_document_chunks(body: DocumentChunksRequest):
         "page": result["page"],
         "page_size": result["page_size"],
     }
+
+
+class DocumentDeleteRequest(BaseModel):
+    """文档删除请求体。"""
+
+    kb_id: str
+    doc_id: str
+
+
+@router.post("/kbs/documents/delete")
+async def delete_document(body: DocumentDeleteRequest):
+    """软删除文档（标记为 deleted），同时删除向量库中的分块。
+
+    Args:
+        body: 文档删除请求体，含 kb_id 和 doc_id
+
+    Returns:
+        dict: 含 success 布尔值
+    """
+    svc = _get_service()
+    ok = await svc.db.soft_delete_document(body.doc_id)
+    if ok:
+        svc.vector_store.delete_document(body.kb_id, body.doc_id)
+        logger.info("Document deleted: kb_id={} doc_id={}", body.kb_id, body.doc_id)
+    return {"success": ok}

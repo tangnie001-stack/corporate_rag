@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from src.app_service import AppService
 from src.config.response_codes import Code
-from src.infra.api_error import ApiError
+from src.infra.errors import BusinessError
 
 router = APIRouter()
 
@@ -91,13 +91,13 @@ async def get_session_messages(body: SessionMessagesRequest):
         list[dict]: 消息列表，每项含 role、content、sources、created_at
 
     Raises:
-        ApiError: 会话不存在时返回 404
+        BusinessError: 会话不存在时返回 404
     """
     svc = _get_service()
     session_id = body.session_id
     session = await svc.db.get_session_by_id(session_id)
     if not session:
-        raise ApiError(Code.SESSION_NOT_FOUND, Code.SESSION_NOT_FOUND_MSG, 404)
+        raise BusinessError(Code.SESSION_NOT_FOUND, Code.SESSION_NOT_FOUND_MSG, 404)
 
     messages = await svc.db.get_messages(session_id)
     result = []
@@ -131,7 +131,7 @@ async def delete_session(body: SessionDeleteRequest):
         dict: {"success": true}
 
     Raises:
-        ApiError: 会话不存在时返回 404
+        BusinessError: 会话不存在时返回 404
     """
     svc = _get_service()
     session_id = body.session_id
@@ -142,7 +142,7 @@ async def delete_session(body: SessionDeleteRequest):
     # 删除 MySQL 记录
     ok = await svc.db.delete_session_and_messages(session_id)
     if not ok:
-        raise ApiError(Code.SESSION_NOT_FOUND, Code.SESSION_NOT_FOUND_MSG, 404)
+        raise BusinessError(Code.SESSION_NOT_FOUND, Code.SESSION_NOT_FOUND_MSG, 404)
 
     logger.info("Deleted session: {}", session_id)
     return {"success": True}

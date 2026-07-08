@@ -27,7 +27,7 @@ from src.rag_chain import RAGChain, RAGContext
 from src.infra.chunking.validator import ChunkData, validate_chunks
 from src.infra.db.vector_store import VectorStore
 from src.config.response_codes import Code
-from src.infra.api_error import ApiError
+from src.infra.errors import BusinessError
 
 
 class AppService:
@@ -143,18 +143,18 @@ class AppService:
             {"doc_id": str, "filename": str, "status": "deleted"}
 
         Raises:
-            ApiError(DOC_NOT_FOUND): 文档不存在
-            ApiError(DOC_DELETE_NOT_ALLOWED): 非上传者
-            ApiError(DOC_STATUS_CONFLICT): 状态不可删
+            BusinessError(Code.DOC_NOT_FOUND): 文档不存在
+            BusinessError(Code.DOC_DELETE_NOT_ALLOWED): 非上传者
+            BusinessError(Code.DOC_STATUS_CONFLICT): 状态不可删
         """
         # 1. 查文档
         doc = await self.db.get_document(doc_id)
         if not doc:
-            raise ApiError(Code.DOC_NOT_FOUND, Code.DOC_NOT_FOUND_MSG, 404)
+            raise BusinessError(Code.DOC_NOT_FOUND, Code.DOC_NOT_FOUND_MSG, 404)
 
         # 2. 校验权限
         if doc["user_id"] != user_id:
-            raise ApiError(
+            raise BusinessError(
                 Code.DOC_DELETE_NOT_ALLOWED,
                 Code.DOC_DELETE_NOT_ALLOWED_MSG,
                 403,
@@ -162,7 +162,7 @@ class AppService:
 
         # 3. 校验状态
         if doc["status"] not in ("ready", "failed"):
-            raise ApiError(
+            raise BusinessError(
                 Code.DOC_STATUS_CONFLICT,
                 Code.DOC_STATUS_CONFLICT_MSG,
                 409,
@@ -181,7 +181,7 @@ class AppService:
         # 5. MySQL 标 deleted
         deleted = await self.db.soft_delete_document(doc_id)
         if not deleted:
-            raise ApiError(Code.DOC_NOT_FOUND, Code.DOC_NOT_FOUND_MSG, 404)
+            raise BusinessError(Code.DOC_NOT_FOUND, Code.DOC_NOT_FOUND_MSG, 404)
 
         logger.info("Document deleted: {} ({})", doc["filename"], doc_id)
         return {
