@@ -43,6 +43,7 @@ docker compose up -d --build        # 部署
 
 ## 规则
 - 架构规约（异常处理 / 响应包装 / 日志约定）详见 @CLAUDE-RULES.md
+- API 路由 handler 必须标注请求体和返回类型（请求用 Pydantic BaseModel，返回也用 Pydantic BaseModel 描述 data 结构，SSE 标注 StreamingResponse）
 - git 操作由你手动执行，不会自动 commit/push
 - `old/` 是历史快照，不改也不引用
 - API Key 和 Token 通过 `.env` 加载，日志中脱敏；连接串不记录到日志
@@ -51,24 +52,6 @@ docker compose up -d --build        # 部署
 
 
 ## 代码注释标准
-### 文档字符串（docstring）
-- **模块 docstring**：文件顶部，说明模块用途和核心导出。
-- **类 docstring**：说明类实例代表什么，`Attributes:` 节列出公开属性。
-- **函数 docstring**：`Args:` / `Returns:` / `Raises:` 三节。
-  - Args：每个参数一行，`名称: 描述` 格式（描述前用冒号+空格或换行）
-  - Returns：描述返回值的语义；若 docstring 以 "Return"/"Returns" 开头且已说清类型可省略
-  - Raises：列出接口相关的异常，`异常名: 描述`
-  - 生成器函数用 `Yields:` 代替 `Returns:`
-- **覆写方法**：若有 `@override` 且行为不变，无需 docstring；否则需要。
 
-### 行内注释（inline comment）
-- 用 `#` 后接至少 1 空格
-- 注释应在代码上方（块注释）或至少空 2 格后行尾（行内注释）
-- 解释**为什么**这么做，而不是**怎么**做（代码本身已说明怎么做的）
-- 完整句子、大写句首、句末句号
-
-### 基本原则
-- 公共 API / 非平凡函数 / 逻辑不明显的函数 **必须** 有 docstring
-- 注释不描述代码语法（假设读者懂 Python），而是说明意图和背景
-- 注释一律用**中文**, 且整个文件内保持一致风格（建议 imperative 祈使句风格）
+所有函数必须写 docstring，详细标准见 @CLAUDE-RULES.md 的"代码注释标准"章节。
 

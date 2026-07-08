@@ -71,5 +71,6 @@ async def login(body: LoginRequest) -> LoginResponse:
 - **覆写方法**：若有 `@override` 且行为不变，无需 docstring；否则需要
 - **基本原则**：
   - 公共 API / 非平凡函数 / 逻辑不明显的函数 **必须** 有 docstring
+  - Pydantic model 的每个字段 **必须** 有行内注释（`#`），说明字段含义和约束
   - 注释不描述代码语法（假设读者懂 Python），而是说明意图和背景
   - 注释一律用**中文**

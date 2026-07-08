@@ -27,20 +27,20 @@ def _get_service() -> AppService:
 
 class LoginRequest(BaseModel):
     """登录请求体。"""
-    account: str
-    password: str
+    account: str  # 账号
+    password: str  # 密码（明文，服务端做 hash 比对）
 
 
 class LoginResponse(BaseModel):
     """登录成功响应。"""
-    token: str
-    user_id: str
+    token: str  # 登录 token，后续请求通过 Cookie 携带
+    user_id: str  # 用户 UUID
 
 
 class VerifyResponse(BaseModel):
     """Token 校验响应。"""
-    valid: bool
-    user_id: Optional[str] = None
+    valid: bool  # token 是否有效
+    user_id: Optional[str] = None  # 对应用户 UUID，无效时为 None
 
 
 @router.post("/auth/login")

@@ -47,29 +47,29 @@ ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt"}
 class DocumentListRequest(BaseModel):
     """文档列表请求体。"""
 
-    kb_id: str
+    kb_id: str  # 知识库 UUID
 
 
 class DocumentStatusRequest(BaseModel):
     """文档状态请求体。"""
 
-    kb_id: str
-    doc_id: str
+    kb_id: str  # 知识库 UUID
+    doc_id: str  # 文档 UUID
 
 
 class DocumentChunksRequest(BaseModel):
     """分块预览请求体。"""
 
-    kb_id: str
-    doc_id: str
-    page: int = 1
-    page_size: int = 50
+    kb_id: str  # 知识库 UUID
+    doc_id: str  # 文档 UUID
+    page: int = 1  # 页码，从 1 开始
+    page_size: int = 50  # 每页条数
 
 
 class UploadDocumentResponse(BaseModel):
     """文档上传响应。"""
 
-    doc_id: str
+    doc_id: str  # 文档 UUID
     status: str
     filename: str
     dedup: bool = False
@@ -91,26 +91,26 @@ class DocumentStatusResponse(BaseModel):
     status: str
     chunk_count: int = 0
     progress: int = 0
-    error: str = ""
-    processing_state: str | None = None
-    processing_progress: int = 0
-    processing_message: str = ""
+    error: str = ""  # 错误信息
+    processing_state: str | None = None  # 处理阶段
+    processing_progress: int = 0  # 当前阶段进度
+    processing_message: str = ""  # 当前阶段描述
 
 
 class ChunkItem(BaseModel):
     """分块预览项。"""
     chunk_id: str
     content: str
-    page: int = 1
+    page: int = 1  # 页码，从 1 开始
     tokens: int = 0
     char_count: int
-    block_type: str = "text"
-    parent_content: str | None = None
+    block_type: str = "text"  # 块类型（text / table / list）
+    parent_content: str | None = None  # 父级块内容
 
 
 class ChunksResponse(BaseModel):
     """分块预览响应。"""
-    items: list[ChunkItem]
+    items: list[ChunkItem]  # 当前页分块列表
     total: int
     page: int
     page_size: int
@@ -421,8 +421,8 @@ async def get_document_chunks(body: DocumentChunksRequest) -> ChunksResponse:
 class DocumentDeleteRequest(BaseModel):
     """文档删除请求体。"""
 
-    kb_id: str
-    doc_id: str
+    kb_id: str  # 知识库 UUID
+    doc_id: str  # 文档 UUID
 
 
 @router.post("/kbs/documents/delete")

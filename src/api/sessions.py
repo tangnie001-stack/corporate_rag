@@ -52,16 +52,16 @@ class SessionItem(BaseModel):
     kb_id: str
     kb_name: str
     message_count: int
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    created_at: Optional[str] = None  # 创建时间
+    updated_at: Optional[str] = None  # 最后更新时间
 
 
 class MessageItem(BaseModel):
     """会话消息项。"""
     role: str
     content: str
-    sources: Optional[str] = None
-    created_at: Optional[str] = None
+    sources: Optional[str] = None  # 引用来源（JSON 字符串）
+    created_at: Optional[str] = None  # 创建时间
 
 
 class SessionDeleteResponse(BaseModel):

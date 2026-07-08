@@ -34,7 +34,7 @@ async def response_envelope_middleware(
         return await call_next(request)
 
     try:
-        response = await call_next(request)
+        response:Response = await call_next(request)
 
         # @app.exception_handler 或 Auth 已返回统一格式 → 直接透传
         if response.status_code >= 400:

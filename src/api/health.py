@@ -8,7 +8,7 @@ router = APIRouter()
 
 class HealthResponse(BaseModel):
     """健康检查响应。"""
-    status: str
+    status: str  # 服务状态，固定 "ok"
 
 
 @router.get("/health")

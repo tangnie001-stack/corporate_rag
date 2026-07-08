@@ -37,8 +37,8 @@ class CreateKBRequest(BaseModel):
         description: 知识库描述（可选，默认为空字符串）
     """
 
-    name: str
-    description: str = ""
+    name: str  # 知识库名称（必填）
+    description: str = ""  # 知识库描述（可选）
 
 
 class CreateKBResponse(BaseModel):
@@ -49,32 +49,26 @@ class CreateKBResponse(BaseModel):
         created: 是否为新创建（False 表示名称重复返回已有库）
     """
 
-    id: str
-    created: bool
+    id: str  # 知识库 UUID
+    created: bool  # 是否为新创建
 
 
 class KBItem(BaseModel):
-    """知识库列表项。
-
-    Attributes:
-        id: 知识库 UUID
-        name: 知识库名称
-        doc_count: 包含的文档数量
-    """
-    id: str
-    name: str
-    doc_count: int
+    """知识库列表项。"""
+    id: str  # 知识库 UUID
+    name: str  # 知识库名称
+    doc_count: int  # 包含的文档数量
 
 
 class KBDeleteRequest(BaseModel):
     """删除知识库请求体。"""
-    kb_id: str
+    kb_id: str  # 要删除的知识库 UUID
 
 
 class KBDeleteResponse(BaseModel):
     """删除知识库的响应体。"""
-    success: bool
-    message: str
+    success: bool  # 是否删除成功
+    message: str  # 删除结果描述
 
 
 @router.post("/kbs/list")
