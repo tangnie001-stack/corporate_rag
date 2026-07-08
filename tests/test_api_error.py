@@ -1,6 +1,5 @@
 """测试 AppError 业务异常层次。"""
 
-import pytest
 from src.infra.errors import BusinessError
 
 

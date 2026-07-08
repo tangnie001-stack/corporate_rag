@@ -1,4 +1,3 @@
-import pytest
 from starlette.middleware.base import BaseHTTPMiddleware
 from src.middleware.response_envelope import ResponseEnvelopeMiddleware
 

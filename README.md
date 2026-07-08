@@ -115,7 +115,7 @@ docker compose up -d --build
 docker compose up -d mysql redis postgres langfuse
 
 # 本地运行 FastAPI（--reload 热重载）
-uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
 
 # 在另一个终端启动静态文件服务（预览前端）
 python3 -m http.server 8080 --directory nginx/html/
@@ -269,7 +269,7 @@ pip install -e .
 docker compose up -d mysql redis postgres langfuse
 
 ### 运行 API 服务（热重载）
-uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
 
 ### 运行测试
 pytest tests/ -v
@@ -287,4 +287,4 @@ codegraph init
 ### 链接数据库，中间件等的方法，一定注意异步同步，大模型都是默认同步的， 其他情况下一定要询问同步/异步的问题，还有接口统一用post方式
 ### 大模型的知识盲区，一定要多问，多问，多问， 不会直接给你最好的方案，只会贴合你当前代码的给你方案，导致没有架构性，前瞻性，只是为了解决当前的问题。
 ### 大模型对工程化，对可用性，对性能的理解较弱，做项目的时候一定要自己关注这块
-目前具体工程化的问题有，链路统一的traceid，同步/异步调用，线程池的使用，上下文contextvars的使用
+目前具体工程化的问题有，链路统一的traceid，同步/异步调用，线程池的使用，上下文contextvars的使用，添加日志系统给大模型查日志，添加异常统一管理，添加metrics,span完善监控，工程化的框架需要形成rule，

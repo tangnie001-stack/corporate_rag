@@ -42,10 +42,12 @@ docker compose up -d --build        # 部署
 4. 改前端时用 playwright-cli 验证交互
 
 ## 规则
+- 架构规约（异常处理 / 响应包装 / 日志约定）详见 @CLAUDE-RULES.md
 - git 操作由你手动执行，不会自动 commit/push
 - `old/` 是历史快照，不改也不引用
 - API Key 和 Token 通过 `.env` 加载，日志中脱敏；连接串不记录到日志
 - 测试 mock 外部依赖，不发起真实网络调用
+- 需求池文档在docs/requirements_pool.md
 
 
 ## 代码注释标准

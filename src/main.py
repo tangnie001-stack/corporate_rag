@@ -19,7 +19,7 @@ from src.api.routes import (
 from src.api.routes import auth as auth_routes
 from src.config.response_codes import Code
 from src.middleware.auth import auth_middleware
-from src.middleware.response_envelope import ResponseEnvelopeMiddleware
+from src.middleware.response_envelope import response_envelope_middleware
 from src.middleware.trace_id import trace_id_middleware
 from src.infra.db.mysql_db import MySQLDB
 from src.infra.errors import AppError
@@ -131,7 +131,7 @@ app.add_middleware(
 
 app.middleware("http")(trace_id_middleware)  # 放在 CORS 之后，ResponseEnvelope 之前
 
-app.add_middleware(ResponseEnvelopeMiddleware)
+app.middleware("http")(response_envelope_middleware)
 app.middleware("http")(auth_middleware)
 
 # 挂载路由模块

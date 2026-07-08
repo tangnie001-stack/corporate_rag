@@ -1,6 +1,6 @@
 services:
   app:
     volumes:
-      - ./src:/app/src
-      - ./tests:/app/tests
-      - ./test_docs:/app/test_docs
+      - /mnt/d/code/demo/AIAgent/corporate_rag/src:/app/src
+      - /mnt/d/code/demo/AIAgent/corporate_rag/tests:/app/tests
+      - /mnt/d/code/demo/AIAgent/corporate_rag/test_docs:/app/test_docs

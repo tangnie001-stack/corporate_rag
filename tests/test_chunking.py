@@ -1,5 +1,4 @@
 # tests/test_chunking.py
-import pytest
 from src.infra.chunking.strategies.parent_child import ParentChildChunker
 from src.infra.chunking.strategies.qa import QAChunker
 from src.infra.chunking.strategies.table_preserving import TablePreservingChunker

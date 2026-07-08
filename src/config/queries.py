@@ -19,7 +19,7 @@ SQL 语句集中管理而非散落各处的好处：
 # 所有 id 使用 VARCHAR(36) 存储 UUID，而非自增 INT：
 #   - 分布式环境下不会冲突（后续可能多个 app 实例同时创建）
 #   - 对外暴露的 API 中不易被枚举遍历
-# 外键保留引用完整性，不再使用 ON DELETE CASCADE（改为应用层软删除）。
+# 外键统一使用 ON DELETE CASCADE，删除知识库时自动清理关联文档和历史。
 
 # 用户表。一条记录 = 一个注册用户。
 # 密码存储的是 bcrypt 哈希值（空字符串代表未注册/游客）。
@@ -41,7 +41,6 @@ CREATE TABLE IF NOT EXISTS knowledge_base (
     user_id     VARCHAR(36)  NOT NULL DEFAULT '',
     name        VARCHAR(255) NOT NULL,
     description TEXT,
-    status      VARCHAR(20)  NOT NULL DEFAULT 'active',
     created_at  DATETIME     DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uk_user_kb (user_id, name)
@@ -71,7 +70,7 @@ CREATE TABLE IF NOT EXISTS document (
     chunk_count         INTEGER      DEFAULT 0,
     meta_info           JSON,
     created_at          DATETIME     DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (kb_id) REFERENCES knowledge_base(id),
+    FOREIGN KEY (kb_id) REFERENCES knowledge_base(id) ON DELETE CASCADE,
     INDEX idx_user_kb (user_id, kb_id)
 )
 """
@@ -139,14 +138,15 @@ SELECT_ALL_KNOWLEDGE_BASES: str = """\
 SELECT k.id, k.user_id, k.name, COUNT(d.id) AS doc_count
 FROM knowledge_base k
 LEFT JOIN document d ON d.kb_id = k.id AND d.status != 'deleted'
-WHERE k.user_id = %s AND k.status != 'deleted'
+WHERE k.user_id = %s
 GROUP BY k.id, k.user_id, k.name
 ORDER BY k.created_at DESC
 """
 
-# 软删除知识库。参数：[kb_id]。标记为 deleted，保留记录（不再使用 ON DELETE CASCADE）。
-SOFT_DELETE_KNOWLEDGE_BASE_BY_ID: str = """\
-UPDATE knowledge_base SET status = 'deleted' WHERE id = %s
+# 删除知识库。参数：[kb_id]。
+# 通过 ON DELETE CASCADE 自动清除该库下所有文档和对话历史。
+DELETE_KNOWLEDGE_BASE_BY_ID: str = """\
+DELETE FROM knowledge_base WHERE id = %s
 """
 
 # ====== 文档 CRUD ======
@@ -179,22 +179,9 @@ SELECT id, user_id, kb_id, filename, file_type, file_size, file_path, hash,
 FROM document WHERE kb_id = %s AND status != 'deleted' ORDER BY created_at DESC
 """
 
-# 按 ID 查询文档。参数：[doc_id]。用于删除前校验文档存在、归属和状态。
-SELECT_DOCUMENT_BY_ID: str = """\
-SELECT id, user_id, kb_id, filename, file_type, file_size, file_path, hash,
-       status, processing_state, processing_progress, processing_message,
-       error_msg, chunk_strategy, chunk_count, meta_info, created_at
-FROM document WHERE id = %s
-"""
-
-# 软删除文档。参数：[doc_id]。标记为 deleted，保留记录。
-SOFT_DELETE_DOCUMENT: str = """\
-UPDATE document SET status = 'deleted' WHERE id = %s
-"""
-
-# 软删除某知识库下的所有文档。参数：[kb_id]。
-SOFT_DELETE_DOCUMENTS_BY_KB: str = """\
-UPDATE document SET status = 'deleted' WHERE kb_id = %s
+# 软删除文档（将 status 标记为 deleted）。参数：[doc_id]。
+SOFT_DELETE_DOCUMENT_BY_ID: str = """\
+UPDATE document SET status = 'deleted' WHERE id = %s AND status != 'deleted'
 """
 
 # ====== 会话 CRUD ======

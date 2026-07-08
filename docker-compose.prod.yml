@@ -5,7 +5,7 @@
 #   2. 调大 mem_limit 适配生产数据量
 #   3. 内部服务不暴露端口，仅 nginx 对外
 #   4. 重启策略改为 always
-
+name: corporate_rag
 services:
   mysql:
     image: mysql:8.0
@@ -199,7 +199,7 @@ services:
     container_name: corporate-rag-app
     restart: always
     # 生产用多 worker 提升并发
-    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --workers 4
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 4
     env_file:
       - .env
     environment:

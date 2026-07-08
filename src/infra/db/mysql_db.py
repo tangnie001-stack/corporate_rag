@@ -37,6 +37,7 @@ from src.config.queries import (
     CREATE_TABLE_KNOWLEDGE_BASE,
     CREATE_TABLE_SESSIONS,
     CREATE_TABLE_USERS,
+    DELETE_KNOWLEDGE_BASE_BY_ID,
     DELETE_MESSAGES_BY_SESSION,
     DELETE_SESSION,
     DROP_CONVERSATION_HISTORY_FK,
@@ -47,16 +48,13 @@ from src.config.queries import (
     INSERT_USER,
     SELECT_ALL_KNOWLEDGE_BASES,
     SELECT_DOCUMENTS_BY_KB_ID,
-    SELECT_DOCUMENT_BY_ID,
     SELECT_KNOWLEDGE_BASE_ID_BY_NAME,
     SELECT_MESSAGES_BY_SESSION,
     SELECT_SESSION_BY_ID,
     SELECT_SESSIONS,
     SELECT_USER_BY_ACCOUNT,
     SELECT_USER_BY_TOKEN,
-    SOFT_DELETE_DOCUMENT,
-    SOFT_DELETE_DOCUMENTS_BY_KB,
-    SOFT_DELETE_KNOWLEDGE_BASE_BY_ID,
+    SOFT_DELETE_DOCUMENT_BY_ID,
     UPDATE_DOCUMENT_STATUS,
     UPDATE_USER_TOKEN,
 )
@@ -119,7 +117,7 @@ class MySQLDB:
           - conversation_history: 对话历史（session_id, role, content, sources, tokens）
           - sessions: 会话记录（id, user_id, title, kb_id）
 
-        外键保留引用完整性，删除操作为应用层软删除（不再使用 ON DELETE CASCADE）。
+        所有外键设置了 ON DELETE CASCADE，删除知识库时自动清理关联文档和历史记录。
         """
         pool = await self._get_pool()
         async with pool.acquire() as conn:
@@ -241,62 +239,13 @@ class MySQLDB:
                 )
             await conn.commit()
         logger.info(
-            "SQL add_document: doc_id={} kb_id={} filename={} status={}",
-            doc_id, kb_id, filename, status,
+            "SQL: {} | doc_id={} kb_id={} filename={} status={}",
+            INSERT_DOCUMENT.split("\n")[0].strip(),
+            doc_id,
+            kb_id,
+            filename,
+            status,
         )
-
-    async def get_document(self, doc_id: str) -> dict | None:
-        """按 ID 查询文档记录。
-
-        Args:
-            doc_id: 文档 UUID
-
-        Returns:
-            dict，包含 document 表全部字段；不存在返回 None
-        """
-        pool = await self._get_pool()
-        async with pool.acquire() as conn:
-            async with conn.cursor(aiomysql.DictCursor) as cursor:
-                await cursor.execute(SELECT_DOCUMENT_BY_ID, (doc_id,))
-                row = await cursor.fetchone()
-        logger.info("SQL get_document: doc_id={} found={}", doc_id, row is not None)
-        return row
-
-    async def soft_delete_document(self, doc_id: str) -> bool:
-        """软删除文档（标记 status = 'deleted'）。
-
-        Args:
-            doc_id: 文档 UUID
-
-        Returns:
-            True 表示更新了记录，False 表示文档不存在
-        """
-        pool = await self._get_pool()
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cursor:
-                await cursor.execute(SOFT_DELETE_DOCUMENT, (doc_id,))
-                await conn.commit()
-                rowcount = cursor.rowcount
-        logger.info("SQL soft_delete_document: doc_id={} rows_affected={}", doc_id, rowcount)
-        return rowcount > 0
-
-    async def soft_delete_documents_by_kb(self, kb_id: str) -> int:
-        """软删除某知识库下的所有文档。
-
-        Args:
-            kb_id: 知识库 UUID
-
-        Returns:
-            被更新的文档数量
-        """
-        pool = await self._get_pool()
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cursor:
-                await cursor.execute(SOFT_DELETE_DOCUMENTS_BY_KB, (kb_id,))
-                await conn.commit()
-                rowcount = cursor.rowcount
-        logger.info("SQL soft_delete_documents_by_kb: kb_id={} rows_affected={}", kb_id, rowcount)
-        return rowcount
 
     async def create_session(
         self, session_id: str, title: str, kb_id: str, user_id: str = ""
@@ -312,8 +261,17 @@ class MySQLDB:
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             async with conn.cursor() as cursor:
-                await cursor.execute(INSERT_SESSION, (session_id, user_id, title, kb_id))
+                await cursor.execute(
+                    INSERT_SESSION, (session_id, user_id, title, kb_id)
+                )
             await conn.commit()
+        logger.info(
+            "SQL: {} | session_id={} title={} kb_id={}",
+            INSERT_SESSION.split("\n")[0].strip(),
+            session_id,
+            title,
+            kb_id,
+        )
 
     async def get_sessions(self) -> list[dict]:
         """返回最近 50 条会话列表，包含知识库名称和消息数量。
@@ -326,7 +284,10 @@ class MySQLDB:
             async with conn.cursor() as cursor:
                 await cursor.execute(SELECT_SESSIONS)
                 rows = await cursor.fetchall()
-            return rows
+        logger.info(
+            "SQL: {} | count={}", SELECT_SESSIONS.split("\n")[0].strip(), len(rows)
+        )
+        return rows
 
     async def get_session_by_id(self, session_id: str) -> Optional[dict]:
         """按 ID 查询会话。
@@ -342,7 +303,13 @@ class MySQLDB:
             async with conn.cursor() as cursor:
                 await cursor.execute(SELECT_SESSION_BY_ID, (session_id,))
                 row = await cursor.fetchone()
-            return row
+        logger.info(
+            "SQL: {} | session_id={} found={}",
+            SELECT_SESSION_BY_ID.split("\n")[0].strip(),
+            session_id,
+            row is not None,
+        )
+        return row
 
     async def get_messages(self, session_id: str) -> list[dict]:
         """返回会话的所有消息，按 created_at 正序排列。
@@ -358,7 +325,13 @@ class MySQLDB:
             async with conn.cursor() as cursor:
                 await cursor.execute(SELECT_MESSAGES_BY_SESSION, (session_id,))
                 rows = await cursor.fetchall()
-            return rows
+        logger.info(
+            "SQL: {} | session_id={} count={}",
+            SELECT_MESSAGES_BY_SESSION.split("\n")[0].strip(),
+            session_id,
+            len(rows),
+        )
+        return rows
 
     async def delete_session_and_messages(self, session_id: str) -> bool:
         """删除会话及其所有消息（同一事务内）。
@@ -376,7 +349,14 @@ class MySQLDB:
                 await cursor.execute(DELETE_SESSION, (session_id,))
                 deleted = cursor.rowcount > 0
             await conn.commit()
-            return deleted
+        logger.info(
+            "SQL: {} {} | session_id={} deleted={}",
+            DELETE_MESSAGES_BY_SESSION.split("\n")[0].strip(),
+            DELETE_SESSION.split("\n")[0].strip(),
+            session_id,
+            deleted,
+        )
+        return deleted
 
     async def save_message(
         self,
@@ -422,6 +402,13 @@ class MySQLDB:
                     ),
                 )
             await conn.commit()
+        logger.info(
+            "SQL: {} | session_id={} role={} tokens={}",
+            INSERT_MESSAGE.split("\n")[0].strip(),
+            session_id,
+            role,
+            total_tokens,
+        )
 
     async def update_document_status(
         self,
@@ -467,8 +454,11 @@ class MySQLDB:
                 )
             await conn.commit()
         logger.info(
-            "SQL update_document_status: doc_id={} status={} chunk_count={}",
-            doc_id, status, chunk_count,
+            "SQL: {} | doc_id={} status={} chunks={}",
+            UPDATE_DOCUMENT_STATUS.split("\n")[0].strip(),
+            doc_id,
+            status,
+            chunk_count,
         )
 
     # ====== 用户 CRUD ======
@@ -486,6 +476,12 @@ class MySQLDB:
             async with conn.cursor() as cursor:
                 await cursor.execute(INSERT_USER, (user_id, account, password_hash))
             await conn.commit()
+        logger.info(
+            "SQL: {} | user_id={} account={}",
+            INSERT_USER.split("\n")[0].strip(),
+            user_id,
+            account,
+        )
 
     async def get_user_by_account(self, account: str) -> Optional[dict]:
         """按账号查询用户信息。
@@ -501,7 +497,13 @@ class MySQLDB:
             async with conn.cursor() as cursor:
                 await cursor.execute(SELECT_USER_BY_ACCOUNT, (account,))
                 row = await cursor.fetchone()
-            return row
+        logger.info(
+            "SQL: {} | account={} found={}",
+            SELECT_USER_BY_ACCOUNT.split("\n")[0].strip(),
+            account,
+            row is not None,
+        )
+        return row
 
     async def update_user_token(self, user_id: str, token: str) -> None:
         """更新用户 token（登录后生成 session token）。
@@ -515,6 +517,9 @@ class MySQLDB:
             async with conn.cursor() as cursor:
                 await cursor.execute(UPDATE_USER_TOKEN, (token, user_id))
             await conn.commit()
+        logger.info(
+            "SQL: {} | user_id={}", UPDATE_USER_TOKEN.split("\n")[0].strip(), user_id
+        )
 
     async def get_user_by_token(self, token: str) -> Optional[dict]:
         """按 token 查询用户（登录态验证）。
@@ -530,7 +535,13 @@ class MySQLDB:
             async with conn.cursor() as cursor:
                 await cursor.execute(SELECT_USER_BY_TOKEN, (token,))
                 row = await cursor.fetchone()
-            return row
+        logger.info(
+            "SQL: {} | token={} found={}",
+            SELECT_USER_BY_TOKEN.split("\n")[0].strip(),
+            token[:8] + "...",
+            row is not None,
+        )
+        return row
 
     # ====== 知识库 CRUD ======
 
@@ -549,7 +560,14 @@ class MySQLDB:
             async with conn.cursor() as cursor:
                 await cursor.execute(SELECT_KNOWLEDGE_BASE_ID_BY_NAME, (user_id, name))
                 row = await cursor.fetchone()
-            return row["id"] if row else None
+        logger.info(
+            "SQL: {} | user_id={} name={} found={}",
+            SELECT_KNOWLEDGE_BASE_ID_BY_NAME.split("\n")[0].strip(),
+            user_id,
+            name,
+            row is not None,
+        )
+        return row["id"] if row else None
 
     async def get_all_kb(self, user_id: str = "") -> list[dict]:
         """列出某用户的所有知识库（按创建时间倒序），含文档计数。
@@ -565,29 +583,44 @@ class MySQLDB:
             async with conn.cursor() as cursor:
                 await cursor.execute(SELECT_ALL_KNOWLEDGE_BASES, (user_id,))
                 result = [
-                    {"id": row["id"], "name": row["name"], "doc_count": row["doc_count"]}
+                    {
+                        "id": row["id"],
+                        "name": row["name"],
+                        "doc_count": row["doc_count"],
+                    }
                     for row in await cursor.fetchall()
                 ]
             await conn.commit()  # 关闭隐式只读事务
-            return result
+        logger.info(
+            "SQL: {} | user_id={} count={}",
+            SELECT_ALL_KNOWLEDGE_BASES.split("\n")[0].strip(),
+            user_id,
+            len(result),
+        )
+        return result
 
-    async def soft_delete_kb(self, kb_id: str) -> bool:
-        """软删除知识库（标记 status = 'deleted'，保留记录供 Job 清理 MinIO 用）。
+    async def delete_kb(self, kb_id: str) -> bool:
+        """删除知识库及其关联的所有文档和对话历史（CASCADE）。
 
         Args:
             kb_id: 知识库 UUID
 
         Returns:
-            True 表示更新了记录，False 表示知识库不存在
+            True 表示删除成功，False 表示该知识库不存在
         """
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             async with conn.cursor() as cursor:
-                await cursor.execute(SOFT_DELETE_KNOWLEDGE_BASE_BY_ID, (kb_id,))
-                await conn.commit()
-                ok = cursor.rowcount > 0
-        logger.info("SQL soft_delete_kb: kb_id={} found={}", kb_id, ok)
-        return ok
+                await cursor.execute(DELETE_KNOWLEDGE_BASE_BY_ID, (kb_id,))
+                deleted = cursor.rowcount
+            await conn.commit()
+        logger.info(
+            "SQL: {} | kb_id={} deleted={}",
+            DELETE_KNOWLEDGE_BASE_BY_ID.split("\n")[0].strip(),
+            kb_id,
+            deleted > 0,
+        )
+        return deleted > 0
 
     async def get_documents(self, kb_id: str) -> list[dict]:
         """获取指定知识库下的所有文档列表（按创建时间倒序）。
@@ -603,5 +636,33 @@ class MySQLDB:
             async with conn.cursor() as cursor:
                 await cursor.execute(SELECT_DOCUMENTS_BY_KB_ID, (kb_id,))
                 rows = await cursor.fetchall()
-        logger.info("SQL get_documents: kb_id={} count={}", kb_id, len(rows))
+        logger.info(
+            "SQL: {} | kb_id={} count={}",
+            SELECT_DOCUMENTS_BY_KB_ID.split("\n")[0].strip(),
+            kb_id,
+            len(rows),
+        )
         return rows
+
+    async def soft_delete_document(self, doc_id: str) -> bool:
+        """软删除文档（标记为 deleted 状态）。
+
+        Args:
+            doc_id: 文档 UUID
+
+        Returns:
+            True 表示删除成功，False 表示文档不存在或已删除
+        """
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(SOFT_DELETE_DOCUMENT_BY_ID, (doc_id,))
+                deleted = cursor.rowcount
+            await conn.commit()
+        logger.info(
+            "SQL: {} | doc_id={} deleted={}",
+            SOFT_DELETE_DOCUMENT_BY_ID.split("\n")[0].strip(),
+            doc_id,
+            deleted > 0,
+        )
+        return deleted > 0

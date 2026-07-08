@@ -1,3 +1,4 @@
+name: corporate_rag
 services:
   mysql:
     image: mysql:8.0
@@ -201,7 +202,7 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
-    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8000
     env_file:
       - .env
     environment:
@@ -209,6 +210,7 @@ services:
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-corporate_rag_pass}
       REDIS_HOST: redis
       REDIS_PASSWORD: ${REDIS_PASSWORD:-corporate_rag_pass}
+      LOG_DIR: /data/logs
     volumes:
       - app_logs:/data/logs
       - chroma_onnx_cache:/root/.cache/chroma

@@ -1,5 +1,4 @@
 # tests/test_auth.py
-import pytest
 from src.infra.auth.user_auth import UserAuth
 from unittest.mock import Mock
 
