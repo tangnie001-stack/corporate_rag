@@ -9,14 +9,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from loguru import logger
 
 from src.core.logging import setup_logging
-from src.api.routes import (
-    health_router,
-    kb_router,
-    doc_router,
-    chat_router,
-    sessions_router,
-)
-from src.api.routes import auth as auth_routes
+from src.api import (health_router, kb_router, doc_router, chat_router, sessions_router)
+from src.api import auth as auth_routes
 from src.config.response_codes import Code
 from src.middleware.auth import auth_middleware
 from src.middleware.response_envelope import response_envelope_middleware

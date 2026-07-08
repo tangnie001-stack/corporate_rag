@@ -9,6 +9,6 @@ import pytest
 @pytest.mark.asyncio
 async def test_semaphore_value():
     """验证 _process_semaphore 初始值为 3。"""
-    from src.api.routes.documents import _process_semaphore
+    from src.api.documents import _process_semaphore
 
     assert _process_semaphore._value == 3
