@@ -22,6 +22,8 @@ from chromadb.api.types import Documents, Embeddings, EmbeddingFunction
 from langchain_community.embeddings import DashScopeEmbeddings
 from loguru import logger
 
+from src.core.logging import LOG_MAX_BODY
+
 from src.config import (
     CHROMA_COLLECTION_PREFIX,
     CHROMA_PERSIST_DIR,
@@ -202,7 +204,9 @@ class VectorStore:
             # 保留 chunker 传入的所有元数据字段（如 chunk_strategy, heading_path,
             # parent_content, tokens, entities），只覆盖路由字段。
             meta = dict(chunk.metadata)
-            meta.update({"chunk_index": i, "chunk_total": len(chunks), "doc_id": doc_id})
+            meta.update(
+                {"chunk_index": i, "chunk_total": len(chunks), "doc_id": doc_id}
+            )
             meta.setdefault("source", "")
             meta.setdefault("page", 0)
             metadatas.append(meta)
@@ -213,7 +217,12 @@ class VectorStore:
             documents=documents,
             metadatas=metadatas,
         )
-        logger.info("ChromaDB add_chunks: kb_id={} doc_id={} count={}", kb_id, doc_id, len(chunks))
+        logger.info(
+            "ChromaDB add_chunks: kb_id={} doc_id={} count={}",
+            kb_id,
+            doc_id,
+            len(chunks),
+        )
         return len(ids)
 
     def similarity_search(self, kb_id: str, query: str, k: int = 5) -> list[dict]:
@@ -261,7 +270,33 @@ class VectorStore:
                         else None,
                     }
                 )
-        logger.info("ChromaDB search: kb_id={} query_len={} results={}", kb_id, len(query), len(formatted))
+        logger.info(
+            "ChromaDB search: kb_id={} query_len={} results={}",
+            kb_id,
+            len(query),
+            len(formatted),
+        )
+        try:
+            data_str = str(formatted)
+            if len(data_str) > LOG_MAX_BODY:
+                data_str = (
+                    data_str[:LOG_MAX_BODY]
+                    + f"... (truncated, total={len(data_str)} chars)"
+                )
+            logger.info(
+                "[CHROMA] method=similarity_search | kb_id={} | query_len={} | rows={} | data={}",
+                kb_id,
+                len(query),
+                len(formatted),
+                data_str,
+            )
+        except Exception:
+            logger.info(
+                "[CHROMA] method=similarity_search | kb_id={} | query_len={} | rows={} | data=<serialization_error>",
+                kb_id,
+                len(query),
+                len(formatted),
+            )
         return formatted
 
     def delete_collection(self, kb_id: str) -> bool:
@@ -306,6 +341,10 @@ class VectorStore:
             collection = self.get_or_create_collection(kb_id)
             results = collection.get(where={"doc_id": doc_id})
             if not results["ids"]:
+                logger.info(
+                    "[CHROMA] method=get_chunks_by_doc_id | doc_id={} | rows=0 | data=[]",
+                    doc_id,
+                )
                 return []
             chunks = []
             for i in range(len(results["ids"])):
@@ -319,6 +358,25 @@ class VectorStore:
                         if results["metadatas"]
                         else {},
                     }
+                )
+            try:
+                data_str = str(chunks)
+                if len(data_str) > LOG_MAX_BODY:
+                    data_str = (
+                        data_str[:LOG_MAX_BODY]
+                        + f"... (truncated, total={len(data_str)} chars)"
+                    )
+                logger.info(
+                    "[CHROMA] method=get_chunks_by_doc_id | doc_id={} | rows={} | data={}",
+                    doc_id,
+                    len(chunks),
+                    data_str,
+                )
+            except Exception:
+                logger.info(
+                    "[CHROMA] method=get_chunks_by_doc_id | doc_id={} | rows={} | data=<serialization_error>",
+                    doc_id,
+                    len(chunks),
                 )
             return chunks
         except Exception as e:
@@ -351,11 +409,13 @@ class VectorStore:
             collection = self.get_or_create_collection(kb_id)
 
             # 先获取总量（只返回 IDs，不加载 documents/embeddings）
-            all_ids = collection.get(
-                where={"doc_id": doc_id}, include=[]
-            )
+            all_ids = collection.get(where={"doc_id": doc_id}, include=[])
             total = len(all_ids["ids"]) if all_ids.get("ids") else 0
             if total == 0:
+                logger.info(
+                    "[CHROMA] method=get_chunks_paginated | doc_id={} | rows=0 | data=[]",
+                    doc_id,
+                )
                 return {"items": [], "total": 0, "page": page, "page_size": page_size}
 
             # 获取当前页
@@ -379,12 +439,33 @@ class VectorStore:
                         else {},
                     }
                 )
-            return {
+            result = {
                 "items": items,
                 "total": total,
                 "page": page,
                 "page_size": page_size,
             }
+            try:
+                data_str = str(items)
+                if len(data_str) > LOG_MAX_BODY:
+                    data_str = (
+                        data_str[:LOG_MAX_BODY]
+                        + f"... (truncated, total={len(data_str)} chars)"
+                    )
+                logger.info(
+                    "[CHROMA] method=get_chunks_paginated | doc_id={} | page={} | total={} | data={}",
+                    doc_id,
+                    page,
+                    total,
+                    data_str,
+                )
+            except Exception:
+                logger.info(
+                    "[CHROMA] method=get_chunks_paginated | doc_id={} | page={} | data=<serialization_error>",
+                    doc_id,
+                    page,
+                )
+            return result
         except Exception as e:
             logger.warning(
                 "Failed to get paginated chunks for doc_id={}: {}", doc_id, e
@@ -411,7 +492,12 @@ class VectorStore:
             if results["ids"]:
                 collection.delete(ids=results["ids"])
                 count = len(results["ids"])
-                logger.info("ChromaDB delete_document: kb_id={} doc_id={} deleted={}", kb_id, doc_id, count)
+                logger.info(
+                    "ChromaDB delete_document: kb_id={} doc_id={} deleted={}",
+                    kb_id,
+                    doc_id,
+                    count,
+                )
                 return count
             return 0
         except NotFoundError:
@@ -462,4 +548,22 @@ class VectorStore:
 
         # 按 distance 升序排列（数值越小表示越相似）
         all_results.sort(key=lambda r: r.get("distance", float("inf")))
-        return all_results[:k]
+        result = all_results[:k]
+        try:
+            data_str = str(result)
+            if len(data_str) > LOG_MAX_BODY:
+                data_str = (
+                    data_str[:LOG_MAX_BODY]
+                    + f"... (truncated, total={len(data_str)} chars)"
+                )
+            logger.info(
+                "[CHROMA] method=similarity_search_all | rows={} | data={}",
+                len(result),
+                data_str,
+            )
+        except Exception:
+            logger.info(
+                "[CHROMA] method=similarity_search_all | rows={} | data=<serialization_error>",
+                len(result),
+            )
+        return result
