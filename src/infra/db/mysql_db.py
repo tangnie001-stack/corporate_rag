@@ -24,6 +24,8 @@ from typing import Optional
 import aiomysql
 from loguru import logger
 
+from src.core.logging import LOG_MAX_BODY, SQL_SKIP_FULL_LOG
+
 from src.config import (
     MYSQL_HOST,
     MYSQL_PORT,
@@ -58,6 +60,33 @@ from src.config.queries import (
     UPDATE_DOCUMENT_STATUS,
     UPDATE_USER_TOKEN,
 )
+
+
+def _log_sql_result(method: str, rows, **extra) -> None:
+    """统一 SQL 返回值日志。
+
+    方法名在 SQL_SKIP_FULL_LOG 中时只记录 count + 额外参数，
+    否则记录完整 data。超过 LOG_MAX_BODY 时截断。
+    """
+    count = (
+        len(rows) if isinstance(rows, (list, dict)) else (1 if rows is not None else 0)
+    )
+    if method in SQL_SKIP_FULL_LOG:
+        extra_str = " | ".join(f"{k}={v}" for k, v in extra.items())
+        logger.info("[SQL] method={} | rows={} | {}", method, count, extra_str)
+    else:
+        data_str = str(rows)
+        if len(data_str) > LOG_MAX_BODY:
+            data_str = (
+                data_str[:LOG_MAX_BODY]
+                + f"... (truncated, total={len(data_str)} chars)"
+            )
+        try:
+            logger.info("[SQL] method={} | rows={} | data={}", method, count, data_str)
+        except Exception:
+            logger.info(
+                "[SQL] method={} | rows={} | data=<serialization_error>", method, count
+            )
 
 
 class MySQLDB:
@@ -166,6 +195,7 @@ class MySQLDB:
                         INSERT_KNOWLEDGE_BASE, (kb_id, user_id, name, description)
                     )
                 await conn.commit()
+                _log_sql_result("get_or_create_kb", (kb_id, True))
                 return kb_id, True
             except aiomysql.IntegrityError:
                 # (user_id, name) 有联合 UNIQUE 约束：另一个请求已插入同名知识库
@@ -177,6 +207,7 @@ class MySQLDB:
                     raise RuntimeError(
                         f"IntegrityError on '{name}' but get_kb_by_name returned None"
                     ) from None
+                _log_sql_result("get_or_create_kb", (existing_id, False))
                 return existing_id, False
 
     async def add_document(
@@ -288,6 +319,7 @@ class MySQLDB:
         logger.info(
             "SQL: {} | count={}", SELECT_SESSIONS.split("\n")[0].strip(), len(rows)
         )
+        _log_sql_result("get_sessions", rows)
         return rows
 
     async def get_session_by_id(self, session_id: str) -> Optional[dict]:
@@ -310,6 +342,7 @@ class MySQLDB:
             session_id,
             row is not None,
         )
+        _log_sql_result("get_session_by_id", row)
         return row
 
     async def get_messages(self, session_id: str) -> list[dict]:
@@ -332,6 +365,7 @@ class MySQLDB:
             session_id,
             len(rows),
         )
+        _log_sql_result("get_messages", rows, session_id=session_id)
         return rows
 
     async def delete_session_and_messages(self, session_id: str) -> bool:
@@ -504,6 +538,7 @@ class MySQLDB:
             account,
             row is not None,
         )
+        _log_sql_result("get_user_by_account", row)
         return row
 
     async def update_user_token(self, user_id: str, token: str) -> None:
@@ -542,6 +577,7 @@ class MySQLDB:
             token[:8] + "...",
             row is not None,
         )
+        _log_sql_result("get_user_by_token", row)
         return row
 
     # ====== 知识库 CRUD ======
@@ -568,6 +604,7 @@ class MySQLDB:
             name,
             row is not None,
         )
+        _log_sql_result("get_kb_by_name", row)
         return row["id"] if row else None
 
     async def get_all_kb(self, user_id: str = "") -> list[dict]:
@@ -598,6 +635,7 @@ class MySQLDB:
             user_id,
             len(result),
         )
+        _log_sql_result("get_all_kb", result)
         return result
 
     async def delete_kb(self, kb_id: str) -> bool:
@@ -643,6 +681,7 @@ class MySQLDB:
             kb_id,
             len(rows),
         )
+        _log_sql_result("get_documents", rows)
         return rows
 
     async def soft_delete_document(self, doc_id: str) -> bool:
