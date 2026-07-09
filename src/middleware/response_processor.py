@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 
 from src.config.response_codes import Code
-from src.core.logging import API_SKIP_FULL_LOG
+from src.core.logging import API_SKIP_FULL_LOG, LOG_MAX_BODY
 
 # 跳过包装的路径白名单
 _SKIP_PATHS = {"/api/health", "/api/chat/stream"}
@@ -60,12 +60,18 @@ async def response_processor_middleware(
                 )
             else:
                 try:
+                    data_str = str(data)
+                    if len(data_str) > LOG_MAX_BODY:
+                        data_str = (
+                            data_str[:LOG_MAX_BODY]
+                            + f"... (truncated, total={len(data_str)} chars)"
+                        )
                     logger.info(
                         "[API] {} {} | status={} | data={}",
                         request.method,
                         path,
                         response.status_code,
-                        data,
+                        data_str,
                     )
                 except Exception:
                     logger.info(
