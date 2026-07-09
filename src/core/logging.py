@@ -6,7 +6,6 @@
 
 import logging
 import os
-import sys
 
 from loguru import logger
 
@@ -27,11 +26,22 @@ class InterceptHandler(logging.Handler):
         while frame and frame.f_code.co_filename == logging.__file__:
             frame = frame.f_back
             depth += 1
-        logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
+        logger.opt(depth=depth, exception=record.exc_info).log(
+            level, record.getMessage()
+        )
 
 
 _LOG_FORMAT = "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<7} | {extra[trace_id]:36} | {name}:{function}:{line} - {message}"
 _LOG_DIR = os.getenv("LOG_DIR", "logs")
+
+# ==== 数据链路追踪日志常量 ====
+LOG_MAX_BODY = 10 * 1024 * 1024  # 单条日志最大 10MB
+
+# SQL 方法层 — 跳过全量返回值记录（只记 count + 关键参数）
+SQL_SKIP_FULL_LOG = {"get_messages"}
+
+# API 路由层 — 跳过全量响应体记录（只记 path + status_code）
+API_SKIP_FULL_LOG = {"/api/sessions/messages"}
 
 
 def _setup_trace_id_patcher() -> None:
@@ -57,9 +67,8 @@ def setup_logging(write_to_file: bool = True, configure_trace_id: bool = False) 
         configure_trace_id: 是否注入 trace_id patcher（API 模式 True，CLI 模式 False）
 
     API 模式配置：
-      - app_{date}.log — INFO 级别，按天轮转，保留 7 天
-      - error.log     — ERROR 级别，100MB 轮转，保留 30 天，异步写入
-      - stderr        — INFO 级别，彩色输出
+      - app_{date}.log — INFO 级别，按天轮转，保留 7 天，异步写入
+      - error_{date}.log — ERROR 级别，按天轮转，保留 30 天，异步写入
 
     CLI 模式配置：
       - stderr — INFO 级别，彩色输出（不写文件）
@@ -70,9 +79,6 @@ def setup_logging(write_to_file: bool = True, configure_trace_id: bool = False) 
     # 移除默认 sink，防止重复
     logger.remove()
 
-    # 控制台 sink（API 和 CLI 共用）
-    logger.add(sys.stderr, format=_LOG_FORMAT, level="INFO", colorize=True)
-
     # 文件 sink（仅 API 模式）
     if write_to_file:
         logger.add(
@@ -82,11 +88,12 @@ def setup_logging(write_to_file: bool = True, configure_trace_id: bool = False) 
             retention="7 days",
             level="INFO",
             encoding="utf-8",
+            enqueue=True,
         )
         logger.add(
-            f"{_LOG_DIR}/error.log",
+            f"{_LOG_DIR}/error_{{time:YYYY-MM-DD}}.log",
             format=_LOG_FORMAT,
-            rotation="100 MB",
+            rotation="1 day",
             retention="30 days",
             level="ERROR",
             encoding="utf-8",
