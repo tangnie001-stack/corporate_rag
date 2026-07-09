@@ -1,9 +1,7 @@
-from starlette.middleware.base import BaseHTTPMiddleware
-from src.middleware.response_envelope import ResponseEnvelopeMiddleware
+def test_response_processor_exists():
+    from src.middleware.response_processor import response_processor_middleware
 
-
-def test_response_envelope_is_middleware():
-    assert issubclass(ResponseEnvelopeMiddleware, BaseHTTPMiddleware)
+    assert callable(response_processor_middleware)
 
 
 def test_auth_middleware_exists():

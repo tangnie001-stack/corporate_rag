@@ -33,7 +33,7 @@ DASHSCOPE_BASE_URL: str = os.getenv(
 # 大语言模型：用于生成最终回答，qwen-max 效果最佳
 LLM_MODEL: str = os.getenv("LLM_MODEL", "qwen3.6-plus")
 # 向量化模型：将文本转为向量，用于 ChromaDB 语义检索
-EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "text-embedding-v2")
+EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "text-embedding-v1")
 # 重排序模型：对检索结果二次打分排序，提高最终送入 LLM 的上下文质量
 RERANK_MODEL: str = os.getenv("RERANK_MODEL", "gte-rerank-v1")
 # LLM 温度参数：越低回答越确定性（适合金融场景），0.1 几乎不产生随机性

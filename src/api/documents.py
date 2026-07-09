@@ -309,12 +309,12 @@ async def get_document_status(body: DocumentStatusRequest) -> DocumentStatusResp
         return DocumentStatusResponse(status="not_found")
     return DocumentStatusResponse(
         status=doc["status"],
-        chunk_count=doc.get("chunk_count", 0),
-        progress=doc.get("processing_progress", 0),
-        error=doc.get("error_msg", ""),
+        chunk_count=doc.get("chunk_count"),
+        progress=doc.get("processing_progress"),
+        error=doc.get("error_msg"),
         processing_state=doc.get("processing_state"),
-        processing_progress=doc.get("processing_progress", 0),
-        processing_message=doc.get("processing_message", ""),
+        processing_progress=doc.get("processing_progress"),
+        processing_message=doc.get("processing_message"),
     )
 
 

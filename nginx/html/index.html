@@ -234,7 +234,7 @@
     </div>
 
     <!-- ====== Scripts ====== -->
-    <script src="js/api.js?v=12"></script>
+    <script src="js/api.js?v=13"></script>
     <script>
         let _userId = '';
 
@@ -315,6 +315,7 @@
 
         let selectedKbId = null;
         let selectedKbName = '';
+        let _docPollTimer = null;
 
         // ====== Sidebar ======
         function toggleSidebar() {
@@ -470,7 +471,7 @@
                 setTimeout(() => {
                     loadDocuments(selectedKbId);
                     loadKBs();
-                }, 4000);
+                }, 2000);
             } catch (err) {
                 showToast('删除失败: ' + err.message, 'error');
             }
@@ -539,6 +540,9 @@
                         </div>
                     </div>
                 `).join('');
+
+                // Poll for latest document if still processing
+                startDocPolling(kbId, docs);
             } catch (err) {
                 const list = document.getElementById('doc-list');
                 list.innerHTML = `<div class="flex flex-col items-center justify-center py-12 text-red-400">
@@ -550,6 +554,57 @@
             }
         }
 
+        // ====== Document Processing Polling ======
+        function startDocPolling(kbId, docs) {
+            if (_docPollTimer) {
+                clearInterval(_docPollTimer);
+                _docPollTimer = null;
+            }
+
+            const pending = docs
+                .filter(d => d.status !== 'ready' && d.status !== 'error')
+                .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))[0];
+
+            if (!pending) return;
+
+            let pollCount = 0;
+            _docPollTimer = setInterval(async () => {
+                pollCount++;
+                try {
+                    const traceId = generateTraceId();
+                    const resp = await fetch(`${API_BASE}/kbs/documents/status`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Trace-ID': traceId },
+                        body: JSON.stringify({ kb_id: kbId, doc_id: pending.id }),
+                    });
+                    const body = await resp.json();
+                    const data = body.data || {};
+
+                    if (data.status === 'ready') {
+                        clearInterval(_docPollTimer);
+                        _docPollTimer = null;
+                        showToast(`文档处理完成，共 ${data.chunk_count} 个分块`, 'success');
+                        await loadDocuments(kbId);
+                        await loadKBs();
+                    } else if (data.status === 'failed') {
+                        clearInterval(_docPollTimer);
+                        _docPollTimer = null;
+                        showToast(`处理失败: ${data.error || '未知错误'}`, 'error');
+                        await loadDocuments(kbId);
+                        await loadKBs();
+                    } else if (pollCount > 120) {
+                        clearInterval(_docPollTimer);
+                        _docPollTimer = null;
+                        showToast('处理超时，请查看文档列表确认状态', 'warning');
+                        await loadDocuments(kbId);
+                    }
+                } catch (e) {
+                    clearInterval(_docPollTimer);
+                    _docPollTimer = null;
+                }
+            }, 3000);
+        }
+
         // ====== Upload Document ======
         async function handleUpload(event) {
             const file = event.target.files[0];
@@ -558,68 +613,18 @@
                 return;
             }
 
-            // Show persistent loading (duration=0 means no auto-dismiss)
-            showToast(`正在上传 ${file.name}...`, 'info', 0);
-            const toastText = document.querySelector('#toast span');
-
             document.getElementById('upload-loading').classList.remove('hidden');
 
+            // 等待浏览器渲染 loading 遮罩层后再发起上传
+            await new Promise(resolve => requestAnimationFrame(resolve));
+
             try {
-                const result = await uploadDocument(selectedKbId, file);
+                await uploadDocument(selectedKbId, file);
                 document.getElementById('upload-loading').classList.add('hidden');
-                const docId = result.doc_id;
-
-                if (result.status === 'parsing' && docId) {
-                    toastText.textContent = `${file.name} 上传成功，正在处理...`;
-
-                    // Poll status every second until done or failed
-                    let pollCount = 0;
-                    const poll = setInterval(async () => {
-                        pollCount++;
-                        try {
-                            const traceId = generateTraceId();
-                            const statusResp = await fetch(`${API_BASE}/kbs/documents/status`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json', 'X-Trace-ID': traceId },
-                                body: JSON.stringify({ kb_id: selectedKbId, doc_id: docId }),
-                            });
-                            const body = await statusResp.json();
-                            const data = body.data || {};
-                            toastText.textContent = `正在处理 ${file.name}... ${data.progress}%`;
-
-                            if (data.status === 'ready') {
-                                clearInterval(poll);
-                                hideToast();
-                                showToast(`${file.name} 处理完成，共 ${data.chunk_count} 个分块`, 'success');
-                                await loadDocuments(selectedKbId);
-                                await loadKBs();
-                            } else if (data.status === 'failed') {
-                                clearInterval(poll);
-                                hideToast();
-                                showToast(`处理失败: ${data.error || '未知错误'}`, 'error');
-                            } else if (pollCount > 120) {
-                                clearInterval(poll);
-                                hideToast();
-                                showToast('处理超时，请查看文档列表确认状态', 'warning');
-                                await loadDocuments(selectedKbId);
-                            }
-                        } catch (e) {
-                            clearInterval(poll);
-                            hideToast();
-                            showToast('查询处理状态失败', 'error');
-                        }
-                    }, 1000);
-                } else if (result.chunk_count !== undefined) {
-                    hideToast();
-                    showToast(`上传成功：${result.chunk_count} 个文本分块已入库`, 'success');
-                    await loadDocuments(selectedKbId);
-                    await loadKBs();
-                } else {
-                    hideToast();
-                    showToast('上传成功', 'success');
-                    await loadDocuments(selectedKbId);
-                    await loadKBs();
-                }
+                showToast('上传成功', 'success');
+                await new Promise(r => setTimeout(r, 1000));
+                await loadDocuments(selectedKbId);
+                await loadKBs();
             } catch (err) {
                 document.getElementById('upload-loading').classList.add('hidden');
                 hideToast();

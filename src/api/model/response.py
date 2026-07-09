@@ -5,7 +5,7 @@
 
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class LoginResponse(BaseModel):
@@ -62,9 +62,22 @@ class DocumentListResponse(BaseModel):
     created_at: str  # 上传时间
     chunk_count: int = 0  # 分块数量
 
+    @field_validator("file_size", "chunk_count", mode="before")
+    @classmethod
+    def none_to_zero(cls, v):
+        """将 None 转为 0，与数据库可空字段兼容。"""
+        return 0 if v is None else v
+
+    @field_validator("file_type", mode="before")
+    @classmethod
+    def none_to_empty(cls, v):
+        """将 None 转为空字符串，与数据库可空字段兼容。"""
+        return "" if v is None else v
+
 
 class DocumentStatusResponse(BaseModel):
     """文档处理状态响应。"""
+
     status: str  # 处理状态
     chunk_count: int = 0  # 已入库分块数量
     progress: int = 0  # 处理进度百分比
@@ -72,6 +85,18 @@ class DocumentStatusResponse(BaseModel):
     processing_state: str | None = None  # 处理阶段
     processing_progress: int = 0  # 当前阶段进度
     processing_message: str = ""  # 当前阶段描述
+
+    @field_validator("chunk_count", "progress", "processing_progress", mode="before")
+    @classmethod
+    def none_to_zero(cls, v):
+        """将 None 转为 0，与数据库可空字段兼容。"""
+        return 0 if v is None else v
+
+    @field_validator("error", "processing_message", mode="before")
+    @classmethod
+    def none_to_empty(cls, v):
+        """将 None 转为空字符串，与数据库可空字段兼容。"""
+        return "" if v is None else v
 
 
 class ChunkItem(BaseModel):
@@ -83,6 +108,18 @@ class ChunkItem(BaseModel):
     char_count: int  # 字符数
     block_type: str = "text"  # 块类型（text / table / list）
     parent_content: str | None = None  # 父级块内容
+
+    @field_validator("page", "tokens", mode="before")
+    @classmethod
+    def none_to_zero(cls, v):
+        """将 None 转为 0，与数据库可空字段兼容。"""
+        return 0 if v is None else v
+
+    @field_validator("block_type", mode="before")
+    @classmethod
+    def none_to_empty(cls, v):
+        """将 None 转为空字符串，与数据库可空字段兼容。"""
+        return "" if v is None else v
 
 
 class ChunksResponse(BaseModel):
