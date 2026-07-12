@@ -228,7 +228,14 @@ Tailwind CDN 异步加载导致 `hidden` 类闪动，弹窗在页面渲染时短
 
 ---
 
-## 8. 设计决策记录
+## 9. 效果预览
+
+效果预览 HTML 文件在 `docs/design/eval-mockup.html`，通过 nginx 访问：
+```
+http://localhost/eval-mockup.html
+```
+
+后续改设计时只更新此 HTML 文件即可，不生成截图。
 
 | 决策 | 选项 | 选择 | 理由 |
 |------|------|------|------|

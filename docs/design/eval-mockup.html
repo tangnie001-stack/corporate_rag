@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Corporate RAG — 效果预览</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: { extend: { fontFamily: { sans: ['IBM Plex Sans', 'system-ui', '-apple-system', 'sans-serif'] } } }
+        };
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'IBM Plex Sans', system-ui, sans-serif; }
+        .modal-panel { animation: modalIn 0.25s ease-out; }
+        @keyframes modalIn { from { opacity:0; transform:translateY(12px) scale(.98); } to { opacity:1; transform:translateY(0) scale(1); } }
+        @keyframes cardIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+        .chunk-card { animation: cardIn 0.3s ease-out both; }
+        .modal-backdrop { backdrop-filter: blur(4px); }
+        .spinner { display:inline-block; width:16px; height:16px; border:2px solid #e2e8f0; border-top-color:#2563eb; border-radius:50%; animation:spin 0.6s linear infinite; }
+        @keyframes spin { to { transform:rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen font-sans text-slate-900" style="padding: 40px;">
+
+    <div class="max-w-4xl mx-auto space-y-12">
+
+        <!-- ====== Section: 文档列表行 ====== -->
+        <section>
+            <h2 class="text-lg font-bold text-slate-900 mb-4">1. 文档列表行 — 评分展示</h2>
+            <div class="bg-white rounded-xl border border-slate-200 shadow-sm divide-y divide-slate-100">
+                <!-- 通过的文件 -->
+                <div class="flex items-center justify-between px-5 py-3.5 hover:bg-slate-50 transition-colors">
+                    <div class="flex items-center gap-3 min-w-0 flex-1">
+                        <div class="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center flex-shrink-0 text-xs font-bold text-red-600">PDF</div>
+                        <div class="min-w-0">
+                            <div class="text-sm font-medium text-slate-900 truncate">neusoft_2025_q1.pdf</div>
+                            <div class="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
+                                <span>2.3MB</span>
+                                <span>· 14 分块</span>
+                                <span>· 7/12/2026</span>
+                                <span class="flex items-center gap-1 text-emerald-600 font-medium">
+                                    <span>分块评分</span>
+                                    <span class="text-xs font-bold">0.89</span>
+                                    <span>✓</span>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 flex-shrink-0">
+                        <span class="status-badge" style="background:#dcfce7;color:#166534;display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:9999px;font-size:.75rem;font-weight:500;">✓ 就绪</span>
+                        <button class="px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 rounded-md transition-colors">详情</button>
+                        <button class="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                        </button>
+                    </div>
+                </div>
+                <!-- 未通过的文件 -->
+                <div class="flex items-center justify-between px-5 py-3.5 hover:bg-slate-50 transition-colors" style="background:rgba(254,226,226,0.15);">
+                    <div class="flex items-center gap-3 min-w-0 flex-1">
+                        <div class="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center flex-shrink-0 text-xs font-bold text-red-600">PDF</div>
+                        <div class="min-w-0">
+                            <div class="text-sm font-medium text-slate-900 truncate">report_2024_q4.pdf</div>
+                            <div class="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
+                                <span>1.8MB</span>
+                                <span>· 8 分块</span>
+                                <span>· 7/11/2026</span>
+                                <span class="flex items-center gap-1 text-red-500 font-medium">
+                                    <span>分块评分</span>
+                                    <span class="text-xs font-bold">0.42</span>
+                                    <span>✗</span>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 flex-shrink-0">
+                        <span class="status-badge" style="background:#dcfce7;color:#166534;display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:9999px;font-size:.75rem;font-weight:500;">✓ 就绪</span>
+                        <button class="px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 rounded-md transition-colors">详情</button>
+                        <button class="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                        </button>
+                    </div>
+                </div>
+                <!-- 无评估数据的文件（旧文件） -->
+                <div class="flex items-center justify-between px-5 py-3.5 hover:bg-slate-50 transition-colors">
+                    <div class="flex items-center gap-3 min-w-0 flex-1">
+                        <div class="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0 text-xs font-bold text-slate-600">TXT</div>
+                        <div class="min-w-0">
+                            <div class="text-sm font-medium text-slate-900 truncate">test_consistency.txt</div>
+                            <div class="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
+                                <span>5B</span>
+                                <span>· 1 分块</span>
+                                <span>· 7/8/2026</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 flex-shrink-0">
+                        <span class="status-badge" style="background:#dcfce7;color:#166534;display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:9999px;font-size:.75rem;font-weight:500;">✓ 就绪</span>
+                        <button class="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ====== Section: KB 头部 RAGAS ====== -->
+        <section>
+            <h2 class="text-lg font-bold text-slate-900 mb-4">2. KB 头部 RAGAS 评分</h2>
+            <div class="bg-white rounded-xl border border-slate-200 shadow-sm">
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-5 py-4 border-b border-slate-100">
+                    <div>
+                        <h3 class="font-semibold text-slate-900">📄 测试知识库</h3>
+                        <p class="text-xs text-slate-500 mt-0.5">知识库 ID: 78b43840...</p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <div class="flex items-center gap-2 px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-lg text-xs">
+                            <span class="text-blue-600 font-medium">RAGAS</span>
+                            <span class="text-blue-700 font-semibold">Faith 0.92</span>
+                            <span class="text-blue-400">·</span>
+                            <span class="text-blue-700 font-semibold">Recall 0.87</span>
+                            <span class="text-emerald-500 font-bold">✓</span>
+                        </div>
+                        <button class="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors cursor-pointer shadow-sm">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                            上传文档
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ====== Section: 一级弹窗 ====== -->
+        <section>
+            <h2 class="text-lg font-bold text-slate-900 mb-4">3. 一级弹窗（评估总览）</h2>
+            <div style="position:relative; min-height:480px;">
+                <!-- 遮罩 -->
+                <div class="modal-backdrop absolute inset-0 bg-black/30" style="position:absolute; inset:0; border-radius:12px;"></div>
+                <!-- 弹窗 -->
+                <div class="modal-panel bg-white rounded-xl shadow-xl max-w-2xl mx-auto flex flex-col relative z-10" style="width:90%;">
+                    <!-- Header -->
+                    <div class="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+                        <div>
+                            <h3 class="text-base font-semibold text-slate-900">分块评估详情</h3>
+                            <p class="text-xs text-slate-400 mt-0.5">文件级质量评分</p>
+                        </div>
+                        <button class="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+                        </button>
+                    </div>
+                    <!-- Body -->
+                    <div class="px-6 py-4 space-y-4">
+                        <!-- 综合评分 -->
+                        <div class="flex items-center justify-between p-4 rounded-xl border bg-emerald-50 border-emerald-200">
+                            <div>
+                                <div class="text-xs text-slate-500 font-medium mb-1">综合评分</div>
+                                <div class="text-3xl font-bold text-emerald-600">0.89</div>
+                            </div>
+                            <div class="text-2xl text-emerald-600 font-bold">✓</div>
+                        </div>
+
+                        <!-- 结构完整性 -->
+                        <div class="border border-slate-200 rounded-xl p-4 space-y-1">
+                            <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">结构完整性</div>
+                            <!-- 表格 -->
+                            <div class="flex items-center justify-between py-2">
+                                <div class="flex items-center gap-2 min-w-0 flex-1">
+                                    <span class="text-sm text-slate-700 font-medium whitespace-nowrap">表格</span>
+                                    <div class="flex-1 h-1.5 bg-slate-100 rounded-full mx-2 max-w-[120px]">
+                                        <div class="h-full rounded-full bg-emerald-500" style="width:80%"></div>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-1 flex-shrink-0">
+                                    <span class="text-sm font-bold text-emerald-600">0.80</span>
+                                    <button class="ml-2 text-xs text-blue-600 hover:text-blue-700 font-medium underline underline-offset-2">1个断裂 → 查看</button>
+                                </div>
+                            </div>
+                            <!-- 标题 -->
+                            <div class="flex items-center justify-between py-2">
+                                <div class="flex items-center gap-2 min-w-0 flex-1">
+                                    <span class="text-sm text-slate-700 font-medium whitespace-nowrap">标题</span>
+                                    <div class="flex-1 h-1.5 bg-slate-100 rounded-full mx-2 max-w-[120px]">
+                                        <div class="h-full rounded-full bg-emerald-500" style="width:100%"></div>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-1 flex-shrink-0">
+                                    <span class="text-sm font-bold text-emerald-600">1.00</span>
+                                    <span class="ml-2 text-xs text-slate-400">无断裂</span>
+                                </div>
+                            </div>
+                            <!-- 条款 -->
+                            <div class="flex items-center justify-between py-2">
+                                <div class="flex items-center gap-2 min-w-0 flex-1">
+                                    <span class="text-sm text-slate-700 font-medium whitespace-nowrap">条款</span>
+                                    <div class="flex-1 h-1.5 bg-slate-100 rounded-full mx-2 max-w-[120px]">
+                                        <div class="h-full rounded-full bg-emerald-500" style="width:100%"></div>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-1 flex-shrink-0">
+                                    <span class="text-sm font-bold text-emerald-600">1.00</span>
+                                    <span class="ml-2 text-xs text-slate-400">无断裂</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- SBR -->
+                        <div class="border border-slate-200 rounded-xl p-4">
+                            <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">语义断裂率 SBR</div>
+                            <div class="flex items-center justify-between py-2">
+                                <div class="flex items-center gap-2 min-w-0 flex-1">
+                                    <span class="text-sm text-slate-700 font-medium whitespace-nowrap">SBR</span>
+                                    <div class="flex-1 h-1.5 bg-slate-100 rounded-full mx-2 max-w-[120px]">
+                                        <div class="h-full rounded-full bg-emerald-500" style="width:100%"></div>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-1 flex-shrink-0">
+                                    <span class="text-sm font-bold text-emerald-600">1.00</span>
+                                    <span class="ml-2 text-xs text-slate-400">无断裂</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 粒度 -->
+                        <div class="border border-slate-200 rounded-xl p-4">
+                            <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">粒度均匀性</div>
+                            <div class="flex items-center justify-between py-2">
+                                <div class="flex items-center gap-2 min-w-0 flex-1">
+                                    <span class="text-sm text-slate-700 font-medium whitespace-nowrap">CV</span>
+                                    <div class="flex-1 h-1.5 bg-slate-100 rounded-full mx-2 max-w-[120px]">
+                                        <div class="h-full rounded-full bg-amber-500" style="width:65%"></div>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-1 flex-shrink-0">
+                                    <span class="text-sm font-bold text-amber-600">0.65</span>
+                                    <button class="ml-2 text-xs text-blue-600 hover:text-blue-700 font-medium underline underline-offset-2">1个极端块 → 查看</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </div>
+</body>
+</html>
