@@ -7,6 +7,7 @@
 
 import asyncio
 import hashlib
+import json
 import os
 import tempfile
 import uuid
@@ -14,10 +15,24 @@ import uuid
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from loguru import logger
 
-from src.api.model.request import DocumentListRequest, DocumentStatusRequest, DocumentChunksRequest, DocumentDeleteRequest
-from src.api.model.response import UploadDocumentResponse, DocumentListResponse, DocumentStatusResponse, ChunkItem, ChunksResponse, DocumentDeleteResponse
+from src.api.model.request import (
+    DocumentListRequest,
+    DocumentStatusRequest,
+    DocumentChunksRequest,
+    DocumentDeleteRequest,
+)
+from src.api.model.response import (
+    UploadDocumentResponse,
+    DocumentListResponse,
+    DocumentStatusResponse,
+    ChunkItem,
+    ChunksResponse,
+    DocumentDeleteResponse,
+)
 from src.app_service import AppService
+from src.config import CHUNK_EVAL_ENABLED, MAX_TABLE_TOKENS
 from src.config.response_codes import Code
+from src.eval.chunk_scorer import ChunkQualityScorer
 from src.infra.errors import BusinessError, SystemError
 from src.infra.chunking.router import ChunkRouter
 from src.infra.chunking.validator import ChunkData, validate_chunks
@@ -46,7 +61,9 @@ ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt"}
 
 
 @router.post("/kbs/documents/list")
-async def get_documents(body: DocumentListRequest, request: Request = None) -> list[DocumentListResponse]:
+async def get_documents(
+    body: DocumentListRequest, request: Request = None
+) -> list[DocumentListResponse]:
     """列出知识库中的所有文档。
 
     Args:
@@ -58,18 +75,43 @@ async def get_documents(body: DocumentListRequest, request: Request = None) -> l
     svc = _get_service()
     docs = await svc.get_documents(body.kb_id)
     logger.info("Documents list: kb_id={} count={}", body.kb_id, len(docs))
-    return [
-        DocumentListResponse(
-            id=d["id"],
-            filename=d["filename"],
-            file_type=d["file_type"],
-            file_size=d["file_size"],
-            status=d["status"],
-            created_at=d["created_at"].isoformat() if hasattr(d["created_at"], "isoformat") else d["created_at"],
-            chunk_count=d.get("chunk_count", 0),
+
+    result = []
+    for d in docs:
+        eval_score = None
+        eval_passed = None
+        eval_detail = None
+        meta_raw = d.get("meta_info")
+        if meta_raw:
+            try:
+                if isinstance(meta_raw, str):
+                    meta = json.loads(meta_raw)
+                else:
+                    meta = meta_raw
+                eval_data = meta.get("eval", {}) if isinstance(meta, dict) else {}
+                if eval_data:
+                    eval_score = eval_data.get("overall_score")
+                    eval_passed = eval_data.get("passed")
+                    eval_detail = eval_data
+            except (json.JSONDecodeError, AttributeError):
+                pass
+        result.append(
+            DocumentListResponse(
+                id=d["id"],
+                filename=d["filename"],
+                file_type=d["file_type"],
+                file_size=d["file_size"],
+                status=d["status"],
+                created_at=d["created_at"].isoformat()
+                if hasattr(d["created_at"], "isoformat")
+                else d["created_at"],
+                chunk_count=d.get("chunk_count", 0),
+                eval_score=eval_score,
+                eval_passed=eval_passed,
+                eval_detail=eval_detail,
+            )
         )
-        for d in docs
-    ]
+    return result
 
 
 @router.post("/kbs/documents/upload", status_code=202)
@@ -123,7 +165,9 @@ async def upload_document(
         logger.warning(
             "Upload rejected (unsupported type): filename={} ext={}", file.filename, ext
         )
-        raise BusinessError(Code.FILE_TYPE_UNSUPPORTED, Code.FILE_TYPE_UNSUPPORTED_MSG, 400)
+        raise BusinessError(
+            Code.FILE_TYPE_UNSUPPORTED, Code.FILE_TYPE_UNSUPPORTED_MSG, 400
+        )
 
     svc = _get_service()
 
@@ -135,8 +179,19 @@ async def upload_document(
             logger.info(
                 "Duplicate document detected: {} (hash={})", file.filename, file_hash
             )
+            # 去重时保留评估数据
+            if d.get("meta_info") and isinstance(d["meta_info"], str):
+                try:
+                    meta = json.loads(d["meta_info"])
+                    if "eval" in meta:
+                        await svc.db.update_document_meta_info(d["id"], {"eval": meta["eval"]})
+                except (json.JSONDecodeError, Exception):
+                    pass
             return UploadDocumentResponse(
-                doc_id=d["id"], status=d["status"], filename=d["filename"], dedup=True,
+                doc_id=d["id"],
+                status=d["status"],
+                filename=d["filename"],
+                dedup=True,
             )
 
     # 先写入 MinIO 存储
@@ -178,7 +233,9 @@ async def upload_document(
         len(contents),
     )
 
-    return UploadDocumentResponse(doc_id=doc_id, status="processing", filename=file.filename)
+    return UploadDocumentResponse(
+        doc_id=doc_id, status="processing", filename=file.filename
+    )
 
 
 async def _process_document_task(
@@ -231,7 +288,7 @@ async def _process_document_task(
                 return
 
             # 分块 — CPU，to_thread
-            full_text = "\n".join(c.content for c in parse_result.chunks)
+            full_text = "\n\n".join(c.content for c in parse_result.chunks)
             strategy = await asyncio.to_thread(
                 ChunkRouter.detect_strategy, full_text, parse_result.chunks
             )
@@ -260,6 +317,23 @@ async def _process_document_task(
                     filename,
                     len(quality.garbled_chunks),
                 )
+
+            # 分块质量评估 — 开关控制，只记录不拦截
+            if CHUNK_EVAL_ENABLED:
+                try:
+                    scorer = ChunkQualityScorer()
+                    eval_result = await asyncio.to_thread(
+                        scorer.evaluate, chunks, filename
+                    )
+                    await svc.db.update_document_meta_info(doc_id, {"eval": eval_result})
+                    logger.info(
+                        "Chunk eval for '{}': score={} passed={}",
+                        filename,
+                        eval_result.get("overall_score"),
+                        eval_result.get("passed"),
+                    )
+                except Exception as eval_err:
+                    logger.warning("Chunk eval failed for '{}': {}", filename, eval_err)
 
             # ChromaDB — 同步库，to_thread
             count = await asyncio.to_thread(
@@ -339,7 +413,8 @@ async def get_document_chunks(body: DocumentChunksRequest) -> ChunksResponse:
     items = [
         ChunkItem(
             chunk_id=c["id"],
-            content=c["content"][:500],
+            # MAX_TABLE_TOKENS * 2: token 转字符数（中文 1 token ≈ 2 字符）
+            content=c["content"][:MAX_TABLE_TOKENS * 2],
             page=c.get("metadata", {}).get("page", 1),
             tokens=c.get("metadata", {}).get("tokens", 0),
             char_count=len(c["content"]),
@@ -349,7 +424,10 @@ async def get_document_chunks(body: DocumentChunksRequest) -> ChunksResponse:
         for c in result["items"]
     ]
     return ChunksResponse(
-        items=items, total=result["total"], page=result["page"], page_size=result["page_size"],
+        items=items,
+        total=result["total"],
+        page=result["page"],
+        page_size=result["page_size"],
     )
 
 

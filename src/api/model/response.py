@@ -3,36 +3,41 @@
 描述业务数据结构，不含 code/message 包装（由 ResponseEnvelopeMiddleware 统一包装）。
 """
 
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, field_validator
 
 
 class LoginResponse(BaseModel):
     """登录成功响应。"""
+
     token: str  # 登录 token，后续请求通过 Cookie 携带
     user_id: str  # 用户 UUID
 
 
 class VerifyResponse(BaseModel):
     """Token 校验响应。"""
+
     valid: bool  # token 是否有效
     user_id: Optional[str] = None  # 对应用户 UUID，无效时为 None
 
 
 class HealthResponse(BaseModel):
     """健康检查响应。"""
+
     status: str  # 服务状态，固定 "ok"
 
 
 class CreateKBResponse(BaseModel):
     """创建知识库的响应体。"""
+
     id: str  # 知识库 UUID
     created: bool  # 是否为新创建
 
 
 class KBItem(BaseModel):
     """知识库列表项。"""
+
     id: str  # 知识库 UUID
     name: str  # 知识库名称
     doc_count: int  # 包含的文档数量
@@ -40,12 +45,14 @@ class KBItem(BaseModel):
 
 class KBDeleteResponse(BaseModel):
     """删除知识库的响应体。"""
+
     success: bool  # 是否删除成功
     message: str  # 删除结果描述
 
 
 class UploadDocumentResponse(BaseModel):
     """文档上传响应。"""
+
     doc_id: str  # 文档 UUID
     status: str  # 处理状态（processing / ready / failed）
     filename: str  # 原始文件名
@@ -54,6 +61,7 @@ class UploadDocumentResponse(BaseModel):
 
 class DocumentListResponse(BaseModel):
     """文档列表项。"""
+
     id: str  # 文档 UUID
     filename: str  # 文件名
     file_type: str  # 文件类型（pdf / docx / txt）
@@ -61,6 +69,9 @@ class DocumentListResponse(BaseModel):
     status: str  # 处理状态
     created_at: str  # 上传时间
     chunk_count: int = 0  # 分块数量
+    eval_score: float | None = None  # 文档质量评分
+    eval_passed: bool | None = None  # 质量评估是否通过
+    eval_detail: dict | None = None  # 评估详情
 
     @field_validator("file_size", "chunk_count", mode="before")
     @classmethod
@@ -101,8 +112,9 @@ class DocumentStatusResponse(BaseModel):
 
 class ChunkItem(BaseModel):
     """分块预览项。"""
+
     chunk_id: str  # 分块 UUID
-    content: str  # 分块内容（截取前 500 字）
+    content: str  # 分块内容（截取前 MAX_TABLE_TOKENS*2 字符，约 4096 chars = 2048 token）
     page: int = 1  # 来源页码
     tokens: int = 0  # token 估算数量
     char_count: int  # 字符数
@@ -124,6 +136,7 @@ class ChunkItem(BaseModel):
 
 class ChunksResponse(BaseModel):
     """分块预览响应。"""
+
     items: list[ChunkItem]  # 当前页分块列表
     total: int  # 总条数
     page: int  # 当前页码
@@ -132,11 +145,13 @@ class ChunksResponse(BaseModel):
 
 class DocumentDeleteResponse(BaseModel):
     """文档删除响应。"""
+
     success: bool  # 是否删除成功
 
 
 class SessionItem(BaseModel):
     """会话列表项。"""
+
     id: str  # 会话 UUID
     title: str  # 会话标题（首条消息前 20 字）
     kb_id: str  # 关联知识库 UUID
@@ -148,6 +163,7 @@ class SessionItem(BaseModel):
 
 class MessageItem(BaseModel):
     """会话消息项。"""
+
     role: str  # 角色（user / assistant）
     content: str  # 消息内容
     sources: Optional[str] = None  # 引用来源（JSON 字符串）
@@ -156,4 +172,11 @@ class MessageItem(BaseModel):
 
 class SessionDeleteResponse(BaseModel):
     """会话删除响应。"""
+
     success: bool  # 是否删除成功
+
+
+class BaseResponse(BaseModel):
+    """通用响应包装体（仅含 data，code/message 由中间件统一包装）。"""
+
+    data: Any  # 响应数据
