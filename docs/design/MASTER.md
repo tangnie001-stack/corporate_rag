@@ -1,57 +1,87 @@
-### Pattern
-- **Name:** Enterprise Gateway
-- **Conversion Focus:** Path selection (I am a...). Mega menu navigation. Trust signals prominent.
-- **CTA Placement:** Contact Sales (Primary) + Login (Secondary)
-- **Color Strategy:** Corporate: Navy/Grey. High integrity. Conservative accents.
-- **Sections:** 1. Hero (Video/Mission), 2. Solutions by Industry, 3. Solutions by Role, 4. Client Logos, 5. Contact Sales
+# Corporate RAG — 全局设计系统
 
-### Style
-- **Name:** Dark Mode (OLED)
-- **Mode Support:** Light ✗ No | Dark ✓ Only
-- **Keywords:** Dark theme, low light, high contrast, deep black, midnight blue, eye-friendly, OLED, night mode, power efficient
-- **Best For:** Night-mode apps, coding platforms, entertainment, eye-strain prevention, OLED devices, low-light
-- **Performance:** ⚡ Excellent | **Accessibility:** ✓ WCAG AAA
+> 产品类型：企业级金融文档智能问答系统（知识库管理 + 文档检索 + AI 问答）
+> 技术栈：Tailwind CSS + HTML/CSS/JS（Nginx 静态文件）
+> 目标用户：金融分析师、企业财务人员
 
-### Colors
-| Role | Hex | CSS Variable |
-|------|-----|--------------|
-| Primary | `#1E293B` | `--color-primary` |
-| On Primary | `#FFFFFF` | `--color-on-primary` |
-| Secondary | `#334155` | `--color-secondary` |
-| Accent/CTA | `#2563EB` | `--color-accent` |
-| Background | `#F8FAFC` | `--color-background` |
-| Foreground | `#0F172A` | `--color-foreground` |
-| Muted | `#F1F2F3` | `--color-muted` |
-| Border | `#E4E5E7` | `--color-border` |
-| Destructive | `#DC2626` | `--color-destructive` |
-| Ring | `#1E293B` | `--color-ring` |
+---
 
-*Notes: Document grey + scan blue*
+## 整体风格
 
-### Typography
-- **Heading:** IBM Plex Sans
-- **Body:** IBM Plex Sans
-- **Mood:** financial, trustworthy, professional, corporate, banking, serious
-- **Best For:** Banks, finance, insurance, investment, fintech, enterprise
-- **Google Fonts:** https://fonts.google.com/share?selection.family=IBM+Plex+Sans:wght@300;400;500;600;700
-- **CSS Import:**
+- **名称**：企业专业风（Corporate Professional）
+- **关键词**：专业、可信、沉稳、高对比度、聚焦内容
+- **色系**：蓝灰色为主，蓝色强调，红色用于危险操作
+- **基调**：左侧深色导航栏 + 右侧浅色内容区
+
+---
+
+## 色盘
+
+| 角色 | Hex | 用途 |
+|------|-----|------|
+| 主色 | `#1E293B` | 导航栏、标题 |
+| 主色文字 | `#FFFFFF` | 导航栏文字 |
+| 次要 | `#334155` | 次要文字、辅助元素 |
+| **强调/CTA** | `#2563EB` | 按钮、链接、活动状态 |
+| 背景 | `#F8FAFC` | 页面主背景 |
+| 前景 | `#0F172A` | 正文文字 |
+| 弱化 | `#F1F2F3` | 骨架屏、加载态 |
+| 边框 | `#E4E5E7` | 卡片、分割线 |
+| 危险 | `#DC2626` | 删除、错误提示 |
+| 成功 | `#059669` | 通过、就绪状态 |
+
+---
+
+## 字体
+
+| 角色 | 字体 | 字重 |
+|------|------|------|
+| 标题 | IBM Plex Sans | 600-700 |
+| 正文 | IBM Plex Sans | 400-500 |
+| 数据/代码 | SF Mono / Consolas | 400 |
+
+引入方式：
 ```css
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap');
 ```
 
-### Key Effects
-Minimal glow (text-shadow: 0 0 10px), dark-to-light transitions, low white emission, high readability, visible focus
+---
 
-### Avoid (Anti-patterns)
-- Light mode default
-- Slow rendering
+## 布局规则
 
-### Pre-Delivery Checklist
-- [ ] No emojis as icons (use SVG: Heroicons/Lucide)
-- [ ] cursor-pointer on all clickable elements
-- [ ] Hover states with smooth transitions (150-300ms)
-- [ ] Light mode: text contrast 4.5:1 minimum
-- [ ] Focus states visible for keyboard nav
-- [ ] prefers-reduced-motion respected
-- [ ] Responsive: 375px, 768px, 1024px, 1440px
+- **导航**：固定左侧导航栏（`w-64 bg-slate-900`），移动端可收起
+- **内容区**：`md:ml-64` 左侧留出导航空间
+- **卡片网格**：`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3`
+- **弹窗**：`fixed inset-0` 全屏遮罩，白色圆角卡片居中
+- **间距**：Tailwind 默认间距系统（4px 增量）
 
+---
+
+## 圆角规范
+
+| 级别 | 值 | 用途 |
+|------|-----|------|
+| 小 | `rounded-lg` | 按钮、输入框 |
+| 中 | `rounded-xl` | 卡片、弹窗 |
+| 大 | `rounded-2xl` | 模态框 |
+
+---
+
+## 禁止项
+
+- ❌ 使用 emoji 代替 SVG 图标（导航栏已用 emoji，后续逐步替换为 Lucide/Heroicons）
+- ❌ 文字/背景对比度低于 4.5:1
+- ❌ 异步加载内容导致布局跳动（需预留空间）
+- ❌ Tailwind 加载前的 FOUC（弹窗使用 `style="display:none"` 替代 `hidden` 类）
+
+---
+
+## 预交付检查清单
+
+- [ ] 所有可点击元素有 `cursor-pointer`
+- [ ] 悬停状态有平滑过渡（150-300ms）
+- [ ] 弹窗使用内联 `style="display:none"` 防止闪烁
+- [ ] 响应式：375px / 768px / 1024px / 1440px
+- [ ] 评估分数颜色正确（≥0.70 绿 / 0.50-0.69 黄 / <0.50 红）
+- [ ] ESC 键关闭弹窗
+- [ ] `prefers-reduced-motion` 支持
