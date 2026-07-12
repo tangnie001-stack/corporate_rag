@@ -114,7 +114,9 @@ class ChunkItem(BaseModel):
     """分块预览项。"""
 
     chunk_id: str  # 分块 UUID
-    content: str  # 分块内容（截取前 MAX_TABLE_TOKENS*2 字符，约 4096 chars = 2048 token）
+    content: (
+        str  # 分块内容（截取前 MAX_TABLE_TOKENS*2 字符，约 4096 chars = 2048 token）
+    )
     page: int = 1  # 来源页码
     tokens: int = 0  # token 估算数量
     char_count: int  # 字符数

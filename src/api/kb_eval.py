@@ -31,17 +31,35 @@ async def get_latest_kb_eval(kb_id: str, request: Request = None) -> BaseRespons
     svc = _get_service()
     report = await svc.db.get_latest_eval_report(kb_id)
     if report:
-        logger.info("KB eval report found: kb_id={} score={}", kb_id, report.get("overall_score"))
-        return BaseResponse(data={
-            "eval_date": report["eval_date"].isoformat() if hasattr(report["eval_date"], "isoformat") else str(report["eval_date"]),
-            "faithfulness": float(report["faithfulness"]) if report["faithfulness"] else None,
-            "answer_relevancy": float(report["answer_relevancy"]) if report["answer_relevancy"] else None,
-            "context_precision": float(report["context_precision"]) if report["context_precision"] else None,
-            "context_recall": float(report["context_recall"]) if report["context_recall"] else None,
-            "overall_score": float(report["overall_score"]) if report["overall_score"] else None,
-            "passed": report["passed"],
-            "qa_count": report["qa_count"],
-            "run_type": report["run_type"],
-        })
+        logger.info(
+            "KB eval report found: kb_id={} score={}",
+            kb_id,
+            report.get("overall_score"),
+        )
+        return BaseResponse(
+            data={
+                "eval_date": report["eval_date"].isoformat()
+                if hasattr(report["eval_date"], "isoformat")
+                else str(report["eval_date"]),
+                "faithfulness": float(report["faithfulness"])
+                if report["faithfulness"]
+                else None,
+                "answer_relevancy": float(report["answer_relevancy"])
+                if report["answer_relevancy"]
+                else None,
+                "context_precision": float(report["context_precision"])
+                if report["context_precision"]
+                else None,
+                "context_recall": float(report["context_recall"])
+                if report["context_recall"]
+                else None,
+                "overall_score": float(report["overall_score"])
+                if report["overall_score"]
+                else None,
+                "passed": report["passed"],
+                "qa_count": report["qa_count"],
+                "run_type": report["run_type"],
+            }
+        )
     logger.info("KB eval report not found: kb_id={}", kb_id)
     return BaseResponse(data=None)

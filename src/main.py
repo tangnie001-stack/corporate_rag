@@ -9,7 +9,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from loguru import logger
 
 from src.core.logging import setup_logging
-from src.api import health_router, kb_router, doc_router, chat_router, sessions_router
+from src.api import health_router, kb_router, doc_router, chat_router, sessions_router, kb_eval_router
 from src.api import auth as auth_routes
 from src.config.response_codes import Code
 from src.middleware.auth import auth_middleware
@@ -48,7 +48,7 @@ app = FastAPI(
 
 
 # 配置 Loguru — 收拢到统一模块
-setup_logging(write_to_file=True, configure_trace_id=True)
+setup_logging(configure_trace_id=True)
 
 
 # 异常处理器 — 所有 Router 层异常在此集中处理，补充 traceback 日志
@@ -114,7 +114,7 @@ async def unknown_exception_handler(request: Request, exc: Exception):
 
 
 # 中间件注册顺序（请求从外到内）：
-# CORS → TraceID → ResponseProcessor → auth → router
+# CORS → ResponseProcessor → auth → TraceID → router
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -123,10 +123,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.middleware("http")(trace_id_middleware)  # 放在 CORS 之后，ResponseProcessor 之前
-
 app.middleware("http")(response_processor_middleware)
 app.middleware("http")(auth_middleware)
+app.middleware("http")(trace_id_middleware)  # 最后注册 = 最外层，确保所有路径都写 X-Trace-ID
 
 # 挂载路由模块
 app.include_router(auth_routes.router, prefix="/api", tags=["auth"])
@@ -135,3 +134,4 @@ app.include_router(kb_router, prefix="/api", tags=["knowledge-bases"])
 app.include_router(doc_router, prefix="/api", tags=["documents"])
 app.include_router(chat_router, prefix="/api", tags=["chat"])
 app.include_router(sessions_router, prefix="/api", tags=["sessions"])
+app.include_router(kb_eval_router, prefix="/api", tags=["evaluation"])
