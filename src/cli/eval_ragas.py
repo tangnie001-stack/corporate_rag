@@ -25,6 +25,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
+import asyncio
 from loguru import logger
 
 from src.core.logging import setup_logging
@@ -47,7 +48,7 @@ from src.config.qa_pairs import QUESTIONS, GROUND_TRUTH
 from src.models import get_llm, get_embeddings
 from src.rag_chain import RAGChain
 
-setup_logging(write_to_file=False)
+setup_logging()
 
 
 # 默认输出目录
@@ -519,6 +520,9 @@ def main() -> None:
         )
         save_markdown_report(result, QUESTIONS, chunk_size, output_path)
 
+        # ---- 写入 eval_report 表 ----
+        _save_eval_report(kb_name, result, QUESTIONS, output_path, chunk_size)
+
         # ---- gate 模式：检查评估结果是否通过质量门禁 ----
         if args.gate:
             check_gate(result, QUESTIONS)
@@ -530,6 +534,84 @@ def main() -> None:
             logger.info("Restored chunk_size to {}", original_chunk_size)
 
     logger.info("Evaluation complete.")
+
+
+def _save_eval_report(
+    kb_name: str,
+    result,
+    questions: list[str],
+    output_path: str,
+    chunk_size: int | None,
+) -> None:
+    """将 RAGAS 评估结果持久化到 eval_report 表。
+
+    Args:
+        kb_name: 知识库名称
+        result: RAGAS evaluate() 返回的结果对象
+        questions: 问题列表
+        output_path: CSV 报告文件路径
+        chunk_size: 使用的 chunk_size
+    """
+    try:
+        from src.app_service import AppService
+
+        svc = AppService()
+        kb_id = svc.db.get_kb_by_name(kb_name)
+        if not kb_id:
+            logger.warning("KB '{}' not found, skipping eval_report write", kb_name)
+            return
+
+        df = result.to_pandas()
+        metric_cols = ["faithfulness", "answer_relevancy", "context_precision", "context_recall"]
+        detail = []
+        for i, q in enumerate(questions):
+            entry = {"q_index": i, "question": q[:100]}
+            for col in metric_cols:
+                if col in df.columns:
+                    entry[col] = float(df[col].iloc[i])
+            detail.append(entry)
+
+        avg = {}
+        for col in metric_cols:
+            if col in df.columns:
+                avg[col] = float(df[col].mean())
+
+        faith = avg.get("faithfulness")
+        recall = avg.get("context_recall")
+        precision = avg.get("context_precision")
+        relevancy = avg.get("answer_relevancy")
+
+        weights = {"faithfulness": 0.3, "context_recall": 0.3,
+                   "context_precision": 0.2, "answer_relevancy": 0.2}
+        weighted_sum = 0.0
+        total_w = 0.0
+        for k, w in weights.items():
+            v = avg.get(k)
+            if v is not None:
+                weighted_sum += v * w
+                total_w += w
+        overall = weighted_sum / total_w if total_w > 0 else None
+
+        async def _do_insert():
+            await svc.db.insert_eval_report({
+                "kb_id": kb_id,
+                "run_type": "manual",
+                "qa_count": len(questions),
+                "faithfulness": faith,
+                "answer_relevancy": relevancy,
+                "context_precision": precision,
+                "context_recall": recall,
+                "overall_score": overall,
+                "passed": overall >= 0.70 if overall is not None else False,
+                "report_path": output_path,
+                "triggered_by": None,
+                "detail_json": detail,
+            })
+
+        asyncio.run(_do_insert())
+        logger.info("Eval report saved to eval_report table for KB '{}'", kb_name)
+    except Exception as e:
+        logger.warning("Failed to save eval report to database: {}", e)
 
 
 if __name__ == "__main__":
