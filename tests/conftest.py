@@ -1,22 +1,18 @@
-"""页面集成测试的共享 fixture 和配置。
+"""测试共享 fixture 和配置。
 
 提供：
-  - gradio_client 实例（连接运行中的 Gradio 应用）
+  - AppService / MySQLDB / VectorStore 实例
   - 测试知识库生命周期（创建 / 销毁）
-  - --start-app CLI 选项（CI 自动启动模式）
   - 测试文档路径和数据库验证辅助函数
 """
 
 from __future__ import annotations
 
 import os
-import subprocess
-import time
 import uuid
 from typing import Generator
 
 import pytest
-from gradio_client import Client
 from loguru import logger
 
 from src.app_service import AppService
@@ -27,73 +23,6 @@ from src.infra.db.vector_store import VectorStore
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 TEST_DOCS_DIR = os.path.join(PROJECT_ROOT, "test_docs")
-
-# ==================== CLI 选项 ====================
-
-
-def pytest_addoption(parser: pytest.Parser) -> None:
-    """添加 --start-app 选项：CI 模式下自动启动 Gradio 应用。"""
-    parser.addoption(
-        "--start-app",
-        action="store_true",
-        default=False,
-        help="自动启动 Gradio 应用（用于 CI 环境）",
-    )
-
-
-# ==================== 应用生命周期（--start-app 模式） ====================
-
-
-@pytest.fixture(scope="session")
-def gradio_app_url(request: pytest.FixtureRequest) -> Generator[str, None, None]:
-    """提供 Gradio 应用 URL。
-
-    如果指定了 --start-app，则自动启动应用进程；否则使用 GRADIO_URL 环境变量或默认地址。
-
-    Yields:
-        Gradio 应用 URL
-    """
-    url = os.getenv("GRADIO_URL", "http://127.0.0.1:7861")
-
-    if request.config.getoption("--start-app"):
-        # CI 模式：自动启动
-        app_path = os.path.join(PROJECT_ROOT, "src", "app.py")
-        env = os.environ.copy()
-        env["PYTHONPATH"] = PROJECT_ROOT
-
-        logger.info("Starting Gradio app at {} ...", app_path)
-        proc = subprocess.Popen(
-            ["python", app_path],
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-
-        # 等待应用就绪（最多 30 秒）
-        max_wait = 30
-        for attempt in range(max_wait):
-            try:
-                import urllib.request as req
-
-                req.urlopen(f"{url}/", timeout=2)
-                logger.info("Gradio app ready after {}s", attempt)
-                break
-            except Exception:
-                time.sleep(1)
-        else:
-            # 超时：打印日志后仍继续，让测试自行失败更直观
-            logger.error("Gradio app did not start within {}s", max_wait)
-
-        yield url
-
-        # 清理
-        proc.terminate()
-        proc.wait(timeout=10)
-        logger.info("Gradio app stopped")
-    else:
-        # 本地模式：假设已手动启动
-        yield url
-
 
 # ==================== 数据库直连验证 ====================
 
@@ -117,19 +46,6 @@ def vector_store() -> Generator[VectorStore, None, None]:
     """提供 VectorStore 实例，用于验证 ChromaDB 状态。"""
     vs = VectorStore()
     yield vs
-
-
-# ==================== Gradio Client ====================
-
-
-@pytest.fixture(scope="session")
-def client(gradio_app_url: str) -> Generator[Client, None, None]:
-    """提供 Gradio Client 实例，模拟前端用户操作。"""
-    c = Client(gradio_app_url)
-    # 等待应用实际就绪
-    c.predict("")  # 空预测确保连接建立
-    logger.info("Gradio Client connected to {}", gradio_app_url)
-    yield c
 
 
 # ==================== 测试知识库生命周期 ====================
