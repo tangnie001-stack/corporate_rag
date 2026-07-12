@@ -1,5 +1,9 @@
 """Tests for ChunkQualityScorer structure integrity check."""
 
+import os
+
+import pytest
+
 from src.eval.chunk_scorer import _check_structure_integrity
 
 
@@ -113,3 +117,109 @@ def test_no_clauses():
     result = _check_structure_integrity(chunks)
     assert result["clause"]["total"] == 0
     assert result["clause"]["score"] is None
+
+
+# ---- SBR 相关测试 ----
+
+
+def test_sbr_no_breakage():
+    """Adjacent chunks with same content should have similarity >= 0.35."""
+    from src.eval.chunk_scorer import _calc_sbr
+
+    embeddings = [[0.1, 0.2, 0.3], [0.1, 0.21, 0.29]]
+    result = _calc_sbr(embeddings)
+    assert result["score"] == 1.0  # no broken boundaries
+    assert result["total_boundaries"] == 1
+    assert result["broken_boundaries"] == []
+
+
+def test_sbr_with_breakage():
+    """Very different embeddings should be flagged as broken."""
+    from src.eval.chunk_scorer import _calc_sbr
+
+    # Orthogonal vectors -> cosine similarity ~ 0
+    embeddings = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]]
+    result = _calc_sbr(embeddings)
+    assert result["score"] < 1.0
+    assert len(result["broken_boundaries"]) >= 1
+
+
+# ---- Granularity CV 相关测试 ----
+
+
+def test_granularity_cv_uniform():
+    """Equal-length chunks should have low CV."""
+    from src.eval.chunk_scorer import _calc_granularity_cv
+
+    chunks = [
+        {"content": "A" * 200, "metadata": {}},
+        {"content": "B" * 200, "metadata": {}},
+        {"content": "C" * 200, "metadata": {}},
+    ]
+    result = _calc_granularity_cv(chunks)
+    assert result["cv"] == 0.0
+    assert result["score"] == 1.0
+
+
+def test_granularity_cv_with_extremes():
+    """A very tiny chunk should be flagged as extreme."""
+    from src.eval.chunk_scorer import _calc_granularity_cv
+
+    chunks = [
+        {"content": "A" * 200, "metadata": {}},
+        {"content": "tiny", "metadata": {}},  # < 50 tokens
+        {"content": "C" * 200, "metadata": {}},
+    ]
+    result = _calc_granularity_cv(chunks)
+    assert len(result["extreme_chunks"]) >= 1
+    assert result["extreme_chunks"][0]["type"] == "tiny"
+
+
+# ---- ChunkQualityScorer 集成测试 ----
+
+
+@pytest.mark.skipif(not os.getenv("DASHSCOPE_API_KEY"), reason="Requires DashScope API key")
+def test_evaluate_full_pipeline():
+    """Full evaluate() should return the complete eval JSON."""
+    from src.eval.chunk_scorer import ChunkQualityScorer
+
+    scorer = ChunkQualityScorer()
+    chunks = [
+        {"content": "| A | B |\n|---|---|\n| 1 | 2 |", "metadata": {"page": 1}},
+        {"content": "（一）主要会计数据\n总资产 1.7亿元", "metadata": {"page": 1}},
+    ]
+    result = scorer.evaluate(chunks, "test.pdf")
+    assert "overall_score" in result
+    assert "structure_integrity" in result
+    assert "sbr" in result
+    assert "granularity_cv" in result
+    assert "version" in result
+    assert 0.0 <= result["overall_score"] <= 1.0
+
+
+def test_evaluate_graceful_degradation():
+    """If a metric fails, overall_score should use remaining metrics."""
+    from src.eval.chunk_scorer import ChunkQualityScorer
+
+    # Simulate SBR failure by making embed_documents raise
+    class FailingScorer(ChunkQualityScorer):
+        def _calc_sbr(self, chunks):
+            raise RuntimeError("Embedding API timeout")
+
+    scorer = FailingScorer()
+    chunks = [
+        {"content": "test content", "metadata": {}},
+    ]
+    result = scorer.evaluate(chunks, "test.pdf")
+    assert result["sbr"]["error"] is not None
+    assert result["overall_score"] is not None  # computed from remaining metrics
+
+
+def test_empty_chunks():
+    """Empty chunks list should return null scores, not crash."""
+    from src.eval.chunk_scorer import ChunkQualityScorer
+
+    scorer = ChunkQualityScorer()
+    result = scorer.evaluate([], "empty.pdf")
+    assert result["overall_score"] is None
+    assert not result["passed"]
