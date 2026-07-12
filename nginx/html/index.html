@@ -602,7 +602,8 @@
                             </button>` : ''}
                         </div>
                     </div>
-                `).join('');
+                `;
+                }).join('');
 
                 // Poll for latest document if still processing
                 startDocPolling(kbId, docs);
@@ -865,7 +866,13 @@
         });
 
         // ====== Init ======
-        document.addEventListener('DOMContentLoaded', loadKBs);
+        document.addEventListener('DOMContentLoaded', () => {
+            // Surface script errors instead of silently failing
+            window.addEventListener('error', (e) => {
+                if (e.error) console.error('SCRIPT ERROR:', e.error.message, e.error.stack);
+            });
+            loadKBs();
+        });
 
         // ====== Eval Detail Modal ======
         function showEvalModal(evalDataRaw) {
