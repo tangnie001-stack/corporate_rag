@@ -225,7 +225,7 @@
     </div>
 
     <!-- ====== Upload Loading Modal ====== -->
-    <div id="upload-loading" class="fixed inset-0 z-50 hidden">
+    <div id="upload-loading" class="fixed inset-0 z-50" style="display:none">
         <div class="absolute inset-0 bg-black/40"></div>
         <div class="absolute inset-0 flex items-center justify-center">
             <div class="bg-white rounded-2xl px-10 py-8 shadow-2xl flex flex-col items-center">
@@ -237,7 +237,7 @@
     </div>
 
     <!-- ====== Eval Detail Modal ====== -->
-    <div id="eval-modal" class="fixed inset-0 z-40 hidden">
+    <div id="eval-modal" class="fixed inset-0 z-40" style="display:none">
         <div onclick="hideEvalModal()" class="modal-backdrop absolute inset-0 bg-black/30"></div>
         <div class="absolute inset-0 flex items-center justify-center p-4">
             <div class="eval-modal-panel bg-white rounded-xl shadow-xl w-[90vw] max-w-2xl max-h-[85vh] flex flex-col relative z-10">
@@ -264,7 +264,7 @@
     </div>
 
     <!-- ====== Eval Broken Detail Sub-Modal ====== -->
-    <div id="eval-broken-modal" class="fixed inset-0 z-50 hidden">
+    <div id="eval-broken-modal" class="fixed inset-0 z-50" style="display:none">
         <div onclick="hideEvalBroken()" class="modal-backdrop absolute inset-0 bg-black/30"></div>
         <div class="absolute inset-0 flex items-center justify-center p-4">
             <div class="eval-modal-panel bg-white rounded-xl shadow-xl w-[80vw] max-w-lg max-h-[70vh] flex flex-col relative z-10">
@@ -686,20 +686,20 @@
                 return;
             }
 
-            document.getElementById('upload-loading').classList.remove('hidden');
+            document.getElementById('upload-loading').style.display = 'flex';
 
             // 等待浏览器渲染 loading 遮罩层后再发起上传
             await new Promise(resolve => requestAnimationFrame(resolve));
 
             try {
                 await uploadDocument(selectedKbId, file);
-                document.getElementById('upload-loading').classList.add('hidden');
+                document.getElementById('upload-loading').style.display = 'none';
                 showToast('上传成功', 'success');
                 await new Promise(r => setTimeout(r, 1000));
                 await loadDocuments(selectedKbId);
                 await loadKBs();
             } catch (err) {
-                document.getElementById('upload-loading').classList.add('hidden');
+                document.getElementById('upload-loading').style.display = 'none';
                 hideToast();
                 showToast('上传失败: ' + err.message, 'error');
             }
@@ -948,11 +948,11 @@
 
             // Store detail for sub-modal access
             document.getElementById('eval-detail-body').dataset.detail = JSON.stringify(detail);
-            document.getElementById('eval-modal').classList.remove('hidden');
+            document.getElementById('eval-modal').style.display = 'block';
         }
 
         function hideEvalModal() {
-            document.getElementById('eval-modal').classList.add('hidden');
+            document.getElementById('eval-modal').style.display = 'none';
         }
 
         function showEvalBrokenFromAttr(...path) {
@@ -1023,11 +1023,11 @@
                 }
             }
 
-            document.getElementById('eval-broken-modal').classList.remove('hidden');
+            document.getElementById('eval-broken-modal').style.display = 'block';
         }
 
         function hideEvalBroken() {
-            document.getElementById('eval-broken-modal').classList.add('hidden');
+            document.getElementById('eval-broken-modal').style.display = 'none';
         }
 
         // ====== KB Level RAGAS Eval Summary ======
