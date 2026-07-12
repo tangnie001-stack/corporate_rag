@@ -226,6 +226,15 @@
 
     <!-- ====== Upload Loading Modal ====== -->
     <div id="upload-loading" class="fixed inset-0 z-50 hidden">
+        <div class="absolute inset-0 bg-black/40"></div>
+        <div class="absolute inset-0 flex items-center justify-center">
+            <div class="bg-white rounded-2xl px-10 py-8 shadow-2xl flex flex-col items-center">
+                <div class="spinner mb-4" style="width:32px;height:32px;border-width:3px"></div>
+                <p class="text-sm font-medium text-slate-700">正在同步上传中...</p>
+                <p class="text-xs text-slate-400 mt-1">请勿关闭页面</p>
+            </div>
+        </div>
+    </div>
 
     <!-- ====== Eval Detail Modal ====== -->
     <div id="eval-modal" class="fixed inset-0 z-40 hidden">
