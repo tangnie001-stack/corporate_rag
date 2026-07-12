@@ -93,6 +93,9 @@ Success:
 | `chunk_count` | int | 入库分块数 |
 | `error_msg` | str\|null | 失败原因 |
 | `created_at` | str | 上传时间 |
+| `eval_score` | float\|null | 分块质量综合评分（0-1，需开启 `CHUNK_EVAL_ENABLED`） |
+| `eval_passed` | bool\|null | 质量是否达标（阈值 ≥ 0.70） |
+| `eval_detail` | dict\|null | 评估详情 JSON，含 structure_integrity / sbr / granularity_cv 三个模块的分数和断裂明细 |
 
 #### 2.2.2 `POST /api/kbs/documents/upload → 202`
 
@@ -243,7 +246,29 @@ Success:
 {"code": "NOT_FOUND", "message": "会话不存在", "data": null}
 ```
 
-### 2.5 健康检查
+### 2.5 评估报告
+
+#### 2.5.1 `POST /api/kbs/eval/latest → dict | null`
+
+获取知识库最新的 RAGAS 评估报告。Body: `{"kb_id": "uuid"}`
+
+```json
+{"code": "SUCCESS", "message": "操作成功", "data": {
+  "eval_date": "2026-07-12T18:00:00",
+  "faithfulness": 0.92,
+  "answer_relevancy": 0.88,
+  "context_precision": 0.85,
+  "context_recall": 0.87,
+  "overall_score": 0.89,
+  "passed": true,
+  "qa_count": 22,
+  "run_type": "manual"
+}}
+```
+
+无评估记录时返回 `{"code": "SUCCESS", "data": null}`。
+
+### 2.6 健康检查
 
 #### 2.5.1 `GET /api/health → dict`
 
@@ -275,6 +300,7 @@ Success:
 | `status` | str | `pending` / `parsing` / `chunking` / `indexing` / `ready` / `failed` |
 | `chunk_count` | int | 分块数 |
 | `error_msg` | str \| None | 处理失败时的错误信息 |
+| `meta_info` | str \| None | JSON 字符串，含 `eval` 评估数据 |
 
 ### 3.3 `MySQLDB.delete_kb(kb_id) → bool`
 
@@ -286,6 +312,36 @@ MySQLDB 不感知 ChromaDB。
 ### 3.4 `MySQLDB.update_document_status(doc_id, status, chunk_count=0, error_msg="") → None`
 
 更新文档处理状态。由 `_process_document` 后台任务调用。
+
+### 3.5 `MySQLDB.update_document_meta_info(doc_id, meta_info) → None`
+
+更新文档的 `meta_info` JSON 列（存储分块评估结果）。由 `_process_document_task` 在分块质量评估后调用。
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `meta_info` | dict | 写入 JSON 列的字典，评估结果放在 `{"eval": {...}}` 下 |
+
+### 3.6 `MySQLDB.insert_eval_report(report) → None`
+
+插入一条 RAGAS 评估报告。首次调用时自动建表（幂等）。
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `report.kb_id` | str | 知识库 UUID |
+| `report.run_type` | str | `manual` / `sampling` / `ci_gate` |
+| `report.qa_count` | int | QA 对数量 |
+| `report.faithfulness` | float | 忠实度 |
+| `report.answer_relevancy` | float | 答案相关性 |
+| `report.context_precision` | float | 上下文精确率 |
+| `report.context_recall` | float | 上下文召回率 |
+| `report.overall_score` | float | 加权综合分（0.3×faith + 0.3×recall + 0.2×precision + 0.2×relevancy） |
+| `report.passed` | bool | 是否达标（≥ 0.70） |
+| `report.report_path` | str\|null | CSV 报告路径 |
+| `report.detail_json` | list\|null | 逐条 QA 得分 `[{"q_index":0, "faithfulness":0.95}, ...]` |
+
+### 3.7 `MySQLDB.get_latest_eval_report(kb_id) → dict | None`
+
+获取知识库最新的 RAGAS 评估报告。按 `eval_date DESC LIMIT 1` 查询。
 
 ---
 
