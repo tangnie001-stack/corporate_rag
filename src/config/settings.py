@@ -128,3 +128,8 @@ LANGFUSE_PUBLIC_KEY: str = os.getenv(
 LANGFUSE_HOST: str = os.getenv("LANGFUSE_HOST", "http://langfuse:3000")
 # 全局开关：false 时完全跳过 Langfuse 初始化
 LANGFUSE_ENABLE: bool = os.getenv("LANGFUSE_ENABLE", "true").lower() == "true"
+
+# ====== 分块质量评估 ======
+# 分块质量评估开关：true 时上传文件后自动跑 3 个质量指标
+# 默认关闭，不影响现有流程
+CHUNK_EVAL_ENABLED: bool = os.getenv("CHUNK_EVAL_ENABLED", "false").lower() == "true"
