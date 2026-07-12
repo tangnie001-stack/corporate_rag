@@ -560,6 +560,8 @@
             try {
                 const docs = await listDocuments(kbId);
                 const list = document.getElementById('doc-list');
+                // Store eval data for access by detail button
+                window._evalDocs = [];
 
                 if (docs.length === 0) {
                     list.innerHTML = `<div class="flex flex-col items-center justify-center py-12 text-slate-400">
@@ -570,7 +572,9 @@
                     return;
                 }
 
-                list.innerHTML = docs.map((doc, i) => `
+                list.innerHTML = docs.map((doc, i) => {
+                    window._evalDocs[i] = doc.eval_detail || null;
+                    return `
                     <div class="flex items-center justify-between px-5 py-3.5 hover:bg-slate-50 transition-colors group ${doc.status === 'ready' ? 'cursor-pointer' : ''}" ${doc.status === 'ready' ? `onclick="showChunkPreview('${kbId}','${doc.id}','${escapeAttr(doc.filename)}')"` : ''}>
                         <div class="flex items-center gap-3 min-w-0 flex-1">
                             <div class="w-8 h-8 rounded-lg ${(doc.file_type || doc.type) === 'pdf' ? 'bg-red-100' : (doc.file_type || doc.type) === 'docx' ? 'bg-blue-100' : 'bg-slate-100'} flex items-center justify-center flex-shrink-0 text-xs font-bold ${(doc.file_type || doc.type) === 'pdf' ? 'text-red-600' : (doc.file_type || doc.type) === 'docx' ? 'text-blue-600' : 'text-slate-600'}">${((doc.file_type || doc.type) || 'txt').toUpperCase().slice(0,3)}</div>
@@ -592,7 +596,7 @@
                             <span class="status-badge ${doc.status === 'ready' ? 'ready' : doc.status === 'error' ? 'error' : 'processing'}">
                                 ${doc.status === 'ready' ? '✓ 就绪' : doc.status === 'error' ? '✕ 失败' : '⋯ 处理中'}
                             </span>
-                            ${doc.eval_detail ? `<button onclick="event.stopPropagation();window._evalData=JSON.parse('${escapeAttr(JSON.stringify(doc.eval_detail)).replace(/\\//g,'/')}');showEvalModal(window._evalData)" class="px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title="查看评估详情">详情</button>` : ''}
+                            ${doc.eval_detail ? '<button onclick="event.stopPropagation();showEvalModal(window._evalDocs[' + i + '])" class="px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title="查看评估详情">详情</button>' : ''}
                             ${doc.status === 'ready' || doc.status === 'error' ? `<button onclick="event.stopPropagation();showDeleteDocModal('${kbId}','${doc.id}','${escapeAttr(doc.filename)}')" class="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors" title="删除文档">
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                             </button>` : ''}
@@ -864,8 +868,8 @@
         document.addEventListener('DOMContentLoaded', loadKBs);
 
         // ====== Eval Detail Modal ======
-        function showEvalModal(evalDetailJson) {
-            const detail = typeof evalDetailJson === 'string' ? JSON.parse(evalDetailJson) : evalDetailJson;
+        function showEvalModal(evalDataRaw) {
+            const detail = typeof evalDataRaw === 'string' ? JSON.parse(evalDataRaw) : evalDataRaw;
             const body = document.getElementById('eval-detail-body');
             const score = detail.overall_score;
             const passed = detail.passed;
@@ -1018,15 +1022,17 @@
                     body: JSON.stringify({ kb_id: kbId }),
                 });
                 const summary = document.getElementById('ragas-summary');
-                if (!report) {
+                // Handle wrapped response (BaseResponse may add nested data)
+                const evalData = (report && report.data !== undefined) ? report.data : report;
+                if (!evalData || !evalData.faithfulness) {
                     summary.classList.add('hidden');
                     return;
                 }
                 summary.classList.remove('hidden');
-                document.getElementById('ragas-faith').textContent = `Faith ${(report.faithfulness || 0).toFixed(2)}`;
-                document.getElementById('ragas-recall').textContent = `Recall ${(report.context_recall || 0).toFixed(2)}`;
+                document.getElementById('ragas-faith').textContent = `Faith ${(evalData.faithfulness || 0).toFixed(2)}`;
+                document.getElementById('ragas-recall').textContent = `Recall ${(evalData.context_recall || 0).toFixed(2)}`;
                 const icon = document.getElementById('ragas-pass-icon');
-                if (report.passed) {
+                if (evalData.passed) {
                     icon.textContent = '✓';
                     icon.className = 'text-emerald-500 font-bold';
                 } else {
