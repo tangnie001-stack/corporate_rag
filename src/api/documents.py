@@ -184,7 +184,9 @@ async def upload_document(
                 try:
                     meta = json.loads(d["meta_info"])
                     if "eval" in meta:
-                        await svc.db.update_document_meta_info(d["id"], {"eval": meta["eval"]})
+                        await svc.db.update_document_meta_info(
+                            d["id"], {"eval": meta["eval"]}
+                        )
                 except (json.JSONDecodeError, Exception):
                     pass
             return UploadDocumentResponse(
@@ -325,7 +327,9 @@ async def _process_document_task(
                     eval_result = await asyncio.to_thread(
                         scorer.evaluate, chunks, filename
                     )
-                    await svc.db.update_document_meta_info(doc_id, {"eval": eval_result})
+                    await svc.db.update_document_meta_info(
+                        doc_id, {"eval": eval_result}
+                    )
                     logger.info(
                         "Chunk eval for '{}': score={} passed={}",
                         filename,
@@ -414,7 +418,7 @@ async def get_document_chunks(body: DocumentChunksRequest) -> ChunksResponse:
         ChunkItem(
             chunk_id=c["id"],
             # MAX_TABLE_TOKENS * 2: token 转字符数（中文 1 token ≈ 2 字符）
-            content=c["content"][:MAX_TABLE_TOKENS * 2],
+            content=c["content"][: MAX_TABLE_TOKENS * 2],
             page=c.get("metadata", {}).get("page", 1),
             tokens=c.get("metadata", {}).get("tokens", 0),
             char_count=len(c["content"]),
