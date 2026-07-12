@@ -285,6 +285,9 @@
 .chunk-modal-panel {
     animation: modalIn 0.25s ease-out;
 }
+.eval-modal-panel {
+    animation: modalIn 0.25s ease-out;
+}
 
 /* Chunk card entrance stagger */
 .chunk-card {

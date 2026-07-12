@@ -111,7 +111,16 @@
                         <h3 id="doc-section-title" class="font-semibold text-slate-900">文档列表</h3>
                         <p id="doc-section-subtitle" class="text-xs text-slate-500 mt-0.5"></p>
                     </div>
-                    <label class="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors cursor-pointer shadow-sm">
+                    <div class="flex items-center gap-2">
+                        <!-- RAGAS Eval Summary (KB level) -->
+                        <div id="ragas-summary" class="hidden flex items-center gap-2 px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-lg text-xs">
+                            <span class="text-blue-600 font-medium">RAGAS</span>
+                            <span id="ragas-faith" class="text-blue-700 font-semibold">—</span>
+                            <span class="text-blue-400">·</span>
+                            <span id="ragas-recall" class="text-blue-700 font-semibold">—</span>
+                            <span class="text-blue-400" id="ragas-pass-icon"></span>
+                        </div>
+                        <label class="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors cursor-pointer shadow-sm">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
                         上传文档
                         <input type="file" id="file-input" accept=".pdf,.docx,.txt" class="hidden" onchange="handleUpload(event)">
@@ -217,6 +226,49 @@
 
     <!-- ====== Upload Loading Modal ====== -->
     <div id="upload-loading" class="fixed inset-0 z-50 hidden">
+
+    <!-- ====== Eval Detail Modal ====== -->
+    <div id="eval-modal" class="fixed inset-0 z-40 hidden">
+        <div onclick="hideEvalModal()" class="modal-backdrop absolute inset-0 bg-black/30"></div>
+        <div class="absolute inset-0 flex items-center justify-center p-4">
+            <div class="eval-modal-panel bg-white rounded-xl shadow-xl w-[90vw] max-w-2xl max-h-[85vh] flex flex-col relative z-10">
+                <!-- Header -->
+                <div class="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+                    <div>
+                        <h3 class="text-base font-semibold text-slate-900">分块评估详情</h3>
+                        <p class="text-xs text-slate-400 mt-0.5">文件级质量评分</p>
+                    </div>
+                    <button onclick="hideEvalModal()" class="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>
+                <!-- Content -->
+                <div id="eval-detail-body" class="flex-1 overflow-y-auto px-6 py-4 min-h-0 space-y-4">
+                    <!-- Populated by JS -->
+                    <div class="flex items-center justify-center py-8 text-slate-400">
+                        <div class="spinner mr-3"></div>
+                        <span>加载中...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== Eval Broken Detail Sub-Modal ====== -->
+    <div id="eval-broken-modal" class="fixed inset-0 z-50 hidden">
+        <div onclick="hideEvalBroken()" class="modal-backdrop absolute inset-0 bg-black/30"></div>
+        <div class="absolute inset-0 flex items-center justify-center p-4">
+            <div class="eval-modal-panel bg-white rounded-xl shadow-xl w-[80vw] max-w-lg max-h-[70vh] flex flex-col relative z-10">
+                <div class="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+                    <h3 id="eval-broken-title" class="text-base font-semibold text-slate-900"></h3>
+                    <button onclick="hideEvalBroken()" class="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>
+                <div id="eval-broken-body" class="flex-1 overflow-y-auto px-6 py-4 space-y-3 text-sm"></div>
+            </div>
+        </div>
+    </div>
         <div class="absolute inset-0 bg-black/40"></div>
         <div class="absolute inset-0 flex items-center justify-center">
             <div class="bg-white rounded-2xl px-10 py-8 shadow-2xl flex flex-col items-center">
@@ -500,6 +552,7 @@
             if (window.innerWidth < 768) toggleSidebar();
 
             await loadDocuments(kbId);
+            loadRagasEval(kbId);
         }
 
         // ====== Load Documents ======
@@ -527,6 +580,11 @@
                                     <span>${formatSize(doc.size)}</span>
                                     ${doc.chunk_count ? `<span>· ${doc.chunk_count} 分块</span>` : ''}
                                     ${doc.created_at ? `<span>· ${new Date(doc.created_at).toLocaleDateString()}</span>` : ''}
+                                    ${doc.eval_score != null ? `<span class="flex items-center gap-1 ${doc.eval_passed ? 'text-emerald-600' : 'text-red-500'} font-medium">
+                                        <span>分块评分</span>
+                                        <span class="text-xs font-bold">${doc.eval_score.toFixed(2)}</span>
+                                        <span>${doc.eval_passed ? '✓' : '✗'}</span>
+                                    </span>` : ''}
                                 </div>
                             </div>
                         </div>
@@ -534,6 +592,7 @@
                             <span class="status-badge ${doc.status === 'ready' ? 'ready' : doc.status === 'error' ? 'error' : 'processing'}">
                                 ${doc.status === 'ready' ? '✓ 就绪' : doc.status === 'error' ? '✕ 失败' : '⋯ 处理中'}
                             </span>
+                            ${doc.eval_detail ? `<button onclick="event.stopPropagation();window._evalData=JSON.parse('${escapeAttr(JSON.stringify(doc.eval_detail)).replace(/\\//g,'/')}');showEvalModal(window._evalData)" class="px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title="查看评估详情">详情</button>` : ''}
                             ${doc.status === 'ready' || doc.status === 'error' ? `<button onclick="event.stopPropagation();showDeleteDocModal('${kbId}','${doc.id}','${escapeAttr(doc.filename)}')" class="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors" title="删除文档">
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                             </button>` : ''}
@@ -796,11 +855,189 @@
                 hideCreateModal();
                 hideDeleteModal();
                 hideChunkPreview();
+                hideEvalModal();
+                hideEvalBroken();
             }
         });
 
         // ====== Init ======
         document.addEventListener('DOMContentLoaded', loadKBs);
+
+        // ====== Eval Detail Modal ======
+        function showEvalModal(evalDetailJson) {
+            const detail = typeof evalDetailJson === 'string' ? JSON.parse(evalDetailJson) : evalDetailJson;
+            const body = document.getElementById('eval-detail-body');
+            const score = detail.overall_score;
+            const passed = detail.passed;
+            const si = detail.structure_integrity || {};
+            const sbr = detail.sbr || {};
+            const cv = detail.granularity_cv || {};
+
+            const scoreColor = passed ? 'text-emerald-600' : 'text-red-500';
+            const passIcon = passed ? '✓' : '✗';
+            const passBg = passed ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200';
+
+            function metricRow(label, score, brokenCount, brokenData, onClick) {
+                const color = score >= 0.7 ? 'text-emerald-600' : score >= 0.5 ? 'text-amber-600' : 'text-red-500';
+                const barColor = score >= 0.7 ? 'bg-emerald-500' : score >= 0.5 ? 'bg-amber-500' : 'bg-red-500';
+                const brokenHtml = brokenCount > 0
+                    ? `<button onclick="${onClick}" class="ml-2 text-xs text-blue-600 hover:text-blue-700 font-medium underline underline-offset-2">${brokenCount}个断裂 → 查看</button>`
+                    : `<span class="ml-2 text-xs text-slate-400">无断裂</span>`;
+                return `
+                    <div class="flex items-center justify-between py-2">
+                        <div class="flex items-center gap-2 min-w-0 flex-1">
+                            <span class="text-sm text-slate-700 font-medium whitespace-nowrap">${label}</span>
+                            <div class="flex-1 h-1.5 bg-slate-100 rounded-full mx-2 max-w-[120px]">
+                                <div class="h-full rounded-full ${barColor} transition-all" style="width:${Math.round(score * 100)}%"></div>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-1 flex-shrink-0">
+                            <span class="text-sm font-bold ${color}">${score.toFixed(2)}</span>
+                            ${brokenHtml}
+                        </div>
+                    </div>`;
+            }
+
+            body.innerHTML = `
+                <div class="flex items-center justify-between p-4 rounded-xl border ${passBg} mb-4">
+                    <div>
+                        <div class="text-xs text-slate-500 font-medium mb-1">综合评分</div>
+                        <div class="text-3xl font-bold ${scoreColor}">${score != null ? score.toFixed(2) : 'N/A'}</div>
+                    </div>
+                    <div class="text-2xl ${scoreColor} font-bold">${passIcon}</div>
+                </div>
+
+                <div class="border border-slate-200 rounded-xl p-4 space-y-1">
+                    <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">结构完整性</div>
+                    ${(si.table && si.table.total > 0) ? metricRow('表格', si.table.score, si.table.broken.length, si.table.broken, "showEvalBrokenFromAttr('structure_integrity', 'table')") : ''}
+                    ${(si.heading && si.heading.total > 0) ? metricRow('标题', si.heading.score, si.heading.broken.length, si.heading.broken, "showEvalBrokenFromAttr('structure_integrity', 'heading')") : ''}
+                    ${(si.clause && si.clause.total > 0) ? metricRow('条款', si.clause.score, si.clause.broken.length, si.clause.broken, "showEvalBrokenFromAttr('structure_integrity', 'clause')") : ''}
+                    ${(!si.table || si.table.total === 0) && (!si.heading || si.heading.total === 0) && (!si.clause || si.clause.total === 0) ? '<div class="text-xs text-slate-400 py-1">无结构数据</div>' : ''}
+                </div>
+
+                <div class="border border-slate-200 rounded-xl p-4">
+                    <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">语义断裂率 SBR</div>
+                    ${sbr.score != null ? metricRow('SBR', sbr.score, (sbr.broken_boundaries || []).length, sbr.broken_boundaries, "showEvalBrokenFromAttr('sbr')") : '<div class="text-xs text-slate-400 py-1">未评估</div>'}
+                </div>
+
+                <div class="border border-slate-200 rounded-xl p-4">
+                    <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">粒度均匀性</div>
+                    ${cv.score != null ? metricRow('CV', cv.score, (cv.extreme_chunks || []).length, cv.extreme_chunks, "showEvalBrokenFromAttr('granularity_cv')") : '<div class="text-xs text-slate-400 py-1">未评估</div>'}
+                </div>
+            `;
+
+            // Store detail for sub-modal access
+            document.getElementById('eval-detail-body').dataset.detail = JSON.stringify(detail);
+            document.getElementById('eval-modal').classList.remove('hidden');
+        }
+
+        function hideEvalModal() {
+            document.getElementById('eval-modal').classList.add('hidden');
+        }
+
+        function showEvalBrokenFromAttr(...path) {
+            const raw = document.getElementById('eval-detail-body').dataset.detail;
+            if (!raw) return;
+            const detail = JSON.parse(raw);
+            let data = detail;
+            for (const key of path) {
+                data = data[key];
+                if (!data) break;
+            }
+            if (!data) return;
+            // Determine type from path
+            const typeKey = path[path.length - 1];
+            const typeMap = { table: 'table', heading: 'heading', clause: 'clause', sbr: 'sbr', granularity_cv: 'granularity' };
+            const brokenType = typeMap[typeKey] || typeKey;
+            showEvalBroken(brokenType, JSON.stringify(data));
+        }
+
+        function showEvalBroken(type, dataJson) {
+            const data = JSON.parse(dataJson);
+            const body = document.getElementById('eval-broken-body');
+            const title = document.getElementById('eval-broken-title');
+
+            const labels = { table: '表格断裂详情', heading: '标题断裂详情', clause: '条款断裂详情', sbr: '语义断裂详情', granularity: '极端分块详情' };
+            title.textContent = labels[type] || '断裂详情';
+
+            if (type === 'table' || type === 'heading' || type === 'clause') {
+                const items = data.broken || [];
+                if (items.length === 0) {
+                    body.innerHTML = '<div class="text-sm text-slate-500 text-center py-6">无断裂项</div>';
+                } else {
+                    body.innerHTML = items.map((item, i) => `
+                        <div class="border border-slate-200 rounded-lg p-3 bg-slate-50">
+                            <div class="text-xs font-medium text-slate-500 mb-1">断裂 ${i + 1}</div>
+                            <div class="text-xs text-slate-700 bg-white rounded border border-slate-100 p-2 font-mono leading-relaxed">${escapeHtml(item.text || item.preview || '')}</div>
+                        </div>
+                    `).join('');
+                }
+            } else if (type === 'sbr') {
+                const items = data.broken_boundaries || [];
+                if (items.length === 0) {
+                    body.innerHTML = '<div class="text-sm text-slate-500 text-center py-6">无语义断裂边界</div>';
+                } else {
+                    body.innerHTML = items.map((item, i) => `
+                        <div class="border border-slate-200 rounded-lg p-3 bg-slate-50">
+                            <div class="text-xs font-medium text-slate-500 mb-1">边界 ${i + 1}（相似度: ${item.similarity.toFixed(2)}）</div>
+                            <div class="space-y-1">
+                                <div class="text-xs text-slate-700 bg-white rounded border border-slate-100 p-2 font-mono leading-relaxed">${escapeHtml(item.preview_before || '')}</div>
+                                <div class="text-xs text-slate-400 text-center">↓</div>
+                                <div class="text-xs text-slate-700 bg-white rounded border border-slate-100 p-2 font-mono leading-relaxed">${escapeHtml(item.preview_after || '')}</div>
+                            </div>
+                        </div>
+                    `).join('');
+                }
+            } else if (type === 'granularity') {
+                const items = data.extreme_chunks || [];
+                if (items.length === 0) {
+                    body.innerHTML = '<div class="text-sm text-slate-500 text-center py-6">无极端分块</div>';
+                } else {
+                    body.innerHTML = `
+                        <div class="text-xs text-slate-500 mb-3">CV: ${data.cv != null ? data.cv.toFixed(4) : '—'} · 最小: ${data.min_tokens || 0} token · 最大: ${data.max_tokens || 0} token</div>
+                        ${items.map((item, i) => `
+                        <div class="border border-slate-200 rounded-lg p-3 bg-slate-50">
+                            <div class="text-xs font-medium ${item.type === 'tiny' ? 'text-amber-600' : 'text-red-500'}">分块 ${item.index} — ${item.type === 'tiny' ? '极小块' : '超大块'}（${item.tokens} token）</div>
+                        </div>
+                    `).join('')}`;
+                }
+            }
+
+            document.getElementById('eval-broken-modal').classList.remove('hidden');
+        }
+
+        function hideEvalBroken() {
+            document.getElementById('eval-broken-modal').classList.add('hidden');
+        }
+
+        // ====== KB Level RAGAS Eval Summary ======
+        async function loadRagasEval(kbId) {
+            try {
+                const report = await apiRequest('/kbs/eval/latest', {
+                    method: 'POST',
+                    body: JSON.stringify({ kb_id: kbId }),
+                });
+                const summary = document.getElementById('ragas-summary');
+                if (!report) {
+                    summary.classList.add('hidden');
+                    return;
+                }
+                summary.classList.remove('hidden');
+                document.getElementById('ragas-faith').textContent = `Faith ${(report.faithfulness || 0).toFixed(2)}`;
+                document.getElementById('ragas-recall').textContent = `Recall ${(report.context_recall || 0).toFixed(2)}`;
+                const icon = document.getElementById('ragas-pass-icon');
+                if (report.passed) {
+                    icon.textContent = '✓';
+                    icon.className = 'text-emerald-500 font-bold';
+                } else {
+                    icon.textContent = '✗';
+                    icon.className = 'text-red-500 font-bold';
+                }
+            } catch (e) {
+                // KB eval not available - hide
+                document.getElementById('ragas-summary').classList.add('hidden');
+            }
+        }
     </script>
 </body>
 </html>
