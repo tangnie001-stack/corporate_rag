@@ -78,6 +78,17 @@ CHUNK_OVERLAP: int = int(os.getenv("CHUNK_OVERLAP", "64"))
 TOP_K_RETRIEVAL: int = int(os.getenv("TOP_K_RETRIEVAL", "50"))
 # 重排序后保留的 top-N 数量（最终送入 LLM 的上下文数量）
 TOP_K_RERANK: int = int(os.getenv("TOP_K_RERANK", "5"))
+# 扫描件检测阈值：单页可提取文字少于 200 字符视为"扫描页"
+MIN_TEXT_CHARS: int = int(os.getenv("MIN_TEXT_CHARS", "200"))
+# 页眉页脚排除阈值：距离页面顶部/底部 N px 内的文本块视为页眉页脚
+HEADER_FOOTER_MARGIN: int = int(os.getenv("HEADER_FOOTER_MARGIN", "80"))
+# 跨页表格合并阈值：TABLE → 短文本（< N 字符）→ TABLE 合并为一个 chunk
+CROSS_PAGE_TABLE_MERGE_THRESHOLD: int = int(
+    os.getenv("CROSS_PAGE_TABLE_MERGE_THRESHOLD", "100")
+)
+# 表格合并后最大 token 数（超过则不合并，避免 embedding 截断丢失信息）
+# 使用时需 *2 转为字符数（中文 1 token ≈ 2 字符），如 2048 token → 4096 chars
+MAX_TABLE_TOKENS: int = int(os.getenv("MAX_TABLE_TOKENS", "2048"))
 
 # ====== Hybrid Search ======
 # 是否启用 BM25 + Dense 混合检索（通过 RRF 融合）
