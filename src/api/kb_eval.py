@@ -2,11 +2,18 @@
 
 from fastapi import APIRouter, Request
 from loguru import logger
+from pydantic import BaseModel
 
 from src.api.model.response import BaseResponse
 from src.app_service import AppService
 
 router = APIRouter()
+
+
+class KbEvalRequest(BaseModel):
+    """知识库评估请求。"""
+
+    kb_id: str  # 知识库 UUID
 
 
 def _get_service() -> AppService:
@@ -19,7 +26,7 @@ def _get_service() -> AppService:
 
 
 @router.post("/kbs/eval/latest")
-async def get_latest_kb_eval(kb_id: str, request: Request = None) -> BaseResponse:
+async def get_latest_kb_eval(body: KbEvalRequest, request: Request = None) -> BaseResponse:
     """获取知识库最新的 RAGAS 评估结果。
 
     Args:
@@ -29,11 +36,11 @@ async def get_latest_kb_eval(kb_id: str, request: Request = None) -> BaseRespons
         BaseResponse: 含评估详情或 None
     """
     svc = _get_service()
-    report = await svc.db.get_latest_eval_report(kb_id)
+    report = await svc.db.get_latest_eval_report(body.kb_id)
     if report:
         logger.info(
             "KB eval report found: kb_id={} score={}",
-            kb_id,
+            body.kb_id,
             report.get("overall_score"),
         )
         return BaseResponse(
@@ -61,5 +68,5 @@ async def get_latest_kb_eval(kb_id: str, request: Request = None) -> BaseRespons
                 "run_type": report["run_type"],
             }
         )
-    logger.info("KB eval report not found: kb_id={}", kb_id)
+    logger.info("KB eval report not found: kb_id={}", body.kb_id)
     return BaseResponse(data=None)
