@@ -528,6 +528,7 @@ class MySQLDB:
         """
         from src.config.queries import SELECT_LATEST_EVAL_REPORT
 
+        await self.ensure_eval_report_table()
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             async with conn.cursor() as cursor:
