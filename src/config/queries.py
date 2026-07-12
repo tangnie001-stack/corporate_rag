@@ -184,6 +184,57 @@ SOFT_DELETE_DOCUMENT_BY_ID: str = """\
 UPDATE document SET status = 'deleted' WHERE id = %s AND status != 'deleted'
 """
 
+# ====== 分块评估结果 ======
+
+# eval_report 表 DDL（在第一次写入时自动创建）
+CREATE_EVAL_REPORT_TABLE: str = """\
+CREATE TABLE IF NOT EXISTS eval_report (
+    id                  VARCHAR(36)  PRIMARY KEY,
+    kb_id               VARCHAR(36)  NOT NULL,
+    run_type            VARCHAR(20)  NOT NULL,
+    qa_count            INT          NOT NULL,
+    faithfulness        DECIMAL(5,4),
+    answer_relevancy    DECIMAL(5,4),
+    context_precision   DECIMAL(5,4),
+    context_recall      DECIMAL(5,4),
+    overall_score       DECIMAL(5,4),
+    passed              TINYINT(1)   DEFAULT 0,
+    report_path         VARCHAR(512),
+    triggered_by        VARCHAR(36),
+    detail_json         JSON,
+    eval_date           DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (kb_id) REFERENCES knowledge_base(id) ON DELETE CASCADE,
+    INDEX idx_kb_date (kb_id, eval_date DESC)
+)
+"""
+
+# 插入评估报告。参数：[id, kb_id, run_type, qa_count, faithfulness, answer_relevancy,
+#                        context_precision, context_recall, overall_score, passed,
+#                        report_path, triggered_by, detail_json]
+INSERT_EVAL_REPORT: str = """\
+INSERT INTO eval_report
+    (id, kb_id, run_type, qa_count, faithfulness, answer_relevancy,
+     context_precision, context_recall, overall_score, passed,
+     report_path, triggered_by, detail_json)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+"""
+
+# 查询知识库最新评估报告。参数：[kb_id]
+SELECT_LATEST_EVAL_REPORT: str = """\
+SELECT id, kb_id, run_type, qa_count, faithfulness, answer_relevancy,
+       context_precision, context_recall, overall_score, passed,
+       report_path, triggered_by, detail_json, eval_date
+FROM eval_report
+WHERE kb_id = %s
+ORDER BY eval_date DESC
+LIMIT 1
+"""
+
+# 更新文档 meta_info（JSON 列）。参数：[meta_info, doc_id]
+UPDATE_DOCUMENT_META_INFO: str = """\
+UPDATE document SET meta_info = %s WHERE id = %s
+"""
+
 # ====== 会话 CRUD ======
 
 # 插入会话记录，首次消息时调用。
