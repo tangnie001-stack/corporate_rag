@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
-from src.app_service import AppService
+from src.services.app_service import AppService
 from src.infra.api_error import ApiError
 
 
