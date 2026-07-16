@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 from src.services.app_service import AppService
-from src.infra.api_error import ApiError
+from src.infra.errors import AppError
 
 
 class TestAppServiceInit:
@@ -112,7 +112,7 @@ class TestAppServiceDeleteDocument:
         db = MagicMock()
         db.get_document = AsyncMock(return_value=None)
         svc = AppService(mysql_db=db)
-        with pytest.raises(ApiError) as exc:
+        with pytest.raises(AppError) as exc:
             await svc.delete_document("kb", "nonexistent", "user")
         assert exc.value.code == "DOC_NOT_FOUND"
 
@@ -132,7 +132,7 @@ class TestAppServiceDeleteDocument:
             }
         )
         svc = AppService(mysql_db=db)
-        with pytest.raises(ApiError) as exc:
+        with pytest.raises(AppError) as exc:
             await svc.delete_document("kb", "d1", "other_user")
         assert exc.value.code == "DOC_DELETE_NOT_ALLOWED"
 
@@ -154,7 +154,7 @@ class TestAppServiceDeleteDocument:
             }
         )
         svc = AppService(mysql_db=db)
-        with pytest.raises(ApiError) as exc:
+        with pytest.raises(AppError) as exc:
             await svc.delete_document("kb", "d1", "user")
         assert exc.value.code == "DOC_STATUS_CONFLICT"
 
