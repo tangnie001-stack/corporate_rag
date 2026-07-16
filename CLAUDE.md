@@ -12,10 +12,57 @@
 ## 技术栈
 Python 3.11+ / FastAPI / ChromaDB / LangChain / DashScope / MySQL 8.0 / Redis 7 / Langfuse / Nginx
 
+## 代码目录结构（修改代码前必读）
+
+```
+src/
+├── api/              # 纯路由层：只做请求→调用 service→返回，不写业务逻辑
+│   ├── sse_utils.py  # SSE 格式化函数（纯工具，仅依赖 json）
+│   └── model/        # 请求/响应 Pydantic 模型
+├── services/         # 业务服务层：文档/知识库/对话的业务逻辑
+├── rag/              # RAG 流水线
+│   ├── chain.py      # RAGChain 主类（编排检索→精排→生成）
+│   ├── retrieval.py  # 检索 + 查询改写（纯函数）
+│   ├── prompt.py     # Prompt 构建（纯函数）
+│   └── stream.py     # 流式生成（纯函数）
+├── chat/             # 对话管理
+│   ├── manager.py    # ChatManager（Redis/InMemory 会话 CRUD）
+│   └── persistence.py# MySQL 持久化
+├── core/             # 基础设施核心
+├── config/           # 配置与常量
+├── eval/             # 评估
+├── parsers/          # 文档解析器
+├── middleware/       # 中间件
+├── infra/            # 基础设施：db / llm / search / chunking / auth
+└── models.py         # 模型工厂
+
+tests/
+├── api/              # API 路由测试
+├── services/         # 服务层测试
+├── rag/              # RAG 模块测试
+├── chat/             # 对话管理测试
+├── parsers/          # 解析器测试
+├── infra/            # 基础设施测试
+├── config/           # 配置测试
+├── middleware/        # 中间件测试
+└── eval/             # 评估测试
+```
+
+### 层间调用规则
+- ❌ `api/` 不得直接调用 `infra/` 或 `config/`（必须通过 `services/`）
+- ❌ `api/chat.py` 不包含 SSE 格式化函数（在 `api/sse_utils.py`）
+- ✅ `services/` 可调用 `infra/`、`rag/`、`chat/`
+- ✅ `rag/chain.py` 编排 retrieval / prompt / stream，不包含实现细节
+- ✅ `chat/manager.py` 不包含 MySQL 持久化逻辑（在 `chat/persistence.py`）
+
+### 文件大小红线
+- 单文件超过 400 行 → 必须拆分为模块包
+- 单函数超过 80 行 → 必须拆分子函数
+
 ## 数据流
-文档上传 → parsers/router 解析 → document_loader 分块 → vector_store 入库
-用户提问 → rag_chain 检索/重排序/生成 → api/routes SSE 推送前端
-session/消息 → chat_manager(Redis+MySQL) 写 + api/routes/sessions 读
+文档上传 → parsers/router 解析 → infra/chunking 分块 → infra/db/vector_store 入库
+用户提问 → rag/chain 检索/重排序/生成 → api SSE 推送前端
+session/消息 → chat/manager(Redis) 写 + chat/persistence(MySQL) 落盘 → api/sessions 读
 
 ## 依赖图
 .codegraph/codegraph.db — SQLite，含全量代码节点和调用/引入关系
@@ -46,6 +93,11 @@ docker exec corporate-rag-app grep '<trace_id>' /data/logs/app_*.log
 2. `ruff check .` 无错误
 3. 无遗留 `print()`、TODO 或调试代码
 4. 改前端时用 playwright-cli 验证交互
+5. **代码位置检查**：新增/修改的代码放在正确的目录了吗？
+6. **层次检查**：api/ 里是否只做了参数校验和路由转发，没有写业务逻辑？
+7. **import 检查**：有没有违反层间调用规则的 import（如 api/ 里 import infra/）？
+8. **文件大小检查**：单文件是否超过 400 行？是否需要拆分？
+9. **测试对应检查**：如果增加了新模块，是否更新了 tests/ 对应目录的测试？
 
 ## 设计流程
 
@@ -68,7 +120,6 @@ docker exec corporate-rag-app grep '<trace_id>' /data/logs/app_*.log
 - 架构规约（异常处理 / 响应包装 / 日志约定 / 排查规范）详见 @CLAUDE-RULES.md
 - API 路由 handler 必须标注请求体和返回类型（请求用 Pydantic BaseModel，返回也用 Pydantic BaseModel 描述 data 结构，SSE 标注 StreamingResponse）
 - git 操作由你手动执行，不会自动 commit/push
-- `old/` 是历史快照，不改也不引用
 - API Key 和 Token 通过 `.env` 加载，日志中脱敏；连接串不记录到日志
 - 测试 mock 外部依赖，不发起真实网络调用
 - 需求池文档在docs/requirements_pool.md
