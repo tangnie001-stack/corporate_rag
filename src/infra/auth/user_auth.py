@@ -21,7 +21,9 @@ class UserAuth:
         return str(uuid.uuid4())
 
     @staticmethod
-    def store_token(redis_client, token: str, user_id: str, ttl: int = TOKEN_TTL) -> None:
+    def store_token(
+        redis_client, token: str, user_id: str, ttl: int = TOKEN_TTL
+    ) -> None:
         redis_client.setex(f"token:{token}", ttl, user_id)
 
     @staticmethod

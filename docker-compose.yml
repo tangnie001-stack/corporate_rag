@@ -49,6 +49,7 @@ services:
     mem_limit: 256m
     mem_reservation: 128m
     container_name: corporate-rag-postgres
+    profiles: ["langfuse"]
     restart: unless-stopped
     environment:
       POSTGRES_DB: langfuse
@@ -70,6 +71,7 @@ services:
     mem_limit: 512m
     mem_reservation: 256m
     container_name: corporate-rag-clickhouse
+    profiles: ["langfuse"]
     restart: unless-stopped
     user: "101:101"
     environment:
@@ -121,6 +123,7 @@ services:
     mem_limit: 512m
     mem_reservation: 256m
     container_name: corporate-rag-langfuse-worker
+    profiles: ["langfuse"]
     restart: unless-stopped
     depends_on: &langfuse-depends
       clickhouse: { condition: service_healthy }
@@ -164,6 +167,7 @@ services:
     mem_limit: 512m
     mem_reservation: 256m
     container_name: corporate-rag-langfuse-web
+    profiles: ["langfuse"]
     restart: unless-stopped
     depends_on: *langfuse-depends
     ports:

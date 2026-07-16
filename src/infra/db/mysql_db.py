@@ -57,6 +57,8 @@ from src.config.queries import (
     SELECT_USER_BY_ACCOUNT,
     SELECT_USER_BY_TOKEN,
     SOFT_DELETE_DOCUMENT_BY_ID,
+    SOFT_DELETE_DOCUMENTS_BY_KB_ID,
+    SOFT_DELETE_KNOWLEDGE_BASE_BY_ID,
     UPDATE_DOCUMENT_STATUS,
     UPDATE_USER_TOKEN,
 )
@@ -729,6 +731,52 @@ class MySQLDB:
             "SQL: {} | doc_id={} deleted={}",
             SOFT_DELETE_DOCUMENT_BY_ID.split("\n")[0].strip(),
             doc_id,
+            deleted > 0,
+        )
+        return deleted > 0
+
+    async def soft_delete_documents_by_kb(self, kb_id: str) -> int:
+        """按知识库批量软删除所有关联文档。
+
+        Args:
+            kb_id: 知识库 UUID
+
+        Returns:
+            实际标记删除的文档数量
+        """
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(SOFT_DELETE_DOCUMENTS_BY_KB_ID, (kb_id,))
+                count = cursor.rowcount
+            await conn.commit()
+        logger.info(
+            "SQL: {} | kb_id={} deleted={}",
+            SOFT_DELETE_DOCUMENTS_BY_KB_ID.split("\n")[0].strip(),
+            kb_id,
+            count,
+        )
+        return count
+
+    async def soft_delete_kb(self, kb_id: str) -> bool:
+        """软删除知识库（标记 status 为 deleted）。
+
+        Args:
+            kb_id: 知识库 UUID
+
+        Returns:
+            True 表示删除成功
+        """
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(SOFT_DELETE_KNOWLEDGE_BASE_BY_ID, (kb_id,))
+                deleted = cursor.rowcount
+            await conn.commit()
+        logger.info(
+            "SQL: {} | kb_id={} deleted={}",
+            SOFT_DELETE_KNOWLEDGE_BASE_BY_ID.split("\n")[0].strip(),
+            kb_id,
             deleted > 0,
         )
         return deleted > 0

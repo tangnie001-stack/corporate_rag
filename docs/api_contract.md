@@ -270,7 +270,19 @@ Success:
 
 ### 2.6 健康检查
 
-#### 2.5.1 `GET /api/health → dict`
+#### 2.5.1 `POST /api/config → AppConfigResponse`
+
+获取前端配置（如上传文件大小限制）。Body: `{}`
+
+```json
+{"code": "SUCCESS", "message": "操作成功", "data": {"max_upload_size": 10485760}}
+```
+
+| 键 | 类型 | 说明 |
+|----|------|------|
+| `max_upload_size` | int | 单文件上传上限（字节），默认 10MB，可通过 `MAX_FILE_SIZE` 环境变量覆盖 |
+
+#### 2.5.2 `GET /api/health → dict`
 
 ```json
 {"status": "ok"}

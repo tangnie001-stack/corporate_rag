@@ -53,7 +53,9 @@ class Code:
     DOC_DELETE_NOT_ALLOWED = "DOC_DELETE_NOT_ALLOWED"
     DOC_DELETE_NOT_ALLOWED_MSG = "只能删除自己上传的文档"
     DOC_STATUS_CONFLICT = "DOC_STATUS_CONFLICT"
-    DOC_STATUS_CONFLICT_MSG = "文档当前状态不允许删除，仅 ready 和 failed 状态的文档可删除"
+    DOC_STATUS_CONFLICT_MSG = (
+        "文档当前状态不允许删除，仅 ready 和 failed 状态的文档可删除"
+    )
 
     # 会话
     SESSION_NOT_FOUND = "SESSION_NOT_FOUND"

@@ -29,7 +29,7 @@ class ChunkRouter:
     def _is_qa_document(text: str) -> bool:
         if not text.strip():
             return False
-        sentences = [s.strip() for s in re.split(r'[。！\n]', text) if s.strip()]
+        sentences = [s.strip() for s in re.split(r"[。！\n]", text) if s.strip()]
         if not sentences:
             return False
         q_count = sum(1 for s in sentences if s.rstrip().endswith(("？", "?")))

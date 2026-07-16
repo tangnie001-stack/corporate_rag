@@ -42,20 +42,29 @@ def test_table_preserving_keeps_table():
 
 def test_chunk_router_qa():
     from src.infra.chunking.validator import ChunkData
+
     text = "问：你好吗？\n答：我很好。\n问：吃了吗？\n答：吃了。"
-    chunks = [ChunkData("a", {"block_type": "text"}, "0"), ChunkData("b", {"block_type": "text"}, "1")]
+    chunks = [
+        ChunkData("a", {"block_type": "text"}, "0"),
+        ChunkData("b", {"block_type": "text"}, "1"),
+    ]
     assert ChunkRouter.detect_strategy(text, chunks) == "qa"
 
 
 def test_chunk_router_table():
     from src.infra.chunking.validator import ChunkData
+
     text = "普通文本。\n| 项目 |\n|--- |\n| 数据 |"
-    chunks = [ChunkData("txt", {"block_type": "text"}, "0"), ChunkData("| 项目 |", {"block_type": "table"}, "1")]
+    chunks = [
+        ChunkData("txt", {"block_type": "text"}, "0"),
+        ChunkData("| 项目 |", {"block_type": "table"}, "1"),
+    ]
     assert ChunkRouter.detect_strategy(text, chunks) == "table_preserving"
 
 
 def test_chunk_router_default():
     from src.infra.chunking.validator import ChunkData
-    text = ("这是一段普通的说明文字。" * 10)
+
+    text = "这是一段普通的说明文字。" * 10
     chunks = [ChunkData(text, {"block_type": "text"}, "0")]
     assert ChunkRouter.detect_strategy(text, chunks) == "parent_child"

@@ -129,9 +129,7 @@ class AppService:
         """
         return await self.db.get_documents(kb_id)
 
-    async def delete_document(
-        self, kb_id: str, doc_id: str, user_id: str
-    ) -> dict:
+    async def delete_document(self, kb_id: str, doc_id: str, user_id: str) -> dict:
         """删除文档：ChromaDB 删向量 → MySQL 标 deleted。
 
         Args:
@@ -170,13 +168,9 @@ class AppService:
 
         # 4. ChromaDB 删向量（不在意结果——document 记录保留可重试）
         try:
-            await asyncio.to_thread(
-                self.vector_store.delete_document, kb_id, doc_id
-            )
+            await asyncio.to_thread(self.vector_store.delete_document, kb_id, doc_id)
         except Exception:
-            logger.warning(
-                "ChromaDB delete failed for doc_id={}, will retry", doc_id
-            )
+            logger.warning("ChromaDB delete failed for doc_id={}, will retry", doc_id)
 
         # 5. MySQL 标 deleted
         deleted = await self.db.soft_delete_document(doc_id)
@@ -269,7 +263,7 @@ class AppService:
         except Exception as e:
             # 解析或入库过程中发生异常，记录失败状态
             error_msg = str(e)
-            logger.error("Document processing failed: {} - {}", filename, error_msg)
+            logger.exception("Document processing failed: {} - {}", filename, error_msg)
             try:
                 self.db.update_document_status(doc_id, "failed", error_msg=error_msg)
             except Exception:

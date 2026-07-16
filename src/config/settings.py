@@ -33,7 +33,9 @@ DASHSCOPE_BASE_URL: str = os.getenv(
 # 大语言模型：用于生成最终回答，qwen-max 效果最佳
 LLM_MODEL: str = os.getenv("LLM_MODEL", "qwen3.6-plus")
 # 向量化模型：将文本转为向量，用于 ChromaDB 语义检索
-EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "text-embedding-v1")
+EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "text-embedding-v4")
+# 向量输出维度：固定维度后切换模型无需重建 ChromaDB collection
+EMBEDDING_DIMENSION: int = int(os.getenv("EMBEDDING_DIMENSION", "1024"))
 # 重排序模型：对检索结果二次打分排序，提高最终送入 LLM 的上下文质量
 RERANK_MODEL: str = os.getenv("RERANK_MODEL", "gte-rerank-v1")
 # LLM 温度参数：越低回答越确定性（适合金融场景），0.1 几乎不产生随机性
@@ -113,7 +115,7 @@ RETRY_BACKOFF_FACTOR: float = float(os.getenv("RETRY_BACKOFF_FACTOR", "2.0"))
 
 # ====== 文件上传 ======
 # 单文件上传大小上限（字节），默认 50MB
-MAX_FILE_SIZE: int = int(os.getenv("MAX_FILE_SIZE", str(50 * 1024 * 1024)))
+MAX_FILE_SIZE: int = int(os.getenv("MAX_FILE_SIZE", str(10 * 1024 * 1024)))
 
 # ====== MinIO ======
 # 对象存储服务，用于持久化原始文档文件
@@ -143,4 +145,4 @@ LANGFUSE_ENABLE: bool = os.getenv("LANGFUSE_ENABLE", "true").lower() == "true"
 # ====== 分块质量评估 ======
 # 分块质量评估开关：true 时上传文件后自动跑 3 个质量指标
 # 默认关闭，不影响现有流程
-CHUNK_EVAL_ENABLED: bool = os.getenv("CHUNK_EVAL_ENABLED", "false").lower() == "true"
+CHUNK_EVAL_ENABLED: bool = os.getenv("CHUNK_EVAL_ENABLED", "true").lower() == "true"

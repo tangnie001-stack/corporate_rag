@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>父块分组预览</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'IBM Plex Sans', system-ui, sans-serif; }
+        .chunk-card {
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            overflow: hidden;
+            transition: box-shadow 0.2s ease, border-color 0.2s ease;
+            background: #ffffff;
+        }
+        .chunk-card:hover {
+            border-color: #cbd5e1;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+        .chunk-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 14px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        .parent-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 2px 10px 2px 8px;
+            border-radius: 9999px;
+            font-size: 0.65rem;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+        }
+        .parent-indicator::before {
+            content: '';
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .group-a .parent-indicator { background: #eff6ff; color: #1d4ed8; }
+        .group-a .parent-indicator::before { background: #3b82f6; }
+        .group-a .chunk-card-header { background: #f8faff; }
+        .group-b .parent-indicator { background: #f0fdf4; color: #15803d; }
+        .group-b .parent-indicator::before { background: #22c55e; }
+        .group-b .chunk-card-header { background: #f8fef8; }
+        .group-c .parent-indicator { background: #fefce8; color: #a16207; }
+        .group-c .parent-indicator::before { background: #eab308; }
+        .group-c .chunk-card-header { background: #fefce8; }
+
+        .group-connector {
+            position: relative;
+        }
+        .group-connector::before {
+            content: '';
+            position: absolute;
+            left: -8px;
+            top: 0;
+            bottom: 0;
+            width: 3px;
+            border-radius: 2px;
+        }
+        .group-a.group-connector::before { background: #3b82f6; }
+        .group-b.group-connector::before { background: #22c55e; }
+        .group-c.group-connector::before { background: #eab308; }
+
+        /* 分组之间的分隔 */
+        .group-spacer {
+            height: 2px;
+            margin: 0 14px;
+            border-radius: 1px;
+        }
+        .group-spacer.group-a { background: linear-gradient(90deg, #3b82f6 30%, transparent); }
+        .group-spacer.group-b { background: linear-gradient(90deg, #22c55e 30%, transparent); }
+        .group-spacer.group-c { background: linear-gradient(90deg, #eab308 30%, transparent); }
+
+        .chunk-card-body pre {
+            font-size: 0.75rem;
+            line-height: 1.5;
+            color: #475569;
+            white-space: pre-wrap;
+            max-height: 80px;
+            overflow-y: auto;
+            background: #fafbfc;
+            border: 1px solid #f1f5f9;
+            border-radius: 6px;
+            padding: 8px 10px;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen font-sans p-8">
+
+    <div class="max-w-3xl mx-auto">
+
+        <h2 class="text-base font-bold text-slate-900 mb-1">chunk 预览（父块分组展示）</h2>
+        <p class="text-xs text-slate-500 mb-6">同一父块的 chunk 显示相同颜色标签和左侧连接线</p>
+
+        <!-- ====== Group A ====== -->
+        <div class="chunk-card group-a group-connector mb-1" style="border-bottom-left-radius:0;border-bottom-right-radius:0">
+            <div class="chunk-card-header">
+                <span style="display:flex;align-items:center;gap:8px;">
+                    <span style="font-size:0.7rem;font-weight:600;color:#64748b;letter-spacing:0.02em">分块 0</span>
+                    <span class="parent-indicator">父块 A</span>
+                </span>
+                <span style="display:flex;align-items:center;gap:10px;font-size:0.65rem;color:#94a3b8;font-weight:500">
+                    <span>第 5 页</span>
+                    <span>132 字符</span>
+                    <span>67 tokens</span>
+                </span>
+            </div>
+            <div class="chunk-card-body">
+                <pre>证券代码：600718
+证券简称：东软集团
+
+东软集团股份有限公司
+2025 年第一季度报告</pre>
+            </div>
+            <details class="border-t border-slate-100">
+                <summary class="px-4 py-2 text-xs text-slate-500 cursor-pointer hover:bg-slate-50 font-medium select-none">查看父段落上下文</summary>
+                <div class="px-4 py-3 bg-slate-50 border-t border-slate-100">
+                    <pre style="font-size:0.7rem;color:#64748b;line-height:1.5;font-family:monospace;white-space:pre-wrap">证券代码：600718
+证券简称：东软集团
+
+东软集团股份有限公司
+2025 年第一季度报告
+
+一、重要提示
+1.1 公司董事会、监事会及董事、监事、高级管理人员保证季度报告内容的真实...</pre>
+                </div>
+            </details>
+        </div>
+
+        <div class="chunk-card group-a group-connector mb-1" style="border-radius:0">
+            <div class="chunk-card-header">
+                <span style="display:flex;align-items:center;gap:8px;">
+                    <span style="font-size:0.7rem;font-weight:600;color:#64748b;letter-spacing:0.02em">分块 1</span>
+                    <span class="parent-indicator">父块 A</span>
+                </span>
+                <span style="display:flex;align-items:center;gap:10px;font-size:0.65rem;color:#94a3b8;font-weight:500">
+                    <span>第 5 页</span>
+                    <span>89 字符</span>
+                    <span>45 tokens</span>
+                </span>
+            </div>
+            <div class="chunk-card-body">
+                <pre>一、重要提示
+1.1 公司董事会、监事会及董事、监事、高级管理人员保证季度报告内容的真实...</pre>
+            </div>
+            <details class="border-t border-slate-100">
+                <summary class="px-4 py-2 text-xs text-slate-500 cursor-pointer hover:bg-slate-50 font-medium select-none">查看父段落上下文</summary>
+                <div class="px-4 py-3 bg-slate-50 border-t border-slate-100">
+                    <pre style="font-size:0.7rem;color:#64748b;line-height:1.5;font-family:monospace;white-space:pre-wrap">证券代码：600718
+证券简称：东软集团
+
+东软集团股份有限公司
+2025 年第一季度报告
+
+一、重要提示
+1.1 公司董事会、监事会及董事、监事、高级管理人员保证季度报告内容的真实...</pre>
+                </div>
+            </details>
+        </div>
+
+        <div class="chunk-card group-a group-connector mb-4" style="border-top-left-radius:0;border-top-right-radius:0">
+            <div class="chunk-card-header">
+                <span style="display:flex;align-items:center;gap:8px;">
+                    <span style="font-size:0.7rem;font-weight:600;color:#64748b;letter-spacing:0.02em">分块 2</span>
+                    <span class="parent-indicator">父块 A</span>
+                </span>
+                <span style="display:flex;align-items:center;gap:10px;font-size:0.65rem;color:#94a3b8;font-weight:500">
+                    <span>第 5 页</span>
+                    <span>47 字符</span>
+                    <span>24 tokens</span>
+                </span>
+            </div>
+            <div class="chunk-card-body">
+                <pre>（一）主要会计数据和财务指标</pre>
+            </div>
+        </div>
+
+        <!-- ====== Group B ====== -->
+        <div class="chunk-card group-b group-connector mb-1" style="border-bottom-left-radius:0;border-bottom-right-radius:0">
+            <div class="chunk-card-header">
+                <span style="display:flex;align-items:center;gap:8px;">
+                    <span style="font-size:0.7rem;font-weight:600;color:#64748b;letter-spacing:0.02em">分块 3</span>
+                    <span class="parent-indicator">父块 B</span>
+                </span>
+                <span style="display:flex;align-items:center;gap:10px;font-size:0.65rem;color:#94a3b8;font-weight:500">
+                    <span>第 6 页</span>
+                    <span>892 字符</span>
+                    <span>446 tokens</span>
+                </span>
+            </div>
+            <div class="chunk-card-body">
+                <pre>| 项目 | 本报告期 | 上年同期 | 本报告期比上年同 期增减变动幅度(%) |
+| --- | --- | --- | --- |
+| 营业收入 | 1,800,000,000 | 1,500,000,000 | 20.00% |
+| 归属于上市公司股东的净利润 | 150,000,000 | 120,000,000 | 25.00% |</pre>
+            </div>
+            <details class="border-t border-slate-100">
+                <summary class="px-4 py-2 text-xs text-slate-500 cursor-pointer hover:bg-slate-50 font-medium select-none">查看父段落上下文</summary>
+                <div class="px-4 py-3 bg-slate-50 border-t border-slate-100">
+                    <pre style="font-size:0.7rem;color:#64748b;line-height:1.5;font-family:monospace;white-space:pre-wrap">四、季度财务报表
+4.1 合并资产负债表
+| 项目 | 本报告期 | 上年同期 | 本报告期比上年同 期增减变动幅度(%) |
+| --- | --- | --- | --- |
+| 营业收入 | 1,800,000,000 | 1,500,000,000 | 20.00% |
+| 归属于上市公司股东的净利润 | 150,000,000 | 120,000,000 | 25.00% |
+| 经营活动产生的现金流量净额 | -200,000,000 | -150,000,000 | -33.33% |</pre>
+                </div>
+            </details>
+        </div>
+
+        <div class="chunk-card group-b group-connector mb-4" style="border-top-left-radius:0;border-top-right-radius:0">
+            <div class="chunk-card-header">
+                <span style="display:flex;align-items:center;gap:8px;">
+                    <span style="font-size:0.7rem;font-weight:600;color:#64748b;letter-spacing:0.02em">分块 4</span>
+                    <span class="parent-indicator">父块 B</span>
+                </span>
+                <span style="display:flex;align-items:center;gap:10px;font-size:0.65rem;color:#94a3b8;font-weight:500">
+                    <span>第 6 页</span>
+                    <span>672 字符</span>
+                    <span>336 tokens</span>
+                </span>
+            </div>
+            <div class="chunk-card-body">
+                <pre>| 经营活动产生的现金流量净额 | -200,000,000 | -150,000,000 | -33.33% |
+| 投资活动产生的现金流量净额 | -500,000,000 | -400,000,000 | -25.00% |</pre>
+            </div>
+        </div>
+
+        <!-- ====== Group C ====== -->
+        <div class="chunk-card group-c group-connector mb-1" style="border-bottom-left-radius:0;border-bottom-right-radius:0">
+            <div class="chunk-card-header">
+                <span style="display:flex;align-items:center;gap:8px;">
+                    <span style="font-size:0.7rem;font-weight:600;color:#64748b;letter-spacing:0.02em">分块 5</span>
+                    <span class="parent-indicator">父块 C</span>
+                </span>
+                <span style="display:flex;align-items:center;gap:10px;font-size:0.65rem;color:#94a3b8;font-weight:500">
+                    <span>第 8 页</span>
+                    <span>54 字符</span>
+                    <span>27 tokens</span>
+                </span>
+            </div>
+            <div class="chunk-card-body">
+                <pre>公司负责人：刘积仁
+主管会计工作负责人：张晓鸥</pre>
+            </div>
+        </div>
+
+        <div class="chunk-card group-c group-connector" style="border-top-left-radius:0;border-top-right-radius:0">
+            <div class="chunk-card-header">
+                <span style="display:flex;align-items:center;gap:8px;">
+                    <span style="font-size:0.7rem;font-weight:600;color:#64748b;letter-spacing:0.02em">分块 6</span>
+                    <span class="parent-indicator">父块 C</span>
+                </span>
+                <span style="display:flex;align-items:center;gap:10px;font-size:0.65rem;color:#94a3b8;font-weight:500">
+                    <span>第 8 页</span>
+                    <span>38 字符</span>
+                    <span>19 tokens</span>
+                </span>
+            </div>
+            <div class="chunk-card-body">
+                <pre>会计机构负责人：闫伟超</pre>
+            </div>
+        </div>
+
+        <div class="mt-8 p-4 bg-white rounded-xl border border-slate-200 shadow-sm">
+            <h3 class="text-sm font-semibold text-slate-900 mb-2">实现方案</h3>
+            <ul class="text-xs text-slate-600 space-y-1.5 list-disc pl-4">
+                <li>纯前端改动，不改后端 API</li>
+                <li>遍历 chunks，比较相邻 chunk 的 <code class="text-blue-600 bg-blue-50 px-1 rounded">parent_content</code>，相同的归为一组</li>
+                <li>每组分配一个颜色标签（蓝/绿/黄轮换），显示"父块 A/B/C"</li>
+                <li>同组间卡片头尾相连（取消圆角），左侧加色条连接线</li>
+                <li>同组用统一浅色背景，方便视觉区分</li>
+            </ul>
+        </div>
+
+    </div>
+
+</body>
+</html>

@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS knowledge_base (
     user_id     VARCHAR(36)  NOT NULL DEFAULT '',
     name        VARCHAR(255) NOT NULL,
     description TEXT,
+    status      VARCHAR(20)  NOT NULL DEFAULT 'active',
     created_at  DATETIME     DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uk_user_kb (user_id, name)
@@ -130,7 +131,7 @@ INSERT INTO knowledge_base (id, user_id, name, description) VALUES (%s, %s, %s, 
 # 被 get_kb_by_name() 和 get_or_create_kb()（回退路径）调用。
 # 返回 None 表示该名称不存在。
 SELECT_KNOWLEDGE_BASE_ID_BY_NAME: str = """\
-SELECT id FROM knowledge_base WHERE user_id = %s AND name = %s
+SELECT id FROM knowledge_base WHERE user_id = %s AND name = %s AND status != 'deleted'
 """
 
 # 列出某用户的所有知识库（最近创建的在前）。参数：[user_id]。
@@ -138,7 +139,7 @@ SELECT_ALL_KNOWLEDGE_BASES: str = """\
 SELECT k.id, k.user_id, k.name, COUNT(d.id) AS doc_count
 FROM knowledge_base k
 LEFT JOIN document d ON d.kb_id = k.id AND d.status != 'deleted'
-WHERE k.user_id = %s
+WHERE k.user_id = %s AND k.status != 'deleted'
 GROUP BY k.id, k.user_id, k.name
 ORDER BY k.created_at DESC
 """
@@ -147,6 +148,11 @@ ORDER BY k.created_at DESC
 # 通过 ON DELETE CASCADE 自动清除该库下所有文档和对话历史。
 DELETE_KNOWLEDGE_BASE_BY_ID: str = """\
 DELETE FROM knowledge_base WHERE id = %s
+"""
+
+# 软删除知识库（标记为 deleted）。参数：[kb_id]。
+SOFT_DELETE_KNOWLEDGE_BASE_BY_ID: str = """\
+UPDATE knowledge_base SET status = 'deleted' WHERE id = %s AND status != 'deleted'
 """
 
 # ====== 文档 CRUD ======
@@ -182,6 +188,11 @@ FROM document WHERE kb_id = %s AND status != 'deleted' ORDER BY created_at DESC
 # 软删除文档（将 status 标记为 deleted）。参数：[doc_id]。
 SOFT_DELETE_DOCUMENT_BY_ID: str = """\
 UPDATE document SET status = 'deleted' WHERE id = %s AND status != 'deleted'
+"""
+
+# 按知识库批量软删除文档（将 status 标记为 deleted）。参数：[kb_id]。
+SOFT_DELETE_DOCUMENTS_BY_KB_ID: str = """\
+UPDATE document SET status = 'deleted' WHERE kb_id = %s AND status != 'deleted'
 """
 
 # ====== 分块评估结果 ======

@@ -224,7 +224,7 @@ class ChatManager:
             conn.close()
             return [json.loads(m) for m in raw]
         except Exception as e:
-            logger.error("ChatManager: Redis get_history failed: {}", e)
+            logger.warning("ChatManager: Redis get_history failed: {}", e)
             return []
 
     def add_message(
@@ -279,7 +279,7 @@ class ChatManager:
             conn.expire(key, self.ttl)
             conn.close()
         except Exception as e:
-            logger.error("ChatManager: Redis add_message failed: {}", e)
+            logger.warning("ChatManager: Redis add_message failed: {}", e)
 
     def get_window(
         self,
@@ -349,7 +349,7 @@ class ChatManager:
             await self._redis.rpush(key, json.dumps(msg, ensure_ascii=False))
             await self._redis.expire(key, self.ttl)
         except Exception as e:
-            logger.error("add_message_async failed: {}", e)
+            logger.warning("add_message_async failed: {}", e)
 
     async def get_history_async(self, session_id: str) -> list[dict]:
         """异步获取指定会话的完整对话历史。
@@ -368,7 +368,7 @@ class ChatManager:
             raw = await self._redis.lrange(key, 0, -1)
             return [json.loads(m) for m in raw]
         except Exception as e:
-            logger.error("get_history_async failed: {}", e)
+            logger.warning("get_history_async failed: {}", e)
             return []
 
     async def clear_history_async(self, session_id: str) -> None:
@@ -385,7 +385,7 @@ class ChatManager:
         try:
             await self._redis.delete(key)
         except Exception as e:
-            logger.error("clear_history_async failed: {}", e)
+            logger.warning("clear_history_async failed: {}", e)
 
     def clear_history(self, session_id: str) -> None:
         """清空指定会话的所有对话历史。
@@ -407,4 +407,4 @@ class ChatManager:
             conn.delete(key)
             conn.close()
         except Exception as e:
-            logger.error("ChatManager: Redis clear_history failed: {}", e)
+            logger.warning("ChatManager: Redis clear_history failed: {}", e)

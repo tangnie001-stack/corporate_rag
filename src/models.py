@@ -22,6 +22,7 @@ from langchain_community.document_compressors.dashscope_rerank import DashScopeR
 from src.config import (
     DASHSCOPE_API_KEY,
     DASHSCOPE_BASE_URL,
+    EMBEDDING_DIMENSION,
     LLM_MODEL,
     EMBEDDING_MODEL,
     RERANK_MODEL,
@@ -68,7 +69,9 @@ def with_retry(
     # 当使用 @with_retry(max_attempts=5) 带参形式时，func 为 None
     # 返回一个 lambda，让 Python 再次调用 with_retry 并传入真正的 func
     if func is None:
-        return lambda f: with_retry(f, max_attempts, initial_interval, backoff, retryable_exceptions)
+        return lambda f: with_retry(
+            f, max_attempts, initial_interval, backoff, retryable_exceptions
+        )
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
@@ -100,18 +103,59 @@ def with_retry(
     return wrapper
 
 
-def get_embeddings(model: str = EMBEDDING_MODEL) -> DashScopeEmbeddings:
-    """创建 DashScope 文本向量化模型实例。
+class FixedDimDashScopeEmbeddings(DashScopeEmbeddings):
+    """始终以固定维度调用 DashScope Embedding API。
 
-    将文本转换为高维向量，供 ChromaDB 进行语义相似度检索。
+    确保无论使用哪个模型版本（text-embedding-v3/v4），输出的向量维度一致，
+    切换模型时无需重建 ChromaDB collection。
+    """
+
+    EMBEDDING_DIMENSION: int = EMBEDDING_DIMENSION
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        """将文本列表转为固定维度的向量。
+
+        Args:
+            texts: 待编码的文本列表
+
+        Returns:
+            固定维度的向量列表
+        """
+        from langchain_community.embeddings.dashscope import embed_with_retry
+
+        embeddings = embed_with_retry(
+            self,
+            input=texts,
+            text_type="document",
+            model=self.model,
+            dimensions=self.EMBEDDING_DIMENSION,
+        )
+        return [item["embedding"] for item in embeddings]
+
+    def embed_query(self, text: str) -> list[float]:
+        """将单条文本转为固定维度的向量。
+
+        Args:
+            text: 待编码的文本
+
+        Returns:
+            固定维度的向量
+        """
+        return self.embed_documents([text])[0]
+
+
+def get_embeddings(model: str = EMBEDDING_MODEL) -> FixedDimDashScopeEmbeddings:
+    """创建固定维度的 DashScope 文本向量化模型实例。
+
+    始终输出 1024 维向量，切换 embedding 模型时无需重建 ChromaDB collection。
 
     Args:
-        model: 模型名称，默认 text-embedding-v3
+        model: 模型名称，默认 text-embedding-v4
 
     Returns:
-        DashScopeEmbeddings 实例，可直接用于 LangChain 的 embedding 接口
+        FixedDimDashScopeEmbeddings 实例，可直接用于 LangChain 的 embedding 接口
     """
-    return DashScopeEmbeddings(
+    return FixedDimDashScopeEmbeddings(
         model=model,
         dashscope_api_key=DASHSCOPE_API_KEY,
     )

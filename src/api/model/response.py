@@ -122,6 +122,7 @@ class ChunkItem(BaseModel):
     char_count: int  # 字符数
     block_type: str = "text"  # 块类型（text / table / list）
     parent_content: str | None = None  # 父级块内容
+    parent_key: str | None = None  # 父块去重键，用于关联 parent_map
 
     @field_validator("page", "tokens", mode="before")
     @classmethod
@@ -143,12 +144,19 @@ class ChunksResponse(BaseModel):
     total: int  # 总条数
     page: int  # 当前页码
     page_size: int  # 每页条数
+    parent_map: dict[str, str] = {}  # 父块内容映射（parent_key → 全文）
 
 
 class DocumentDeleteResponse(BaseModel):
     """文档删除响应。"""
 
     success: bool  # 是否删除成功
+
+
+class AppConfigResponse(BaseModel):
+    """前端配置响应。"""
+
+    max_upload_size: int  # 单文件上传上限（字节）
 
 
 class SessionItem(BaseModel):

@@ -40,7 +40,11 @@ async def auth_middleware(
         token = request.cookies.get("token")
         if not token:
             return JSONResponse(
-                {"code": Code.AUTH_REQUIRED, "message": Code.AUTH_REQUIRED_MSG, "data": None},
+                {
+                    "code": Code.AUTH_REQUIRED,
+                    "message": Code.AUTH_REQUIRED_MSG,
+                    "data": None,
+                },
                 status_code=401,
             )
         uid = await UserAuth.get_user_id_from_token_async(
@@ -48,7 +52,11 @@ async def auth_middleware(
         )
         if not uid:
             return JSONResponse(
-                {"code": Code.AUTH_TOKEN_EXPIRED, "message": Code.AUTH_TOKEN_EXPIRED_MSG, "data": None},
+                {
+                    "code": Code.AUTH_TOKEN_EXPIRED,
+                    "message": Code.AUTH_TOKEN_EXPIRED_MSG,
+                    "data": None,
+                },
                 status_code=401,
             )
         request.state.user_id = uid
@@ -73,9 +81,7 @@ async def auth_middleware(
         current_user_id.set(uid)
         resp: Response = await call_next(request)
         if not request.cookies.get("user_id"):
-            resp.set_cookie(
-                "user_id", uid, max_age=31536000, path="/", samesite="lax"
-            )
+            resp.set_cookie("user_id", uid, max_age=31536000, path="/", samesite="lax")
         return resp
 
     return await call_next(request)

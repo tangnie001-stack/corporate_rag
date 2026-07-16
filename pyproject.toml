@@ -31,7 +31,7 @@ dependencies = [
     "pymysql==1.2.0",
     "aiomysql>=0.2.0,<1.0.0",
     "redis==8.0.0",
-    "dashscope==1.25.21",
+    "dashscope>=1.26.3",
     "rank_bm25>=0.2.2",
     "jieba>=0.42.1",
     "minio>=7.2.0,<8.0.0",

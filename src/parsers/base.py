@@ -64,6 +64,22 @@ class BaseParser(ABC):
     目前有三个子类：TxtParser、DocxParser、PyMuPDFParser。
     """
 
+    @staticmethod
+    def sanitize_cell(value: str | None) -> str:
+        """将表格单元格值转为 Markdown 安全的单行字符串。以后任何 parser 要生成 Markdown 表格，都调用 self.sanitize_cell()
+
+        清理规则：
+          - None → 空字符串
+          - 内部换行符 → 空格（保持 Markdown |...| 行结构完整）
+
+        Args:
+            value: 单元格原始值
+
+        Returns:
+            清理后的字符串
+        """
+        return str(value or "").strip().replace("\n", " ")
+
     @abstractmethod
     def parse(self, file_path: str) -> ParseResult:
         """解析文档文件，返回结构化的 ParseResult。

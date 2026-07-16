@@ -19,7 +19,7 @@ import chromadb
 from chromadb.config import Settings
 from chromadb.errors import NotFoundError
 from chromadb.api.types import Documents, Embeddings, EmbeddingFunction
-from langchain_community.embeddings import DashScopeEmbeddings
+from src.models import FixedDimDashScopeEmbeddings
 from loguru import logger
 
 from src.core.logging import LOG_MAX_BODY
@@ -48,10 +48,10 @@ class DashScopeEmbeddingFunction(EmbeddingFunction):
             model: Embedding 模型名称（如 text-embedding-v3）
             api_key: DashScope API Key
         """
-        self._embedding = DashScopeEmbeddings(model=model, dashscope_api_key=api_key)
+        self._embedding = FixedDimDashScopeEmbeddings(model=model, dashscope_api_key=api_key)
 
     def __call__(self, input: Documents) -> Embeddings:
-        """将文档列表转为向量嵌入。
+        """将文档列表转为向量嵌入（入库用，text_type=document）。
 
         Args:
             input: 待编码的文档文本列表
@@ -60,6 +60,17 @@ class DashScopeEmbeddingFunction(EmbeddingFunction):
             向量嵌入列表，每个文档对应一个向量
         """
         return self._embedding.embed_documents(list(input))
+
+    def embed_query(self, text: str) -> list[float]:
+        """将单条查询文本转为向量（检索用，text_type=query）。
+
+        Args:
+            text: 用户查询文本
+
+        Returns:
+            查询向量
+        """
+        return self._embedding.embed_query(text)
 
 
 class VectorStore:
@@ -212,11 +223,24 @@ class VectorStore:
             metadatas.append(meta)
 
         # 批量写入：ChromaDB 自动计算 embedding 并持久化
-        collection.add(
-            ids=ids,
-            documents=documents,
-            metadatas=metadatas,
-        )
+        try:
+            collection.add(
+                ids=ids,
+                documents=documents,
+                metadatas=metadatas,
+            )
+        except Exception as e:
+            logger.error(
+                "ChromaDB add_chunks failed: kb_id={} doc_id={} chunks={} "
+                "first_content_preview={} error={}",
+                kb_id,
+                doc_id,
+                len(chunks),
+                chunks[0].content[:100] if chunks else "",
+                e,
+                exc_info=True,
+            )
+            raise
         logger.info(
             "ChromaDB add_chunks: kb_id={} doc_id={} count={}",
             kb_id,
@@ -246,9 +270,10 @@ class VectorStore:
             }
         """
         collection = self.get_or_create_collection(kb_id)
-        # ChromaDB 内部调用 embedding 函数将 query 转为向量后执行 ANN 检索
+        # 预先算 query embedding（text_type=query），传向量而非文本给 ChromaDB
+        query_vec = self._embed_fn.embed_query(query)
         results = collection.query(
-            query_texts=[query],
+            query_embeddings=[query_vec],
             n_results=min(k, 100),
         )
 

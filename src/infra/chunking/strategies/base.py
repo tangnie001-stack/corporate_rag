@@ -9,8 +9,7 @@ class BaseChunker(ABC):
     chunk_strategy: str = ""
 
     @abstractmethod
-    def chunk(self, text: str, metadata: dict) -> list[dict]:
-        ...
+    def chunk(self, text: str, metadata: dict) -> list[dict]: ...
 
     @staticmethod
     def count_tokens(text: str) -> int:

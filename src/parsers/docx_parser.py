@@ -24,7 +24,7 @@ from src.parsers.base import BaseParser, ChunkData, ParseResult
 from src.config import CHUNK_SIZE, CHUNK_OVERLAP
 
 # 匹配 Markdown 表格（以 | 开头和结尾的行组成的多行表格）
-TABLE_PATTERN = re.compile(r'^\|.+\|[\s\S]*?^\|.+\|', re.MULTILINE)
+TABLE_PATTERN = re.compile(r"^\|.+\|[\s\S]*?^\|.+\|", re.MULTILINE)
 
 
 class DocxParser(BaseParser):
@@ -114,7 +114,7 @@ class DocxParser(BaseParser):
         """
         rows = []
         for row in table.rows:
-            cells = [cell.text.strip() for cell in row.cells]
+            cells = [self.sanitize_cell(cell.text) for cell in row.cells]
             rows.append(cells)
         if not rows:
             return ""

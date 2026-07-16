@@ -25,7 +25,7 @@ from src.infra.db.mysql_db import MySQLDB
 from src.infra.db.vector_store import VectorStore
 from src.config import TOP_K_RERANK
 
-setup_logging(write_to_file=False)
+setup_logging()
 
 
 def main() -> None:
@@ -58,7 +58,7 @@ def main() -> None:
     try:
         results = store.similarity_search(kb_id, args.query, k=args.top_k)
     except Exception as e:
-        logger.error("Search failed: {}", e)
+        logger.exception("Search failed: {}", e)
         print("Hint: Ensure DASHSCOPE_API_KEY is set and documents have been added.")
         sys.exit(1)
 

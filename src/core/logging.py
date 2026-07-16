@@ -1,6 +1,6 @@
 """统一日志配置 — 集中管理 Loguru sinks 和第三方库日志收编。
 
-支持 API 模式（写文件 + 控制台）和 CLI 模式（仅控制台）。
+全部日志写入文件（INFO 级别按天轮转保留 7 天，ERROR 级别保留 30 天）。
 提供 InterceptHandler 将标准库 logging 路由至 Loguru。
 """
 
@@ -44,6 +44,33 @@ SQL_SKIP_FULL_LOG = {"get_messages"}
 API_SKIP_FULL_LOG = {"/api/sessions/messages"}
 
 
+def log_sql_result(method: str, sql, rows, **extra) -> None:
+    """统一 SQL 返回值日志。
+
+    方法名在 SQL_SKIP_FULL_LOG 中时只记录 count + 额外参数，
+    否则记录完整 data。超过 LOG_MAX_BODY 时截断。
+    """
+    count = (
+        len(rows) if isinstance(rows, (list, dict)) else (1 if rows is not None else 0)
+    )
+    if method in SQL_SKIP_FULL_LOG:
+        extra_str = " | ".join(f"{k}={v}" for k, v in extra.items())
+        logger.info("[SQL] method={} | sql={} | rows={} | {}", method, sql, count, extra_str)
+    else:
+        data_str = str(rows)
+        if len(data_str) > LOG_MAX_BODY:
+            data_str = (
+                data_str[:LOG_MAX_BODY]
+                + f"... (truncated, total={len(data_str)} chars)"
+            )
+        try:
+            logger.info("[SQL] method={} | sql={}| rows={} | data={}", method, sql, count, data_str)
+        except Exception:
+            logger.info(
+                "[SQL] method={} | sql={}| rows={} | data=<serialization_error>", method, sql, count
+            )
+
+
 def _setup_trace_id_patcher() -> None:
     """配置 Loguru patcher，自动注入当前请求的 trace_id。
 
@@ -59,46 +86,39 @@ def _setup_trace_id_patcher() -> None:
     logger.configure(extra={"trace_id": ""}, patcher=_patcher)
 
 
-def setup_logging(write_to_file: bool = True, configure_trace_id: bool = False) -> None:
+def setup_logging(configure_trace_id: bool = False) -> None:
     """初始化 Loguru 日志配置。
 
     Args:
-        write_to_file: 是否写入文件（API 模式 True，CLI 模式 False）
-        configure_trace_id: 是否注入 trace_id patcher（API 模式 True，CLI 模式 False）
+        configure_trace_id: 是否注入 trace_id patcher（仅 API 模式需启用）
 
-    API 模式配置：
+    日志文件：
       - app_{date}.log — INFO 级别，按天轮转，保留 7 天，异步写入
       - error_{date}.log — ERROR 级别，按天轮转，保留 30 天，异步写入
-
-    CLI 模式配置：
-      - stderr — INFO 级别，彩色输出（不写文件）
     """
-    # 确保日志目录存在
     os.makedirs(_LOG_DIR, exist_ok=True)
 
     # 移除默认 sink，防止重复
     logger.remove()
 
-    # 文件 sink（仅 API 模式）
-    if write_to_file:
-        logger.add(
-            f"{_LOG_DIR}/app_{{time:YYYY-MM-DD}}.log",
-            format=_LOG_FORMAT,
-            rotation="1 day",
-            retention="7 days",
-            level="INFO",
-            encoding="utf-8",
-            enqueue=True,
-        )
-        logger.add(
-            f"{_LOG_DIR}/error_{{time:YYYY-MM-DD}}.log",
-            format=_LOG_FORMAT,
-            rotation="1 day",
-            retention="30 days",
-            level="ERROR",
-            encoding="utf-8",
-            enqueue=True,
-        )
+    logger.add(
+        f"{_LOG_DIR}/app_{{time:YYYY-MM-DD}}.log",
+        format=_LOG_FORMAT,
+        rotation="1 day",
+        retention="7 days",
+        level="INFO",
+        encoding="utf-8",
+        enqueue=True,
+    )
+    logger.add(
+        f"{_LOG_DIR}/error_{{time:YYYY-MM-DD}}.log",
+        format=_LOG_FORMAT,
+        rotation="1 day",
+        retention="30 days",
+        level="ERROR",
+        encoding="utf-8",
+        enqueue=True,
+    )
 
     # 收编标准库日志到 Loguru
     logging.basicConfig(handlers=[InterceptHandler()], level=logging.INFO)

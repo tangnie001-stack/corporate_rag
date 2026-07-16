@@ -127,10 +127,24 @@ def _check_structure_integrity(chunks: list[dict]) -> dict:
     for table in tables:
         chunk_indices = set(row["chunk_index"] for row in table)
         if len(chunk_indices) > 1:
+            sorted_indices = sorted(chunk_indices)
+            pages = []
+            for ci in sorted_indices:
+                p = chunks[ci].get("metadata", {}).get("page")
+                pages.append(p if p is not None else "?")
+
+            # 统计各 chunk 中的行数
+            rows_per_chunk = {}
+            for row in table:
+                rows_per_chunk.setdefault(row["chunk_index"], []).append(row)
+            break_parts = [f"chunk {ci}: {len(rows_per_chunk[ci])} 行" for ci in sorted_indices]
+
             broken_tables.append(
                 {
                     "index": len(broken_tables),
-                    "chunks": sorted(chunk_indices),
+                    "chunks": sorted_indices,
+                    "pages": list(dict.fromkeys(pages)),
+                    "break_position": " / ".join(break_parts),
                     "preview": table[0]["text"][:50],
                 }
             )
@@ -160,6 +174,7 @@ def _check_structure_integrity(chunks: list[dict]) -> dict:
                     {
                         "index": len(broken_headings),
                         "text": all_lines[idx][:50],
+                        "page": chunks[ci].get("metadata", {}).get("page"),
                     }
                 )
 
@@ -181,6 +196,7 @@ def _check_structure_integrity(chunks: list[dict]) -> dict:
                     {
                         "index": len(broken_clauses),
                         "text": all_lines[idx][:50],
+                        "page": chunks[ci].get("metadata", {}).get("page"),
                     }
                 )
 
@@ -233,15 +249,20 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return float(np.dot(a_np, b_np) / (norm_a * norm_b))
 
 
-def _calc_sbr(embeddings: list[list[float]], threshold: float = 0.35) -> dict:
+def _calc_sbr(embeddings: list[list[float]], threshold: float = 0.35,
+              block_types: list[str] | None = None) -> dict:
     """计算语义断裂率（SBR）。
 
     比较相邻分块的 embedding 向量余弦相似度，
     低于 threshold 的视为语义断裂。
 
+    跨类型边界（如 table↔text）跳过不计入评分，
+    因为表格和文本的 embedding 天然差异大，不代表分块质量有问题。
+
     Args:
         embeddings: 每个分块的 embedding 向量列表
         threshold: 余弦相似度阈值，低于此值视为断裂
+        block_types: 每个分块的 block_type 列表，用于跳过跨类型边界
 
     Returns:
         dict: 包含 score, total_boundaries, broken_boundaries
@@ -249,17 +270,18 @@ def _calc_sbr(embeddings: list[list[float]], threshold: float = 0.35) -> dict:
     if len(embeddings) < 2:
         return {"score": 1.0, "total_boundaries": 0, "broken_boundaries": []}
 
-    similarities = []
-    for i in range(len(embeddings) - 1):
-        sim = _cosine_similarity(embeddings[i], embeddings[i + 1])
-        similarities.append(sim)
-
     broken = []
-    for i, sim in enumerate(similarities):
+    total = 0
+    for i in range(len(embeddings) - 1):
+        # 跳过跨类型边界（如 table↔text），这种差异是内容切换而非分块断裂
+        if block_types and block_types[i] and block_types[i + 1] \
+                and block_types[i] != block_types[i + 1]:
+            continue
+        sim = _cosine_similarity(embeddings[i], embeddings[i + 1])
+        total += 1
         if sim < threshold:
             broken.append({"index": i, "similarity": round(sim, 4)})
 
-    total = len(similarities)
     score = 1.0 - (len(broken) / total) if total > 0 else 1.0
     return {
         "score": round(score, 4),
@@ -309,7 +331,7 @@ def _calc_granularity_cv(chunks: list[dict]) -> dict:
         elif t > 2 * mean:
             extreme.append({"index": i, "tokens": t, "type": "oversized"})
 
-    score = 1.0 - min(cv, 1.0)
+    score = 1.0 - min(cv / 2.0, 1.0)
     return {
         "score": round(score, 4),
         "cv": round(cv, 4),
@@ -329,12 +351,13 @@ class ChunkQualityScorer:
 
     SBR_THRESHOLD = 0.35
 
-    def evaluate(self, chunks: list[dict], source: str) -> dict:
+    def evaluate(self, chunks: list[dict], source: str, strategy: str = "") -> dict:
         """运行全部 3 个指标并返回完整评估 JSON。
 
         Args:
             chunks: 分块列表，每个分块包含 "content" 和 "metadata" 键
             source: 源文件名，用于日志
+            strategy: 分块策略（当前未使用，保留兼容）
 
         Returns:
             dict: 包含 version, enabled, overall_score, passed 及各维度结果
@@ -358,9 +381,9 @@ class ChunkQualityScorer:
         scores = []
         weights = []
         metric_weights = {
-            "structure_integrity": 0.40,
-            "sbr": 0.30,
-            "granularity_cv": 0.30,
+            "structure_integrity": 0.45,
+            "sbr": 0.45,
+            "granularity_cv": 0.10,
         }
 
         for key, result in [("structure_integrity", structure), ("sbr", sbr_result), ("granularity_cv", cv_result)]:
@@ -401,11 +424,22 @@ class ChunkQualityScorer:
         embedder = get_embeddings()
         embeddings = embedder.embed_documents(texts)
 
-        result = _calc_sbr(embeddings, self.SBR_THRESHOLD)
+        # 提取 block_types，用于跳过跨类型边界（如 table↔text）。
+        # table 块有 "table"，text 块可能无此字段，统一归一化为 "text"
+        block_types = []
+        for c in chunks:
+            bt = c.get("metadata", {}).get("block_type")
+            block_types.append(bt if bt else "text")
+
+        result = _calc_sbr(embeddings, self.SBR_THRESHOLD, block_types)
         for b in result["broken_boundaries"]:
             idx = b["index"]
             b["preview_before"] = texts[idx][:50]
             b["preview_after"] = texts[idx + 1][:50]
+            meta_before = chunks[idx].get("metadata", {})
+            meta_after = chunks[idx + 1].get("metadata", {})
+            b["page_before"] = meta_before.get("page")
+            b["page_after"] = meta_after.get("page")
 
         return result
 

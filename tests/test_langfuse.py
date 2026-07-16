@@ -14,8 +14,9 @@ from langfuse import Langfuse
 
 def test_init_without_keys():
     """LANGFUSE_SECRET_KEY 为空时，tracer 不初始化。"""
-    with patch("src.config.LANGFUSE_SECRET_KEY", ""), patch(
-        "src.config.LANGFUSE_PUBLIC_KEY", ""
+    with (
+        patch("src.config.LANGFUSE_SECRET_KEY", ""),
+        patch("src.config.LANGFUSE_PUBLIC_KEY", ""),
     ):
         from src.infra.llm.langfuse_tracing import LangfuseTracer
 
@@ -26,8 +27,9 @@ def test_init_without_keys():
 
 def test_init_without_public_key():
     """LANGFUSE_PUBLIC_KEY 为空时，tracer 不初始化。"""
-    with patch("src.config.LANGFUSE_SECRET_KEY", "sk-test"), patch(
-        "src.config.LANGFUSE_PUBLIC_KEY", ""
+    with (
+        patch("src.config.LANGFUSE_SECRET_KEY", "sk-test"),
+        patch("src.config.LANGFUSE_PUBLIC_KEY", ""),
     ):
         from src.infra.llm.langfuse_tracing import LangfuseTracer
 
@@ -37,14 +39,11 @@ def test_init_without_public_key():
 
 def test_init_success():
     """密钥完整时，tracer 创建官方 Langfuse 客户端。"""
-    with patch(
-        "src.infra.llm.langfuse_tracing.Langfuse"
-    ) as MockLangfuse, patch(
-        "src.config.LANGFUSE_SECRET_KEY", "sk-test"
-    ), patch(
-        "src.config.LANGFUSE_PUBLIC_KEY", "pk-test"
-    ), patch(
-        "src.config.LANGFUSE_HOST", "http://localhost:3000"
+    with (
+        patch("src.infra.llm.langfuse_tracing.Langfuse") as MockLangfuse,
+        patch("src.config.LANGFUSE_SECRET_KEY", "sk-test"),
+        patch("src.config.LANGFUSE_PUBLIC_KEY", "pk-test"),
+        patch("src.config.LANGFUSE_HOST", "http://localhost:3000"),
     ):
         from src.infra.llm.langfuse_tracing import LangfuseTracer
 
@@ -64,14 +63,11 @@ def test_init_success():
 
 def test_init_exception():
     """Langfuse 初始化抛出异常时，tracer 静默降级。"""
-    with patch(
-        "src.infra.llm.langfuse_tracing.Langfuse"
-    ) as MockLangfuse, patch(
-        "src.config.LANGFUSE_SECRET_KEY", "sk-test"
-    ), patch(
-        "src.config.LANGFUSE_PUBLIC_KEY", "pk-test"
-    ), patch(
-        "src.config.LANGFUSE_HOST", "http://localhost:3000"
+    with (
+        patch("src.infra.llm.langfuse_tracing.Langfuse") as MockLangfuse,
+        patch("src.config.LANGFUSE_SECRET_KEY", "sk-test"),
+        patch("src.config.LANGFUSE_PUBLIC_KEY", "pk-test"),
+        patch("src.config.LANGFUSE_HOST", "http://localhost:3000"),
     ):
         MockLangfuse.side_effect = Exception("Connection failed")
 

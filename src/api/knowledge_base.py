@@ -42,7 +42,9 @@ async def list_knowledge_bases(request: Request) -> list[KBItem]:
     svc = _get_service()
     user_id = getattr(request.state, "user_id", "")
     kbs = await svc.list_knowledge_bases(user_id)
-    return [KBItem(id=kb["id"], name=kb["name"], doc_count=kb["doc_count"]) for kb in kbs]
+    return [
+        KBItem(id=kb["id"], name=kb["name"], doc_count=kb["doc_count"]) for kb in kbs
+    ]
 
 
 @router.post("/kbs", status_code=201)

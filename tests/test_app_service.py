@@ -123,9 +123,14 @@ class TestAppServiceDeleteDocument:
     async def test_delete_not_owner(self, mock_router, mock_vs, mock_db, mock_rag):
         """非上传者删除应抛 DOC_DELETE_NOT_ALLOWED。"""
         db = MagicMock()
-        db.get_document = AsyncMock(return_value={
-            "id": "d1", "user_id": "owner", "status": "ready", "filename": "t.pdf"
-        })
+        db.get_document = AsyncMock(
+            return_value={
+                "id": "d1",
+                "user_id": "owner",
+                "status": "ready",
+                "filename": "t.pdf",
+            }
+        )
         svc = AppService(mysql_db=db)
         with pytest.raises(ApiError) as exc:
             await svc.delete_document("kb", "d1", "other_user")
@@ -135,12 +140,19 @@ class TestAppServiceDeleteDocument:
     @patch("src.app_service.MySQLDB")
     @patch("src.app_service.VectorStore")
     @patch("src.app_service.DocRouter")
-    async def test_delete_processing_status(self, mock_router, mock_vs, mock_db, mock_rag):
+    async def test_delete_processing_status(
+        self, mock_router, mock_vs, mock_db, mock_rag
+    ):
         """处理中的文档应抛 DOC_STATUS_CONFLICT。"""
         db = MagicMock()
-        db.get_document = AsyncMock(return_value={
-            "id": "d1", "user_id": "user", "status": "processing", "filename": "t.pdf"
-        })
+        db.get_document = AsyncMock(
+            return_value={
+                "id": "d1",
+                "user_id": "user",
+                "status": "processing",
+                "filename": "t.pdf",
+            }
+        )
         svc = AppService(mysql_db=db)
         with pytest.raises(ApiError) as exc:
             await svc.delete_document("kb", "d1", "user")
@@ -153,9 +165,14 @@ class TestAppServiceDeleteDocument:
     async def test_delete_success(self, mock_router, mock_vs, mock_db, mock_rag):
         """正常删除应返回 deleted 状态。"""
         db = MagicMock()
-        db.get_document = AsyncMock(return_value={
-            "id": "d1", "user_id": "user", "status": "ready", "filename": "t.pdf"
-        })
+        db.get_document = AsyncMock(
+            return_value={
+                "id": "d1",
+                "user_id": "user",
+                "status": "ready",
+                "filename": "t.pdf",
+            }
+        )
         db.soft_delete_document = AsyncMock(return_value=True)
         vs = MagicMock()
         svc = AppService(mysql_db=db, vector_store=vs)

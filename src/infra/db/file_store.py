@@ -8,11 +8,14 @@ from src.config import settings
 
 
 class FileStore:
-    def __init__(self, endpoint: str = settings.MINIO_ENDPOINT,
-                 access_key: str = settings.MINIO_ACCESS_KEY,
-                 secret_key: str = settings.MINIO_SECRET_KEY,
-                 bucket: str = settings.MINIO_DOC_BUCKET,
-                 secure: bool = False):
+    def __init__(
+        self,
+        endpoint: str = settings.MINIO_ENDPOINT,
+        access_key: str = settings.MINIO_ACCESS_KEY,
+        secret_key: str = settings.MINIO_SECRET_KEY,
+        bucket: str = settings.MINIO_DOC_BUCKET,
+        secure: bool = False,
+    ):
         self._bucket = bucket
         self._client = Minio(endpoint, access_key, secret_key, secure=secure)
         self._ensure_bucket()
@@ -26,9 +29,13 @@ class FileStore:
     def build_path(user_id: str, kb_id: str, doc_id: str, filename: str) -> str:
         return f"documents/{user_id}/{kb_id}/{doc_id}/{filename}"
 
-    def upload(self, key: str, data: bytes, content_type: str = "application/octet-stream") -> bool:
+    def upload(
+        self, key: str, data: bytes, content_type: str = "application/octet-stream"
+    ) -> bool:
         try:
-            self._client.put_object(self._bucket, key, BytesIO(data), len(data), content_type=content_type)
+            self._client.put_object(
+                self._bucket, key, BytesIO(data), len(data), content_type=content_type
+            )
             return True
         except S3Error as e:
             logger.error("MinIO upload failed: {} - {}", key, e)

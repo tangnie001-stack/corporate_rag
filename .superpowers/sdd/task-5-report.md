@@ -1,13 +1,7 @@
-## Implementer Report: Task 5 — RAG 链日志 + 后台任务
-
-**Status:** DONE
-
-**Changes:**
-- `src/rag_chain.py` — 3 changes:
-  - A) `search()`: 3 return paths refactored to capture results → log → return
-  - B) `rerank()`: capture contexts → log before/after counts → return
-  - C) `_stream_answer()`: added first-token latency timer + log
-- `src/api/routes/documents.py` — added `logger.info("process_task start: ...")` at top of `_process_document_task`
-
-**ruff check:** All checks passed!
-**Concerns:** none
+Status: DONE
+Commits:
+- 1f7b46f feat: integrate ChunkQualityScorer into document upload pipeline
+Verification:
+- ruff: All checks passed!
+- compile: OK (exit 0)
+Concerns: The core integration code (imports, eval block, dedup copy) was already present in HEAD~1 from earlier task sessions. This commit applies formatting/line-length compliance on top of that foundation.

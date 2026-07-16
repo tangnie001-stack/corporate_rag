@@ -168,19 +168,34 @@ class RAGChain:
             bm25_t = asyncio.to_thread(self.bm25.search, kb_id, query, TOP_K_RETRIEVAL)
             d, b = await asyncio.gather(dense_t, bm25_t)
             results = rrf_fusion(d, b)
-            logger.info("RAG search: kb_id={} query_len={} results={}", kb_id, len(query), len(results))
+            logger.info(
+                "RAG search: kb_id={} query_len={} results={}",
+                kb_id,
+                len(query),
+                len(results),
+            )
             return results
 
         if not kb_id:
             results = await asyncio.to_thread(
                 self.vector_store.similarity_search_all, query, k=TOP_K_RETRIEVAL
             )
-            logger.info("RAG search: kb_id={} query_len={} results={}", kb_id, len(query), len(results))
+            logger.info(
+                "RAG search: kb_id={} query_len={} results={}",
+                kb_id,
+                len(query),
+                len(results),
+            )
             return results
         results = await asyncio.to_thread(
             self.vector_store.similarity_search, kb_id, query, k=TOP_K_RETRIEVAL
         )
-        logger.info("RAG search: kb_id={} query_len={} results={}", kb_id, len(query), len(results))
+        logger.info(
+            "RAG search: kb_id={} query_len={} results={}",
+            kb_id,
+            len(query),
+            len(results),
+        )
         return results
 
     def rerank(self, query: str, results: list[dict]) -> list[RAGContext]:
@@ -418,7 +433,7 @@ class RAGChain:
             loop.close()
         except Exception as e:
             error_msg = str(e)
-            logger.error("Vector search failed for kb_id={}: {}", kb_id, error_msg)
+            logger.exception("Vector search failed for kb_id={}: {}", kb_id, error_msg)
             citations = []
 
             def _search_err_gen() -> Generator[str, None, None]:
@@ -469,8 +484,10 @@ class RAGChain:
         # 使用统一重试装饰器调用 Reranker，失败后降级为原始顺序
         try:
             reranked = with_retry(
-                self.reranker.rerank, max_attempts=RETRY_MAX_ATTEMPTS,
-                initial_interval=RETRY_INITIAL_INTERVAL, backoff=RETRY_BACKOFF_FACTOR,
+                self.reranker.rerank,
+                max_attempts=RETRY_MAX_ATTEMPTS,
+                initial_interval=RETRY_INITIAL_INTERVAL,
+                backoff=RETRY_BACKOFF_FACTOR,
             )(query, docs)
         except Exception as e:
             logger.warning(
@@ -636,7 +653,7 @@ class RAGChain:
                         full_output += content
                         yield content
                     # 捕获 DashScope 返回的精确 token 用量
-                    if hasattr(chunk, 'usage_metadata') and chunk.usage_metadata:
+                    if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
                         u = chunk.usage_metadata
                         self.last_token_usage = {
                             "prompt_tokens": u.get("input_tokens", 0),

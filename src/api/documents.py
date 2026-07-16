@@ -30,7 +30,7 @@ from src.api.model.response import (
     DocumentDeleteResponse,
 )
 from src.app_service import AppService
-from src.config import CHUNK_EVAL_ENABLED, MAX_TABLE_TOKENS
+from src.config import CHUNK_EVAL_ENABLED, MAX_FILE_SIZE, MAX_TABLE_TOKENS
 from src.config.response_codes import Code
 from src.eval.chunk_scorer import ChunkQualityScorer
 from src.infra.errors import BusinessError, SystemError
@@ -56,7 +56,6 @@ def _get_service() -> AppService:
     return _service
 
 
-MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 单文件上传上限 10MB
 ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt"}
 
 
@@ -147,12 +146,12 @@ async def upload_document(
         kb_id,
         user_id[:8] + "..." if user_id else "",
     )
-    if len(contents) > MAX_UPLOAD_SIZE:
+    if len(contents) > MAX_FILE_SIZE:
         logger.warning(
             "Upload rejected (too large): filename={} size={} max={}",
             file.filename,
             len(contents),
-            MAX_UPLOAD_SIZE,
+            MAX_FILE_SIZE,
         )
         raise BusinessError(Code.FILE_TOO_LARGE, Code.FILE_TOO_LARGE_MSG, 413)
 
@@ -240,6 +239,31 @@ async def upload_document(
     )
 
 
+def _enrich_chunk_pages(chunks: list[dict], parse_chunks: list, full_text: str) -> None:
+    """从解析器分块反推 chunk 页码。
+
+    Args:
+        chunks: chunker 输出的分块（就地修改 metadata.page）
+        parse_chunks: 解析器输出的 ChunkData 列表（含 metadata.page）
+        full_text: chunker 输入用的完整文本
+    """
+    offset = 0
+    page_map = []
+    for c in parse_chunks:
+        page = c.metadata.get("page", 1)
+        page_map.append((offset, offset + len(c.content), page))
+        offset += len(c.content) + 2
+
+    for chunk in chunks:
+        text = chunk["content"]
+        pos = full_text.find(text)
+        if pos < 0:
+            continue
+        end = pos + len(text)
+        pages = {p for s, e, p in page_map if s < end and e > pos}
+        chunk["metadata"]["page"] = min(pages)
+
+
 async def _process_document_task(
     svc: AppService, kb_id: str, doc_id: str, minio_key: str, filename: str, ext: str
 ) -> None:
@@ -302,6 +326,9 @@ async def _process_document_task(
                 chunker.chunk, full_text, {"source": filename, "doc_id": doc_id}
             )
 
+            # 从解析器分块反补 chunk 页码
+            _enrich_chunk_pages(chunks, parse_result.chunks, full_text)
+
             # 分块质量校验 — CPU，to_thread
             chunk_data_list = [
                 ChunkData(content=c["content"], metadata=c["metadata"]) for c in chunks
@@ -325,7 +352,7 @@ async def _process_document_task(
                 try:
                     scorer = ChunkQualityScorer()
                     eval_result = await asyncio.to_thread(
-                        scorer.evaluate, chunks, filename
+                        scorer.evaluate, chunks, filename, strategy
                     )
                     await svc.db.update_document_meta_info(
                         doc_id, {"eval": eval_result}
@@ -363,7 +390,11 @@ async def _process_document_task(
 
         except Exception as e:
             error_msg = str(e)
-            logger.error("Document processing failed: {} - {}", filename, error_msg)
+            logger.exception(
+                "Document processing failed: {} - {}",
+                filename,
+                error_msg,
+            )
             await svc.db.update_document_status(doc_id, "failed", error_msg=error_msg)
         finally:
             if tmp_path:
@@ -417,7 +448,6 @@ async def get_document_chunks(body: DocumentChunksRequest) -> ChunksResponse:
     items = [
         ChunkItem(
             chunk_id=c["id"],
-            # MAX_TABLE_TOKENS * 2: token 转字符数（中文 1 token ≈ 2 字符）
             content=c["content"][: MAX_TABLE_TOKENS * 2],
             page=c.get("metadata", {}).get("page", 1),
             tokens=c.get("metadata", {}).get("tokens", 0),
@@ -427,11 +457,27 @@ async def get_document_chunks(body: DocumentChunksRequest) -> ChunksResponse:
         )
         for c in result["items"]
     ]
+
+    # 去重 parent_content：相同内容只传一次，其余用 parent_key 引用
+    parent_map = {}
+    parent_keys = {}  # parent_content → parent_key
+    key_counter = 0
+    for item in items:
+        if item.parent_content:
+            if item.parent_content not in parent_keys:
+                key = f"p{key_counter}"
+                key_counter += 1
+                parent_keys[item.parent_content] = key
+                parent_map[key] = item.parent_content
+            item.parent_key = parent_keys[item.parent_content]
+            item.parent_content = None  # 从 items 中移除，只放 parent_map
+
     return ChunksResponse(
         items=items,
         total=result["total"],
         page=result["page"],
         page_size=result["page_size"],
+        parent_map=parent_map,
     )
 
 

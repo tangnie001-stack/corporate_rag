@@ -393,7 +393,7 @@ async def _persist_conversation(
                 return
             except Exception as e:
                 if i < max_retries - 1:
-                    wait = initial_interval * (backoff ** i)
+                    wait = initial_interval * (backoff**i)
                     await asyncio.sleep(wait)
                 else:
                     logger.warning(
