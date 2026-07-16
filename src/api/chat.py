@@ -1,7 +1,6 @@
 """流式聊天 SSE 端点 — 支持分阶段状态推送和引用高亮。"""
 
 import asyncio
-import json
 import os
 from typing import AsyncGenerator
 
@@ -11,6 +10,7 @@ from loguru import logger
 
 import jieba
 
+from src.api.sse_utils import sse_citation, sse_done, sse_error, sse_status, sse_token
 from src.app_service import AppService
 
 router = APIRouter()
@@ -156,102 +156,6 @@ def _get_service() -> AppService:
     if _service is None:
         _service = AppService()
     return _service
-
-
-# ── SSE event helpers ──────────────────────────────────────────────
-
-
-def sse_status(stage: str, message: str, detail: str | None = None) -> str:
-    """构建 SSE status 事件的文本行。
-
-    在流式响应中推送流水线阶段状态，让前端展示进度指示。
-    使用 ensure_ascii=False 保证中文字符不被转义。
-
-    Args:
-        stage: 阶段标识，如 retrieving / reranking / generating
-        message: 向用户展示的阶段描述文本
-        detail: 可选详细说明
-
-    Returns:
-        格式为 "event: status\ndata: {...}\n\n" 的 SSE 文本行
-    """
-    data: dict[str, str] = {"stage": stage, "message": message}
-    if detail:
-        data["detail"] = detail
-    return f"event: status\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
-
-
-def sse_token(token: str) -> str:
-    """构建 SSE token 事件的文本行。
-
-    每次推送一个回答片段，前端将其追加到对话气泡中。
-    使用 ensure_ascii=False 保证中文字符不被转义。
-
-    Args:
-        token: LLM 生成的文本片段
-
-    Returns:
-        格式为 "event: token\ndata: {"token":"..."}\n\n" 的 SSE 文本行
-    """
-    return f"event: token\ndata: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
-
-
-def sse_citation(
-    source: str,
-    page: int,
-    snippet: str,
-    score: float = 0.0,
-    highlighted_snippet: str | None = None,
-) -> str:
-    """构建 SSE citation 事件的文本行。
-
-    推送引用来源信息，支持高亮片段展示。
-    每个文档仅推送一次（由调用方去重）。
-
-    Args:
-        source: 文档来源名称（文件名）
-        page: 引用页码
-        snippet: 引用内容摘要（前 200 字）
-        score: Reranker 相似度分数（0~1）
-        highlighted_snippet: 含 <mark> 标记的高亮 HTML 片段
-
-    Returns:
-        格式为 "event: citation\ndata: {...}\n\n" 的 SSE 文本行
-    """
-    data = {
-        "source": source,
-        "page": page,
-        "snippet": snippet,
-        "score": score,
-        "highlighted_snippet": highlighted_snippet,
-    }
-    return f"event: citation\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
-
-
-def sse_done() -> str:
-    """构建 SSE done 事件的文本行。
-
-    标记流式响应结束，前端收到后关闭连接并恢复 UI 交互。
-
-    Returns:
-        格式为 "event: done\ndata: {}\n\n" 的 SSE 文本行
-    """
-    return "event: done\ndata: {}\n\n"
-
-
-def sse_error(error: str) -> str:
-    """构建 SSE error 事件的文本行。
-
-    在 RAG 流水线发生异常时推送错误信息。
-    前端收到后展示错误提示并关闭流。
-
-    Args:
-        error: 错误描述文本
-
-    Returns:
-        格式为 "event: error\ndata: {"error":"..."}\n\n" 的 SSE 文本行
-    """
-    return f"event: error\ndata: {json.dumps({'error': error}, ensure_ascii=False)}\n\n"
 
 
 async def _stream_rag_response(
