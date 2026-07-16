@@ -150,7 +150,7 @@ def get_embeddings(model: str = EMBEDDING_MODEL) -> FixedDimDashScopeEmbeddings:
     始终输出 1024 维向量，切换 embedding 模型时无需重建 ChromaDB collection。
 
     Args:
-        model: 模型名称，默认 text-embedding-v4
+        model: 模型名称，默认 qwen3.7-text-embedding
 
     Returns:
         FixedDimDashScopeEmbeddings 实例，可直接用于 LangChain 的 embedding 接口

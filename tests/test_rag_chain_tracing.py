@@ -12,16 +12,16 @@ from unittest.mock import MagicMock, patch
 from src.rag.chain import RAGChain
 
 
-@patch("src.rag_chain.LANGFUSE_ENABLE", False)
+@patch("src.rag.chain.LANGFUSE_ENABLE", False)
 def test_langfuse_handler_not_created_when_disabled():
     """When LANGFUSE_ENABLE is False, no handler is created."""
     chain = RAGChain()
     assert chain._langfuse_handler is None
 
 
-@patch("src.rag_chain.LANGFUSE_ENABLE", True)
-@patch("src.rag_chain.Langfuse")
-@patch("src.rag_chain.CallbackHandler")
+@patch("src.rag.chain.LANGFUSE_ENABLE", True)
+@patch("src.rag.chain.Langfuse")
+@patch("src.rag.chain.CallbackHandler")
 def test_langfuse_handler_created_when_enabled(mock_handler_cls, mock_langfuse):
     """When LANGFUSE_ENABLE is True, CallbackHandler is initialized."""
     mock_handler = MagicMock()
@@ -34,9 +34,9 @@ def test_langfuse_handler_created_when_enabled(mock_handler_cls, mock_langfuse):
     assert chain._langfuse_handler == mock_handler
 
 
-@patch("src.rag_chain.LANGFUSE_ENABLE", True)
-@patch("src.rag_chain.Langfuse")
-@patch("src.rag_chain.CallbackHandler")
+@patch("src.rag.chain.LANGFUSE_ENABLE", True)
+@patch("src.rag.chain.Langfuse")
+@patch("src.rag.chain.CallbackHandler")
 def test_langfuse_init_failure_does_not_crash(mock_handler_cls, mock_langfuse):
     """When CallbackHandler init fails, chain still works without tracing."""
     mock_handler_cls.side_effect = Exception("Connection refused")
@@ -46,9 +46,9 @@ def test_langfuse_init_failure_does_not_crash(mock_handler_cls, mock_langfuse):
     assert chain._langfuse_handler is None
 
 
-@patch("src.rag_chain.LANGFUSE_ENABLE", True)
-@patch("src.rag_chain.Langfuse")
-@patch("src.rag_chain.CallbackHandler")
+@patch("src.rag.chain.LANGFUSE_ENABLE", True)
+@patch("src.rag.chain.Langfuse")
+@patch("src.rag.chain.CallbackHandler")
 def test_stream_answer_passes_callbacks(mock_handler_cls, mock_langfuse):
     """_stream_answer passes callbacks config to llm.stream()."""
     mock_handler = MagicMock()

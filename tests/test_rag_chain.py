@@ -84,9 +84,9 @@ class TestRAGContext:
 class TestRAGChainInit:
     """测试 RAGChain 的初始化与依赖注入。"""
 
-    @patch("src.rag_chain.get_rerank")
-    @patch("src.rag_chain.get_llm")
-    @patch("src.rag_chain.get_embeddings")
+    @patch("src.rag.chain.get_rerank")
+    @patch("src.rag.chain.get_llm")
+    @patch("src.rag.chain.get_embeddings")
     def test_init_defaults(self, mock_get_emb, mock_get_llm, mock_get_rerank):
         """默认初始化：调用工厂函数创建所有依赖。"""
         chain = RAGChain()
@@ -97,9 +97,9 @@ class TestRAGChainInit:
         assert chain.db is not None
         assert chain.chat_manager is not None
 
-    @patch("src.rag_chain.get_rerank")
-    @patch("src.rag_chain.get_llm")
-    @patch("src.rag_chain.get_embeddings")
+    @patch("src.rag.chain.get_rerank")
+    @patch("src.rag.chain.get_llm")
+    @patch("src.rag.chain.get_embeddings")
     def test_init_custom_deps(self, mock_get_emb, mock_get_llm, mock_get_rerank):
         """依赖注入：传入自定义依赖时不调用工厂函数。"""
         vs = MagicMock()
@@ -125,9 +125,9 @@ class TestRAGChainInit:
 class TestRAGChainChat:
     """测试 RAGChain.chat_with_citations 的各种场景。"""
 
-    @patch("src.rag_chain.get_rerank")
-    @patch("src.rag_chain.get_llm")
-    @patch("src.rag_chain.get_embeddings")
+    @patch("src.rag.chain.get_rerank")
+    @patch("src.rag.chain.get_llm")
+    @patch("src.rag.chain.get_embeddings")
     def test_kb_not_found(self, mock_get_emb, mock_get_llm, mock_get_rerank):
         """kb_id="" 时调用 similarity_search_all 且无结果时返回"未找到"提示。"""
         chain = RAGChain()
@@ -142,9 +142,9 @@ class TestRAGChainChat:
         assert "未找到" in result or "相关" in result
         assert len(citations) == 0
 
-    @patch("src.rag_chain.get_rerank")
-    @patch("src.rag_chain.get_llm")
-    @patch("src.rag_chain.get_embeddings")
+    @patch("src.rag.chain.get_rerank")
+    @patch("src.rag.chain.get_llm")
+    @patch("src.rag.chain.get_embeddings")
     def test_chat_search_all(self, mock_get_emb, mock_get_llm, mock_get_rerank):
         """kb_id="" 时调用 similarity_search_all 而非返回不存在。"""
         mock_rerank = MagicMock()
@@ -177,9 +177,9 @@ class TestRAGChainChat:
         assert len(citations) > 0
         chain.vector_store.similarity_search_all.assert_called_once()
 
-    @patch("src.rag_chain.get_rerank")
-    @patch("src.rag_chain.get_llm")
-    @patch("src.rag_chain.get_embeddings")
+    @patch("src.rag.chain.get_rerank")
+    @patch("src.rag.chain.get_llm")
+    @patch("src.rag.chain.get_embeddings")
     def test_chat_search_all_no_kbs(self, mock_get_emb, mock_get_llm, mock_get_rerank):
         """kb_id="" 且无任何 KB 时返回"未找到"而非报错。"""
         chain = RAGChain()
@@ -196,9 +196,9 @@ class TestRAGChainChat:
         assert "未找到" in result or "相关" in result
         assert len(citations) == 0
 
-    @patch("src.rag_chain.get_rerank")
-    @patch("src.rag_chain.get_llm")
-    @patch("src.rag_chain.get_embeddings")
+    @patch("src.rag.chain.get_rerank")
+    @patch("src.rag.chain.get_llm")
+    @patch("src.rag.chain.get_embeddings")
     def test_vector_search_empty(self, mock_get_emb, mock_get_llm, mock_get_rerank):
         """场景 2：向量搜索无结果时返回"未找到"提示。"""
         db = MagicMock()
@@ -216,9 +216,9 @@ class TestRAGChainChat:
         assert "未在文档中找到相关数据" in result
         assert len(citations) == 0
 
-    @patch("src.rag_chain.get_rerank")
-    @patch("src.rag_chain.get_llm")
-    @patch("src.rag_chain.get_embeddings")
+    @patch("src.rag.chain.get_rerank")
+    @patch("src.rag.chain.get_llm")
+    @patch("src.rag.chain.get_embeddings")
     def test_vector_search_exception(self, mock_get_emb, mock_get_llm, mock_get_rerank):
         """场景 3：向量搜索异常时返回"检索失败"提示。"""
         db = MagicMock()
@@ -236,9 +236,9 @@ class TestRAGChainChat:
         assert "检索失败" in result
         assert len(citations) == 0
 
-    @patch("src.rag_chain.get_rerank")
-    @patch("src.rag_chain.get_llm")
-    @patch("src.rag_chain.get_embeddings")
+    @patch("src.rag.chain.get_rerank")
+    @patch("src.rag.chain.get_llm")
+    @patch("src.rag.chain.get_embeddings")
     def test_full_pipeline(self, mock_get_emb, mock_get_llm, mock_get_rerank):
         """场景 4：完整流水线 — 检索 + 重排序 + LLM 流式生成 + 引用。"""
         # ---- Mock MySQL：知识库存在 ----
@@ -302,9 +302,9 @@ class TestRAGChainChat:
         assert citations[0].source == "年报2024.pdf"
         assert citations[1].source == "年报2024.pdf"
 
-    @patch("src.rag_chain.get_rerank")
-    @patch("src.rag_chain.get_llm")
-    @patch("src.rag_chain.get_embeddings")
+    @patch("src.rag.chain.get_rerank")
+    @patch("src.rag.chain.get_llm")
+    @patch("src.rag.chain.get_embeddings")
     def test_rerank_fallback(self, mock_get_emb, mock_get_llm, mock_get_rerank):
         """场景 5：重排序失败时降级到原始检索顺序。"""
         db = MagicMock()
@@ -348,9 +348,9 @@ class TestRAGChainChat:
         assert len(citations) == 1
         assert citations[0].source == "a.pdf"
 
-    @patch("src.rag_chain.get_rerank")
-    @patch("src.rag_chain.get_llm")
-    @patch("src.rag_chain.get_embeddings")
+    @patch("src.rag.chain.get_rerank")
+    @patch("src.rag.chain.get_llm")
+    @patch("src.rag.chain.get_embeddings")
     def test_llm_stream_failure(self, mock_get_emb, mock_get_llm, mock_get_rerank):
         """场景 6：LLM 流式生成失败时返回错误提示。"""
         db = MagicMock()
@@ -392,9 +392,9 @@ class TestRAGChainChat:
         assert "生成回答失败" in result  # 提示 LLM 生成失败
         assert len(citations) == 1  # 引用仍然返回
 
-    @patch("src.rag_chain.get_rerank")
-    @patch("src.rag_chain.get_llm")
-    @patch("src.rag_chain.get_embeddings")
+    @patch("src.rag.chain.get_rerank")
+    @patch("src.rag.chain.get_llm")
+    @patch("src.rag.chain.get_embeddings")
     def test_short_query_returns_friendly_message(
         self, mock_get_emb, mock_get_llm, mock_get_rerank
     ):
@@ -410,9 +410,9 @@ class TestRAGChainChat:
     # ==================== RAGChain 拆分方法测试 ====================
 
     @pytest.mark.asyncio
-    @patch("src.rag_chain.get_rerank")
-    @patch("src.rag_chain.get_llm")
-    @patch("src.rag_chain.get_embeddings")
+    @patch("src.rag.chain.get_rerank")
+    @patch("src.rag.chain.get_llm")
+    @patch("src.rag.chain.get_embeddings")
     async def test_search_returns_results(
         self, mock_get_emb, mock_get_llm, mock_get_rerank
     ):
@@ -428,9 +428,9 @@ class TestRAGChainChat:
         call_kwargs = chain.vector_store.similarity_search.call_args
         assert call_kwargs[1]["k"] > 0
 
-    @patch("src.rag_chain.get_rerank")
-    @patch("src.rag_chain.get_llm")
-    @patch("src.rag_chain.get_embeddings")
+    @patch("src.rag.chain.get_rerank")
+    @patch("src.rag.chain.get_llm")
+    @patch("src.rag.chain.get_embeddings")
     def test_rerank_returns_contexts(self, mock_get_emb, mock_get_llm, mock_get_rerank):
         """rerank() 应调用 _rerank_results 并返回 RAGContext 列表。"""
         chain = RAGChain()
@@ -450,9 +450,9 @@ class TestRAGChainChat:
         assert len(contexts) == 1
         assert contexts[0].source == "a.pdf"
 
-    @patch("src.rag_chain.get_rerank")
-    @patch("src.rag_chain.get_llm")
-    @patch("src.rag_chain.get_embeddings")
+    @patch("src.rag.chain.get_rerank")
+    @patch("src.rag.chain.get_llm")
+    @patch("src.rag.chain.get_embeddings")
     def test_stream_answer_generates_tokens(
         self, mock_get_emb, mock_get_llm, mock_get_rerank
     ):
@@ -465,9 +465,9 @@ class TestRAGChainChat:
         tokens = list(gen)
         assert tokens == ["token1", "token2"]
 
-    @patch("src.rag_chain.get_rerank")
-    @patch("src.rag_chain.get_llm")
-    @patch("src.rag_chain.get_embeddings")
+    @patch("src.rag.chain.get_rerank")
+    @patch("src.rag.chain.get_llm")
+    @patch("src.rag.chain.get_embeddings")
     def test_chat_with_citations_delegates_to_split_methods(
         self, mock_get_emb, mock_get_llm, mock_get_rerank
     ):
@@ -564,9 +564,9 @@ class TestRAGChainHelpers:
         assert "query" in messages[3].content  # 当前查询
         assert "context" in messages[3].content  # 检索上下文
 
-    @patch("src.rag_chain.get_rerank")
-    @patch("src.rag_chain.get_llm")
-    @patch("src.rag_chain.get_embeddings")
+    @patch("src.rag.chain.get_rerank")
+    @patch("src.rag.chain.get_llm")
+    @patch("src.rag.chain.get_embeddings")
     def test_saves_user_message_to_history(
         self, mock_get_emb, mock_get_llm, mock_get_rerank
     ):
@@ -618,54 +618,54 @@ class TestRAGChainHelpers:
 class TestRAGChainQueryRewrite:
     """测试 RAGChain 的查询分类与改写方法。"""
 
-    @patch("src.rag_chain.get_rerank")
-    @patch("src.rag_chain.get_llm")
-    @patch("src.rag_chain.get_embeddings")
+    @patch("src.rag.chain.get_rerank")
+    @patch("src.rag.chain.get_llm")
+    @patch("src.rag.chain.get_embeddings")
     def test_classify_clear(self, mock_get_emb, mock_get_llm, mock_get_rerank):
         """清晰查询应分类为 clear。"""
         chain = RAGChain()
         assert chain._classify_query("2024年营业收入是多少？") == "clear"
         assert chain._classify_query("贵州茅台2024年净利润") == "clear"
 
-    @patch("src.rag_chain.get_rerank")
-    @patch("src.rag_chain.get_llm")
-    @patch("src.rag_chain.get_embeddings")
+    @patch("src.rag.chain.get_rerank")
+    @patch("src.rag.chain.get_llm")
+    @patch("src.rag.chain.get_embeddings")
     def test_classify_fuzzy_short(self, mock_get_emb, mock_get_llm, mock_get_rerank):
         """短查询（<10字符）应分类为 fuzzy_short。"""
         chain = RAGChain()
         assert chain._classify_query("营收") == "fuzzy_short"
         assert chain._classify_query("净利润") == "fuzzy_short"
 
-    @patch("src.rag_chain.get_rerank")
-    @patch("src.rag_chain.get_llm")
-    @patch("src.rag_chain.get_embeddings")
+    @patch("src.rag.chain.get_rerank")
+    @patch("src.rag.chain.get_llm")
+    @patch("src.rag.chain.get_embeddings")
     def test_classify_colloquial(self, mock_get_emb, mock_get_llm, mock_get_rerank):
         """口语化查询应分类为 colloquial。"""
         chain = RAGChain()
         assert chain._classify_query("分析一下茅台2024年的业绩") == "colloquial"
         assert chain._classify_query("为什么营收增长了") == "colloquial"
 
-    @patch("src.rag_chain.get_rerank")
-    @patch("src.rag_chain.get_llm")
-    @patch("src.rag_chain.get_embeddings")
+    @patch("src.rag.chain.get_rerank")
+    @patch("src.rag.chain.get_llm")
+    @patch("src.rag.chain.get_embeddings")
     def test_classify_compound(self, mock_get_emb, mock_get_llm, mock_get_rerank):
         """对比查询应分类为 compound。"""
         chain = RAGChain()
         assert chain._classify_query("对比茅台和五粮液2024营收") == "compound"
         assert chain._classify_query("比较2023和2024年净利润") == "compound"
 
-    @patch("src.rag_chain.get_rerank")
-    @patch("src.rag_chain.get_llm")
-    @patch("src.rag_chain.get_embeddings")
+    @patch("src.rag.chain.get_rerank")
+    @patch("src.rag.chain.get_llm")
+    @patch("src.rag.chain.get_embeddings")
     def test_classify_empty(self, mock_get_emb, mock_get_llm, mock_get_rerank):
         """空查询应分类为 clear（不报错）。"""
         chain = RAGChain()
         assert chain._classify_query("") == "clear"
         assert chain._classify_query("   ") == "clear"
 
-    @patch("src.rag_chain.get_rerank")
-    @patch("src.rag_chain.get_llm")
-    @patch("src.rag_chain.get_embeddings")
+    @patch("src.rag.chain.get_rerank")
+    @patch("src.rag.chain.get_llm")
+    @patch("src.rag.chain.get_embeddings")
     def test_rewrite_clear_passthrough(
         self, mock_get_emb, mock_get_llm, mock_get_rerank
     ):
@@ -674,9 +674,9 @@ class TestRAGChainQueryRewrite:
         result = chain._rewrite_query("2024年营业收入是多少？", [])
         assert result == "2024年营业收入是多少？"
 
-    @patch("src.rag_chain.get_rerank")
-    @patch("src.rag_chain.get_llm")
-    @patch("src.rag_chain.get_embeddings")
+    @patch("src.rag.chain.get_rerank")
+    @patch("src.rag.chain.get_llm")
+    @patch("src.rag.chain.get_embeddings")
     def test_rewrite_fuzzy_short_expands(
         self, mock_get_emb, mock_get_llm, mock_get_rerank
     ):
@@ -687,9 +687,9 @@ class TestRAGChainQueryRewrite:
         assert "茅台" in result
         assert "净利润" in result
 
-    @patch("src.rag_chain.get_rerank")
-    @patch("src.rag_chain.get_llm")
-    @patch("src.rag_chain.get_embeddings")
+    @patch("src.rag.chain.get_rerank")
+    @patch("src.rag.chain.get_llm")
+    @patch("src.rag.chain.get_embeddings")
     def test_rewrite_colloquial_condenses(
         self, mock_get_emb, mock_get_llm, mock_get_rerank
     ):
@@ -698,9 +698,9 @@ class TestRAGChainQueryRewrite:
         result = chain._rewrite_query("分析一下茅台2024年的营收", [])
         assert "分析一下" not in result
 
-    @patch("src.rag_chain.get_rerank")
-    @patch("src.rag_chain.get_llm")
-    @patch("src.rag_chain.get_embeddings")
+    @patch("src.rag.chain.get_rerank")
+    @patch("src.rag.chain.get_llm")
+    @patch("src.rag.chain.get_embeddings")
     def test_rewrite_compound_decomposes(
         self, mock_get_emb, mock_get_llm, mock_get_rerank
     ):
@@ -710,9 +710,9 @@ class TestRAGChainQueryRewrite:
         assert isinstance(result, list)
         assert len(result) > 1
 
-    @patch("src.rag_chain.get_rerank")
-    @patch("src.rag_chain.get_llm")
-    @patch("src.rag_chain.get_embeddings")
+    @patch("src.rag.chain.get_rerank")
+    @patch("src.rag.chain.get_llm")
+    @patch("src.rag.chain.get_embeddings")
     def test_expand_query_with_history(
         self, mock_get_emb, mock_get_llm, mock_get_rerank
     ):
@@ -727,18 +727,18 @@ class TestRAGChainQueryRewrite:
         assert "净利润呢" in result
         assert "茅台" in result
 
-    @patch("src.rag_chain.get_rerank")
-    @patch("src.rag_chain.get_llm")
-    @patch("src.rag_chain.get_embeddings")
+    @patch("src.rag.chain.get_rerank")
+    @patch("src.rag.chain.get_llm")
+    @patch("src.rag.chain.get_embeddings")
     def test_expand_query_no_history(self, mock_get_emb, mock_get_llm, mock_get_rerank):
         """无历史时 _expand_query 应返回原查询。"""
         chain = RAGChain()
         result = chain._expand_query("营收", [])
         assert result == "营收"
 
-    @patch("src.rag_chain.get_rerank")
-    @patch("src.rag_chain.get_llm")
-    @patch("src.rag_chain.get_embeddings")
+    @patch("src.rag.chain.get_rerank")
+    @patch("src.rag.chain.get_llm")
+    @patch("src.rag.chain.get_embeddings")
     def test_condense_query_removes_patterns(
         self, mock_get_emb, mock_get_llm, mock_get_rerank
     ):
@@ -748,9 +748,9 @@ class TestRAGChainQueryRewrite:
         assert "分析一下" not in result
         assert "茅台2024年营收" in result
 
-    @patch("src.rag_chain.get_rerank")
-    @patch("src.rag_chain.get_llm")
-    @patch("src.rag_chain.get_embeddings")
+    @patch("src.rag.chain.get_rerank")
+    @patch("src.rag.chain.get_llm")
+    @patch("src.rag.chain.get_embeddings")
     def test_decompose_query_splits_comparison(
         self, mock_get_emb, mock_get_llm, mock_get_rerank
     ):

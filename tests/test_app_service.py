@@ -10,10 +10,10 @@ from src.infra.api_error import ApiError
 class TestAppServiceInit:
     """AppService 初始化测试。"""
 
-    @patch("src.app_service.RAGChain")
-    @patch("src.app_service.MySQLDB")
-    @patch("src.app_service.VectorStore")
-    @patch("src.app_service.DocRouter")
+    @patch("src.services.app_service.RAGChain")
+    @patch("src.services.app_service.MySQLDB")
+    @patch("src.services.app_service.VectorStore")
+    @patch("src.services.app_service.DocRouter")
     def test_init_defaults(self, mock_router, mock_vs, mock_db, mock_rag):
         """默认初始化应创建所有依赖实例。"""
         svc = AppService()
@@ -22,10 +22,10 @@ class TestAppServiceInit:
         assert svc.vector_store is not None
         assert svc.router is not None
 
-    @patch("src.app_service.RAGChain")
-    @patch("src.app_service.MySQLDB")
-    @patch("src.app_service.VectorStore")
-    @patch("src.app_service.DocRouter")
+    @patch("src.services.app_service.RAGChain")
+    @patch("src.services.app_service.MySQLDB")
+    @patch("src.services.app_service.VectorStore")
+    @patch("src.services.app_service.DocRouter")
     def test_init_custom_deps(self, mock_router, mock_vs, mock_db, mock_rag):
         """应接受注入的自定义依赖。"""
         db = MagicMock()
@@ -42,10 +42,10 @@ class TestAppServiceInit:
 class TestAppServiceKBs:
     """知识库管理测试。"""
 
-    @patch("src.app_service.RAGChain")
-    @patch("src.app_service.MySQLDB")
-    @patch("src.app_service.VectorStore")
-    @patch("src.app_service.DocRouter")
+    @patch("src.services.app_service.RAGChain")
+    @patch("src.services.app_service.MySQLDB")
+    @patch("src.services.app_service.VectorStore")
+    @patch("src.services.app_service.DocRouter")
     def test_list_knowledge_bases(self, mock_router, mock_vs, mock_db, mock_rag):
         """列出所有知识库应从 db.get_all_kb 获取数据。"""
         db = MagicMock()
@@ -54,10 +54,10 @@ class TestAppServiceKBs:
         result = svc.list_knowledge_bases()
         assert result == [("id1", "KB1"), ("id2", "KB2")]
 
-    @patch("src.app_service.RAGChain")
-    @patch("src.app_service.MySQLDB")
-    @patch("src.app_service.VectorStore")
-    @patch("src.app_service.DocRouter")
+    @patch("src.services.app_service.RAGChain")
+    @patch("src.services.app_service.MySQLDB")
+    @patch("src.services.app_service.VectorStore")
+    @patch("src.services.app_service.DocRouter")
     def test_create_kb_success(self, mock_router, mock_vs, mock_db, mock_rag):
         """创建知识库应返回 (kb_id, is_new)。"""
         db = MagicMock()
@@ -67,10 +67,10 @@ class TestAppServiceKBs:
         assert kid == "new_id"
         assert is_new is True
 
-    @patch("src.app_service.RAGChain")
-    @patch("src.app_service.MySQLDB")
-    @patch("src.app_service.VectorStore")
-    @patch("src.app_service.DocRouter")
+    @patch("src.services.app_service.RAGChain")
+    @patch("src.services.app_service.MySQLDB")
+    @patch("src.services.app_service.VectorStore")
+    @patch("src.services.app_service.DocRouter")
     async def test_delete_kb_success(self, mock_router, mock_vs, mock_db, mock_rag):
         """删除知识库应软删除文档、清理向量、软删除 KB。"""
         db = MagicMock()
@@ -85,10 +85,10 @@ class TestAppServiceKBs:
         vs.delete_collection.assert_called_once_with("kb_id")
         db.soft_delete_kb.assert_called_once_with("kb_id")
 
-    @patch("src.app_service.RAGChain")
-    @patch("src.app_service.MySQLDB")
-    @patch("src.app_service.VectorStore")
-    @patch("src.app_service.DocRouter")
+    @patch("src.services.app_service.RAGChain")
+    @patch("src.services.app_service.MySQLDB")
+    @patch("src.services.app_service.VectorStore")
+    @patch("src.services.app_service.DocRouter")
     async def test_delete_kb_not_found(self, mock_router, mock_vs, mock_db, mock_rag):
         """删除不存在的知识库应返回 False 并提示。"""
         db = MagicMock()
@@ -103,10 +103,10 @@ class TestAppServiceKBs:
 class TestAppServiceDeleteDocument:
     """文档删除测试。"""
 
-    @patch("src.app_service.RAGChain")
-    @patch("src.app_service.MySQLDB")
-    @patch("src.app_service.VectorStore")
-    @patch("src.app_service.DocRouter")
+    @patch("src.services.app_service.RAGChain")
+    @patch("src.services.app_service.MySQLDB")
+    @patch("src.services.app_service.VectorStore")
+    @patch("src.services.app_service.DocRouter")
     async def test_delete_not_found(self, mock_router, mock_vs, mock_db, mock_rag):
         """删除不存在的文档应抛 DOC_NOT_FOUND。"""
         db = MagicMock()
@@ -116,10 +116,10 @@ class TestAppServiceDeleteDocument:
             await svc.delete_document("kb", "nonexistent", "user")
         assert exc.value.code == "DOC_NOT_FOUND"
 
-    @patch("src.app_service.RAGChain")
-    @patch("src.app_service.MySQLDB")
-    @patch("src.app_service.VectorStore")
-    @patch("src.app_service.DocRouter")
+    @patch("src.services.app_service.RAGChain")
+    @patch("src.services.app_service.MySQLDB")
+    @patch("src.services.app_service.VectorStore")
+    @patch("src.services.app_service.DocRouter")
     async def test_delete_not_owner(self, mock_router, mock_vs, mock_db, mock_rag):
         """非上传者删除应抛 DOC_DELETE_NOT_ALLOWED。"""
         db = MagicMock()
@@ -136,10 +136,10 @@ class TestAppServiceDeleteDocument:
             await svc.delete_document("kb", "d1", "other_user")
         assert exc.value.code == "DOC_DELETE_NOT_ALLOWED"
 
-    @patch("src.app_service.RAGChain")
-    @patch("src.app_service.MySQLDB")
-    @patch("src.app_service.VectorStore")
-    @patch("src.app_service.DocRouter")
+    @patch("src.services.app_service.RAGChain")
+    @patch("src.services.app_service.MySQLDB")
+    @patch("src.services.app_service.VectorStore")
+    @patch("src.services.app_service.DocRouter")
     async def test_delete_processing_status(
         self, mock_router, mock_vs, mock_db, mock_rag
     ):
@@ -158,10 +158,10 @@ class TestAppServiceDeleteDocument:
             await svc.delete_document("kb", "d1", "user")
         assert exc.value.code == "DOC_STATUS_CONFLICT"
 
-    @patch("src.app_service.RAGChain")
-    @patch("src.app_service.MySQLDB")
-    @patch("src.app_service.VectorStore")
-    @patch("src.app_service.DocRouter")
+    @patch("src.services.app_service.RAGChain")
+    @patch("src.services.app_service.MySQLDB")
+    @patch("src.services.app_service.VectorStore")
+    @patch("src.services.app_service.DocRouter")
     async def test_delete_success(self, mock_router, mock_vs, mock_db, mock_rag):
         """正常删除应返回 deleted 状态。"""
         db = MagicMock()
@@ -184,10 +184,10 @@ class TestAppServiceDeleteDocument:
 class TestAppServiceUpload:
     """文档上传处理测试。"""
 
-    @patch("src.app_service.RAGChain")
-    @patch("src.app_service.MySQLDB")
-    @patch("src.app_service.VectorStore")
-    @patch("src.app_service.DocRouter")
+    @patch("src.services.app_service.RAGChain")
+    @patch("src.services.app_service.MySQLDB")
+    @patch("src.services.app_service.VectorStore")
+    @patch("src.services.app_service.DocRouter")
     def test_upload_and_process(self, mock_router, mock_vs, mock_db, mock_rag):
         """正常上传文档应完成解析、向量化并更新状态为 ready。"""
         db = MagicMock()
@@ -219,10 +219,10 @@ class TestAppServiceUpload:
             "doc_id", "ready", chunk_count=5
         )
 
-    @patch("src.app_service.RAGChain")
-    @patch("src.app_service.MySQLDB")
-    @patch("src.app_service.VectorStore")
-    @patch("src.app_service.DocRouter")
+    @patch("src.services.app_service.RAGChain")
+    @patch("src.services.app_service.MySQLDB")
+    @patch("src.services.app_service.VectorStore")
+    @patch("src.services.app_service.DocRouter")
     def test_upload_scanned_doc(self, mock_router, mock_vs, mock_db, mock_rag):
         """扫描件文档应返回错误并更新文档状态为 failed。"""
         db = MagicMock()
@@ -244,10 +244,10 @@ class TestAppServiceUpload:
             "doc_id", "failed", error_msg=ANY
         )
 
-    @patch("src.app_service.RAGChain")
-    @patch("src.app_service.MySQLDB")
-    @patch("src.app_service.VectorStore")
-    @patch("src.app_service.DocRouter")
+    @patch("src.services.app_service.RAGChain")
+    @patch("src.services.app_service.MySQLDB")
+    @patch("src.services.app_service.VectorStore")
+    @patch("src.services.app_service.DocRouter")
     def test_upload_parse_error(self, mock_router, mock_vs, mock_db, mock_rag):
         """解析抛出异常时应返回错误并记录失败状态。"""
         db = MagicMock()
@@ -267,10 +267,10 @@ class TestAppServiceUpload:
 class TestAppServiceChat:
     """问答功能测试。"""
 
-    @patch("src.app_service.RAGChain")
-    @patch("src.app_service.MySQLDB")
-    @patch("src.app_service.VectorStore")
-    @patch("src.app_service.DocRouter")
+    @patch("src.services.app_service.RAGChain")
+    @patch("src.services.app_service.MySQLDB")
+    @patch("src.services.app_service.VectorStore")
+    @patch("src.services.app_service.DocRouter")
     def test_chat(self, mock_router, mock_vs, mock_db, mock_rag):
         """正常问答应返回拼接的回答和引用列表。"""
         rag = MagicMock()
@@ -307,10 +307,10 @@ class TestAppServiceChat:
             sources=ANY,
         )
 
-    @patch("src.app_service.RAGChain")
-    @patch("src.app_service.MySQLDB")
-    @patch("src.app_service.VectorStore")
-    @patch("src.app_service.DocRouter")
+    @patch("src.services.app_service.RAGChain")
+    @patch("src.services.app_service.MySQLDB")
+    @patch("src.services.app_service.VectorStore")
+    @patch("src.services.app_service.DocRouter")
     def test_chat_kb_not_found(self, mock_router, mock_vs, mock_db, mock_rag):
         """知识库不存在的问答应返回错误信息。"""
         rag = MagicMock()

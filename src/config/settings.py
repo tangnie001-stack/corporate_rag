@@ -31,9 +31,9 @@ DASHSCOPE_BASE_URL: str = os.getenv(
 
 # ====== 模型选择 ======
 # 大语言模型：用于生成最终回答，qwen-max 效果最佳
-LLM_MODEL: str = os.getenv("LLM_MODEL", "qwen3.6-plus")
+LLM_MODEL: str = os.getenv("LLM_MODEL", "qwen3.7-plus")
 # 向量化模型：将文本转为向量，用于 ChromaDB 语义检索
-EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "text-embedding-v4")
+EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "qwen3.7-text-embedding")
 # 向量输出维度：固定维度后切换模型无需重建 ChromaDB collection
 EMBEDDING_DIMENSION: int = int(os.getenv("EMBEDDING_DIMENSION", "1024"))
 # 重排序模型：对检索结果二次打分排序，提高最终送入 LLM 的上下文质量
