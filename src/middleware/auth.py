@@ -11,19 +11,10 @@ from collections.abc import Awaitable, Callable
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 
-from src.app_service import AppService
 from src.config.response_codes import Code
 from src.infra.auth.user_auth import UserAuth
 from src.infra.llm.trace_context import current_user_id
-
-_service: AppService | None = None
-
-
-def _get_service() -> AppService:
-    global _service
-    if _service is None:
-        _service = AppService()
-    return _service
+from src.infra.redis_client import get_redis_client
 
 
 async def auth_middleware(
@@ -48,7 +39,7 @@ async def auth_middleware(
                 status_code=401,
             )
         uid = await UserAuth.get_user_id_from_token_async(
-            _get_service().redis_client, token
+            get_redis_client(), token
         )
         if not uid:
             return JSONResponse(
@@ -68,7 +59,7 @@ async def auth_middleware(
         token = request.cookies.get("token")
         if token:
             uid = await UserAuth.get_user_id_from_token_async(
-                _get_service().redis_client, token
+                get_redis_client(), token
             )
             if uid:
                 request.state.user_id = uid
