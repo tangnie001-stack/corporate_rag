@@ -11,7 +11,7 @@ from loguru import logger
 import jieba
 
 from src.api.sse_utils import sse_citation, sse_done, sse_error, sse_status, sse_token
-from src.app_service import AppService
+from src.services.app_service import AppService
 
 router = APIRouter()
 

@@ -9,7 +9,7 @@ Tests cover:
 
 from unittest.mock import MagicMock, patch
 
-from src.rag_chain import RAGChain
+from src.rag.chain import RAGChain
 
 
 @patch("src.rag_chain.LANGFUSE_ENABLE", False)

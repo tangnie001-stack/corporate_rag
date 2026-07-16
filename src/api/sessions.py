@@ -11,7 +11,7 @@ from loguru import logger
 
 from src.api.model.request import SessionMessagesRequest, SessionDeleteRequest
 from src.api.model.response import SessionItem, MessageItem, SessionDeleteResponse
-from src.app_service import AppService
+from src.services.app_service import AppService
 from src.config.response_codes import Code
 from src.infra.errors import BusinessError
 

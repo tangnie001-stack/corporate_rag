@@ -23,7 +23,7 @@ from loguru import logger
 from src.config import REDIS_URL
 from src.infra.db.mysql_db import MySQLDB
 from src.parsers.router import DocRouter
-from src.rag_chain import RAGChain, RAGContext
+from src.rag.chain import RAGChain, RAGContext
 from src.infra.chunking.validator import ChunkData, validate_chunks
 from src.infra.db.vector_store import VectorStore
 from src.config.response_codes import Code

@@ -17,7 +17,7 @@ from typing import Optional
 
 from loguru import logger
 
-from src.app_service import AppService
+from src.services.app_service import AppService
 from src.config import CHROMA_PERSIST_DIR, REDIS_URL
 from src.infra.db.mysql_db import MySQLDB
 

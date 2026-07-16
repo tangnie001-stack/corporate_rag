@@ -8,7 +8,7 @@ from loguru import logger
 
 from src.api.model.request import LoginRequest
 from src.api.model.response import LoginResponse, VerifyResponse
-from src.app_service import AppService
+from src.services.app_service import AppService
 from src.config.response_codes import Code
 from src.infra.errors import AuthError
 from src.infra.auth.user_auth import UserAuth

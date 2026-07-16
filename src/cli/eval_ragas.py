@@ -46,7 +46,7 @@ from ragas.metrics import (
 from src.config import settings
 from src.config.qa_pairs import QUESTIONS, GROUND_TRUTH
 from src.models import get_llm, get_embeddings
-from src.rag_chain import RAGChain
+from src.rag.chain import RAGChain
 
 setup_logging()
 
@@ -383,7 +383,7 @@ def setup_benchmark_kb(kb_name: str) -> tuple[str, str]:
     Returns:
         (kb_id, session_id) 元组
     """
-    from src.app_service import AppService
+    from src.services.app_service import AppService
 
     svc = AppService()
     session_id = f"ragas_eval_{uuid.uuid4().hex[:8]}"
@@ -413,7 +413,7 @@ def cleanup_benchmark_kb(kb_name: str) -> None:
     Args:
         kb_name: 知识库名称
     """
-    from src.app_service import AppService
+    from src.services.app_service import AppService
 
     svc = AppService()
     # get_kb_by_name 返回 kb_id（UUID 字符串）
@@ -469,7 +469,7 @@ def main() -> None:
 
         # ---- 标准模式：从名称查找 kb_id ----
         if temp_kb_name is None:
-            from src.app_service import AppService
+            from src.services.app_service import AppService
 
             svc = AppService()
             kb_id = svc.db.get_kb_by_name(kb_name)
@@ -553,7 +553,7 @@ def _save_eval_report(
         chunk_size: 使用的 chunk_size
     """
     try:
-        from src.app_service import AppService
+        from src.services.app_service import AppService
 
         svc = AppService()
         kb_id = svc.db.get_kb_by_name(kb_name)

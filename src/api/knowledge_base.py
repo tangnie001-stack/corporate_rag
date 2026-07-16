@@ -4,7 +4,7 @@ from fastapi import APIRouter, Request
 
 from src.api.model.request import CreateKBRequest, KBDeleteRequest
 from src.api.model.response import CreateKBResponse, KBItem, KBDeleteResponse
-from src.app_service import AppService
+from src.services.app_service import AppService
 from src.config.response_codes import Code
 from src.infra.errors import BusinessError
 

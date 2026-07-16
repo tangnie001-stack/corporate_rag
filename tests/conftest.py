@@ -15,7 +15,7 @@ from typing import Generator
 import pytest
 from loguru import logger
 
-from src.app_service import AppService
+from src.services.app_service import AppService
 from src.infra.db.mysql_db import MySQLDB
 from src.infra.db.vector_store import VectorStore
 

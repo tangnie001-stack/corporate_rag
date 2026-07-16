@@ -5,7 +5,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from src.api.model.response import BaseResponse
-from src.app_service import AppService
+from src.services.app_service import AppService
 
 router = APIRouter()
 

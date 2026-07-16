@@ -14,7 +14,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from src.chat_manager import ChatManager
+from src.chat.manager import ChatManager
 from src.config import MEMORY_WINDOW
 
 

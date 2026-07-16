@@ -29,7 +29,7 @@ from src.api.model.response import (
     ChunksResponse,
     DocumentDeleteResponse,
 )
-from src.app_service import AppService
+from src.services.app_service import AppService
 from src.config import CHUNK_EVAL_ENABLED, MAX_FILE_SIZE, MAX_TABLE_TOKENS
 from src.config.response_codes import Code
 from src.eval.chunk_scorer import ChunkQualityScorer
