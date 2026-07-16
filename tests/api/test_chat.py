@@ -9,7 +9,7 @@ from src.main import app
 client = TestClient(app)
 
 
-@patch("src.api.routes.chat._get_service")
+@patch("src.api.chat._get_service")
 def test_chat_stream_returns_sse(mock_get_service):
     """GET /api/chat/stream returns SSE event stream."""
     mock_svc = mock_get_service.return_value
