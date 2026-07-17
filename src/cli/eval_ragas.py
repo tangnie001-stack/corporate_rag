@@ -364,7 +364,7 @@ def main() -> None:
 
     # ---- list-kbs 模式：列出知识库后退出 ----
     if args.list_kbs:
-        _list_knowledge_bases()  # noqa: F821
+        _list_knowledge_bases()
         return
 
     kb_name = args.kb_name
@@ -541,6 +541,33 @@ def _save_eval_report(
         logger.info("Eval report saved to eval_report table for KB '{}'", kb_name)
     except Exception as e:
         logger.warning("Failed to save eval report to database: {}", e)
+
+
+def _list_knowledge_bases() -> None:
+    """列出 MySQL 中所有知识库的名称和文档数."""
+    from src.services.app_service import AppService
+
+    svc = AppService()
+
+    async def _do_list():
+        # 获取所有知识库
+        kbs = await svc.db.get_all_knowledge_bases()
+        if not kbs:
+            print("No knowledge bases found.")
+            return
+
+        print("\nAvailable knowledge bases:")
+        print("-" * 40)
+        for kb in kbs:
+            kb_id = kb["id"]
+            kb_name = kb["name"]
+            # 统计文档数
+            docs = await svc.db.get_documents(kb_id)
+            doc_count = len(docs) if docs else 0
+            print(f"  {kb_name:<30} ({doc_count} documents)")
+        print()
+
+    asyncio.run(_do_list())
 
 
 if __name__ == "__main__":
