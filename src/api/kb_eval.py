@@ -1,10 +1,11 @@
 """知识库级 RAGAS 评估结果查询 API。"""
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from loguru import logger
 from pydantic import BaseModel
 
 from src.api.model.response import BaseResponse
+from src.api.dependencies import get_app_service
 from src.services.app_service import AppService
 
 router = APIRouter()
@@ -16,17 +17,10 @@ class KbEvalRequest(BaseModel):
     kb_id: str  # 知识库 UUID
 
 
-def _get_service() -> AppService:
-    """获取 AppService 单例实例。
-
-    Returns:
-        AppService 全局唯一实例
-    """
-    return AppService()
-
-
 @router.post("/kbs/eval/latest")
-async def get_latest_kb_eval(body: KbEvalRequest, request: Request = None) -> BaseResponse:
+async def get_latest_kb_eval(
+    body: KbEvalRequest, svc: AppService = Depends(get_app_service), request: Request = None
+) -> BaseResponse:
     """获取知识库最新的 RAGAS 评估结果。
 
     Args:
@@ -35,7 +29,6 @@ async def get_latest_kb_eval(body: KbEvalRequest, request: Request = None) -> Ba
     Returns:
         BaseResponse: 含评估详情或 None
     """
-    svc = _get_service()
     report = await svc.db.get_latest_eval_report(body.kb_id)
     if report:
         logger.info(
