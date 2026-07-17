@@ -18,6 +18,27 @@ async def health_check() -> HealthResponse:
     return HealthResponse(status="ok")
 
 
+def _get_service():
+    """获取配置服务实例。
+
+    Returns:
+        _ConfigService: 配置服务实例
+    """
+    return _ConfigService()
+
+
+class _ConfigService:
+    """内部配置服务，封装系统配置读取。"""
+
+    async def get_max_upload_size(self) -> int:
+        """获取上传大小限制。
+
+        Returns:
+            int: 单文件上传上限（字节）
+        """
+        return MAX_FILE_SIZE
+
+
 @router.post("/config")
 async def app_config() -> AppConfigResponse:
     """前端配置 — 返回前端需要的系统参数。
@@ -25,4 +46,6 @@ async def app_config() -> AppConfigResponse:
     Returns:
         AppConfigResponse: 含 max_upload_size 等前端配置
     """
-    return AppConfigResponse(max_upload_size=MAX_FILE_SIZE)
+    svc = _get_service()
+    max_size = await svc.get_max_upload_size()
+    return AppConfigResponse(max_upload_size=max_size)
