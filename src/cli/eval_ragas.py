@@ -17,31 +17,15 @@ import argparse
 import os
 import sys
 from datetime import datetime
+from typing import Any
 
 import asyncio
 from loguru import logger
 
 from src.core.logging import setup_logging
 
-# ---- RAGAS 评估库 ----
-from datasets import Dataset
-from ragas import evaluate
-from ragas.llms import LangchainLLMWrapper
-from ragas.embeddings import LangchainEmbeddingsWrapper
-from ragas.dataset_schema import EvaluationResult
-from ragas.metrics import (
-    faithfulness,
-    answer_relevancy,
-    context_recall,
-    context_precision,
-)
-
-from langchain_openai import ChatOpenAI
-
 from src.config import settings, DASHSCOPE_API_KEY, DASHSCOPE_BASE_URL
 from src.config.qa_pairs import QUESTIONS, GROUND_TRUTH
-from src.models import get_embeddings
-from src.rag.chain import RAGChain
 
 setup_logging()
 
@@ -66,8 +50,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--kb-name",
         type=str,
-        required=True,
-        help="要评估的知识库名称（必填）",
+        default=None,
+        help="要评估的知识库名称",
     )
     parser.add_argument(
         "--list-kbs",
@@ -100,7 +84,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def generate_answers_and_contexts(
-    rag_chain: RAGChain,
+    rag_chain: Any,
     kb_id: str,
     session_id: str,
     questions: list[str],
@@ -152,9 +136,9 @@ def run_evaluation(
     ground_truth: list[str],
     answers: list[str],
     contexts: list[list[str]],
-    llm_wrapper: LangchainLLMWrapper,
-    embeddings_wrapper: LangchainEmbeddingsWrapper,
-) -> EvaluationResult:
+    llm_wrapper: Any,
+    embeddings_wrapper: Any,
+) -> Any:
     """运行 RAGAS 四指标评估.
 
     Args:
@@ -162,12 +146,21 @@ def run_evaluation(
         ground_truth: 参考答案列表
         answers: 系统生成的回答列表
         contexts: 检索到的上下文列表
-        llm_wrapper: RAGAS 用 LLM 封装器
-        embeddings_wrapper: RAGAS 用 Embeddings 封装器
+        llm_wrapper: RAGAS 用 LLM 封装器（LangchainLLMWrapper 实例）
+        embeddings_wrapper: RAGAS 用 Embeddings 封装器（LangchainEmbeddingsWrapper 实例）
 
     Returns:
         包含评估结果的 EvaluationResult 对象（可调用 .to_pandas() 转为 DataFrame）
     """
+    from datasets import Dataset
+    from ragas import evaluate
+    from ragas.metrics import (
+        faithfulness,
+        answer_relevancy,
+        context_recall,
+        context_precision,
+    )
+
     data = {
         "question": questions,
         "answer": answers,
@@ -205,7 +198,7 @@ def run_evaluation(
 
 
 def save_results_csv(
-    result: EvaluationResult,
+    result: Any,
     questions: list[str],
     ground_truth: list[str],
     output_path: str,
@@ -236,7 +229,7 @@ def save_results_csv(
 
 
 def save_markdown_report(
-    result: EvaluationResult,
+    result: Any,
     questions: list[str],
     output_path: str,
 ) -> str:
@@ -317,7 +310,7 @@ def check_qa_count(questions: list[str]) -> None:
     sys.exit(0)
 
 
-def check_gate(result: EvaluationResult, questions: list[str]) -> None:
+def check_gate(result: Any, questions: list[str]) -> None:
     """检查评估结果是否通过质量门禁阈值.
 
     对 GATE_THRESHOLDS 中每个指标打印 PASS/FAIL，
@@ -367,18 +360,39 @@ def main() -> None:
         _list_knowledge_bases()
         return
 
-    kb_name = args.kb_name
-    session_id = args.session_id
-
     # ---- check 独立模式：只检查 QA 对数，不执行评估 ----
     if args.check:
         check_qa_count(QUESTIONS)
+
+    # ---- 执行评估需要 kb-name ----
+    if not args.kb_name:
+        print("error: --kb-name is required for evaluation")
+        print("Use --list-kbs to see available knowledge bases")
+        sys.exit(1)
+
+    kb_name = args.kb_name
+    session_id = args.session_id
 
     # 生成输出路径
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_path = (
         args.output or f"{DEFAULT_OUTPUT_DIR}/ragas_eval_{timestamp}.csv"
     )
+
+    # ---- 到此为止不需要重依赖，以下开始懒加载 ----
+    from datasets import Dataset  # noqa: F401
+    from ragas import evaluate  # noqa: F401
+    from ragas.llms import LangchainLLMWrapper  # noqa: F401
+    from ragas.embeddings import LangchainEmbeddingsWrapper  # noqa: F401
+    from ragas.metrics import (  # noqa: F401
+        faithfulness,
+        answer_relevancy,
+        context_recall,
+        context_precision,
+    )
+    from langchain_openai import ChatOpenAI
+    from src.models import get_embeddings
+    from src.rag.chain import RAGChain
 
     logger.info("Evaluating KB '{}'", kb_name)
 
