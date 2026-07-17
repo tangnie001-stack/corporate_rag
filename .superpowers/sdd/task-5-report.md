@@ -1,26 +1,18 @@
-# Task 5 Report — services/ 包
+# Task 5 Report
 
-## Status: DONE
+## Implementation
 
-## Files Created
-- `src/services/__init__.py` — 导出 AppService
-- `src/services/kb_service.py` — KBService（知识库 CRUD）
-- `src/services/document_service.py` — DocumentService（文档处理流水线）
-- `src/services/chat_service.py` — ChatService（RAG 问答）
-- `src/services/app_service.py` — 新 AppService（编排入口，无 redis_client）
+Replaced `tests/api/test_chat.py` — mocked the real chain methods (`search`, `rerank`, `stream_answer`) instead of the nonexistent `chat_with_citations`.
 
-## Files Modified
-- `tests/test_app_service.py` — 将 import 从 `src.app_service` 改为 `src.services.app_service`
+**Changes:**
+- Replaced `mock_chain.chat_with_citations.return_value = (token_gen(), [])` with individual mocks for `search` (async, returns `[make_chunk(...)]`), `rerank` (MagicMock returning `[]`), and `stream_answer` (generator yielding 4 Chinese tokens)
+- Added `AsyncMock` and `MagicMock` imports as needed; kept `patch` import, added `make_chunk` import from `mock_data`
 
-## Verification
-- `ruff check src/services/` — All checks passed
-- `python -c "from src.services import AppService; print('OK')"` — OK
+**Verification:**
+- Test `test_chat_stream_returns_sse` passes (1 passed in 0.21s)
+- The endpoint returns 200 with `text/event-stream` content type
 
-## Notes
-- 移除了 `document_service.py` 中未使用的 `Optional` import（ruff 检查发现）
-- 新 AppService 对比旧版移除了 `redis_client` 属性及相关 import
-
-## Commit Message
-```
-refactor: create services/ package with KBService, DocumentService, ChatService
-```
+**Status:** DONE
+**Commits:** 55d0983
+**Tests:** 1 passed in 0.21s
+**Concerns:** none

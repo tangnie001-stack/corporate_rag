@@ -1,5 +1,7 @@
 """健康检查与前端配置端点。"""
 
+from __future__ import annotations
+
 from fastapi import APIRouter
 
 from src.api.model.response import HealthResponse, AppConfigResponse
@@ -18,7 +20,7 @@ async def health_check() -> HealthResponse:
     return HealthResponse(status="ok")
 
 
-def _get_service():
+def _get_service() -> _ConfigService:
     """获取配置服务实例。
 
     Returns:

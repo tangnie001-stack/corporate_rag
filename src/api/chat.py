@@ -237,7 +237,7 @@ async def _stream_rag_response(
                 continue
             seen_src.add(s)
             sources.append(s)
-        tu = getattr(svc.rag_chain, "last_token_usage", {})
+        tu = getattr(svc.rag_chain, "_last_token_usage", {})
         model_name = os.getenv("LLM_MODEL", "qwen-max")
         await svc.rag_chain.chat_manager.add_message_async(
             session_id,
@@ -255,7 +255,7 @@ async def _stream_rag_response(
         await _persist_conversation(svc, session_id, kb_id, query, full_answer, sources)
 
     except Exception as e:
-        logger.error("Chat stream error: {}", str(e))
+        logger.exception("Chat stream error: {}", str(e))
         yield sse_error(str(e))
 
     # Signal completion

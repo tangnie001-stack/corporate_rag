@@ -68,6 +68,34 @@ class RAGChain:
     def prompt_manager(self):
         return self._prompt_manager
 
+    # ═══════════ API 端调用方法 — SSR 流式端点专用 ═══════════
+
+    async def search(self, query: str, kb_id: str) -> list[dict]:
+        """执行语义检索，委托给 retrieval.search。
+
+        Args:
+            query: 用户查询文本
+            kb_id: 知识库 UUID（空字符串表示跨库搜索）
+
+        Returns:
+            检索结果列表
+        """
+        import src.rag.retrieval as _retrieval
+        return await _retrieval.search(query, kb_id, self.vector_store, self.bm25)
+
+    def rerank(self, query: str, results: list[dict]) -> list[RAGContext]:
+        """Reranker 精排，委托给 retrieval.rerank_results。
+
+        Args:
+            query: 用户查询文本
+            results: 检索结果列表
+
+        Returns:
+            精排后的 RAGContext 列表
+        """
+        import src.rag.retrieval as _retrieval
+        return _retrieval.rerank_results(query, results, self.reranker)
+
     # ═══════════ chat_with_citations — 主入口 ═══════════
 
     def chat_with_citations(
@@ -168,8 +196,20 @@ class RAGChain:
     # ═══════════ 公共方法 ═══════════
 
     def stream_answer(self, query, contexts, history, trace_id=None):
-        """构建 prompt 并流式生成回答。"""
+        """构建 prompt 并流式生成回答，完成后记录 token 用量。"""
         from src.rag.prompt import format_context
+        from src.rag.stream import estimate_usage
         context_str = format_context(contexts)
         prompt = build_prompt(query, context_str, history, self.prompt_manager)
-        return stream_answer(prompt, self.llm, self._tracer, trace_id)
+        internal_gen = stream_answer(prompt, self.llm, self._tracer, trace_id)
+        full_text = ""
+        for token in internal_gen:
+            full_text += token
+            yield token
+        # 生成完成后估算 token 用量，供 chat.py 读取
+        usage = estimate_usage(prompt, full_text)
+        self._last_token_usage = {
+            "prompt_tokens": usage.get("input", 0),
+            "completion_tokens": usage.get("output", 0),
+            "total_tokens": usage.get("input", 0) + usage.get("output", 0),
+        }
