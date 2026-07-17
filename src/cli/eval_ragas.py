@@ -564,8 +564,8 @@ def _list_knowledge_bases() -> None:
     svc = AppService()
 
     async def _do_list():
-        # 获取所有知识库
-        kbs = await svc.db.get_all_knowledge_bases()
+        # 获取所有知识库（含 doc_count）
+        kbs = await svc.db.get_all_kb()
         if not kbs:
             print("No knowledge bases found.")
             return
@@ -573,12 +573,7 @@ def _list_knowledge_bases() -> None:
         print("\nAvailable knowledge bases:")
         print("-" * 40)
         for kb in kbs:
-            kb_id = kb["id"]
-            kb_name = kb["name"]
-            # 统计文档数
-            docs = await svc.db.get_documents(kb_id)
-            doc_count = len(docs) if docs else 0
-            print(f"  {kb_name:<30} ({doc_count} documents)")
+            print(f"  {kb['name']:<30} ({kb['doc_count']} documents)")
         print()
 
     asyncio.run(_do_list())

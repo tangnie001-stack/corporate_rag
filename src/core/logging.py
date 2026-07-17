@@ -101,6 +101,9 @@ def setup_logging(configure_trace_id: bool = False) -> None:
     # 移除默认 sink，防止重复
     logger.remove()
 
+    # 确保 extra 字典至少包含 trace_id 键（即使未配置 patcher）
+    logger.configure(extra={"trace_id": ""})
+
     logger.add(
         f"{_LOG_DIR}/app_{{time:YYYY-MM-DD}}.log",
         format=_LOG_FORMAT,
