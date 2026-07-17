@@ -214,6 +214,19 @@ RAG 管线中需要防护的关键位置：
 | **在线采样评估** | 5-20% 生产流量在线评分（100% 采样异常请求）。用蒸馏小模型做 judge（~50ms 级）替代 LLM judge 降低成本 |
 | **Judge 模型校准** | **永远不要信任未校准的 LLM judge**。在 ≥50-100 样本上与人工标注校准，固定 judge prompt 和模型版本，使用与生成模型不同的模型族避免 self-bias |
 
+### RAGAS 评估实操最佳实践（2026）
+
+以下为调研多篇 RAGAS 最佳实践指南后整理的实操建议，直接指导 `eval_ragas.py` 工具的使用和配置。
+
+| 实践 | 说明 |
+|------|------|
+| **评估 LLM Temperature 必须为 0** | 评估是测量行为，不是生成行为。`temperature=0` 确保多次运行同一条 QA 对得到一致分数，否则无法区分"系统改好了还是 randomness 波动"。生产 LLM 和评估 LLM 建议用不同模型族（如生产用 deepseek-chat，评估用 qwen-max），避免评估者自我偏好（self-bias）。注意 RAGAS 内部 faithfulness/context_recall 等指标需要调 LLM 做 claim 提取和判断，temperature 不设为 0 时这些判断会随机波动 |
+| **黄金测试集（Golden Dataset）** | 从真实用户问题精选 50-200 条，覆盖常见问题类型，人工标注高质量 ground_truth。固定版本作为基线，每次系统变更（chunking 参数、rerank 参数、prompt 修改）时在同一测试集上重新评估，对比分数变化。建议每季度轮换 10-20% 防止分布漂移 |
+| **指标解读定位瓶颈** | 四个指标分别对应不同的优化方向，不要只看平均分：`context_precision` 低 → 检索 Top-K 太大或缺少重排序；`faithfulness` 低 → LLM 未受约束"只从上下文回答"；`context_recall` 低 → 分块策略不合理（信息被切碎）；`answer_relevancy` 低 → 模型回答太宽泛或答非所问 |
+| **不要合成单一综合分** | 一个高平均分可能掩盖关键维度的缺陷。权重（如 faithfulness 0.3 + recall 0.3 + precision 0.2 + relevancy 0.2）是客观分数，推荐在报告中保留各指标单独值而不做 PASS/FAIL 判定。`--gate` 功能可保留作为参考，但不建议作为唯一的发布门禁 |
+| **结构化输出便于 CI 集成** | 评估结果应以结构化格式（CSV + Markdown）持久化，每行包含 question / 各指标得分 / chunk_size / retrieval_k 等上下文信息，便于 `compare_retrieval.py` 解析和在 CI 中做回归对比 |
+| **评估时机策略** | 不需要每次生产请求都跑完整评估（消耗 3-4 次 LLM 调用）。推荐：每次参数改动时跑全量黄金测试集（CI/CD）；生产环境定期抽样 1-5%；用户反馈触发时对单条做深度评估 |
+
 ### 文档解析
 
 | 实践 | 说明 |

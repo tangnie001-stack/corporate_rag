@@ -25,7 +25,7 @@ from loguru import logger
 from src.core.logging import setup_logging
 
 from src.config import settings, DASHSCOPE_API_KEY, DASHSCOPE_BASE_URL
-from src.config.qa_pairs import QUESTIONS, GROUND_TRUTH
+from src.config.ragas_pairs import QUESTIONS, GROUND_TRUTH
 
 setup_logging()
 
@@ -303,7 +303,7 @@ def check_qa_count(questions: list[str]) -> None:
     MIN_QA = 50
     if count < MIN_QA:
         print(f"QA pairs only {count} (< {MIN_QA}). "
-              f"Add more questions and ground_truth to src/config/qa_pairs.py.")
+              f"Add more questions and ground_truth to src/config/ragas_pairs.py.")
         print("建议覆盖以下类型：事实查询、推理查询、多上下文查询、边界案例。")
         sys.exit(1)
     print(f"QA pair count: {count} (OK)")
