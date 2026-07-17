@@ -4,13 +4,14 @@ import asyncio
 import os
 from typing import AsyncGenerator
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
 import jieba
 
 from src.api.sse_utils import sse_citation, sse_done, sse_error, sse_status, sse_token
+from src.api.dependencies import get_app_service
 from src.services.app_service import AppService
 
 router = APIRouter()
@@ -140,25 +141,8 @@ def _build_highlighted_snippet(qbs: dict) -> str:
     return "".join(parts)
 
 
-_service: AppService | None = None
-
-
-def _get_service() -> AppService:
-    """获取 AppService 单例实例。
-
-    延迟初始化：首次调用时创建实例，后续复用。
-    避免模块导入阶段产生网络或数据库连接。
-
-    Returns:
-        AppService 全局唯一实例
-    """
-    global _service
-    if _service is None:
-        _service = AppService()
-    return _service
-
-
 async def _stream_rag_response(
+    svc: AppService,
     kb_id: str,
     session_id: str,
     query: str,
@@ -175,8 +159,6 @@ async def _stream_rag_response(
         token（回答片段）、citation（引用来源）、done（流结束标记）
     """
     try:
-        svc = _get_service()
-
         # 启动 Langfuse trace
         tracer = svc.rag_chain._tracer
         trace_id = tracer.start_trace(
@@ -321,6 +303,7 @@ async def chat_stream(
         ..., description="Knowledge base ID (or empty for cross-KB search)"
     ),
     query: str = Query(..., description="User question"),
+    svc: AppService = Depends(get_app_service),
 ):
     """流式 RAG 问答端点 — 返回 SSE 事件流。
 
@@ -328,6 +311,7 @@ async def chat_stream(
         session_id: 会话 ID，用于关联对话历史
         kb_id: 知识库 UUID（空字符串表示跨库搜索）
         query: 用户问题文本
+        svc: AppService 实例（通过 FastAPI Depends 注入）
 
     Returns:
         StreamingResponse: SSE 流式响应，包含
@@ -337,7 +321,7 @@ async def chat_stream(
         HTTPException 422: 参数校验失败（FastAPI 自动处理）
     """
     return StreamingResponse(
-        _stream_rag_response(kb_id, session_id, query),
+        _stream_rag_response(svc, kb_id, session_id, query),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
