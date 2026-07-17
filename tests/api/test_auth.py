@@ -9,10 +9,9 @@ from tests.api.mock_data import make_user
 
 
 @patch("src.api.auth.UserAuth.hash_password", return_value="hashed_pwd")
-@patch("src.api.auth._get_service")
-def test_login_new_user_auto_register(mock_get_service, mock_hash, client):
+def test_login_new_user_auto_register(mock_hash, mock_app_service, client):
     """新用户自动注册并返回 token。"""
-    mock_svc = mock_get_service.return_value
+    mock_svc = mock_app_service
     mock_svc.db.get_user_by_account = AsyncMock(return_value=None)
     mock_svc.db.add_user = AsyncMock()
     mock_svc.db.update_user_token = AsyncMock()
@@ -33,10 +32,9 @@ def test_login_new_user_auto_register(mock_get_service, mock_hash, client):
 
 
 @patch("src.api.auth.UserAuth.hash_password", return_value="correct_hash")
-@patch("src.api.auth._get_service")
-def test_login_existing_user_correct_password(mock_get_service, mock_hash, client):
+def test_login_existing_user_correct_password(mock_hash, mock_app_service, client):
     """已有用户，密码正确，返回 token。"""
-    mock_svc = mock_get_service.return_value
+    mock_svc = mock_app_service
     mock_svc.db.get_user_by_account = AsyncMock(
         return_value=make_user("u1", "existing", "correct_hash")
     )
@@ -56,10 +54,9 @@ def test_login_existing_user_correct_password(mock_get_service, mock_hash, clien
 
 
 @patch("src.api.auth.UserAuth.hash_password", return_value="wrong_hash")
-@patch("src.api.auth._get_service")
-def test_login_wrong_password(mock_get_service, mock_hash, client):
+def test_login_wrong_password(mock_hash, mock_app_service, client):
     """密码错误返回 401。"""
-    mock_svc = mock_get_service.return_value
+    mock_svc = mock_app_service
     mock_svc.db.get_user_by_account = AsyncMock(
         return_value=make_user("u1", "existing", "correct_hash")
     )
@@ -85,8 +82,7 @@ def test_login_missing_password(client):
     new_callable=AsyncMock,
     return_value="u1",
 )
-@patch("src.api.auth._get_service")
-def test_verify_token_valid(mock_get_service, mock_get_uid, client):
+def test_verify_token_valid(mock_get_uid, mock_app_service, client):
     """有效 token 返回 valid=True + user_id。"""
     client.cookies.set("token", "valid-token")
     response = client.post("/api/auth/verify")
@@ -96,8 +92,7 @@ def test_verify_token_valid(mock_get_service, mock_get_uid, client):
     assert data["user_id"] == "u1"
 
 
-@patch("src.api.auth._get_service")
-def test_verify_no_token(mock_get_service, client):
+def test_verify_no_token(mock_app_service, client):
     """无 Cookie 时返回 valid=False。"""
     response = client.post("/api/auth/verify")
     assert response.status_code == 200
@@ -108,8 +103,7 @@ def test_verify_no_token(mock_get_service, client):
 
 
 @patch("src.api.auth.UserAuth.delete_token_async", new_callable=AsyncMock)
-@patch("src.api.auth._get_service")
-def test_logout(mock_get_service, mock_delete, client):
+def test_logout(mock_delete, mock_app_service, client):
     """退出登录清除 token。"""
     client.cookies.set("token", "test-token")
     response = client.post("/api/auth/logout")

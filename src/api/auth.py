@@ -2,31 +2,24 @@
 
 import uuid
 
-from fastapi import APIRouter, Cookie
+from fastapi import APIRouter, Cookie, Depends
 from fastapi.responses import JSONResponse
 from loguru import logger
 
 from src.api.model.request import LoginRequest
 from src.api.model.response import LoginResponse, VerifyResponse
 from src.services.app_service import AppService
+from src.api.dependencies import get_app_service
 from src.config.response_codes import Code
 from src.infra.errors import AuthError
 from src.infra.auth.user_auth import UserAuth
+from src.infra.redis_client import get_redis_client
 
 router = APIRouter()
 
-_service: AppService | None = None
-
-
-def _get_service() -> AppService:
-    global _service
-    if _service is None:
-        _service = AppService()
-    return _service
-
 
 @router.post("/auth/login")
-async def login(body: LoginRequest) -> LoginResponse:
+async def login(body: LoginRequest, svc: AppService = Depends(get_app_service)) -> LoginResponse:
     """用户登录或自动注册。
 
     若账号存在则验证密码，不存在则自动创建账号并返回新 token。
@@ -40,7 +33,6 @@ async def login(body: LoginRequest) -> LoginResponse:
     Raises:
         AuthError: 密码错误时抛出 401
     """
-    svc = _get_service()
     pw_hash = UserAuth.hash_password(body.password)
     user = await svc.db.get_user_by_account(body.account)
     if user:
@@ -52,13 +44,16 @@ async def login(body: LoginRequest) -> LoginResponse:
         await svc.db.add_user(user_id, body.account, pw_hash)
         logger.info("New user registered: {}", body.account)
     token = UserAuth.generate_token()
-    await UserAuth.store_token_async(svc.redis_client, token, user_id)
+    await UserAuth.store_token_async(get_redis_client(), token, user_id)
     await svc.db.update_user_token(user_id, token)
     return LoginResponse(token=token, user_id=user_id)
 
 
 @router.post("/auth/verify")
-async def verify_token(token: str = Cookie(None)) -> VerifyResponse:
+async def verify_token(
+    token: str = Cookie(None),
+    svc: AppService = Depends(get_app_service),
+) -> VerifyResponse:
     """校验登录 token 是否有效。
 
     Args:
@@ -69,13 +64,15 @@ async def verify_token(token: str = Cookie(None)) -> VerifyResponse:
     """
     if not token:
         return VerifyResponse(valid=False)
-    svc = _get_service()
-    uid = await UserAuth.get_user_id_from_token_async(svc.redis_client, token)
+    uid = await UserAuth.get_user_id_from_token_async(get_redis_client(), token)
     return VerifyResponse(valid=uid is not None, user_id=uid)
 
 
 @router.post("/auth/logout")
-async def logout(token: str = Cookie(None)) -> JSONResponse:
+async def logout(
+    token: str = Cookie(None),
+    svc: AppService = Depends(get_app_service),
+) -> JSONResponse:
     """退出登录，清除 token。
 
     Args:
@@ -85,8 +82,7 @@ async def logout(token: str = Cookie(None)) -> JSONResponse:
         JSONResponse: 退出提示
     """
     if token:
-        svc = _get_service()
-        await UserAuth.delete_token_async(svc.redis_client, token)
+        await UserAuth.delete_token_async(get_redis_client(), token)
     return JSONResponse({"message": "已退出登录"})
 
 
