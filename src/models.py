@@ -27,6 +27,7 @@ from src.config import (
     EMBEDDING_MODEL,
     RERANK_MODEL,
     LLM_TEMPERATURE,
+    EMBEDDING_BATCH_SIZE,
     TOP_K_RERANK,
     RETRY_MAX_ATTEMPTS,
     RETRY_INITIAL_INTERVAL,
@@ -115,8 +116,8 @@ class FixedDimDashScopeEmbeddings(DashScopeEmbeddings):
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         """将文本列表转为固定维度的向量。
 
-        分批调用 DashScope API：单次 batch 上限为 20 条，
-        超出时自动按 20 条分批后再合并结果。
+        分批调用 DashScope API：单次 batch 上限由 `EMBEDDING_BATCH_SIZE`
+        配置项控制（默认 20），超出时自动分批后再合并结果。
 
         Args:
             texts: 待编码的文本列表
@@ -126,7 +127,6 @@ class FixedDimDashScopeEmbeddings(DashScopeEmbeddings):
         """
         from langchain_community.embeddings.dashscope import embed_with_retry
 
-        EMBEDDING_BATCH_SIZE = 20
         all_embeddings: list[list[float]] = []
 
         logger.debug(

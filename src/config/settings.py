@@ -40,6 +40,8 @@ EMBEDDING_DIMENSION: int = int(os.getenv("EMBEDDING_DIMENSION", "1024"))
 RERANK_MODEL: str = os.getenv("RERANK_MODEL", "gte-rerank-v1")
 # LLM 温度参数：越低回答越确定性（适合金融场景），0.1 几乎不产生随机性
 LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.1"))
+# Embedding API 单次 batch 上限（DashScope 限制 20 条，超出需分批）
+EMBEDDING_BATCH_SIZE: int = int(os.getenv("EMBEDDING_BATCH_SIZE", "20"))
 # RAGAS 评估专用模型（独立于生产 LLM，temperature 固定为 0）
 # 为空时回退到 LLM_MODEL
 RAGAS_LLM_MODEL: str = os.getenv("RAGAS_LLM_MODEL", "")
