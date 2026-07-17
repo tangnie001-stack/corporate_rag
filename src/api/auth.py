@@ -52,7 +52,6 @@ async def login(body: LoginRequest, svc: AppService = Depends(get_app_service)) 
 @router.post("/auth/verify")
 async def verify_token(
     token: str = Cookie(None),
-    svc: AppService = Depends(get_app_service),
 ) -> VerifyResponse:
     """校验登录 token 是否有效。
 
@@ -71,7 +70,6 @@ async def verify_token(
 @router.post("/auth/logout")
 async def logout(
     token: str = Cookie(None),
-    svc: AppService = Depends(get_app_service),
 ) -> JSONResponse:
     """退出登录，清除 token。
 
