@@ -6,24 +6,17 @@
   - context_recall: 检索到的上下文是否覆盖了参考答案所需的信息
   - context_precision: 检索到的上下文中有多少是真正有用的
 
-支持两种运行模式：
-  1. 默认模式：对指定知识库运行评估，需提前上传文档
-  2. Benchmark 模式：python eval_ragas.py --chunk-size 768
-     自动创建临时 KB，以指定 chunk_size 解析 sample.txt 后评估
-
-使用方式：
-  python src/eval_ragas.py                          # 默认模式（需先创建 rag_eval KB 并上传）
-  python src/eval_ragas.py --chunk-size 768         # Benchmark 模式
-  python src/eval_ragas.py --kb-name "我的知识库"   # 指定知识库名
-  python src/eval_ragas.py --output ./results.csv   # 指定输出路径
+运行方式：
+  python -m src.cli.eval_ragas --kb-name "我的知识库"  # 评估指定知识库
+  python -m src.cli.eval_ragas --kb-name "我的知识库" --gate  # 评估并检查质量门禁
+  python -m src.cli.eval_ragas --list-kbs              # 列出可用知识库
+  python -m src.cli.eval_ragas --check                 # 检查 QA 对数
 """
 
 import argparse
 import os
 import sys
-import uuid
 from datetime import datetime
-from typing import Optional
 
 import asyncio
 from loguru import logger
@@ -43,9 +36,11 @@ from ragas.metrics import (
     context_precision,
 )
 
-from src.config import settings
+from langchain_openai import ChatOpenAI
+
+from src.config import settings, DASHSCOPE_API_KEY, DASHSCOPE_BASE_URL
 from src.config.qa_pairs import QUESTIONS, GROUND_TRUTH
-from src.models import get_llm, get_embeddings
+from src.models import get_embeddings
 from src.rag.chain import RAGChain
 
 setup_logging()
@@ -53,8 +48,6 @@ setup_logging()
 
 # 默认输出目录
 DEFAULT_OUTPUT_DIR: str = "data/reports"
-# 临时知识库名称前缀（benchmark 模式使用）
-TEMP_KB_PREFIX: str = "ragas_eval_temp"
 
 # Quality gate thresholds
 GATE_THRESHOLDS: dict[str, float] = {
@@ -73,14 +66,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--kb-name",
         type=str,
-        default="rag_eval",
-        help="要评估的知识库名称（默认: rag_eval）",
+        required=True,
+        help="要评估的知识库名称（必填）",
     )
     parser.add_argument(
-        "--chunk-size",
-        type=int,
-        default=None,
-        help="指定 chunk_size 运行 benchmark 模式（如 512/768/1024）",
+        "--list-kbs",
+        action="store_true",
+        help="列出所有可用知识库后退出",
     )
     parser.add_argument(
         "--output",
@@ -97,7 +89,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--check",
         action="store_true",
-        help="检查 QA 对数 >= 20，不满足则退出码为 1",
+        help="检查 QA 对数 >= 50，不满足则退出码为 1",
     )
     parser.add_argument(
         "--gate",
@@ -148,7 +140,7 @@ def generate_answers_and_contexts(
             )
 
         except Exception as e:
-            logger.error("Failed to generate answer for Q{}: {}", i + 1, e)
+            logger.warning("Failed to generate answer for Q{}: {}", i + 1, e)
             answers.append(f"[ERROR] {e}")
             contexts.append([])
 
@@ -216,7 +208,6 @@ def save_results_csv(
     result: EvaluationResult,
     questions: list[str],
     ground_truth: list[str],
-    chunk_size: Optional[int],
     output_path: str,
 ) -> str:
     """将评估结果保存为 CSV 文件.
@@ -225,7 +216,6 @@ def save_results_csv(
         result: RAGAS evaluate() 返回的结果对象
         questions: 问题列表
         ground_truth: 参考答案列表
-        chunk_size: 使用的 chunk_size（benchmark 模式）
         output_path: 输出文件路径
 
     Returns:
@@ -236,9 +226,8 @@ def save_results_csv(
     # 添加元信息列
     df.insert(0, "question", questions)
     df.insert(1, "ground_truth", ground_truth)
-    df.insert(2, "chunk_size", chunk_size if chunk_size else settings.CHUNK_SIZE)
 
-    # 确保输出目录存在；os.path.dirname 对裸文件名返回空字符串，用 or "." 兜底
+    # 确保输出目录存在
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
     df.to_csv(output_path, index=True, encoding="utf-8-sig")
@@ -249,7 +238,6 @@ def save_results_csv(
 def save_markdown_report(
     result: EvaluationResult,
     questions: list[str],
-    chunk_size: Optional[int],
     output_path: str,
 ) -> str:
     """将评估结果保存为 Markdown 摘要报告，与 CSV 同路径（.md 后缀）.
@@ -257,7 +245,6 @@ def save_markdown_report(
     Args:
         result: RAGAS evaluate() 返回的结果对象
         questions: 问题列表
-        chunk_size: 使用的 chunk_size（benchmark 模式）
         output_path: CSV 输出路径（用于推导 .md 路径）
 
     Returns:
@@ -274,7 +261,6 @@ def save_markdown_report(
     ]
     actual_metrics = [c for c in metric_cols if c in df.columns]
 
-    cfg_chunk = chunk_size if chunk_size else settings.CHUNK_SIZE
     cfg_topk = settings.TOP_K_RETRIEVAL
     cfg_rerank = settings.TOP_K_RERANK
 
@@ -283,7 +269,7 @@ def save_markdown_report(
     lines.append("")
     lines.append(f"**Date:** {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     lines.append(
-        f"**Configuration:** chunk_size={cfg_chunk}, "
+        f"**Configuration:** "
         f"TOP_K_RETRIEVAL={cfg_topk}, TOP_K_RERANK={cfg_rerank}"
     )
     lines.append(f"**QA Pairs:** {len(questions)}")
@@ -315,14 +301,17 @@ def save_markdown_report(
 
 
 def check_qa_count(questions: list[str]) -> None:
-    """检查 QA 对数是否 >= 20，不满足时退出码为 1.
+    """检查 QA 对数是否 >= 50，不满足时退出码为 1.
 
     Args:
         questions: 问题列表
     """
     count = len(questions)
-    if count < 20:
-        print(f"QA pair count: {count} (below minimum 20)")
+    MIN_QA = 50
+    if count < MIN_QA:
+        print(f"QA pairs only {count} (< {MIN_QA}). "
+              f"Add more questions and ground_truth to src/config/qa_pairs.py.")
+        print("建议覆盖以下类型：事实查询、推理查询、多上下文查询、边界案例。")
         sys.exit(1)
     print(f"QA pair count: {count} (OK)")
     sys.exit(0)
@@ -369,113 +358,43 @@ def check_gate(result: EvaluationResult, questions: list[str]) -> None:
     sys.exit(0)
 
 
-def setup_benchmark_kb(kb_name: str) -> tuple[str, str]:
-    """为 benchmark 模式创建临时知识库并上传测试文档.
-
-    流程：
-      1. 创建知识库（如已存在则复用）
-      2. 上传 test_docs/sample.txt
-      3. 完成解析和向量化
-
-    Args:
-        kb_name: 知识库名称
-
-    Returns:
-        (kb_id, session_id) 元组
-    """
-    from src.services.app_service import AppService
-
-    svc = AppService()
-    session_id = f"ragas_eval_{uuid.uuid4().hex[:8]}"
-
-    # 创建或获取知识库
-    kb_id, is_new = svc.create_knowledge_base(kb_name)
-    logger.info("KB '{}': id={}, new={}", kb_name, kb_id, is_new)
-
-    # 上传测试文档
-    test_doc_path = "test_docs/sample.txt"
-    if not os.path.exists(test_doc_path):
-        logger.error("Test document not found: {}", test_doc_path)
-        raise FileNotFoundError(f"Test document not found: {test_doc_path}")
-
-    result = svc.upload_and_process(kb_id, test_doc_path, "sample.txt")
-    if result["success"]:
-        logger.info("Test document uploaded: {} chunks", result["chunk_count"])
-    else:
-        logger.warning("Test document upload issue: {}", result.get("error"))
-
-    return kb_id, session_id
-
-
-def cleanup_benchmark_kb(kb_name: str) -> None:
-    """清理 benchmark 模式创建的临时知识库.
-
-    Args:
-        kb_name: 知识库名称
-    """
-    from src.services.app_service import AppService
-
-    svc = AppService()
-    # get_kb_by_name 返回 kb_id（UUID 字符串）
-    kb_id = svc.db.get_kb_by_name(kb_name)
-    if kb_id:
-        svc.delete_knowledge_base(kb_id)
-        logger.info("Cleaned up temp KB: {} ({})", kb_name, kb_id)
-
-
 def main() -> None:
     """主入口 — 解析参数、运行评估、保存结果."""
     args = parse_args()
-    chunk_size = args.chunk_size
+
+    # ---- list-kbs 模式：列出知识库后退出 ----
+    if args.list_kbs:
+        _list_knowledge_bases()  # noqa: F821
+        return
+
     kb_name = args.kb_name
     session_id = args.session_id
 
-    # ---- check 模式：独立检查 QA 对数，不执行评估 ----
+    # ---- check 独立模式：只检查 QA 对数，不执行评估 ----
     if args.check:
         check_qa_count(QUESTIONS)
 
     # 生成输出路径
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    chunk_tag = f"_chunk{chunk_size}" if chunk_size else ""
     output_path = (
-        args.output or f"{DEFAULT_OUTPUT_DIR}/ragas_eval_{timestamp}{chunk_tag}.csv"
+        args.output or f"{DEFAULT_OUTPUT_DIR}/ragas_eval_{timestamp}.csv"
     )
 
-    # ---- Benchmark 模式：临时覆盖 chunk_size ----
-    temp_kb_name: Optional[str] = None
-    original_chunk_size: Optional[int] = None
-    if chunk_size is not None:
-        logger.info("Benchmark mode: chunk_size = {}", chunk_size)
-        original_chunk_size = settings.CHUNK_SIZE
-        settings.CHUNK_SIZE = chunk_size
-
-        # 使用带 chunk_size 标记的临时 KB 名称
-        temp_kb_name = f"{TEMP_KB_PREFIX}_chunk{chunk_size}"
-
-        try:
-            kb_id, session_id = setup_benchmark_kb(temp_kb_name)
-            kb_name = temp_kb_name
-        except Exception as e:
-            logger.error("Benchmark KB setup failed: {}", e)
-            settings.CHUNK_SIZE = original_chunk_size
-            sys.exit(1)
-    else:
-        logger.info("Standard mode: evaluating KB '{}'", kb_name)
+    logger.info("Evaluating KB '{}'", kb_name)
 
     try:
         # ---- 初始化 RAG 组件 ----
         logger.info("Initializing RAGChain...")
         rag_chain = RAGChain()
 
-        # ---- 标准模式：从名称查找 kb_id ----
-        if temp_kb_name is None:
-            from src.services.app_service import AppService
+        # ---- 从名称查找 kb_id ----
+        from src.services.app_service import AppService
 
-            svc = AppService()
-            kb_id = svc.db.get_kb_by_name(kb_name)
-            if not kb_id:
-                logger.error("Knowledge base '{}' not found", kb_name)
-                sys.exit(1)
+        svc = AppService()
+        kb_id = svc.db.get_kb_by_name(kb_name)
+        if not kb_id:
+            logger.error("Knowledge base '{}' not found", kb_name)
+            sys.exit(1)
 
         # ---- 检查知识库是否为空 ----
         logger.info("Checking KB vector store...")
@@ -485,8 +404,14 @@ def main() -> None:
             sys.exit(1)
 
         # ---- 初始化 RAGAS 评估器 ----
-        logger.info("Initializing RAGAS evaluator (Qwen-max)...")
-        llm = get_llm()
+        eval_model = settings.RAGAS_LLM_MODEL or settings.LLM_MODEL
+        logger.info("Initializing RAGAS evaluator ({})...", eval_model)
+        llm = ChatOpenAI(
+            model=eval_model,
+            temperature=0,
+            api_key=DASHSCOPE_API_KEY,
+            base_url=DASHSCOPE_BASE_URL,
+        )
         embeddings = get_embeddings()
         llm_wrapper = LangchainLLMWrapper(llm)
         embeddings_wrapper = LangchainEmbeddingsWrapper(embeddings)
@@ -515,23 +440,18 @@ def main() -> None:
             result,
             QUESTIONS,
             GROUND_TRUTH,
-            chunk_size,
             output_path,
         )
-        save_markdown_report(result, QUESTIONS, chunk_size, output_path)
+        save_markdown_report(result, QUESTIONS, output_path)
 
         # ---- 写入 eval_report 表 ----
-        _save_eval_report(kb_name, result, QUESTIONS, output_path, chunk_size)
+        _save_eval_report(kb_name, result, QUESTIONS, output_path)
 
         # ---- gate 模式：检查评估结果是否通过质量门禁 ----
         if args.gate:
             check_gate(result, QUESTIONS)
     finally:
-        # ---- 清理（benchmark 模式）：即使评估过程出异常也保证执行 ----
-        if temp_kb_name is not None:
-            cleanup_benchmark_kb(temp_kb_name)
-            settings.CHUNK_SIZE = original_chunk_size  # type: ignore[arg-type]
-            logger.info("Restored chunk_size to {}", original_chunk_size)
+        pass  # 不再需要 benchmark 清理逻辑
 
     logger.info("Evaluation complete.")
 
@@ -541,16 +461,14 @@ def _save_eval_report(
     result,
     questions: list[str],
     output_path: str,
-    chunk_size: int | None,
 ) -> None:
-    """将 RAGAS 评估结果持久化到 eval_report 表。
+    """将 RAGAS 评估结果持久化到 eval_report 表.
 
     Args:
         kb_name: 知识库名称
         result: RAGAS evaluate() 返回的结果对象
         questions: 问题列表
         output_path: CSV 报告文件路径
-        chunk_size: 使用的 chunk_size
     """
     try:
         from src.services.app_service import AppService
@@ -562,7 +480,12 @@ def _save_eval_report(
             return
 
         df = result.to_pandas()
-        metric_cols = ["faithfulness", "answer_relevancy", "context_precision", "context_recall"]
+        metric_cols = [
+            "faithfulness",
+            "answer_relevancy",
+            "context_precision",
+            "context_recall",
+        ]
         detail = []
         for i, q in enumerate(questions):
             entry = {"q_index": i, "question": q[:100]}
@@ -581,8 +504,12 @@ def _save_eval_report(
         precision = avg.get("context_precision")
         relevancy = avg.get("answer_relevancy")
 
-        weights = {"faithfulness": 0.3, "context_recall": 0.3,
-                   "context_precision": 0.2, "answer_relevancy": 0.2}
+        weights = {
+            "faithfulness": 0.3,
+            "context_recall": 0.3,
+            "context_precision": 0.2,
+            "answer_relevancy": 0.2,
+        }
         weighted_sum = 0.0
         total_w = 0.0
         for k, w in weights.items():
@@ -593,20 +520,22 @@ def _save_eval_report(
         overall = weighted_sum / total_w if total_w > 0 else None
 
         async def _do_insert():
-            await svc.db.insert_eval_report({
-                "kb_id": kb_id,
-                "run_type": "manual",
-                "qa_count": len(questions),
-                "faithfulness": faith,
-                "answer_relevancy": relevancy,
-                "context_precision": precision,
-                "context_recall": recall,
-                "overall_score": overall,
-                "passed": overall >= 0.70 if overall is not None else False,
-                "report_path": output_path,
-                "triggered_by": None,
-                "detail_json": detail,
-            })
+            await svc.db.insert_eval_report(
+                {
+                    "kb_id": kb_id,
+                    "run_type": "manual",
+                    "qa_count": len(questions),
+                    "faithfulness": faith,
+                    "answer_relevancy": relevancy,
+                    "context_precision": precision,
+                    "context_recall": recall,
+                    "overall_score": overall,
+                    "passed": overall >= 0.70 if overall is not None else False,
+                    "report_path": output_path,
+                    "triggered_by": None,
+                    "detail_json": detail,
+                }
+            )
 
         asyncio.run(_do_insert())
         logger.info("Eval report saved to eval_report table for KB '{}'", kb_name)
