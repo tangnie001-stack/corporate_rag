@@ -12,7 +12,7 @@ import os
 import tempfile
 import uuid
 
-from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from loguru import logger
 
 from src.api.model.request import (
@@ -30,6 +30,7 @@ from src.api.model.response import (
     DocumentDeleteResponse,
 )
 from src.services.app_service import AppService
+from src.api.dependencies import get_app_service
 from src.config import CHUNK_EVAL_ENABLED, MAX_FILE_SIZE, MAX_TABLE_TOKENS
 from src.config.response_codes import Code
 from src.eval.chunk_scorer import ChunkQualityScorer
@@ -40,20 +41,7 @@ from src.infra.db.file_store import FileStore
 
 router = APIRouter()
 
-_service: AppService | None = None
 _process_semaphore = asyncio.Semaphore(3)
-
-
-def _get_service() -> AppService:
-    """获取 AppService 单例实例。
-
-    Returns:
-        AppService 全局唯一实例
-    """
-    global _service
-    if _service is None:
-        _service = AppService()
-    return _service
 
 
 ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt"}
@@ -61,7 +49,9 @@ ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt"}
 
 @router.post("/kbs/documents/list")
 async def get_documents(
-    body: DocumentListRequest, request: Request = None
+    body: DocumentListRequest,
+    request: Request = None,
+    svc: AppService = Depends(get_app_service),
 ) -> list[DocumentListResponse]:
     """列出知识库中的所有文档。
 
@@ -71,7 +61,6 @@ async def get_documents(
     Returns:
         list[DocumentListResponse]: 文档列表
     """
-    svc = _get_service()
     docs = await svc.get_documents(body.kb_id)
     logger.info("Documents list: kb_id={} count={}", body.kb_id, len(docs))
 
@@ -118,6 +107,7 @@ async def upload_document(
     file: UploadFile = File(...),
     kb_id: str = Form(...),
     request: Request = None,
+    svc: AppService = Depends(get_app_service),
 ) -> UploadDocumentResponse:
     """上传文档并立即返回（异步处理）。
 
@@ -167,8 +157,6 @@ async def upload_document(
         raise BusinessError(
             Code.FILE_TYPE_UNSUPPORTED, Code.FILE_TYPE_UNSUPPORTED_MSG, 400
         )
-
-    svc = _get_service()
 
     # MD5 去重：相同 KB 内不允许重复文件
     file_hash = hashlib.md5(contents).hexdigest()
@@ -402,16 +390,18 @@ async def _process_document_task(
 
 
 @router.post("/kbs/documents/status")
-async def get_document_status(body: DocumentStatusRequest) -> DocumentStatusResponse:
+async def get_document_status(
+    body: DocumentStatusRequest,
+    svc: AppService = Depends(get_app_service),
+) -> DocumentStatusResponse:
     """获取文档的处理状态。
 
     Args:
         body: 文档状态请求体，含 kb_id 和 doc_id
 
     Returns:
-        DocumentStatusResponse: 含 status、chunk_count、progress、error 以及处理阶段详情
+        DocumentStatusResponse: 含 status、chunk_count、progress、error         以及处理阶段详情
     """
-    svc = _get_service()
     docs = await svc.db.get_documents(body.kb_id)
     doc = next((d for d in docs if d["id"] == body.doc_id), None)
     if not doc:
@@ -428,7 +418,10 @@ async def get_document_status(body: DocumentStatusRequest) -> DocumentStatusResp
 
 
 @router.post("/kbs/documents/chunks")
-async def get_document_chunks(body: DocumentChunksRequest) -> ChunksResponse:
+async def get_document_chunks(
+    body: DocumentChunksRequest,
+    svc: AppService = Depends(get_app_service),
+) -> ChunksResponse:
     """分页预览已处理文档的分块内容。
 
     Args:
@@ -437,7 +430,6 @@ async def get_document_chunks(body: DocumentChunksRequest) -> ChunksResponse:
     Returns:
         ChunksResponse: 含 items（当前页分块列表）、total（总量）、page、page_size
     """
-    svc = _get_service()
     result = await asyncio.to_thread(
         svc.vector_store.get_chunks_paginated,
         body.doc_id,
@@ -482,7 +474,10 @@ async def get_document_chunks(body: DocumentChunksRequest) -> ChunksResponse:
 
 
 @router.post("/kbs/documents/delete")
-async def delete_document(body: DocumentDeleteRequest) -> DocumentDeleteResponse:
+async def delete_document(
+    body: DocumentDeleteRequest,
+    svc: AppService = Depends(get_app_service),
+) -> DocumentDeleteResponse:
     """软删除文档（标记为 deleted），同时删除向量库中的分块。
 
     Args:
@@ -491,7 +486,6 @@ async def delete_document(body: DocumentDeleteRequest) -> DocumentDeleteResponse
     Returns:
         DocumentDeleteResponse: 含 success 布尔值
     """
-    svc = _get_service()
     ok = await svc.db.soft_delete_document(body.doc_id)
     if ok:
         svc.vector_store.delete_document(body.kb_id, body.doc_id)
