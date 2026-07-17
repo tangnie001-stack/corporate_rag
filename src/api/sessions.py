@@ -6,45 +6,33 @@
 
 import asyncio
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from loguru import logger
 
 from src.api.model.request import SessionMessagesRequest, SessionDeleteRequest
 from src.api.model.response import SessionItem, MessageItem, SessionDeleteResponse
+from src.api.dependencies import get_app_service
 from src.services.app_service import AppService
 from src.config.response_codes import Code
 from src.infra.errors import BusinessError
 
 router = APIRouter()
 
-_service: AppService | None = None
-
-
-def _get_service() -> AppService:
-    """获取 AppService 单例实例。
-
-    延迟初始化：首次调用时创建实例，后续复用。
-    避免模块导入阶段产生网络或数据库连接。
-
-    Returns:
-        AppService 全局唯一实例
-    """
-    global _service
-    if _service is None:
-        _service = AppService()
-    return _service
-
 
 @router.post("/sessions/list")
-async def list_sessions() -> list[SessionItem]:
+async def list_sessions(
+    svc: AppService = Depends(get_app_service),
+) -> list[SessionItem]:
     """列出最近 50 个会话。
 
     始终返回 200 + 数组，无会话时返回 []。
 
+    Args:
+        svc: 应用服务实例（由 FastAPI 注入）
+
     Returns:
         list[SessionItem]: 会话列表
     """
-    svc = _get_service()
     sessions = await svc.db.get_sessions()
     result = []
     for row in sessions:
@@ -67,7 +55,10 @@ async def list_sessions() -> list[SessionItem]:
 
 
 @router.post("/sessions/messages")
-async def get_session_messages(body: SessionMessagesRequest) -> list[MessageItem]:
+async def get_session_messages(
+    body: SessionMessagesRequest,
+    svc: AppService = Depends(get_app_service),
+) -> list[MessageItem]:
     """获取会话消息历史。
 
     先验证会话存在，再返回消息列表。
@@ -75,6 +66,7 @@ async def get_session_messages(body: SessionMessagesRequest) -> list[MessageItem
 
     Args:
         body: 会话消息请求体，含 session_id
+        svc: 应用服务实例（由 FastAPI 注入）
 
     Returns:
         list[MessageItem]: 消息列表
@@ -82,7 +74,6 @@ async def get_session_messages(body: SessionMessagesRequest) -> list[MessageItem
     Raises:
         BusinessError: 会话不存在时返回 404
     """
-    svc = _get_service()
     session_id = body.session_id
     session = await svc.db.get_session_by_id(session_id)
     if not session:
@@ -105,7 +96,10 @@ async def get_session_messages(body: SessionMessagesRequest) -> list[MessageItem
 
 
 @router.post("/sessions/delete")
-async def delete_session(body: SessionDeleteRequest) -> SessionDeleteResponse:
+async def delete_session(
+    body: SessionDeleteRequest,
+    svc: AppService = Depends(get_app_service),
+) -> SessionDeleteResponse:
     """删除会话及其所有消息。
 
     执行顺序:
@@ -116,6 +110,7 @@ async def delete_session(body: SessionDeleteRequest) -> SessionDeleteResponse:
 
     Args:
         body: 会话删除请求体，含 session_id
+        svc: 应用服务实例（由 FastAPI 注入）
 
     Returns:
         SessionDeleteResponse: 删除结果
@@ -123,7 +118,6 @@ async def delete_session(body: SessionDeleteRequest) -> SessionDeleteResponse:
     Raises:
         BusinessError: 会话不存在时返回 404
     """
-    svc = _get_service()
     session_id = body.session_id
 
     # 清理 Redis（同步操作，通过 asyncio.to_thread 委托到线程池）
