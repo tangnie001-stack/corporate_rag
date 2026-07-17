@@ -115,6 +115,9 @@ class FixedDimDashScopeEmbeddings(DashScopeEmbeddings):
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         """将文本列表转为固定维度的向量。
 
+        分批调用 DashScope API：单次 batch 上限为 20 条，
+        超出时自动按 20 条分批后再合并结果。
+
         Args:
             texts: 待编码的文本列表
 
@@ -123,14 +126,28 @@ class FixedDimDashScopeEmbeddings(DashScopeEmbeddings):
         """
         from langchain_community.embeddings.dashscope import embed_with_retry
 
-        embeddings = embed_with_retry(
-            self,
-            input=texts,
-            text_type="document",
-            model=self.model,
-            dimensions=self.EMBEDDING_DIMENSION,
+        EMBEDDING_BATCH_SIZE = 20
+        all_embeddings: list[list[float]] = []
+
+        logger.debug(
+            "Embedding documents: model={} batch_size={} dim={}",
+            self.model,
+            len(texts),
+            self.EMBEDDING_DIMENSION,
         )
-        return [item["embedding"] for item in embeddings]
+
+        for i in range(0, len(texts), EMBEDDING_BATCH_SIZE):
+            batch = texts[i : i + EMBEDDING_BATCH_SIZE]
+            result = embed_with_retry(
+                self,
+                input=batch,
+                text_type="document",
+                model=self.model,
+                dimensions=self.EMBEDDING_DIMENSION,
+            )
+            all_embeddings.extend(item["embedding"] for item in result)
+
+        return all_embeddings
 
     def embed_query(self, text: str) -> list[float]:
         """将单条文本转为固定维度的向量。

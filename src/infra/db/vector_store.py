@@ -48,7 +48,9 @@ class DashScopeEmbeddingFunction(EmbeddingFunction):
             model: Embedding 模型名称（如 text-embedding-v3）
             api_key: DashScope API Key
         """
-        self._embedding = FixedDimDashScopeEmbeddings(model=model, dashscope_api_key=api_key)
+        self._embedding = FixedDimDashScopeEmbeddings(
+            model=model, dashscope_api_key=api_key
+        )
 
     def __call__(self, input: Documents) -> Embeddings:
         """将文档列表转为向量嵌入（入库用，text_type=document）。
@@ -116,7 +118,11 @@ class VectorStore:
                 path=self._persist_dir,
                 settings=Settings(anonymized_telemetry=False),
             )
-            logger.info("ChromaDB PersistentClient created at '{}'", self._persist_dir)
+            logger.info(
+                "ChromaDB PersistentClient created: persist_dir={} model={}",
+                self._persist_dir,
+                EMBEDDING_MODEL,
+            )
         return self._client
 
     def _collection_name(self, kb_id: str) -> str:
@@ -230,22 +236,23 @@ class VectorStore:
                 metadatas=metadatas,
             )
         except Exception as e:
-            logger.error(
+            logger.exception(
                 "ChromaDB add_chunks failed: kb_id={} doc_id={} chunks={} "
-                "first_content_preview={} error={}",
+                "model={} first_content_preview={} error={}",
                 kb_id,
                 doc_id,
                 len(chunks),
+                EMBEDDING_MODEL,
                 chunks[0].content[:100] if chunks else "",
                 e,
-                exc_info=True,
             )
             raise
         logger.info(
-            "ChromaDB add_chunks: kb_id={} doc_id={} count={}",
+            "ChromaDB add_chunks success: kb_id={} doc_id={} count={} model={}",
             kb_id,
             doc_id,
             len(chunks),
+            EMBEDDING_MODEL,
         )
         return len(ids)
 
@@ -296,10 +303,11 @@ class VectorStore:
                     }
                 )
         logger.info(
-            "ChromaDB search: kb_id={} query_len={} results={}",
+            "ChromaDB search: kb_id={} query_len={} results={} model={}",
             kb_id,
             len(query),
             len(formatted),
+            EMBEDDING_MODEL,
         )
         try:
             data_str = str(formatted)
