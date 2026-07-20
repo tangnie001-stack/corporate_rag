@@ -7,17 +7,18 @@
   - context_precision: 检索到的上下文中有多少是真正有用的
 
 运行方式：
-  python -m src.cli.eval_ragas --kb-name "我的知识库"  # 评估指定知识库
-  python -m src.cli.eval_ragas --kb-name "我的知识库" --gate  # 评估并检查质量门禁
-  python -m src.cli.eval_ragas --list-kbs              # 列出可用知识库
-  python -m src.cli.eval_ragas --check                 # 检查 QA 对数
+  python -m src.cli.eval_ragas --kb-name "我的知识库"              # 评估指定知识库
+  python -m src.cli.eval_ragas --kb-name "我的知识库" --gate        # 评估并检查质量门禁
+  python -m src.cli.eval_ragas --kb-name "我的知识库" --generate    # 生成测试集
+  python -m src.cli.eval_ragas --kb-name "我的知识库" --generate --size 30  # 生成 30 条
+  python -m src.cli.eval_ragas --list-kbs                          # 列出可用知识库
 """
 
 import argparse
 import os
 import sys
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 
 import asyncio
 from loguru import logger
@@ -25,7 +26,6 @@ from loguru import logger
 from src.core.logging import setup_logging
 
 from src.config import settings, DASHSCOPE_API_KEY, DASHSCOPE_BASE_URL
-from src.config.ragas_pairs import QUESTIONS, GROUND_TRUTH
 
 setup_logging()
 
@@ -71,14 +71,26 @@ def parse_args() -> argparse.Namespace:
         help="评估用的会话 ID（默认: ragas_eval_session）",
     )
     parser.add_argument(
-        "--check",
-        action="store_true",
-        help="检查 QA 对数 >= 50，不满足则退出码为 1",
-    )
-    parser.add_argument(
         "--gate",
         action="store_true",
         help="评估后检查质量门禁指标，任一不达标则退出码为 1",
+    )
+    parser.add_argument(
+        "--generate",
+        action="store_true",
+        help="生成测试集模式（从文档自动生成 QA 对）",
+    )
+    parser.add_argument(
+        "--size",
+        type=int,
+        default=None,
+        help="生成测试集的 QA 对数（默认: settings.RAGAS_TEST_SIZE）",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="生成测试集用的 LLM 模型名（默认: RAGAS_LLM_MODEL 或 LLM_MODEL）",
     )
     return parser.parse_args()
 
@@ -293,23 +305,6 @@ def save_markdown_report(
     return md_path
 
 
-def check_qa_count(questions: list[str]) -> None:
-    """检查 QA 对数是否 >= 50，不满足时退出码为 1.
-
-    Args:
-        questions: 问题列表
-    """
-    count = len(questions)
-    MIN_QA = 50
-    if count < MIN_QA:
-        print(f"QA pairs only {count} (< {MIN_QA}). "
-              f"Add more questions and ground_truth to src/config/ragas_pairs.py.")
-        print("建议覆盖以下类型：事实查询、推理查询、多上下文查询、边界案例。")
-        sys.exit(1)
-    print(f"QA pair count: {count} (OK)")
-    sys.exit(0)
-
-
 def check_gate(result: Any, questions: list[str]) -> None:
     """检查评估结果是否通过质量门禁阈值.
 
@@ -352,38 +347,69 @@ def check_gate(result: Any, questions: list[str]) -> None:
 
 
 def main() -> None:
-    """主入口 — 解析参数、运行评估、保存结果."""
+    """主入口 — 路由到生成模式或评估模式。"""
     args = parse_args()
 
-    # ---- list-kbs 模式：列出知识库后退出 ----
+    # ---- list-kbs 模式 ----
     if args.list_kbs:
-        _list_knowledge_bases()
+        asyncio.run(_list_knowledge_bases())
         return
 
-    # ---- check 独立模式：只检查 QA 对数，不执行评估 ----
-    if args.check:
-        check_qa_count(QUESTIONS)
-
-    # ---- 执行评估需要 kb-name ----
+    # ---- kb-name 校验 ----
     if not args.kb_name:
-        print("error: --kb-name is required for evaluation")
+        print("error: --kb-name is required")
         print("Use --list-kbs to see available knowledge bases")
         sys.exit(1)
 
     kb_name = args.kb_name
-    session_id = args.session_id
 
-    # 生成输出路径
+    # ---- 查询 kb_id ----
+    from src.services.app_service import AppService
+
+    svc = AppService()
+
+    async def _get_kb_id(name: str) -> Optional[str]:
+        return await svc.db.get_kb_by_name("", name)
+
+    kb_id = asyncio.run(_get_kb_id(kb_name))
+    if not kb_id:
+        logger.error("Knowledge base '{}' not found", kb_name)
+        print(f"error: 知识库 '{kb_name}' 不存在")
+        sys.exit(1)
+
+    # ---- generate 模式 ----
+    if args.generate:
+        from src.cli.eval_ragas_generate import run_generate
+
+        size = args.size or settings.RAGAS_TEST_SIZE
+        model = args.model or ""
+        run_generate(kb_name, kb_id, size, model)
+        return
+
+    # ---- 评估模式（原有流程改造）----
+    session_id = args.session_id
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_path = (
         args.output or f"{DEFAULT_OUTPUT_DIR}/ragas_eval_{timestamp}.csv"
     )
 
-    # ---- 到此为止不需要重依赖，以下开始懒加载 ----
+    # 从 JSON 加载测试集
+    from src.cli.eval_ragas_generate import _load_latest_testset
+
+    try:
+        questions, ground_truth = _load_latest_testset(kb_id)
+    except FileNotFoundError as e:
+        print(f"error: {e}")
+        sys.exit(1)
+
+    logger.info("加载测试集: {} 条 QA 对", len(questions))
+    logger.info("Evaluating KB '{}'", kb_name)
+
+    # ---- 初始化 RAG 组件 ----
     from datasets import Dataset  # noqa: F401
     from ragas import evaluate  # noqa: F401
-    from ragas.llms import LangchainLLMWrapper  # noqa: F401
-    from ragas.embeddings import LangchainEmbeddingsWrapper  # noqa: F401
+    from ragas.llms import LangchainLLMWrapper
+    from ragas.embeddings import LangchainEmbeddingsWrapper
     from ragas.metrics import (  # noqa: F401
         faithfulness,
         answer_relevancy,
@@ -394,78 +420,45 @@ def main() -> None:
     from src.models import get_embeddings
     from src.rag.chain import RAGChain
 
-    logger.info("Evaluating KB '{}'", kb_name)
+    logger.info("Initializing RAGChain...")
+    rag_chain = RAGChain()
 
-    try:
-        # ---- 初始化 RAG 组件 ----
-        logger.info("Initializing RAGChain...")
-        rag_chain = RAGChain()
+    logger.info("Checking KB vector store...")
+    if rag_chain.vector_store._collection.count() == 0:
+        logger.error("Knowledge base '{}' vector store is empty", kb_name)
+        print("Knowledge base is empty")
+        sys.exit(1)
 
-        # ---- 从名称查找 kb_id ----
-        from src.services.app_service import AppService
+    eval_model = settings.RAGAS_LLM_MODEL or settings.LLM_MODEL
+    logger.info("Initializing RAGAS evaluator ({})...", eval_model)
+    llm = ChatOpenAI(
+        model=eval_model,
+        temperature=0,
+        api_key=DASHSCOPE_API_KEY,
+        base_url=DASHSCOPE_BASE_URL,
+    )
+    embeddings = get_embeddings()
+    llm_wrapper = LangchainLLMWrapper(llm)
+    embeddings_wrapper = LangchainEmbeddingsWrapper(embeddings)
 
-        svc = AppService()
-        kb_id = svc.db.get_kb_by_name(kb_name)
-        if not kb_id:
-            logger.error("Knowledge base '{}' not found", kb_name)
-            sys.exit(1)
+    logger.info("Generating answers for {} questions...", len(questions))
+    answers, contexts = generate_answers_and_contexts(
+        rag_chain, kb_id, session_id, questions,
+    )
 
-        # ---- 检查知识库是否为空 ----
-        logger.info("Checking KB vector store...")
-        if rag_chain.vector_store._collection.count() == 0:
-            logger.error("Knowledge base '{}' vector store is empty", kb_name)
-            print("Knowledge base is empty")
-            sys.exit(1)
+    result = run_evaluation(
+        questions, ground_truth, answers, contexts,
+        llm_wrapper, embeddings_wrapper,
+    )
 
-        # ---- 初始化 RAGAS 评估器 ----
-        eval_model = settings.RAGAS_LLM_MODEL or settings.LLM_MODEL
-        logger.info("Initializing RAGAS evaluator ({})...", eval_model)
-        llm = ChatOpenAI(
-            model=eval_model,
-            temperature=0,
-            api_key=DASHSCOPE_API_KEY,
-            base_url=DASHSCOPE_BASE_URL,
-        )
-        embeddings = get_embeddings()
-        llm_wrapper = LangchainLLMWrapper(llm)
-        embeddings_wrapper = LangchainEmbeddingsWrapper(embeddings)
+    output_path = save_results_csv(result, questions, ground_truth, output_path)
+    save_markdown_report(result, questions, output_path)
 
-        # ---- 生成答案和上下文 ----
-        logger.info("Generating answers for {} questions...", len(QUESTIONS))
-        answers, contexts = generate_answers_and_contexts(
-            rag_chain,
-            kb_id,
-            session_id,
-            QUESTIONS,
-        )
+    # _save_eval_report 需要 questions 长度
+    _save_eval_report(kb_name, result, len(questions), output_path)
 
-        # ---- 运行评估 ----
-        result = run_evaluation(
-            QUESTIONS,
-            GROUND_TRUTH,
-            answers,
-            contexts,
-            llm_wrapper,
-            embeddings_wrapper,
-        )
-
-        # ---- 保存结果 ----
-        output_path = save_results_csv(
-            result,
-            QUESTIONS,
-            GROUND_TRUTH,
-            output_path,
-        )
-        save_markdown_report(result, QUESTIONS, output_path)
-
-        # ---- 写入 eval_report 表 ----
-        _save_eval_report(kb_name, result, QUESTIONS, output_path)
-
-        # ---- gate 模式：检查评估结果是否通过质量门禁 ----
-        if args.gate:
-            check_gate(result, QUESTIONS)
-    finally:
-        pass  # 不再需要 benchmark 清理逻辑
+    if args.gate:
+        check_gate(result, questions)
 
     logger.info("Evaluation complete.")
 
@@ -473,7 +466,7 @@ def main() -> None:
 def _save_eval_report(
     kb_name: str,
     result,
-    questions: list[str],
+    qa_count: int,
     output_path: str,
 ) -> None:
     """将 RAGAS 评估结果持久化到 eval_report 表.
@@ -481,7 +474,7 @@ def _save_eval_report(
     Args:
         kb_name: 知识库名称
         result: RAGAS evaluate() 返回的结果对象
-        questions: 问题列表
+        qa_count: QA 对数
         output_path: CSV 报告文件路径
     """
     try:
@@ -501,8 +494,8 @@ def _save_eval_report(
             "context_recall",
         ]
         detail = []
-        for i, q in enumerate(questions):
-            entry = {"q_index": i, "question": q[:100]}
+        for i in range(qa_count):
+            entry = {"q_index": i, "question": ""}
             for col in metric_cols:
                 if col in df.columns:
                     entry[col] = float(df[col].iloc[i])
@@ -538,7 +531,7 @@ def _save_eval_report(
                 {
                     "kb_id": kb_id,
                     "run_type": "manual",
-                    "qa_count": len(questions),
+                    "qa_count": qa_count,
                     "faithfulness": faith,
                     "answer_relevancy": relevancy,
                     "context_precision": precision,
