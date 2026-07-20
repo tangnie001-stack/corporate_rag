@@ -11,6 +11,7 @@ from loguru import logger
 from src.core.logging import setup_logging
 from src.api import health_router, kb_router, doc_router, chat_router, sessions_router, kb_eval_router
 from src.api import auth as auth_routes
+from src.api import ragas_generate as ragas_generate_routes
 from src.config.response_codes import Code
 from src.middleware.auth import auth_middleware
 from src.middleware.response_processor import response_processor_middleware
@@ -135,3 +136,4 @@ app.include_router(doc_router, prefix="/api", tags=["documents"])
 app.include_router(chat_router, prefix="/api", tags=["chat"])
 app.include_router(sessions_router, prefix="/api", tags=["sessions"])
 app.include_router(kb_eval_router, prefix="/api", tags=["evaluation"])
+app.include_router(ragas_generate_routes.router, prefix="/api", tags=["ragas"])
