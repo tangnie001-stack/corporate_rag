@@ -283,15 +283,18 @@ def run_generate(
     )
 
     # ---- 4. 生成测试集 ----
-    # 构建 transforms：只保留必要步骤（NodeFilter + NERExtractor + OverlapScoreBuilder）
+    # 构建 transforms：保留必要的 LLM 步骤
+    # SummaryExtractor（Persona 生成需要）+ NERExtractor（多跳需要）
     transforms = None
     if not use_filter:
         from ragas.testset.transforms.filters import CustomNodeFilter
+        from ragas.testset.transforms.extractors import SummaryExtractor
         from ragas.testset.transforms.extractors.llm_based import NERExtractor
         from ragas.testset.transforms.relationship_builders import OverlapScoreBuilder
 
         transforms = [
             CustomNodeFilter(llm=generator.llm),
+            SummaryExtractor(llm=generator.llm),
             NERExtractor(llm=generator.llm),
             OverlapScoreBuilder(threshold=0.01),
         ]
