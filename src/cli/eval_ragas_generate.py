@@ -283,19 +283,30 @@ def run_generate(
     )
 
     # ---- 4. 生成测试集 ----
-    # 构建 transforms：保留必要的 LLM 步骤
-    # SummaryExtractor（Persona 生成需要）+ NERExtractor（多跳需要）
+    # 构建 transforms
+    # LLM 步骤: SummaryExtractor + NERExtractor = 2 次/节点
+    # 非 LLM 步骤: CustomNodeFilter + EmbeddingExtractor + OverlapScoreBuilder
     transforms = None
     if not use_filter:
+        from ragas.testset.graph import NodeType
         from ragas.testset.transforms.filters import CustomNodeFilter
-        from ragas.testset.transforms.extractors import SummaryExtractor
+        from ragas.testset.transforms.extractors import SummaryExtractor, EmbeddingExtractor
         from ragas.testset.transforms.extractors.llm_based import NERExtractor
         from ragas.testset.transforms.relationship_builders import OverlapScoreBuilder
 
+        def _filter_chunks(node):
+            return node.type == NodeType.CHUNK
+
         transforms = [
-            CustomNodeFilter(llm=generator.llm),
-            SummaryExtractor(llm=generator.llm),
-            NERExtractor(llm=generator.llm),
+            CustomNodeFilter(llm=generator.llm, filter_nodes=_filter_chunks),
+            SummaryExtractor(llm=generator.llm, filter_nodes=_filter_chunks),
+            EmbeddingExtractor(
+                embedding_model=generator.embedding_model,
+                property_name="summary_embedding",
+                embed_property_name="summary",
+                filter_nodes=_filter_chunks,
+            ),
+            NERExtractor(llm=generator.llm, filter_nodes=_filter_chunks),
             OverlapScoreBuilder(threshold=0.01),
         ]
         logger.info("使用自定义 transforms 步骤: {}", [type(t).__name__ for t in transforms])
