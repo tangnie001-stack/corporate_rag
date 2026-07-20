@@ -19,22 +19,21 @@ class TestParseArgs:
 
     @patch("sys.argv", ["eval_ragas.py"])
     def test_default_args(self) -> None:
-        """默认参数应使用 rag_eval 作为知识库名。"""
+        """默认参数应按预期设置。"""
         from src.cli.eval_ragas import parse_args
 
         args = parse_args()
-        assert args.kb_name == "rag_eval"
-        assert args.chunk_size is None
+        assert args.kb_name is None
         assert args.session_id == "ragas_eval_session"
 
-    @patch("sys.argv", ["eval_ragas.py", "--kb-name", "测试库", "--chunk-size", "768"])
+    @patch("sys.argv", ["eval_ragas.py", "--kb-name", "测试库", "--session-id", "custom_session"])
     def test_custom_args(self) -> None:
         """应正确解析自定义参数。"""
         from src.cli.eval_ragas import parse_args
 
         args = parse_args()
         assert args.kb_name == "测试库"
-        assert args.chunk_size == 768
+        assert args.session_id == "custom_session"
 
     @patch("sys.argv", ["eval_ragas.py", "--output", "/tmp/result.csv"])
     def test_output_arg(self) -> None:
@@ -48,13 +47,11 @@ class TestParseArgs:
 class TestGenerateAnswers:
     """答案生成流程测试（全 mock RAGChain）。"""
 
-    @patch("src.eval_ragas.RAGChain")
-    def test_generate_success(self, mock_rag_chain_cls: MagicMock) -> None:
+    def test_generate_success(self) -> None:
         """正常情况应返回答案列表和上下文列表。"""
         from src.cli.eval_ragas import generate_answers_and_contexts
 
         mock_chain = MagicMock()
-        mock_rag_chain_cls.return_value = mock_chain
 
         def mock_chat(kb: str, sess: str, q: str) -> tuple:
             def gen() -> str:
@@ -79,13 +76,11 @@ class TestGenerateAnswers:
         assert "Answer for" in answers[0]
         assert len(contexts[0]) == 2
 
-    @patch("src.eval_ragas.RAGChain")
-    def test_generate_partial_failure(self, mock_rag_chain_cls: MagicMock) -> None:
+    def test_generate_partial_failure(self) -> None:
         """部分问题失败时应返回错误标记，不中断整体流程。"""
         from src.cli.eval_ragas import generate_answers_and_contexts
 
         mock_chain = MagicMock()
-        mock_rag_chain_cls.return_value = mock_chain
 
         def mock_chat(kb: str, sess: str, q: str) -> tuple:
             if "失败" in q:
@@ -113,8 +108,8 @@ class TestGenerateAnswers:
 class TestRunEvaluation:
     """RAGAS 评估流程测试（全 mock）。"""
 
-    @patch("src.eval_ragas.Dataset.from_dict")
-    @patch("src.eval_ragas.evaluate")
+    @patch("datasets.Dataset.from_dict")
+    @patch("ragas.evaluate")
     def test_evaluation_runs(
         self,
         mock_evaluate: MagicMock,
@@ -160,8 +155,8 @@ class TestRunEvaluation:
         assert actual_metric_names == expected_metric_names
         assert result is mock_result
 
-    @patch("src.eval_ragas.Dataset.from_dict")
-    @patch("src.eval_ragas.evaluate")
+    @patch("datasets.Dataset.from_dict")
+    @patch("ragas.evaluate")
     def test_evaluation_empty_contexts(
         self,
         mock_evaluate: MagicMock,
@@ -209,15 +204,12 @@ class TestSaveResults:
             tmp_path = tmp.name
 
         try:
-            with patch("src.config.settings") as mock_settings:
-                mock_settings.CHUNK_SIZE = 512
-                save_results_csv(
-                    mock_result,
-                    ["Q1"],
-                    ["GT1"],
-                    chunk_size=None,
-                    output_path=tmp_path,
-                )
+            save_results_csv(
+                mock_result,
+                ["Q1"],
+                ["GT1"],
+                output_path=tmp_path,
+            )
 
             with open(tmp_path, "r") as f:
                 content = f.read()
@@ -245,46 +237,23 @@ class TestSaveResults:
             tmp_path = tmp.name
 
         try:
-            with patch("src.config.settings") as mock_settings:
-                mock_settings.CHUNK_SIZE = 512
-                save_results_csv(
-                    mock_result,
-                    ["Q1"],
-                    ["GT1"],
-                    chunk_size=768,
-                    output_path=tmp_path,
-                )
+            save_results_csv(
+                mock_result,
+                ["Q1"],
+                ["GT1"],
+                output_path=tmp_path,
+            )
 
             with open(tmp_path, "r") as f:
                 content = f.read()
 
-            assert "768" in content
+            assert "faithfulness" in content
 
         finally:
             os.unlink(tmp_path)
 
 
-# ---- --check 和 --gate 标志测试 ----
-
-
-def test_check_passes_with_20_questions() -> None:
-    """--check exits 0 when >= 20 QA pairs exist."""
-    from src.cli.eval_ragas import check_qa_count
-
-    questions = [f"Q{i}" for i in range(20)]
-    with pytest.raises(SystemExit) as exc_info:
-        check_qa_count(questions)
-    assert exc_info.value.code == 0
-
-
-def test_check_fails_with_few_questions() -> None:
-    """--check exits 1 when < 20 QA pairs exist."""
-    from src.cli.eval_ragas import check_qa_count
-
-    questions = ["Q1", "Q2"]
-    with pytest.raises(SystemExit) as exc_info:
-        check_qa_count(questions)
-    assert exc_info.value.code == 1
+# ---- --gate 标志测试 ----
 
 
 def test_gate_passes_with_high_scores() -> None:

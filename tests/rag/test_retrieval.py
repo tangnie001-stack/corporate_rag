@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.rag.chain import RAGChain, RAGContext
+from src.rag.chain import RAGChain
 
 
 # ==================== RAGContext 数据类测试 ====================

@@ -202,9 +202,8 @@ Nginx 已预配 SSE 支持（`proxy_buffering off`），确保流式问答不卡
 │   │   ├── pymupdf_parser.py  # PDF 解析
 │   │   ├── docx_parser.py     # DOCX 解析
 │   │   └── txt_parser.py      # TXT 解析
-│   └── cli/
-│       ├── check_chunks.py    # 分块质量报告
-│       └── check_retrieval.py # 检索质量检测
+    │   └── cli/
+    │       └── check_retrieval.py # 检索质量检测
 ├── nginx/                     # Nginx 反向代理
 │   ├── Dockerfile
 │   ├── nginx.conf

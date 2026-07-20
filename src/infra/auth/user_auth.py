@@ -29,7 +29,7 @@ class UserAuth:
     @staticmethod
     def get_user_id_from_token(redis_client, token: str) -> Optional[str]:
         uid = redis_client.get(f"token:{token}")
-        return uid.decode() if uid else None
+        return uid.decode() if isinstance(uid, bytes) else uid
 
     @staticmethod
     def delete_token(redis_client, token: str) -> None:
@@ -61,7 +61,7 @@ class UserAuth:
             用户 ID，不存在或过期时返回 None
         """
         uid = await rc.get(f"token:{token}")
-        return uid.decode() if uid else None
+        return uid.decode() if isinstance(uid, bytes) else uid
 
     @staticmethod
     async def delete_token_async(rc, token: str) -> None:

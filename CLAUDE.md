@@ -73,7 +73,6 @@ session/消息 → chat/manager(Redis) 写 + chat/persistence(MySQL) 落盘 → 
 python -m src.app          # 启动
 pytest tests/ -v           # 测试
 ruff format . && ruff check . --fix  # 格式化
-python -m src.cli.check_chunks      # 检查分块
 python -m src.cli.check_retrieval   # 检查检索
 python -m src.eval_ragas            # RAGAS 评估
 docker compose up -d --build        # 部署

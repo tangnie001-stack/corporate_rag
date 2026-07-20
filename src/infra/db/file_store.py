@@ -38,7 +38,7 @@ class FileStore:
             )
             return True
         except S3Error as e:
-            logger.error("MinIO upload failed: {} - {}", key, e)
+            logger.warning("MinIO upload failed: {} - {}", key, e)
             return False
 
     def download(self, key: str) -> Optional[bytes]:

@@ -3,7 +3,7 @@
 描述业务数据结构，不含 code/message 包装（由 ResponseEnvelopeMiddleware 统一包装）。
 """
 
-from typing import Any, Optional
+from typing import Optional
 
 from pydantic import BaseModel, field_validator
 
@@ -189,4 +189,4 @@ class SessionDeleteResponse(BaseModel):
 class BaseResponse(BaseModel):
     """通用响应包装体（仅含 data，code/message 由中间件统一包装）。"""
 
-    data: Any  # 响应数据
+    data: dict | None  # 响应数据

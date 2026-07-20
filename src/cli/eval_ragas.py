@@ -305,6 +305,7 @@ def save_markdown_report(
     return md_path
 
 
+
 def check_gate(result: Any, questions: list[str]) -> None:
     """检查评估结果是否通过质量门禁阈值.
 
