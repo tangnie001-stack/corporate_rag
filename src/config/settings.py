@@ -31,7 +31,7 @@ DASHSCOPE_BASE_URL: str = os.getenv(
 
 # ====== 模型选择 ======
 # 大语言模型：用于生成最终回答，qwen-max 效果最佳
-LLM_MODEL: str = os.getenv("LLM_MODEL", "qwen3.7-plus")
+LLM_MODEL: str = os.getenv("LLM_MODEL", "qwen3.5-plus-2026-04-20")
 # 向量化模型：将文本转为向量，用于 ChromaDB 语义检索
 EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "qwen3.7-text-embedding")
 # 向量输出维度：固定维度后切换模型无需重建 ChromaDB collection
@@ -47,6 +47,16 @@ EMBEDDING_BATCH_SIZE: int = int(os.getenv("EMBEDDING_BATCH_SIZE", "20"))
 RAGAS_LLM_MODEL: str = os.getenv("RAGAS_LLM_MODEL", "")
 # RAGAS 测试集生成条数
 RAGAS_TEST_SIZE: int = int(os.getenv("RAGAS_TEST_SIZE", "20"))
+# RAGAS 测试集存储目录
+RAGAS_DATA_DIR: str = os.getenv("RAGAS_DATA_DIR", "data/ragas")
+# RAGAS 默认用户 ID（查询知识库时使用）
+RAGAS_USER_ID: str = os.getenv("RAGAS_USER_ID", "24a93c0e-3c9b-4d8d-a371-2d8b3607892a")
+# RAGAS 文档白名单：只处理白名单中的文档 ID
+# 用于跳过不需要参与测试集生成的文档（如扫描件、不相关文档）
+RAGAS_DOC_WHITELIST: list[str] = [
+    "fa7d700e-f093-45be-a78f-73fbdfd1801d",   # neusoft_2025_q1.pdf
+    # "7d3f573c-d810-46d4-b0e7-42fc14b73bf4",  # tencent_2024_annual.pdf（暂放）
+]
 
 # ====== MySQL ======
 # 元数据库，存储 knowledge_base（知识库）和 document（文档）的元信息
