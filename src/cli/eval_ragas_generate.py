@@ -21,6 +21,8 @@ from typing import Optional
 
 from loguru import logger
 
+from src.config import RAGAS_DATA_DIR
+
 
 def _ensure_vertexai_stub() -> None:
     """检查 langchain_community.chat_models.vertexai 模块是否存在，
@@ -50,10 +52,7 @@ def _ensure_vertexai_stub() -> None:
         logger.info("Created vertexai stub at {}", stub_path)
 
 
-# 测试集存储目录
-RAGAS_DATA_DIR: str = "data/ragas"
-
-# 测试集 JSON 结构
+    # 测试集 JSON 结构
 # {
 #   "metadata": {
 #     "kb_name": str,
@@ -141,6 +140,7 @@ def run_generate(
     kb_id: str,
     size: int,
     model: str = "",
+    use_filter: bool = False,
 ) -> None:
     """运行测试集生成流程：从 MinIO 取文档 → 解析 → TestsetGenerator → 保存 JSON.
 
@@ -156,6 +156,7 @@ def run_generate(
         kb_id: 知识库 UUID
         size: 生成的 QA 对数
         model: 生成用的 LLM 模型名（空字符串则使用 RAGAS_LLM_MODEL 或 LLM_MODEL）
+        use_filter: 是否启用 LLM 节点过滤（关闭可节省约 70 次 LLM 调用）
 
     Raises:
         SystemExit: 知识库无就绪文档 / 无成功解析的文档 / 生成失败时退出进程
@@ -170,6 +171,8 @@ def run_generate(
     from ragas.testset.synthesizers.generate import TestsetGenerator
     from src.models import get_embeddings
     from src.config import settings, DASHSCOPE_API_KEY, DASHSCOPE_BASE_URL
+    from src.infra.desensitize import desensitize
+    from src.config.settings import RAGAS_DOC_WHITELIST
     import ragas
 
     # ---- 1. 查询文档列表 ----
@@ -180,9 +183,23 @@ def run_generate(
         return await svc.db.get_documents(kb_id)
 
     import asyncio
-    docs = asyncio.run(_fetch_docs())
-    # 只取状态为 ready 的文档
-    ready_docs = [d for d in docs if d.get("status") == "ready"]
+    try:
+        loop = asyncio.get_running_loop()
+        # 已有 event loop（如 API 调用时），用 run_until_complete 执行
+        docs = loop.run_until_complete(_fetch_docs())
+    except RuntimeError:
+        # 无 event loop（CLI 直接调用时）
+        docs = asyncio.run(_fetch_docs())
+    # 只取状态为 ready 且在白名单中的文档
+    ready_docs = [
+        d for d in docs
+        if d.get("status") == "ready"
+        and d["id"] in RAGAS_DOC_WHITELIST
+    ]
+    # 记录被白名单过滤掉的文档
+    skipped = [d for d in docs if d.get("status") == "ready" and d["id"] not in RAGAS_DOC_WHITELIST]
+    for d in skipped:
+        logger.info("文档不在白名单中，跳过: {} ({})", d.get("filename", "unknown"), d["id"])
     if not ready_docs:
         logger.error("知识库 '{}' 中没有已就绪的文档", kb_name)
         print("✗ 知识库中没有已入库的文档")
@@ -193,7 +210,7 @@ def run_generate(
     # ---- 2. 从 MinIO 下载并解析 ----
     file_store = FileStore()
     router = DocRouter()
-    full_texts: list[str] = []
+    langchain_chunks: list[LCDocument] = []
     doc_ids: list[str] = []
 
     for i, doc in enumerate(ready_docs):
@@ -224,9 +241,10 @@ def run_generate(
                     print(f"  ⚠ {filename} 是扫描件，已跳过")
                     continue
 
-                # 拼完整文本
-                full_text = "\n\n".join(c.content for c in parse_result.chunks)
-                full_texts.append(full_text)
+                # 每个 parser chunk 独立作为 Document，不拼接
+                for chunk in parse_result.chunks:
+                    safe_content = desensitize(chunk.content)
+                    langchain_chunks.append(LCDocument(page_content=safe_content))
                 doc_ids.append(doc_id)
                 print(f"  ✓ {filename} ({parse_result.total_chars} 字符)")
             except Exception as e:
@@ -241,15 +259,15 @@ def run_generate(
             print(f"  ✗ {filename} 处理异常，已跳过")
             continue
 
-    if not full_texts:
+    if not langchain_chunks:
         logger.error("没有成功解析任何文档，无法生成测试集")
-        print("✗ 没有成功解析任何文档")
+        print("✗ 没有成功解析任何文档（或白名单中无匹配文档）")
         sys.exit(1)
 
     # ---- 3. 初始化 RAGAS TestsetGenerator ----
     eval_model = model or settings.RAGAS_LLM_MODEL or settings.LLM_MODEL
-    logger.info("初始化 TestsetGenerator (model={}, size={})...", eval_model, size)
-    print(f"\n正在构建知识图谱 ({len(full_texts)} 份文档)...")
+    logger.info("初始化 TestsetGenerator (model={}, size={}, chunks={})...", eval_model, size, len(langchain_chunks))
+    print(f"\n正在构建知识图谱 ({len(langchain_chunks)} 个 chunk)...")
 
     llm = ChatOpenAI(
         model=eval_model,
@@ -265,20 +283,41 @@ def run_generate(
     )
 
     # ---- 4. 生成测试集 ----
-    langchain_docs = [
-        LCDocument(page_content=text) for text in full_texts
-    ]
+    # 构建 transforms：跳过 LLM 密集步骤，保留 NERExtractor 支持多跳
+    transforms = None
+    if not use_filter:
+        from ragas.testset.transforms.default import default_transforms_for_prechunked
+
+        full_transforms = default_transforms_for_prechunked(
+            llm=generator.llm,
+            embedding_model=generator.embedding_model,
+        )
+        skip_keywords = ["ThemesExtractor", "SummaryExtractor"]
+        transforms = [
+            t for t in full_transforms
+            if not any(k in type(t).__name__ for k in skip_keywords)
+        ]
+        logger.info(
+            "跳过的步骤: {}，保留的步骤: {}",
+            [k for k in skip_keywords],
+            [type(t).__name__ for t in transforms],
+        )
+
     logger.info("开始生成测试集 ({} 条)...", size)
     print(f"正在生成测试集 ({size} 条)...")
 
     try:
-        testset = generator.generate_with_langchain_docs(
-            documents=langchain_docs,
+        testset = generator.generate_with_chunks(
+            chunks=langchain_chunks,
             testset_size=size,
+            transforms=transforms,
         )
-    except Exception:
+    except Exception as e:
         logger.exception("TestsetGenerator 调用失败")
-        print("✗ 测试集生成失败: 请检查 LLM 配置和网络连接")
+        print(f"✗ 测试集生成失败: {e}")
+        print(f"✗ 异常类型: {type(e).__name__}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
 
     # ---- 5. 序列化为 JSON ----
