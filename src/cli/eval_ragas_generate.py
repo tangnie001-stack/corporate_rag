@@ -292,7 +292,7 @@ def run_generate(
             llm=generator.llm,
             embedding_model=generator.embedding_model,
         )
-        skip_keywords = ["ThemesExtractor", "SummaryExtractor"]
+        skip_keywords = ["ThemesExtractor", "SummaryExtractor", "EmbeddingExtractor", "CosineSimilarityBuilder"]
         transforms = [
             t for t in full_transforms
             if not any(k in type(t).__name__ for k in skip_keywords)
