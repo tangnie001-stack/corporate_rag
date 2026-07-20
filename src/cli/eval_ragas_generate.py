@@ -283,25 +283,19 @@ def run_generate(
     )
 
     # ---- 4. 生成测试集 ----
-    # 构建 transforms：跳过 LLM 密集步骤，保留 NERExtractor 支持多跳
+    # 构建 transforms：只保留必要步骤（NodeFilter + NERExtractor + OverlapScoreBuilder）
     transforms = None
     if not use_filter:
-        from ragas.testset.transforms.default import default_transforms_for_prechunked
+        from ragas.testset.transforms.filters import CustomNodeFilter
+        from ragas.testset.transforms.extractors.llm_based import NERExtractor
+        from ragas.testset.transforms.relationship_builders import OverlapScoreBuilder
 
-        full_transforms = default_transforms_for_prechunked(
-            llm=generator.llm,
-            embedding_model=generator.embedding_model,
-        )
-        skip_keywords = ["ThemesExtractor", "SummaryExtractor", "EmbeddingExtractor", "CosineSimilarityBuilder"]
         transforms = [
-            t for t in full_transforms
-            if not any(k in type(t).__name__ for k in skip_keywords)
+            CustomNodeFilter(llm=generator.llm),
+            NERExtractor(llm=generator.llm),
+            OverlapScoreBuilder(threshold=0.01),
         ]
-        logger.info(
-            "跳过的步骤: {}，保留的步骤: {}",
-            [k for k in skip_keywords],
-            [type(t).__name__ for t in transforms],
-        )
+        logger.info("使用自定义 transforms 步骤: {}", [type(t).__name__ for t in transforms])
 
     logger.info("开始生成测试集 ({} 条)...", size)
     print(f"正在生成测试集 ({size} 条)...")
