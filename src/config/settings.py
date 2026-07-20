@@ -45,6 +45,8 @@ EMBEDDING_BATCH_SIZE: int = int(os.getenv("EMBEDDING_BATCH_SIZE", "20"))
 # RAGAS 评估专用模型（独立于生产 LLM，temperature 固定为 0）
 # 为空时回退到 LLM_MODEL
 RAGAS_LLM_MODEL: str = os.getenv("RAGAS_LLM_MODEL", "")
+# RAGAS 测试集生成条数
+RAGAS_TEST_SIZE: int = int(os.getenv("RAGAS_TEST_SIZE", "20"))
 
 # ====== MySQL ======
 # 元数据库，存储 knowledge_base（知识库）和 document（文档）的元信息
