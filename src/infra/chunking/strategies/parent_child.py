@@ -1,3 +1,4 @@
+from loguru import logger
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from src.infra.chunking.strategies.base import BaseChunker
 
@@ -40,4 +41,11 @@ class ParentChildChunker(BaseChunker):
                         },
                     }
                 )
+        logger.info(
+            "[parent_child] chunks={} parents={} children={} tokens={}",
+            len(result),
+            len(parent_docs),
+            len(result),
+            sum(c["metadata"]["tokens"] for c in result),
+        )
         return result

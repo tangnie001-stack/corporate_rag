@@ -1,4 +1,5 @@
 import re
+from loguru import logger
 from src.infra.chunking.strategies.base import BaseChunker
 
 
@@ -28,4 +29,10 @@ class QAChunker(BaseChunker):
                     },
                 }
             )
+        logger.info(
+            "[qa] chunks={} qa_pairs={} tokens={}",
+            len(result),
+            len(qa_pairs),
+            sum(c["metadata"]["tokens"] for c in result),
+        )
         return result
