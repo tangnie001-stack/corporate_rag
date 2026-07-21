@@ -21,11 +21,7 @@ venv/
 .superprojects/
 
 # Docker volume data
-/data/chroma_persist
 /data/
-chroma_data/
-mysql_data/
-redis_data/
 
 # Logs
 logs/
@@ -37,11 +33,3 @@ Thumbs.db
 
 # Playwright CLI artifacts
 .playwright-cli/
-
-# Test docs
-test_docs/
-
-# Output
-outputs/
-
-old/
