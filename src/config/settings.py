@@ -43,8 +43,10 @@ LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.1"))
 # Embedding API 单次 batch 上限（DashScope 限制 20 条，超出需分批）
 EMBEDDING_BATCH_SIZE: int = int(os.getenv("EMBEDDING_BATCH_SIZE", "20"))
 # RAGAS 评估专用模型（独立于生产 LLM，temperature 固定为 0）
+# 不可使用推理模型（如 qwen3.7-max），RAGAS 内部会传 n>1 参数，
+# 推理模型要求 n=1 会导致 BadRequestError。用非推理模型如 qwen-plus 系列。
 # 为空时回退到 LLM_MODEL
-RAGAS_LLM_MODEL: str = os.getenv("RAGAS_LLM_MODEL", "qwen3.7-max")
+RAGAS_LLM_MODEL: str = os.getenv("RAGAS_LLM_MODEL", "qwen3.7-plus-2026-05-26")
 # RAGAS 测试集生成条数
 RAGAS_TEST_SIZE: int = int(os.getenv("RAGAS_TEST_SIZE", "20"))
 # RAGAS 测试集存储目录
