@@ -73,6 +73,16 @@ def stream_answer(
             tracer.end_generation(
                 gen_id, trace_id, output=full_output, usage=last_token_usage,
             )
+            _gen_latency = (time.monotonic() - _stream_start) * 1000
+            logger.info(
+                "Generation completed: chars={} latency={:.0f}ms "
+                "| tokens: prompt={} completion={} total={}",
+                len(full_output),
+                _gen_latency,
+                last_token_usage.get("prompt_tokens", 0),
+                last_token_usage.get("completion_tokens", 0),
+                last_token_usage.get("total_tokens", 0),
+            )
             return
         except Exception as e:
             last_error = e
