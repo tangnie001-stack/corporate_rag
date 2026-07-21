@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import tempfile
+import time
 import uuid
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
@@ -293,7 +294,17 @@ async def _process_document_task(
             await asyncio.to_thread(tmp.close)
 
             # 解析 — CPU + 文件 I/O，to_thread
+            t0 = time.perf_counter()
             parse_result = await asyncio.to_thread(svc.router.parse, tmp_path)
+            logger.info(
+                "Parser result: {} -> type={} pages={} chars={} scanned={} encoding={}",
+                filename,
+                parse_result.file_type,
+                parse_result.total_pages,
+                parse_result.total_chars,
+                parse_result.is_scanned,
+                parse_result.encoding,
+            )
             if parse_result.is_scanned:
                 await svc.db.update_document_status(
                     doc_id, "failed", error_msg="扫描件暂不支持"
@@ -302,6 +313,7 @@ async def _process_document_task(
                 return
 
             # 分块 — CPU，to_thread
+            t1 = time.perf_counter()
             full_text = "\n\n".join(c.content for c in parse_result.chunks)
             strategy = await asyncio.to_thread(
                 ChunkRouter.detect_strategy, full_text, parse_result.chunks
@@ -355,11 +367,13 @@ async def _process_document_task(
                     logger.warning("Chunk eval failed for '{}': {}", filename, eval_err)
 
             # ChromaDB — 同步库，to_thread
+            t2 = time.perf_counter()
             count = await asyncio.to_thread(
                 svc.vector_store.add_chunks, kb_id, chunk_data_list, doc_id
             )
 
             # DB 更新 — 异步，直接 await
+            t3 = time.perf_counter()
             await svc.db.update_document_status(
                 doc_id,
                 "ready",
@@ -370,10 +384,15 @@ async def _process_document_task(
                 chunk_strategy=strategy,
             )
             logger.info(
-                "Document processed: {} -> {} chunks (strategy={})",
+                "Document processed: {} -> {} chunks (strategy={}) | "
+                "parse={:.1f}s chunk={:.1f}s store={:.1f}s total={:.1f}s",
                 filename,
                 count,
                 strategy,
+                t1 - t0,
+                t2 - t1,
+                t3 - t2,
+                t3 - t0,
             )
 
         except Exception as e:
