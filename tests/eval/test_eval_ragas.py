@@ -17,25 +17,25 @@ import pytest
 class TestParseArgs:
     """命令行参数解析测试。"""
 
-    @patch("sys.argv", ["eval_ragas.py"])
+    @patch("sys.argv", ["eval_ragas.py", "--kb-id", "test-uuid"])
     def test_default_args(self) -> None:
         """默认参数应按预期设置。"""
         from src.cli.eval_ragas import parse_args
 
         args = parse_args()
-        assert args.kb_name is None
+        assert args.kb_id == "test-uuid"
         assert args.session_id == "ragas_eval_session"
 
-    @patch("sys.argv", ["eval_ragas.py", "--kb-name", "测试库", "--session-id", "custom_session"])
+    @patch("sys.argv", ["eval_ragas.py", "--kb-id", "test-uuid", "--session-id", "custom_session"])
     def test_custom_args(self) -> None:
         """应正确解析自定义参数。"""
         from src.cli.eval_ragas import parse_args
 
         args = parse_args()
-        assert args.kb_name == "测试库"
+        assert args.kb_id == "test-uuid"
         assert args.session_id == "custom_session"
 
-    @patch("sys.argv", ["eval_ragas.py", "--output", "/tmp/result.csv"])
+    @patch("sys.argv", ["eval_ragas.py", "--kb-id", "test-uuid", "--output", "/tmp/result.csv"])
     def test_output_arg(self) -> None:
         """应正确解析输出路径参数。"""
         from src.cli.eval_ragas import parse_args
