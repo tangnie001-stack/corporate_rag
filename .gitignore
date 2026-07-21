@@ -12,8 +12,13 @@ venv/
 .env.local
 
 # IDE
-.vscode/
 .idea/
+
+# Generated indices (auto-regeneratable)
+.codegraph/
+.coverage
+.superpowers/
+.superprojects/
 
 # Docker volume data
 /data/chroma_persist
@@ -29,8 +34,6 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
-.claude/
-.codebuddy/
 
 # Playwright CLI artifacts
 .playwright-cli/
