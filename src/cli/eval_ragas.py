@@ -31,9 +31,6 @@ from src.config import settings, DASHSCOPE_API_KEY, DASHSCOPE_BASE_URL
 setup_logging()
 
 
-# 默认输出目录
-DEFAULT_OUTPUT_DIR: str = "data/ragas/reports"
-
 # Quality gate thresholds
 GATE_THRESHOLDS: dict[str, float] = {
     "faithfulness": 0.85,
@@ -387,7 +384,7 @@ def main() -> None:
     # ---- 评估模式（原有流程改造）----
     session_id = args.session_id
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_path = args.output or f"{DEFAULT_OUTPUT_DIR}/ragas_eval_{timestamp}.csv"
+    output_path = args.output or f"{settings.RAGAS_REPORT_DIR}/ragas_eval_{timestamp}.csv"
 
     # 从 JSON 加载测试集
     from src.cli.eval_ragas_generate import _load_latest_testset
