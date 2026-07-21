@@ -55,7 +55,7 @@ RAGAS_USER_ID: str = os.getenv("RAGAS_USER_ID", "24a93c0e-3c9b-4d8d-a371-2d8b360
 # 用于跳过不需要参与测试集生成的文档（如扫描件、不相关文档）
 RAGAS_DOC_WHITELIST: list[str] = [
     "fa7d700e-f093-45be-a78f-73fbdfd1801d",   # neusoft_2025_q1.pdf
-    # "7d3f573c-d810-46d4-b0e7-42fc14b73bf4",  # tencent_2024_annual.pdf（暂放）
+    "7d3f573c-d810-46d4-b0e7-42fc14b73bf4",   # tencent_2024_annual.pdf
 ]
 
 # ====== MySQL ======
