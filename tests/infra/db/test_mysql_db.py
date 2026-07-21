@@ -34,3 +34,52 @@ async def test_document_crud():
     doc_ids = [d["id"] for d in docs]
     assert doc_id in doc_ids
     await db.close()
+
+
+@pytest.mark.asyncio
+async def test_get_kb_name_by_id():
+    """测试根据知识库 ID 查询名称。"""
+    db = MySQLDB()
+    user_id = "test-user"
+    name = f"test-kb-name-{uuid.uuid4().hex[:8]}"
+    kb_id, _ = await db.get_or_create_kb(user_id, name)
+
+    result = await db.get_kb_name_by_id(kb_id)
+    assert result == name
+
+    # 不存在的 ID 返回 None
+    result = await db.get_kb_name_by_id(str(uuid.uuid4()))
+    assert result is None
+
+    await db.close()
+
+
+@pytest.mark.asyncio
+async def test_get_doc_names():
+    """测试根据文档 ID 列表查询文件名。"""
+    db = MySQLDB()
+    user_id = "test-user"
+    kb_name = f"test-doc-names-{uuid.uuid4().hex[:8]}"
+    kb_id, _ = await db.get_or_create_kb(user_id, kb_name)
+
+    # 创建多个文档
+    doc_id_1 = str(uuid.uuid4())
+    doc_id_2 = str(uuid.uuid4())
+    doc_id_3 = str(uuid.uuid4())
+    await db.add_document(doc_id_1, kb_id, "report.pdf", "pdf", 100)
+    await db.add_document(doc_id_2, kb_id, "summary.docx", "docx", 200)
+    await db.add_document(doc_id_3, kb_id, "data.xlsx", "xlsx", 300)
+
+    # 查询部分文档
+    result = await db.get_doc_names([doc_id_1, doc_id_3])
+    assert result == {doc_id_1: "report.pdf", doc_id_3: "data.xlsx"}
+
+    # 空列表返回空字典
+    result = await db.get_doc_names([])
+    assert result == {}
+
+    # 不存在的 ID 不包含在结果中
+    result = await db.get_doc_names([str(uuid.uuid4())])
+    assert result == {}
+
+    await db.close()
