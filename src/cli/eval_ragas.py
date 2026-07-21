@@ -160,6 +160,14 @@ def run_evaluation(
 ) -> Any:
     """运行 RAGAS 四指标评估.
 
+    每个指标内部会多次调用 LLM（非简单的一次一问一答），
+    因此评估耗时明显长于回答生成：
+      - faithfulness: 将回答拆成陈述句后逐句判断，N+1 次 LLM
+      - answer_relevancy: 从回答反向生成候选项问题，M 次 LLM
+      - context_recall: 逐条判断上下文是否覆盖参考答案，P 次 LLM
+      - context_precision: 逐条判断上下文是否与问题相关，Q 次 LLM
+    综上，评估阶段 LLM 调用次数 = 指标内调用次数 × 指标数 × QA 对数。
+
     Args:
         questions: 问题列表
         ground_truth: 参考答案列表
