@@ -13,6 +13,60 @@
 Langfuse (:3000) → PostgreSQL (Tracing 存储)
 ```
 
+## 数据流链路
+
+项目包含 4 条核心业务链路：
+
+### 链路 1：文档上传 → 解析 → 入库 ★
+```
+用户上传 → MinIO 存储 → 文档解析(parse) → 策略检测
+→ 智能分块(chunk) → 分块质量校验 → [可选]分块质量评估
+→ ChromaDB 向量入库 → MySQL 元数据更新(ready)
+```
+入口: `POST /api/kbs/documents/upload` → 后台 `asyncio.create_task(_process_document_task)`
+
+### 链路 2：用户问答 → 检索 → 生成 ★
+```
+用户提问 → SSE 建立 → 检索(search) → 精排(rerank)
+→ 流式生成(stream_answer) → 引用高亮(citations)
+→ 对话历史持久化(Redis + MySQL)
+```
+入口: `GET /api/chat/stream?session_id=&kb_id=&query=`
+输出: SSE 事件流 `status → token → citation → done`
+
+### 链路 3：知识库管理
+```
+创建知识库 → MySQL get_or_create（名称去重）→ 返回 kb_id
+列出知识库 → MySQL 查询 + 文档计数
+删除知识库 → 软删文档 → ChromaDB 删集合 → 软删 KB 记录
+```
+入口: `POST /api/kbs` / `POST /api/kbs/list` / `POST /api/kbs/delete`
+
+### 链路 4：会话管理 ★
+```
+列出会话 → MySQL 查询最近 50 条
+查看消息 → MySQL 查询 session 消息历史
+删除会话 → Redis 清理 → MySQL 事务删除 session + 消息
+```
+入口: `POST /api/sessions/list` / `POST /api/sessions/messages` / `POST /api/sessions/delete`
+
+### 链路 5：认证
+```
+登录/注册 → MySQL 查用户 → 密码校验/自动注册 → Redis 存 token
+校验 → Redis 查 token → 返回 user_id
+登出 → Redis 删 token
+```
+入口: `POST /api/auth/login` / `POST /api/auth/verify` / `POST /api/auth/logout`
+
+### 链路 6：RAGAS 质量评估（CLI）
+测试集生成: `python -m src.cli.eval_ragas --kb-id xxx --generate --size 20`
+评估执行: `python -m src.cli.eval_ragas --kb-id xxx`（加 `--gate` 启用质量门禁）
+
+### 链路 7：分块质量评估（嵌入在链路 1 中）★
+由 `CHUNK_EVAL_ENABLED` 开关控制，`src/eval/chunk_scorer.py` 实现
+
+> ★ 标注的为关键链路
+
 ## 功能特性
 
 - 支持 PDF / DOCX / TXT 三种文档格式
