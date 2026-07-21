@@ -222,6 +222,7 @@ services:
       - app_logs:/data/logs
       - chroma_onnx_cache:/root/.cache/chroma
       - ./data/chroma_persist:/app/data/chroma_persist
+      - ./data/ragas:/app/data/ragas
     depends_on:
       mysql:
         condition: service_healthy
