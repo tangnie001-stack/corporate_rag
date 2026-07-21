@@ -3,6 +3,7 @@
 本模块被 eval_ragas.py 的 --generate 模式调用，包含：
   - vertexai stub 自动修复（ragas 兼容性）
   - 从 ChromaDB 读取已有分块数据
+  - 分步构建 KG + DiskCacheBackend 缓存（支持中断恢复）
   - TestsetGenerator 编排
   - 测试集版本管理与 JSON 写入
 
@@ -50,8 +51,9 @@ def _ensure_vertexai_stub() -> None:
         )
         logger.info("Created vertexai stub at {}", stub_path)
 
-
     # 测试集 JSON 结构
+
+
 # {
 #   "metadata": {
 #     "kb_name": str,
@@ -122,8 +124,7 @@ def _load_latest_testset(kb_id: str) -> tuple[list[str], list[str]]:
 
     if latest_file is None:
         raise FileNotFoundError(
-            f"No testset found for kb_id={kb_id}. "
-            "请先运行 --generate 生成测试集"
+            f"No testset found for kb_id={kb_id}. 请先运行 --generate 生成测试集"
         )
 
     with open(latest_file, "r", encoding="utf-8") as f:
@@ -135,22 +136,24 @@ def _load_latest_testset(kb_id: str) -> tuple[list[str], list[str]]:
 
 
 def run_generate(
-    kb_name: str,
     kb_id: str,
     size: int,
     model: str = "",
     use_filter: bool = False,
 ) -> None:
-    """运行测试集生成流程：从 ChromaDB 取 chunk → TestsetGenerator → 保存 JSON.
+    """运行测试集生成流程：从 ChromaDB 取 chunk → 构建 KG → 生成 → 保存 JSON.
 
     流程：
+      0. 从 MySQL 查询 kb_name 和 doc_names
       1. 从白名单获取 doc_ids
       2. 从 ChromaDB 按 doc_id 取出已有分块
-      3. 脱敏后传给 generate_with_chunks()
-      4. 写入 data/ragas/testset_{kb_id}_vN.json
+      3. 脱敏后构建 KnowledgeGraph
+      4. 应用 transforms（SummaryExtractor / NERExtractor 等）
+      5. 保存 KG 到磁盘（支持中断恢复时跳过 transforms）
+      6. 生成 Personas → Scenarios → Samples
+      7. 写入 data/ragas/testset_{kb_id}_vN.json
 
     Args:
-        kb_name: 知识库名称
         kb_id: 知识库 UUID
         size: 生成的 QA 对数
         model: 生成用的 LLM 模型名（空字符串则使用 RAGAS_LLM_MODEL 或 LLM_MODEL）
@@ -161,18 +164,41 @@ def run_generate(
     """
     _ensure_vertexai_stub()
 
+    from src.infra.db.mysql_db import MySQLClient
+
+    # ---- 0. 从 MySQL 查询 kb_name 和 doc_names ----
+    async def _query_meta() -> tuple[str, dict[str, str]]:
+        db = MySQLClient()
+        name = await db.get_kb_name_by_id(kb_id)
+        if not name:
+            raise ValueError(f"知识库 {kb_id} 不存在")
+        doc_names = await db.get_doc_names(RAGAS_DOC_WHITELIST)
+        return name, doc_names
+
+    try:
+        kb_name, doc_names_map = asyncio.run(_query_meta())
+    except ValueError as e:
+        logger.error("{}", str(e))
+        print(f"✗ {e}")
+        sys.exit(1)
+    except Exception as e:
+        logger.error("查询知识库元信息失败: {}", e)
+        print(f"✗ 查询知识库元信息失败: {e}")
+        sys.exit(1)
+
     from langchain_core.documents import Document as LCDocument
-    from langchain_openai import ChatOpenAI
     from ragas.testset.synthesizers.generate import TestsetGenerator
     from src.models import get_embeddings
-    from src.config import settings, DASHSCOPE_API_KEY, DASHSCOPE_BASE_URL
+    from src.config import settings
     from src.infra.desensitize import desensitize
     from src.config.settings import RAGAS_DOC_WHITELIST
     from src.infra.db.vector_store import VectorStore
     import ragas
 
     # ---- 1. 从 ChromaDB 按白名单 doc_id 取 chunk ----
-    logger.info("从 ChromaDB 读取分块: kb_id={}, whitelist={}", kb_id, RAGAS_DOC_WHITELIST)
+    logger.info(
+        "从 ChromaDB 读取分块: kb_id={}, whitelist={}", kb_id, RAGAS_DOC_WHITELIST
+    )
     vector_store = VectorStore()
     langchain_chunks: list[LCDocument] = []
     doc_ids: list[str] = []
@@ -189,10 +215,12 @@ def run_generate(
             safe_content = desensitize(c["content"])
             meta = dict(c.get("metadata", {}))
             meta["parent_content"] = ""  # 清空原文，避免敏感信息泄漏
-            langchain_chunks.append(LCDocument(
-                page_content=safe_content,
-                metadata=meta,
-            ))
+            langchain_chunks.append(
+                LCDocument(
+                    page_content=safe_content,
+                    metadata=meta,
+                )
+            )
         doc_ids.append(doc_id)
         success_count += 1
         print(f"  ✓ doc_id={doc_id} ({len(chunks_data)} 个 chunk)")
@@ -202,35 +230,45 @@ def run_generate(
         print("✗ 白名单中所有文档在 ChromaDB 中均无数据")
         sys.exit(1)
 
-    logger.info("成功读取 {} 份文档，共 {} 个 chunk", success_count, len(langchain_chunks))
+    logger.info(
+        "成功读取 {} 份文档，共 {} 个 chunk", success_count, len(langchain_chunks)
+    )
 
-    # ---- 3. 初始化 RAGAS TestsetGenerator ----
+    # ---- 3. 初始化 RAGAS 组件（带 DiskCacheBackend 缓存） ----
     eval_model = model or settings.RAGAS_LLM_MODEL or settings.LLM_MODEL
-    logger.info("初始化 TestsetGenerator (model={}, size={}, chunks={})...", eval_model, size, len(langchain_chunks))
-    print(f"\n正在构建知识图谱 ({len(langchain_chunks)} 个 chunk)...")
-
-    llm = ChatOpenAI(
-        model=eval_model,
-        temperature=0,
-        api_key=DASHSCOPE_API_KEY,
-        base_url=DASHSCOPE_BASE_URL,
+    logger.info(
+        "初始化 RAGAS 组件 (model={}, size={}, chunks={})...",
+        eval_model,
+        size,
+        len(langchain_chunks),
     )
-    embeddings = get_embeddings()
-
-    generator = TestsetGenerator.from_langchain(
-        llm=llm,
-        embedding_model=embeddings,
+    print(
+        f"\n初始化 RAGAS 组件 ({len(langchain_chunks)} 个 chunk, model={eval_model})..."
     )
 
-    # ---- 4. 生成测试集 ----
-    # 构建 transforms
+    from ragas.cache import DiskCacheBackend
+    from ragas.llms.base import LangchainLLMWrapper as _LLMWrapper
+    from ragas.embeddings import LangchainEmbeddingsWrapper as _EmbeddingsWrapper
+    from src.models import get_llm
+
+    _cache = DiskCacheBackend(cache_dir=os.path.join(RAGAS_DATA_DIR, "llm_cache"))
+    _langchain_llm = get_llm(model=eval_model, temperature=0)
+    ragas_llm = _LLMWrapper(_langchain_llm, cache=_cache)
+    embeddings_wrapper = _EmbeddingsWrapper(get_embeddings())
+
+    generator = TestsetGenerator(llm=ragas_llm, embedding_model=embeddings_wrapper)
+
+    # ---- 4. 构建 transforms ----
     # LLM 步骤: SummaryExtractor + NERExtractor = 2 次/节点
     # 非 LLM 步骤: CustomNodeFilter + EmbeddingExtractor + OverlapScoreBuilder
     transforms = None
     if not use_filter:
         from ragas.testset.graph import NodeType
         from ragas.testset.transforms.filters import CustomNodeFilter
-        from ragas.testset.transforms.extractors import SummaryExtractor, EmbeddingExtractor
+        from ragas.testset.transforms.extractors import (
+            SummaryExtractor,
+            EmbeddingExtractor,
+        )
         from ragas.testset.transforms.extractors.llm_based import NERExtractor
         from ragas.testset.transforms.relationship_builders import OverlapScoreBuilder
 
@@ -249,32 +287,75 @@ def run_generate(
             NERExtractor(llm=generator.llm, filter_nodes=_filter_chunks),
             OverlapScoreBuilder(threshold=0.01),
         ]
-        logger.info("使用自定义 transforms 步骤: {}", [type(t).__name__ for t in transforms])
+        logger.info(
+            "使用自定义 transforms 步骤: {}", [type(t).__name__ for t in transforms]
+        )
 
+    # ---- 5. 构建知识图谱（支持中断恢复） ----
+    from ragas.testset.graph import KnowledgeGraph, Node, NodeType as _NodeType
+    from ragas.testset.transforms import apply_transforms
+    from ragas.run_config import RunConfig
+
+    kg_file = os.path.join(RAGAS_DATA_DIR, f"kg_{kb_id}.json")
+
+    if os.path.exists(kg_file):
+        logger.info("发现已保存的知识图谱: {}", kg_file)
+        print("  ↻ 加载已有知识图谱，跳过 transforms...")
+        kg = KnowledgeGraph.load(kg_file)
+        generator.knowledge_graph = kg
+    else:
+        logger.info("构建知识图谱 ({} 个 chunk)...", len(langchain_chunks))
+        print(f"  → 构建知识图谱 ({len(langchain_chunks)} 个 chunk)...")
+
+        nodes = []
+        for chunk in langchain_chunks:
+            if chunk.page_content is not None and chunk.page_content.strip() != "":
+                node = Node(
+                    type=_NodeType.CHUNK,
+                    properties={
+                        "page_content": chunk.page_content,
+                        "document_metadata": chunk.metadata,
+                    },
+                )
+                nodes.append(node)
+
+        kg = KnowledgeGraph(nodes=nodes)
+
+        # 应用 transforms
+        print("  → 应用 transforms...")
+        apply_transforms(kg, transforms, run_config=RunConfig())
+        generator.knowledge_graph = kg
+
+        # 保存 KG 到磁盘
+        os.makedirs(RAGAS_DATA_DIR, exist_ok=True)
+        kg.save(kg_file)
+        logger.info("知识图谱已保存: {}", kg_file)
+        print(f"  ✓ 知识图谱已保存 ({len(kg.nodes)} 个节点)")
+
+    # ---- 6. 生成测试集 ----
     logger.info("开始生成测试集 ({} 条)...", size)
     print(f"正在生成测试集 ({size} 条)...")
 
     try:
-        testset = generator.generate_with_chunks(
-            chunks=langchain_chunks,
-            testset_size=size,
-            transforms=transforms,
-        )
+        testset = generator.generate(testset_size=size)
     except Exception as e:
         logger.exception("TestsetGenerator 调用失败")
         print(f"✗ 测试集生成失败: {e}")
         print(f"✗ 异常类型: {type(e).__name__}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
 
-    # ---- 5. 序列化为 JSON ----
+    # ---- 7. 序列化为 JSON ----
     samples_list = testset.to_list()
     version = _find_next_version(kb_id)
 
     output = {
         "metadata": {
+            "kb_id": kb_id,
             "kb_name": kb_name,
+            "doc_names": [doc_names_map.get(d, "") for d in doc_ids],
             "version": version,
             "generated_at": datetime.now().isoformat(),
             "llm_model": eval_model,
@@ -285,7 +366,7 @@ def run_generate(
         "samples": samples_list,
     }
 
-    # ---- 6. 原子写入 ----
+    # ---- 8. 原子写入 ----
     os.makedirs(RAGAS_DATA_DIR, exist_ok=True)
     output_path = os.path.join(RAGAS_DATA_DIR, f"testset_{kb_id}_v{version}.json")
     tmp_path = output_path + ".tmp"
