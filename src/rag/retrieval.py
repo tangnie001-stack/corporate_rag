@@ -32,8 +32,10 @@ async def search(
         d, b = await asyncio.gather(dense_t, bm25_t)
         results = rrf_fusion(d, b)
         logger.info(
-            "RAG search: kb_id={} query_len={} results={}",
-            kb_id, len(query), len(results),
+            "RAG search: kb_id={} query_len={} results={} mode=hybrid",
+            kb_id,
+            len(query),
+            len(results),
         )
         return results
 
@@ -46,8 +48,10 @@ async def search(
             vector_store.similarity_search, kb_id, query, k=TOP_K_RETRIEVAL
         )
     logger.info(
-        "RAG search: kb_id={} query_len={} results={}",
-        kb_id, len(query), len(results),
+        "RAG search: kb_id={} query_len={} results={} mode=dense",
+        kb_id,
+        len(query),
+        len(results),
     )
     return results
 
@@ -72,7 +76,8 @@ def rerank_results(
     except Exception as e:
         logger.warning(
             "Rerank failed after {} attempts (using raw order): {}",
-            RETRY_MAX_ATTEMPTS, e,
+            RETRY_MAX_ATTEMPTS,
+            e,
         )
         reranked = [
             {"index": i, "relevance_score": r.get("distance", 0)}
@@ -96,6 +101,13 @@ def rerank_results(
                 parent_content=pc,
                 score=score,
             )
+        )
+    if contexts:
+        logger.info(
+            "Rerank completed: {} -> {} contexts, top_score={:.4f}",
+            len(results),
+            len(contexts),
+            contexts[0].score,
         )
     return contexts
 
