@@ -71,7 +71,10 @@ def stream_answer(
                     "total_tokens": usage.get("input", 0) + usage.get("output", 0),
                 }
             tracer.end_generation(
-                gen_id, trace_id, output=full_output, usage=last_token_usage,
+                gen_id,
+                trace_id,
+                output=full_output,
+                usage=last_token_usage,
             )
             _gen_latency = (time.monotonic() - _stream_start) * 1000
             logger.info(
@@ -87,12 +90,13 @@ def stream_answer(
         except Exception as e:
             last_error = e
             if attempt < RETRY_MAX_ATTEMPTS:
-                wait = RETRY_INITIAL_INTERVAL * (
-                    RETRY_BACKOFF_FACTOR ** (attempt - 1)
-                )
+                wait = RETRY_INITIAL_INTERVAL * (RETRY_BACKOFF_FACTOR ** (attempt - 1))
                 logger.warning(
                     "LLM stream failed (attempt {}/{}): {}. Retrying in {:.1f}s...",
-                    attempt, RETRY_MAX_ATTEMPTS, e, wait,
+                    attempt,
+                    RETRY_MAX_ATTEMPTS,
+                    e,
+                    wait,
                 )
                 time.sleep(wait)
 

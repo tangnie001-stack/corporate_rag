@@ -162,7 +162,10 @@ async def _stream_rag_response(
     try:
         logger.info(
             "Chat stream start: session_id={} kb_id={} query_len={} query={}",
-            session_id, kb_id, len(query), query,
+            session_id,
+            kb_id,
+            len(query),
+            query,
         )
         # 启动 Langfuse trace
         tracer = svc.rag_chain._tracer
@@ -322,7 +325,9 @@ async def _persist_conversation(
     )
     logger.info(
         "Conversation persisted: session_id={} kb_id={} sources={}",
-        session_id, kb_id, len(sources),
+        session_id,
+        kb_id,
+        len(sources),
     )
 
 

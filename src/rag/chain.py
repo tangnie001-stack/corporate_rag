@@ -7,7 +7,8 @@ import time
 from loguru import logger
 
 from src.config import (
-    HYBRID_SEARCH_ENABLED, BM25_INDEX_DIR,
+    HYBRID_SEARCH_ENABLED,
+    BM25_INDEX_DIR,
 )
 from src.infra.llm.langfuse_tracing import LangfuseTracer
 from src.infra.llm.prompt_manager import PromptManager
@@ -83,6 +84,7 @@ class RAGChain:
             检索结果列表
         """
         import src.rag.retrieval as _retrieval
+
         return await _retrieval.search(query, kb_id, self.vector_store, self.bm25)
 
     def rerank(self, query: str, results: list[dict]) -> list[RAGContext]:
@@ -96,12 +98,16 @@ class RAGChain:
             精排后的 RAGContext 列表
         """
         import src.rag.retrieval as _retrieval
+
         return _retrieval.rerank_results(query, results, self.reranker)
 
     # ═══════════ chat_with_citations — 主入口 ═══════════
 
     def chat_with_citations(
-        self, kb_id: str, session_id: str, query: str,
+        self,
+        kb_id: str,
+        session_id: str,
+        query: str,
     ) -> tuple[Generator[str, None, None], list[RAGContext]]:
         """生成带引用来源的流式回答 — RAG 流水线主入口。"""
         trace_id = self._tracer.start_trace(
@@ -112,7 +118,9 @@ class RAGChain:
         route = self.router.route(query)
         logger.info(
             "Chat with citations: route={} query_len={} query={}",
-            route, len(query), query,
+            route,
+            len(query),
+            query,
         )
         history = self.chat_manager.get_window(session_id)
 
@@ -126,7 +134,8 @@ class RAGChain:
             if query_rewritten != query:
                 logger.info(
                     'Query rewritten: "{}" -> "{}"',
-                    query, query_rewritten,
+                    query,
+                    query_rewritten,
                 )
                 query = query_rewritten
 
@@ -139,6 +148,7 @@ class RAGChain:
         try:
             t0 = time.perf_counter()
             import asyncio
+
             loop = asyncio.new_event_loop()
             results = loop.run_until_complete(
                 search(query, kb_id, self.vector_store, self.bm25)
@@ -232,6 +242,7 @@ class RAGChain:
         """构建 prompt 并流式生成回答，完成后记录 token 用量。"""
         from src.rag.prompt import format_context
         from src.rag.stream import estimate_usage
+
         context_str = format_context(contexts)
         prompt = build_prompt(query, context_str, history, self.prompt_manager)
         internal_gen = stream_answer(prompt, self.llm, self._tracer, trace_id)
