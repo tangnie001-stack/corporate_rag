@@ -156,6 +156,7 @@ docker exec corporate-rag-app grep '<trace_id>' /data/logs/app_*.log
 - API Key 和 Token 通过 `.env` 加载，日志中脱敏；连接串不记录到日志
 - 测试 mock 外部依赖，不发起真实网络调用
 - 需求池文档在docs/requirements_pool.md
+- **接口契约**：API 参数、返回值、历史踩坑记录详见 @docs/api_contract.md，修改公共方法签名时同步更新
 - **代码风格**：不用三元表达式（`a if cond else b`），写完整的 if/else 结构，保持可读性
 
 
