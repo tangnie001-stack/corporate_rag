@@ -42,10 +42,9 @@ class ParentChildChunker(BaseChunker):
                     }
                 )
         logger.info(
-            "[parent_child] chunks={} parents={} children={} tokens={}",
+            "[parent_child] chunks={} parents={} tokens={}",
             len(result),
             len(parent_docs),
-            len(result),
             sum(c["metadata"]["tokens"] for c in result),
         )
         return result
