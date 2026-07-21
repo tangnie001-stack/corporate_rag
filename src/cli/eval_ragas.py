@@ -7,11 +7,12 @@
   - context_precision: 检索到的上下文中有多少是真正有用的
 
 运行方式：
-  python -m src.cli.eval_ragas --kb-id <kb-uuid>              # 评估指定知识库
-  python -m src.cli.eval_ragas --kb-id <kb-uuid> --gate        # 评估并检查质量门禁
-  python -m src.cli.eval_ragas --kb-id <kb-uuid> --generate    # 生成测试集
-  python -m src.cli.eval_ragas --kb-id <kb-uuid> --generate --size 30  # 生成 30 条
-  python -m src.cli.eval_ragas --list-kbs                     # 列出可用知识库
+  python -m src.cli.eval_ragas --kb-id <kb-uuid>                          # 评估（最新测试集）
+  python -m src.cli.eval_ragas --kb-id <kb-uuid> --testset-version 4       # 评估（指定测试集版本）
+  python -m src.cli.eval_ragas --kb-id <kb-uuid> --gate                    # 评估并检查质量门禁
+  python -m src.cli.eval_ragas --kb-id <kb-uuid> --generate                # 生成测试集
+  python -m src.cli.eval_ragas --kb-id <kb-uuid> --generate --size 30      # 生成 30 条
+  python -m src.cli.eval_ragas --list-kbs                                  # 列出可用知识库
 """
 
 import argparse
@@ -79,6 +80,12 @@ def parse_args() -> argparse.Namespace:
         "--generate",
         action="store_true",
         help="生成测试集模式（从文档自动生成 QA 对）",
+    )
+    parser.add_argument(
+        "--testset-version",
+        type=int,
+        default=None,
+        help="指定测试集版本号（默认取最新版本）",
     )
     parser.add_argument(
         "--size",
@@ -378,7 +385,7 @@ def main() -> None:
     from src.cli.eval_ragas_generate import _load_latest_testset
 
     try:
-        questions, ground_truth = _load_latest_testset(kb_id)
+        questions, ground_truth = _load_latest_testset(kb_id, version=args.testset_version)
     except FileNotFoundError as e:
         print(f"error: {e}")
         sys.exit(1)
@@ -405,7 +412,7 @@ def main() -> None:
     rag_chain = RAGChain()
 
     logger.info("Checking KB vector store...")
-    if rag_chain.vector_store._collection.count() == 0:
+    if rag_chain.vector_store.get_or_create_collection(kb_id).count() == 0:
         logger.error("Knowledge base '{}' vector store is empty", kb_id)
         print("Knowledge base is empty")
         sys.exit(1)

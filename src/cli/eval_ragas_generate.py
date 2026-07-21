@@ -98,11 +98,12 @@ def _find_next_version(kb_id: str) -> int:
     return max_version + 1
 
 
-def _load_latest_testset(kb_id: str) -> tuple[list[str], list[str]]:
-    """加载指定知识库的最新版本测试集。
+def _load_latest_testset(kb_id: str, version: Optional[int] = None) -> tuple[list[str], list[str]]:
+    """加载指定知识库的测试集，支持指定版本或自动取最新。
 
     Args:
         kb_id: 知识库 UUID
+        version: 指定版本号（None 表示自动取最新版本）
 
     Returns:
         (questions, ground_truth) 元组，分别对应问题和参考答案列表
@@ -111,22 +112,33 @@ def _load_latest_testset(kb_id: str) -> tuple[list[str], list[str]]:
         FileNotFoundError: 没有找到该知识库的测试集文件
     """
     pattern = re.compile(rf"^testset_{re.escape(kb_id)}_v(\d+)\.json$")
-    max_version = 0
-    latest_file: Optional[Path] = None
     ragas_dir = Path(RAGAS_DATA_DIR)
-    if ragas_dir.exists():
-        for f in ragas_dir.iterdir():
-            m = pattern.match(f.name)
-            if m:
-                ver = int(m.group(1))
-                if ver > max_version:
-                    max_version = ver
-                    latest_file = f
 
-    if latest_file is None:
-        raise FileNotFoundError(
-            f"No testset found for kb_id={kb_id}. 请先运行 --generate 生成测试集"
-        )
+    if version is not None:
+        # 指定版本
+        target_file = ragas_dir / f"testset_{kb_id}_v{version}.json"
+        if not target_file.exists():
+            raise FileNotFoundError(
+                f"测试集文件不存在: {target_file}"
+            )
+        latest_file = target_file
+    else:
+        # 自动取最新
+        max_version = 0
+        latest_file = None
+        if ragas_dir.exists():
+            for f in ragas_dir.iterdir():
+                m = pattern.match(f.name)
+                if m:
+                    ver = int(m.group(1))
+                    if ver > max_version:
+                        max_version = ver
+                        latest_file = f
+
+        if latest_file is None:
+            raise FileNotFoundError(
+                f"No testset found for kb_id={kb_id}. 请先运行 --generate 生成测试集"
+            )
 
     with open(latest_file, "r", encoding="utf-8") as f:
         data = json.load(f)
