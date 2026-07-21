@@ -252,7 +252,7 @@ def run_generate(
     from ragas.embeddings import LangchainEmbeddingsWrapper as _EmbeddingsWrapper
     from src.models import get_llm
 
-    _cache = DiskCacheBackend(cache_dir=os.path.join(RAGAS_DATA_DIR, "llm_cache"))
+    _cache = DiskCacheBackend(cache_dir=settings.RAGAS_LLM_CACHE_DIR)
     _langchain_llm = get_llm(model=eval_model, temperature=0)
     ragas_llm = _LLMWrapper(_langchain_llm, cache=_cache)
     embeddings_wrapper = _EmbeddingsWrapper(get_embeddings())
