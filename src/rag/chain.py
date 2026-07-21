@@ -2,6 +2,8 @@
 
 from typing import Generator, Optional
 
+import time
+
 from loguru import logger
 
 from src.config import (
@@ -108,6 +110,10 @@ class RAGChain:
             session_id=session_id,
         )
         route = self.router.route(query)
+        logger.info(
+            "Chat with citations: route={} query_len={} query={}",
+            route, len(query), query,
+        )
         history = self.chat_manager.get_window(session_id)
 
         # Simple route
@@ -116,7 +122,13 @@ class RAGChain:
 
         # Vague / Complex route — 改写查询
         if route in ("vague", "complex"):
-            query = self._rewrite_if_needed(query, history)
+            query_rewritten = self._rewrite_if_needed(query, history)
+            if query_rewritten != query:
+                logger.info(
+                    'Query rewritten: "{}" -> "{}"',
+                    query, query_rewritten,
+                )
+                query = query_rewritten
 
         # Short query guard
         SHORT_QUERY_THRESHOLD = 5
@@ -125,6 +137,7 @@ class RAGChain:
 
         # 检索
         try:
+            t0 = time.perf_counter()
             import asyncio
             loop = asyncio.new_event_loop()
             results = loop.run_until_complete(
@@ -134,14 +147,34 @@ class RAGChain:
         except Exception as e:
             return self._handle_search_error(e, trace_id)
 
+        t1 = time.perf_counter()
+
         if not results:
             return self._handle_no_results(trace_id)
 
         # Rerank → Prompt → Stream
         rag_contexts = rerank_results(query, results, self.reranker)
+        t2 = time.perf_counter()
         history = self.chat_manager.get_window(session_id)
         token_generator = self.stream_answer(query, rag_contexts, history, trace_id)
+        t3 = time.perf_counter()
         self.chat_manager.add_message(session_id, "user", query)
+        tu = getattr(self, "_last_token_usage", {})
+        logger.info(
+            "Chat with citations completed: "
+            "search={:.1f}s rerank={:.1f}s generate={:.1f}s total={:.1f}s "
+            "| results={} contexts={} "
+            "| tokens: prompt={} completion={} total={}",
+            t1 - t0,
+            t2 - t1,
+            t3 - t2,
+            t3 - t0,
+            len(results),
+            len(rag_contexts),
+            tu.get("prompt_tokens", 0),
+            tu.get("completion_tokens", 0),
+            tu.get("total_tokens", 0),
+        )
         return token_generator, rag_contexts
 
     # ═══════════ 子方法 ═══════════
