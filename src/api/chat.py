@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import time
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, Query
@@ -159,6 +160,10 @@ async def _stream_rag_response(
         token（回答片段）、citation（引用来源）、done（流结束标记）
     """
     try:
+        logger.info(
+            "Chat stream start: session_id={} kb_id={} query_len={} query={}",
+            session_id, kb_id, len(query), query,
+        )
         # 启动 Langfuse trace
         tracer = svc.rag_chain._tracer
         trace_id = tracer.start_trace(
@@ -169,11 +174,14 @@ async def _stream_rag_response(
 
         # Stage 1 — search
         yield sse_status("retrieving", "正在检索相关文档...")
+        t0 = time.perf_counter()
         results = await svc.rag_chain.search(query, kb_id)
+        t1 = time.perf_counter()
 
         # Stage 2 — rerank
         yield sse_status("reranking", f"已找到 {len(results)} 个候选，正在精排...")
         contexts = svc.rag_chain.rerank(query, results)
+        t2 = time.perf_counter()
 
         # Stage 3 — generate
         yield sse_status("generating", "正在生成回答...")
@@ -184,6 +192,8 @@ async def _stream_rag_response(
             full_answer += token
             yield sse_token(token)
             await asyncio.sleep(0)
+
+        t3 = time.perf_counter()
 
         # 结束 Langfuse trace（在 citations 和持久化之前记录输出）
         tracer.end_trace(trace_id, output=full_answer)
@@ -209,6 +219,22 @@ async def _stream_rag_response(
                 highlighted_snippet=highlighted,
             )
             await asyncio.sleep(0)
+
+        tu = getattr(svc.rag_chain, "_last_token_usage", {})
+        logger.info(
+            "Chat stream completed: session_id={} | "
+            "search={:.1f}s rerank={:.1f}s generate={:.1f}s total={:.1f}s "
+            "| tokens: prompt={} completion={} total={} | citations={}",
+            session_id,
+            t1 - t0,
+            t2 - t1,
+            t3 - t2,
+            t3 - t0,
+            tu.get("prompt_tokens", 0),
+            tu.get("completion_tokens", 0),
+            tu.get("total_tokens", 0),
+            len(seen),
+        )
 
         # Save assistant response to chat history (deduplicated)
         seen_src: set[str] = set()
@@ -293,6 +319,10 @@ async def _persist_conversation(
         lambda: svc.rag_chain.chat_manager.save_messages_async(
             session_id, kb_id, query, answer, sources
         )
+    )
+    logger.info(
+        "Conversation persisted: session_id={} kb_id={} sources={}",
+        session_id, kb_id, len(sources),
     )
 
 
