@@ -495,3 +495,83 @@ def stream_answer(query, contexts, history) → Generator[str]
 | 2026-06-25 | 重置数据工具 hanging | `reset_data.py` 创建新 `AppService()` 时触发了 DashScope 网络调用 | 改用 `docker exec` 子进程模式 |
 | 2026-07-03 | ChromaDB 服务器未启动导致文件上传一直卡在 processing | docker-compose 缺少 chroma 服务，HttpClient 无法连接 | 改为 PersistentClient 内嵌模式，用 volume 缓存 ONNX 模型 |
 | 2026-07-03 | text-embedding-v3 免费额度用尽导致 embedding 失败 | .env 配置为 v3 模型，免费额度过期 | 切回 text-embedding-v2 |
+
+---
+
+## 8. CLI 接口：eval_ragas 命令行
+
+### 8.1 `python -m src.cli.eval_ragas`
+
+RAGAS 评估与测试集生成命令行。
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `--kb-id` | str | 是* | 知识库 UUID（与 `--list-kbs` 互斥） |
+| `--generate` | flag | 否 | 生成测试集模式（从文档自动生成 QA 对） |
+| `--size` | int | 否 | 生成测试集的 QA 对数（默认: `RAGAS_TEST_SIZE`） |
+| `--model` | str | 否 | 生成测试集用的 LLM 模型名 |
+| `--testset-version` | int | 否 | 指定测试集版本号（默认取最新版本） |
+| `--gate` | flag | 否 | 评估后检查质量门禁指标 |
+| `--output` | str | 否 | CSV 输出路径（默认: `data/reports/ragas_eval_<timestamp>.csv`） |
+| `--session-id` | str | 否 | 评估用的会话 ID（默认: `ragas_eval_session`） |
+| `--list-kbs` | flag | 否 | 列出所有可用知识库后退出 |
+
+> `*` `--kb-id` 除 `--list-kbs` 模式外为必填。
+
+使用示例：
+```bash
+# 生成测试集
+python -m src.cli.eval_ragas --kb-id <uuid> --generate --size 20
+
+# 评估（最新测试集）
+python -m src.cli.eval_ragas --kb-id <uuid>
+
+# 评估（指定测试集版本）
+python -m src.cli.eval_ragas --kb-id <uuid> --testset-version 4
+
+# 评估 + 质量门禁
+python -m src.cli.eval_ragas --kb-id <uuid> --gate
+
+# 列出知识库
+python -m src.cli.eval_ragas --list-kbs
+```
+
+### 8.2 测试集 JSON 格式
+
+位置：`data/ragas/testset_{kb_id}_v<N>.json`
+
+```json
+{
+  "metadata": {
+    "kb_id": "知识库UUID",
+    "kb_name": "知识库名称",
+    "doc_names": ["文档名.pdf"],
+    "version": 1,
+    "generated_at": "ISO 8601",
+    "llm_model": "模型名",
+    "testset_size": 20,
+    "ragas_version": "x.y.z",
+    "doc_ids": ["文档UUID"]
+  },
+  "samples": [
+    {
+      "user_input": "问题",
+      "reference": "参考答案",
+      "reference_contexts": ["上下文1", "上下文2"],
+      "synthesizer_name": "合成器名"
+    }
+  ]
+}
+```
+
+### 8.3 质量门禁阈值
+
+| 指标 | 阈值 |
+|------|------|
+| faithfulness | 0.85 |
+| answer_relevancy | 0.85 |
+| context_precision | 0.80 |
+| context_recall | 0.70 |
+
+综合加权分 = 0.3×faithfulness + 0.3×context_recall + 0.2×context_precision + 0.2×answer_relevancy
+综合分 ≥ 0.70 视为通过。
