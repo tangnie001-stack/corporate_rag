@@ -31,7 +31,7 @@ DASHSCOPE_BASE_URL: str = os.getenv(
 
 # ====== 模型选择 ======
 # 大语言模型：用于生成最终回答，qwen-max 效果最佳
-LLM_MODEL: str = os.getenv("LLM_MODEL", "qwen3.7-max-2026-06-08")
+LLM_MODEL: str = os.getenv("LLM_MODEL", "qwen3.7-max")
 # 向量化模型：将文本转为向量，用于 ChromaDB 语义检索
 EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "qwen3.7-text-embedding")
 # 向量输出维度：固定维度后切换模型无需重建 ChromaDB collection
@@ -44,7 +44,7 @@ LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.1"))
 EMBEDDING_BATCH_SIZE: int = int(os.getenv("EMBEDDING_BATCH_SIZE", "20"))
 # RAGAS 评估专用模型（独立于生产 LLM，temperature 固定为 0）
 # 为空时回退到 LLM_MODEL
-RAGAS_LLM_MODEL: str = os.getenv("RAGAS_LLM_MODEL", "qwen3.7-max-2026-05-20")
+RAGAS_LLM_MODEL: str = os.getenv("RAGAS_LLM_MODEL", "qwen3.7-max")
 # RAGAS 测试集生成条数
 RAGAS_TEST_SIZE: int = int(os.getenv("RAGAS_TEST_SIZE", "20"))
 # RAGAS 测试集存储目录
