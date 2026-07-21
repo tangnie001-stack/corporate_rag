@@ -7,18 +7,18 @@
   - context_precision: 检索到的上下文中有多少是真正有用的
 
 运行方式：
-  python -m src.cli.eval_ragas --kb-name "我的知识库"              # 评估指定知识库
-  python -m src.cli.eval_ragas --kb-name "我的知识库" --gate        # 评估并检查质量门禁
-  python -m src.cli.eval_ragas --kb-name "我的知识库" --generate    # 生成测试集
-  python -m src.cli.eval_ragas --kb-name "我的知识库" --generate --size 30  # 生成 30 条
-  python -m src.cli.eval_ragas --list-kbs                          # 列出可用知识库
+  python -m src.cli.eval_ragas --kb-id <kb-uuid>              # 评估指定知识库
+  python -m src.cli.eval_ragas --kb-id <kb-uuid> --gate        # 评估并检查质量门禁
+  python -m src.cli.eval_ragas --kb-id <kb-uuid> --generate    # 生成测试集
+  python -m src.cli.eval_ragas --kb-id <kb-uuid> --generate --size 30  # 生成 30 条
+  python -m src.cli.eval_ragas --list-kbs                     # 列出可用知识库
 """
 
 import argparse
 import os
 import sys
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 import asyncio
 from loguru import logger
@@ -48,10 +48,10 @@ def parse_args() -> argparse.Namespace:
         description="RAGAS 评估脚本 — 对 RAG 系统进行标准化评估",
     )
     parser.add_argument(
-        "--kb-name",
+        "--kb-id",
         type=str,
         default=None,
-        help="要评估的知识库名称",
+        help="要评估的知识库 UUID（与 --list-kbs 互斥）",
     )
     parser.add_argument(
         "--list-kbs",
@@ -274,8 +274,7 @@ def save_markdown_report(
     lines.append("")
     lines.append(f"**Date:** {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     lines.append(
-        f"**Configuration:** "
-        f"TOP_K_RETRIEVAL={cfg_topk}, TOP_K_RERANK={cfg_rerank}"
+        f"**Configuration:** TOP_K_RETRIEVAL={cfg_topk}, TOP_K_RERANK={cfg_rerank}"
     )
     lines.append(f"**QA Pairs:** {len(questions)}")
     lines.append("")
@@ -303,7 +302,6 @@ def save_markdown_report(
         f.write(content)
     logger.info("Markdown report saved to: {}", md_path)
     return md_path
-
 
 
 def check_gate(result: Any, questions: list[str]) -> None:
@@ -356,27 +354,11 @@ def main() -> None:
         asyncio.run(_list_knowledge_bases())
         return
 
-    # ---- kb-name 校验 ----
-    if not args.kb_name:
-        print("error: --kb-name is required")
-        print("Use --list-kbs to see available knowledge bases")
+    # ---- 解析 kb_id ----
+    if not args.kb_id:
+        print("error: --kb-id 是必填参数（使用 --list-kbs 查看可用知识库）")
         sys.exit(1)
-
-    kb_name = args.kb_name
-
-    # ---- 查询 kb_id ----
-    from src.services.app_service import AppService
-
-    svc = AppService()
-
-    async def _get_kb_id(name: str) -> Optional[str]:
-        return await svc.db.get_kb_by_name("", name)
-
-    kb_id = asyncio.run(_get_kb_id(kb_name))
-    if not kb_id:
-        logger.error("Knowledge base '{}' not found", kb_name)
-        print(f"error: 知识库 '{kb_name}' 不存在")
-        sys.exit(1)
+    kb_id = args.kb_id
 
     # ---- generate 模式 ----
     if args.generate:
@@ -384,15 +366,13 @@ def main() -> None:
 
         size = args.size or settings.RAGAS_TEST_SIZE
         model = args.model or ""
-        run_generate(kb_name, kb_id, size, model)
+        run_generate(kb_id, size, model)
         return
 
     # ---- 评估模式（原有流程改造）----
     session_id = args.session_id
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_path = (
-        args.output or f"{DEFAULT_OUTPUT_DIR}/ragas_eval_{timestamp}.csv"
-    )
+    output_path = args.output or f"{DEFAULT_OUTPUT_DIR}/ragas_eval_{timestamp}.csv"
 
     # 从 JSON 加载测试集
     from src.cli.eval_ragas_generate import _load_latest_testset
@@ -404,7 +384,7 @@ def main() -> None:
         sys.exit(1)
 
     logger.info("加载测试集: {} 条 QA 对", len(questions))
-    logger.info("Evaluating KB '{}'", kb_name)
+    logger.info("Evaluating KB '{}'", kb_id)
 
     # ---- 初始化 RAG 组件 ----
     from datasets import Dataset  # noqa: F401
@@ -426,7 +406,7 @@ def main() -> None:
 
     logger.info("Checking KB vector store...")
     if rag_chain.vector_store._collection.count() == 0:
-        logger.error("Knowledge base '{}' vector store is empty", kb_name)
+        logger.error("Knowledge base '{}' vector store is empty", kb_id)
         print("Knowledge base is empty")
         sys.exit(1)
 
@@ -444,19 +424,26 @@ def main() -> None:
 
     logger.info("Generating answers for {} questions...", len(questions))
     answers, contexts = generate_answers_and_contexts(
-        rag_chain, kb_id, session_id, questions,
+        rag_chain,
+        kb_id,
+        session_id,
+        questions,
     )
 
     result = run_evaluation(
-        questions, ground_truth, answers, contexts,
-        llm_wrapper, embeddings_wrapper,
+        questions,
+        ground_truth,
+        answers,
+        contexts,
+        llm_wrapper,
+        embeddings_wrapper,
     )
 
     output_path = save_results_csv(result, questions, ground_truth, output_path)
     save_markdown_report(result, questions, output_path)
 
     # _save_eval_report 需要 questions 长度
-    _save_eval_report(kb_name, result, len(questions), output_path)
+    _save_eval_report(kb_id, result, len(questions), output_path)
 
     if args.gate:
         check_gate(result, questions)
@@ -465,7 +452,7 @@ def main() -> None:
 
 
 def _save_eval_report(
-    kb_name: str,
+    kb_id: str,
     result,
     qa_count: int,
     output_path: str,
@@ -473,7 +460,7 @@ def _save_eval_report(
     """将 RAGAS 评估结果持久化到 eval_report 表.
 
     Args:
-        kb_name: 知识库名称
+        kb_id: 知识库 UUID
         result: RAGAS evaluate() 返回的结果对象
         qa_count: QA 对数
         output_path: CSV 报告文件路径
@@ -482,10 +469,6 @@ def _save_eval_report(
         from src.services.app_service import AppService
 
         svc = AppService()
-        kb_id = svc.db.get_kb_by_name(kb_name)
-        if not kb_id:
-            logger.warning("KB '{}' not found, skipping eval_report write", kb_name)
-            return
 
         df = result.to_pandas()
         metric_cols = [
@@ -546,31 +529,29 @@ def _save_eval_report(
             )
 
         asyncio.run(_do_insert())
-        logger.info("Eval report saved to eval_report table for KB '{}'", kb_name)
+        logger.info("Eval report saved to eval_report table for KB '{}'", kb_id)
     except Exception as e:
         logger.warning("Failed to save eval report to database: {}", e)
 
 
-def _list_knowledge_bases() -> None:
+async def _list_knowledge_bases() -> None:
     """列出 MySQL 中所有知识库的名称和文档数."""
     from src.services.app_service import AppService
+    from src.config import RAGAS_USER_ID
 
     svc = AppService()
 
-    async def _do_list():
-        # 获取所有知识库（含 doc_count）
-        kbs = await svc.db.get_all_kb()
-        if not kbs:
-            print("No knowledge bases found.")
-            return
+    # 获取所有知识库（含 doc_count）
+    kbs = await svc.db.get_all_kb(RAGAS_USER_ID)
+    if not kbs:
+        print("No knowledge bases found.")
+        return
 
-        print("\nAvailable knowledge bases:")
-        print("-" * 40)
-        for kb in kbs:
-            print(f"  {kb['name']:<30} ({kb['doc_count']} documents)")
-        print()
-
-    asyncio.run(_do_list())
+    print("\nAvailable knowledge bases:")
+    print("-" * 40)
+    for kb in kbs:
+        print(f"  {kb['name']:<30} ({kb['doc_count']} documents)")
+    print()
 
 
 if __name__ == "__main__":
