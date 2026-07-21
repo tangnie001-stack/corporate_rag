@@ -179,7 +179,7 @@ services:
       - app-network
 
   nginx:
-    build: ./nginx
+    build: ./deploy/nginx
     mem_limit: 256m
     container_name: corporate-rag-nginx
     restart: always
@@ -187,7 +187,7 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./deploy/nginx/ssl:/etc/nginx/ssl:ro
     depends_on:
       - app
     networks:

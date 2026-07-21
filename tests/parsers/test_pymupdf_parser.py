@@ -19,7 +19,7 @@ class TestPyMuPDFParser:
     def setup_method(self):
         """每个测试前初始化解析器和测试文件路径。"""
         self.parser = PyMuPDFParser()
-        self.sample_pdf = "test_docs/sample.pdf"
+        self.sample_pdf = "data/test_docs/sample.pdf"
 
     def test_parse_pdf_returns_parse_result(self):
         """基本解析：返回 ParseResult 且页数 / 字符数 > 0。"""

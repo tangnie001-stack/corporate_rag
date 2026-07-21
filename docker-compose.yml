@@ -186,7 +186,7 @@ services:
       - app-network
 
   nginx:
-    build: ./nginx
+    build: ./deploy/nginx
     mem_limit: 128m
     mem_reservation: 64m
     container_name: corporate-rag-nginx

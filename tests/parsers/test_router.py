@@ -20,21 +20,21 @@ class TestDocRouter:
 
     def test_route_txt(self):
         """路由 .txt 文件到 TxtParser。"""
-        result = self.router.parse("test_docs/sample.txt")
+        result = self.router.parse("data/test_docs/sample.txt")
         assert isinstance(result, ParseResult)
         assert result.file_type == "txt"
         assert len(result.chunks) > 0
 
     def test_route_docx(self):
         """路由 .docx 文件到 DocxParser。"""
-        result = self.router.parse("test_docs/sample.docx")
+        result = self.router.parse("data/test_docs/sample.docx")
         assert isinstance(result, ParseResult)
         assert result.file_type == "docx"
         assert len(result.chunks) > 0
 
     def test_route_pdf(self):
         """路由 .pdf 文件到 PyMuPDFParser。"""
-        result = self.router.parse("test_docs/sample.pdf")
+        result = self.router.parse("data/test_docs/sample.pdf")
         assert isinstance(result, ParseResult)
         assert result.file_type == "pdf"
         assert len(result.chunks) > 0

@@ -7,5 +7,5 @@ services:
 
   nginx:
     volumes:
-      - /mnt/d/code/demo/AIAgent/corporate_rag/nginx/nginx.conf:/etc/nginx/conf.d/default.conf
-      - /mnt/d/code/demo/AIAgent/corporate_rag/nginx/html:/usr/share/nginx/html
+      - /mnt/d/code/demo/AIAgent/corporate_rag/deploy/nginx/nginx.conf:/etc/nginx/conf.d/default.conf
+      - /mnt/d/code/demo/AIAgent/corporate_rag/deploy/nginx/html:/usr/share/nginx/html

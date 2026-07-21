@@ -19,7 +19,7 @@ class TestDocxParser:
     def setup_method(self):
         """每个测试前初始化解析器和测试文件路径。"""
         self.parser = DocxParser()
-        self.sample_path = "test_docs/sample.docx"
+        self.sample_path = "data/test_docs/sample.docx"
 
     def test_parse_docx_returns_parse_result(self):
         """基本解析：返回 ParseResult 且统计信息合理。"""

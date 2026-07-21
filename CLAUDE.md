@@ -16,36 +16,85 @@ Python 3.11+ / FastAPI / ChromaDB / LangChain / DashScope / MySQL 8.0 / Redis 7 
 
 ```
 src/
-├── api/              # 纯路由层：只做请求→调用 service→返回，不写业务逻辑
-│   ├── sse_utils.py  # SSE 格式化函数（纯工具，仅依赖 json）
-│   └── model/        # 请求/响应 Pydantic 模型
-├── services/         # 业务服务层：文档/知识库/对话的业务逻辑
-├── rag/              # RAG 流水线
-│   ├── chain.py      # RAGChain 主类（编排检索→精排→生成）
-│   ├── retrieval.py  # 检索 + 查询改写（纯函数）
-│   ├── prompt.py     # Prompt 构建（纯函数）
-│   └── stream.py     # 流式生成（纯函数）
-├── chat/             # 对话管理
-│   ├── manager.py    # ChatManager（Redis/InMemory 会话 CRUD）
-│   └── persistence.py# MySQL 持久化
-├── core/             # 基础设施核心
-├── config/           # 配置与常量
-├── eval/             # 评估
-├── parsers/          # 文档解析器
-├── middleware/       # 中间件
-├── infra/            # 基础设施：db / llm / search / chunking / auth
-└── models.py         # 模型工厂
+├── api/                  # 纯路由层：只做请求→调用 service→返回，不写业务逻辑
+│   ├── model/            #   请求/响应 Pydantic 模型
+│   │   ├── request.py
+│   │   └── response.py
+│   ├── auth.py           #   登录/校验/登出/匿名
+│   ├── chat.py           #   流式 RAG 问答 SSE
+│   ├── dependencies.py   #   依赖注入（get_app_service）
+│   ├── documents.py      #   文档上传/列表/状态/分块预览/删除
+│   ├── health.py         #   健康检查 + 前端配置
+│   ├── kb_eval.py        #   评估结果查询
+│   ├── knowledge_base.py #   知识库 CRUD
+│   ├── llm_test.py       #   LLM 连通性测试
+│   ├── sessions.py       #   会话列表/消息/删除
+│   └── sse_utils.py      #   SSE 格式化函数（纯工具，仅依赖 json）
+├── services/             # 业务服务层
+│   ├── app_service.py    #   统一编排入口（组合 KB/Document/Chat 三个子 service）
+│   ├── chat_service.py   #   问答服务
+│   ├── document_service.py # 文档处理服务
+│   └── kb_service.py     #   知识库服务
+├── rag/                  # RAG 流水线
+│   ├── chain.py          #   RAGChain 主类（编排检索→精排→生成，含 Langfuse Tracing）
+│   ├── context.py        #   RAGContext 数据类
+│   ├── retrieval.py      #   检索 + 查询改写（纯函数）
+│   ├── prompt.py         #   Prompt 构建（纯函数）
+│   └── stream.py         #   流式生成（纯函数）
+├── chat/                 # 对话管理
+│   ├── manager.py        #   ChatManager（Redis/InMemory 会话 CRUD）
+│   └── persistence.py    #   MySQL 持久化
+├── core/                 # 基础设施核心
+│   └── logging.py        #   Loguru 日志配置
+├── config/               # 配置与常量
+│   ├── __init__.py       #   配置导出
+│   ├── settings.py       #   环境变量 + 可调参数
+│   ├── prompts.py        #   LLM 提示词模板
+│   ├── queries.py        #   SQL 语句
+│   └── response_codes.py #   异常码枚举
+├── eval/                 # 评估
+│   └── chunk_scorer.py   #   分块质量评估（结构完整性/SBR/粒度CV）
+├── parsers/              # 文档解析器
+│   ├── router.py         #   解析器路由（按扩展名分发）
+│   ├── base.py           #   解析器基类
+│   ├── pymupdf_parser.py #   PDF 解析
+│   ├── docx_parser.py    #   DOCX 解析
+│   └── txt_parser.py     #   TXT 解析
+├── middleware/            # 中间件
+│   ├── auth.py           #   认证中间件
+│   ├── response_processor.py # 统一响应包装（code/message/data）
+│   └── trace_id.py       #   TraceID 注入
+├── infra/                # 基础设施
+│   ├── db/               #   数据库
+│   │   ├── mysql_db.py   #     MySQL CRUD（异步 aiomysql）
+│   │   ├── vector_store.py #   ChromaDB 向量存储
+│   │   └── file_store.py #     MinIO 文件存储
+│   ├── chunking/         #   分块
+│   │   ├── router.py     #     策略检测与路由
+│   │   ├── enhancer.py   #     分块增强（去重/修复）
+│   │   ├── validator.py  #     分块质量校验
+│   │   └── strategies/   #     分块策略
+│   ├── auth/             #   用户认证
+│   │   └── user_auth.py
+│   ├── llm/              #   LLM 基础设施
+│   │   ├── langfuse_tracing.py # Langfuse Tracing 封装
+│   │   ├── prompt_manager.py   # Prompt 模板管理
+│   │   └── trace_context.py    # 异步上下文 trace 传递
+│   ├── search/           #   混合检索
+│   │   ├── bm25_index.py #     BM25 索引
+│   │   └── query_router.py #   查询路由
+│   ├── desensitize.py    #   脱敏工具
+│   ├── errors.py         #   异常定义（BusinessError/AuthError/SystemError）
+│   └── redis_client.py   #   Redis 客户端
+├── cli/                  # CLI 工具
+│   ├── eval_ragas.py     #   RAGAS 评估入口
+│   ├── eval_ragas_generate.py # 测试集生成
+│   ├── check_retrieval.py    # 检索质量检查
+│   └── compare_retrieval.py  # 检索策略对比
+├── models.py             # LLM/Embedding/Rerank 工厂
+└── main.py               # FastAPI 应用入口 + 异常处理器
 
-tests/
-├── api/              # API 路由测试
-├── services/         # 服务层测试
-├── rag/              # RAG 模块测试
-├── chat/             # 对话管理测试
-├── parsers/          # 解析器测试
-├── infra/            # 基础设施测试
-├── config/           # 配置测试
-├── middleware/        # 中间件测试
-└── eval/             # 评估测试
+tests/                 # 与 src/ 模块一一对应：api / chat / config / eval / infra / middleware / parsers
 ```
 
 ### 层间调用规则
@@ -65,16 +114,15 @@ tests/
 session/消息 → chat/manager(Redis) 写 + chat/persistence(MySQL) 落盘 → api/sessions 读
 
 ## 依赖图
-.codegraph/codegraph.db — SQLite，含全量代码节点和调用/引入关系
-需要时用 sqlite3 查询：sqlite3 .codegraph/codegraph.db "SELECT ..."
+查询代码关系时参考 @docs/agents/codegraph-guide.md（比逐文件 grep 高效）。
 
 ## 常用命令
 ```bash
-python -m src.app          # 启动
+uvicorn src.main:app --reload  # 启动（热重载）
 pytest tests/ -v           # 测试
 ruff format . && ruff check . --fix  # 格式化
 python -m src.cli.check_retrieval   # 检查检索
-python -m src.eval_ragas            # RAGAS 评估
+python -m src.cli.eval_ragas            # RAGAS 评估
 docker compose up -d --build        # 部署
 ```
 
@@ -99,24 +147,10 @@ docker exec corporate-rag-app grep '<trace_id>' /data/logs/app_*.log
 9. **测试对应检查**：如果增加了新模块，是否更新了 tests/ 对应目录的测试？
 
 ## 设计流程
-
-改 UI 或新增组件时，走 `ui-ux-pro-max` skill：
-
-1. **生成全局设计系统**：
-   ```bash
-   python3 ~/.agents/skills/ui-ux-pro-max/scripts/search.py "<产品类型> <关键词>" --design-system -p "项目名"
-   ```
-   持久化到 `docs/design/MASTER.md`（加 `--persist` 参数）
-
-2. **页面级设计**：写入 `docs/design/pages/<page-name>.md`（中文），包含视觉规格和交互说明
-
-3. **效果预览**：只出独立 HTML 文件（`docs/design/<名字>-mockup.html`），不截图
-   通过 `http://localhost/<mockup文件名>.html` 查看
-
-4. 所有设计文档用中文，提交到 git
+改 UI 或新增组件时参考 @docs/agents/ui-design-flow.md。
 
 ## 规则
-- 架构规约（异常处理 / 响应包装 / 日志约定 / 排查规范）详见 @CLAUDE-RULES.md
+- 架构规约（异常处理 / 响应包装 / 日志约定 / 排查规范）详见 @docs/agents/rules.md
 - API 路由 handler 必须标注请求体和返回类型（请求用 Pydantic BaseModel，返回也用 Pydantic BaseModel 描述 data 结构，SSE 标注 StreamingResponse）
 - git 操作由你手动执行，不会自动 commit/push
 - API Key 和 Token 通过 `.env` 加载，日志中脱敏；连接串不记录到日志
@@ -127,8 +161,8 @@ docker exec corporate-rag-app grep '<trace_id>' /data/logs/app_*.log
 
 ## 代码注释标准
 
-所有函数必须写 docstring，详细标准见 @CLAUDE-RULES.md 的"代码注释标准"章节。
+所有函数必须写 docstring，详细标准见 @docs/agents/rules.md 的"代码注释标准"章节。
 
 ## 经验总结
-分块问题排查和修复记录详见 @docs/chunking-issues.md，遇到分块相关问题时优先查阅。
+分块问题排查和修复记录详见 @docs/agents/chunking-issues.md，遇到分块相关问题时优先查阅。
 

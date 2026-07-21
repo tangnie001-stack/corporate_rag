@@ -22,7 +22,7 @@ from src.infra.db.vector_store import VectorStore
 # ==================== 路径常量 ====================
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-TEST_DOCS_DIR = os.path.join(PROJECT_ROOT, "test_docs")
+TEST_DOCS_DIR = os.path.join(PROJECT_ROOT, "data", "test_docs")
 
 # ==================== 数据库直连验证 ====================
 

@@ -118,7 +118,7 @@ docker compose up -d mysql redis postgres langfuse
 uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
 
 # 在另一个终端启动静态文件服务（预览前端）
-python3 -m http.server 8080 --directory nginx/html/
+python3 -m http.server 8080 --directory deploy/nginx/html/
 ```
 
 此时前端访问 `http://localhost:8080`，API 访问 `http://localhost:8000`。
@@ -133,7 +133,7 @@ python3 -m http.server 8080 --directory nginx/html/
 只想看页面样式效果，不需要 API：
 
 ```bash
-python3 -m http.server 8080 --directory nginx/html/
+python3 -m http.server 8080 --directory deploy/nginx/html/
 # 浏览器打开 http://localhost:8080
 ```
 
@@ -166,7 +166,7 @@ docker network inspect financial-qa_app-network
 ## Nginx 路由说明
 
 ```
-http://localhost/              → nginx/html/ 静态文件
+http://localhost/              → deploy/nginx/html/ 静态文件
 http://localhost/api/*         → 反向代理到 app:8000
 http://localhost/api/docs      → FastAPI Swagger 文档
 http://localhost/openapi.json  → FastAPI OpenAPI 规范
@@ -204,7 +204,7 @@ Nginx 已预配 SSE 支持（`proxy_buffering off`），确保流式问答不卡
 │   │   └── txt_parser.py      # TXT 解析
     │   └── cli/
     │       └── check_retrieval.py # 检索质量检测
-├── nginx/                     # Nginx 反向代理
+├── deploy/nginx/                # Nginx 反向代理
 │   ├── Dockerfile
 │   ├── nginx.conf
 │   └── html/                  # 前端静态文件
