@@ -2,7 +2,7 @@
 
 本模块被 eval_ragas.py 的 --generate 模式调用，包含：
   - vertexai stub 自动修复（ragas 兼容性）
-  - MinIO 文档下载与解析
+  - 从 ChromaDB 读取已有分块数据
   - TestsetGenerator 编排
   - 测试集版本管理与 JSON 写入
 
@@ -14,7 +14,6 @@ import os
 import re
 import json
 import sys
-import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -142,14 +141,13 @@ def run_generate(
     model: str = "",
     use_filter: bool = False,
 ) -> None:
-    """运行测试集生成流程：从 MinIO 取文档 → 解析 → TestsetGenerator → 保存 JSON.
+    """运行测试集生成流程：从 ChromaDB 取 chunk → TestsetGenerator → 保存 JSON.
 
     流程：
-      1. 从 MySQL 查询知识库的所有已入库文档
-      2. 从 MinIO 逐一下载原始文件
-      3. parser 解析为完整文本
-      4. 调用 ragas TestsetGenerator.generate_with_langchain_docs()
-      5. 写入 data/ragas/testset_{kb_id}_vN.json
+      1. 从白名单获取 doc_ids
+      2. 从 ChromaDB 按 doc_id 取出已有分块
+      3. 脱敏后传给 generate_with_chunks()
+      4. 写入 data/ragas/testset_{kb_id}_vN.json
 
     Args:
         kb_name: 知识库名称
@@ -159,13 +157,10 @@ def run_generate(
         use_filter: 是否启用 LLM 节点过滤（关闭可节省约 70 次 LLM 调用）
 
     Raises:
-        SystemExit: 知识库无就绪文档 / 无成功解析的文档 / 生成失败时退出进程
+        SystemExit: ChromaDB 中无数据 / 生成失败时退出进程
     """
     _ensure_vertexai_stub()
 
-    from src.services.app_service import AppService
-    from src.infra.db.file_store import FileStore
-    from src.parsers.router import DocRouter
     from langchain_core.documents import Document as LCDocument
     from langchain_openai import ChatOpenAI
     from ragas.testset.synthesizers.generate import TestsetGenerator
@@ -173,96 +168,41 @@ def run_generate(
     from src.config import settings, DASHSCOPE_API_KEY, DASHSCOPE_BASE_URL
     from src.infra.desensitize import desensitize
     from src.config.settings import RAGAS_DOC_WHITELIST
+    from src.infra.db.vector_store import VectorStore
     import ragas
 
-    # ---- 1. 查询文档列表 ----
-    logger.info("查询知识库文档列表: kb_name={}", kb_name)
-    svc = AppService()
-
-    async def _fetch_docs():
-        return await svc.db.get_documents(kb_id)
-
-    import asyncio
-    try:
-        loop = asyncio.get_running_loop()
-        # 已有 event loop（如 API 调用时），用 run_until_complete 执行
-        docs = loop.run_until_complete(_fetch_docs())
-    except RuntimeError:
-        # 无 event loop（CLI 直接调用时）
-        docs = asyncio.run(_fetch_docs())
-    # 只取状态为 ready 且在白名单中的文档
-    ready_docs = [
-        d for d in docs
-        if d.get("status") == "ready"
-        and d["id"] in RAGAS_DOC_WHITELIST
-    ]
-    # 记录被白名单过滤掉的文档
-    skipped = [d for d in docs if d.get("status") == "ready" and d["id"] not in RAGAS_DOC_WHITELIST]
-    for d in skipped:
-        logger.info("文档不在白名单中，跳过: {} ({})", d.get("filename", "unknown"), d["id"])
-    if not ready_docs:
-        logger.error("知识库 '{}' 中没有已就绪的文档", kb_name)
-        print("✗ 知识库中没有已入库的文档")
-        sys.exit(1)
-
-    logger.info("找到 {} 份已入库文档", len(ready_docs))
-
-    # ---- 2. 从 MinIO 下载并解析 ----
-    file_store = FileStore()
-    router = DocRouter()
+    # ---- 1. 从 ChromaDB 按白名单 doc_id 取 chunk ----
+    logger.info("从 ChromaDB 读取分块: kb_id={}, whitelist={}", kb_id, RAGAS_DOC_WHITELIST)
+    vector_store = VectorStore()
     langchain_chunks: list[LCDocument] = []
     doc_ids: list[str] = []
+    success_count = 0
 
-    for i, doc in enumerate(ready_docs):
-        doc_id = doc["id"]
-        file_path_key = doc["file_path"]
-        filename = doc.get("filename", "unknown")
-        logger.info("正在处理 [{}/{}]: {}...", i + 1, len(ready_docs), filename)
-        print(f"  下载中: {filename}")
-
-        try:
-            data = file_store.download(file_path_key)
-            if data is None:
-                logger.warning("MinIO 中未找到文件: {}", file_path_key)
-                print(f"  ⚠ {filename} 在 MinIO 中不存在，已跳过")
-                continue
-
-            # 写入临时文件供 parser 读取
-            with tempfile.NamedTemporaryFile(
-                suffix="." + doc["file_type"], delete=False
-            ) as tmp:
-                tmp.write(data)
-                tmp_path = tmp.name
-
-            try:
-                parse_result = router.parse(tmp_path)
-                if parse_result.is_scanned:
-                    logger.warning("文档 '{}' 为扫描件，跳过", filename)
-                    print(f"  ⚠ {filename} 是扫描件，已跳过")
-                    continue
-
-                # 每个 parser chunk 独立作为 Document，不拼接
-                for chunk in parse_result.chunks:
-                    safe_content = desensitize(chunk.content)
-                    langchain_chunks.append(LCDocument(page_content=safe_content))
-                doc_ids.append(doc_id)
-                print(f"  ✓ {filename} ({parse_result.total_chars} 字符)")
-            except Exception as e:
-                logger.warning("文档 '{}' 解析失败: {}", filename, e)
-                print(f"  ⚠ {filename} 解析失败，已跳过")
-                continue
-            finally:
-                os.unlink(tmp_path)
-
-        except Exception as e:
-            logger.exception("文档 '{}' 处理异常: {}", filename, e)
-            print(f"  ✗ {filename} 处理异常，已跳过")
+    for doc_id in RAGAS_DOC_WHITELIST:
+        chunks_data = vector_store.get_chunks_by_doc_id(doc_id, kb_id)
+        if not chunks_data:
+            logger.warning("ChromaDB 中未找到文档的 chunk: {}", doc_id)
+            print(f"  ⚠ doc_id={doc_id} 在 ChromaDB 中无数据，已跳过")
             continue
 
-    if not langchain_chunks:
-        logger.error("没有成功解析任何文档，无法生成测试集")
-        print("✗ 没有成功解析任何文档（或白名单中无匹配文档）")
+        for c in chunks_data:
+            safe_content = desensitize(c["content"])
+            meta = dict(c.get("metadata", {}))
+            meta["parent_content"] = ""  # 清空原文，避免敏感信息泄漏
+            langchain_chunks.append(LCDocument(
+                page_content=safe_content,
+                metadata=meta,
+            ))
+        doc_ids.append(doc_id)
+        success_count += 1
+        print(f"  ✓ doc_id={doc_id} ({len(chunks_data)} 个 chunk)")
+
+    if success_count == 0:
+        logger.error("白名单中所有文档在 ChromaDB 中均无 chunk 数据")
+        print("✗ 白名单中所有文档在 ChromaDB 中均无数据")
         sys.exit(1)
+
+    logger.info("成功读取 {} 份文档，共 {} 个 chunk", success_count, len(langchain_chunks))
 
     # ---- 3. 初始化 RAGAS TestsetGenerator ----
     eval_model = model or settings.RAGAS_LLM_MODEL or settings.LLM_MODEL
