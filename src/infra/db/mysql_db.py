@@ -50,6 +50,8 @@ from src.config.queries import (
     INSERT_USER,
     SELECT_ALL_KNOWLEDGE_BASES,
     SELECT_DOCUMENTS_BY_KB_ID,
+    SELECT_DOC_NAMES_BY_IDS,
+    SELECT_KB_NAME_BY_ID,
     SELECT_KNOWLEDGE_BASE_ID_BY_NAME,
     SELECT_MESSAGES_BY_SESSION,
     SELECT_SESSION_BY_ID,
@@ -641,6 +643,23 @@ class MySQLDB:
         log_sql_result("get_kb_by_name", SELECT_KNOWLEDGE_BASE_ID_BY_NAME.split("\n")[0].strip(), row, user_id=user_id, name=name)
         return row["id"] if row else None
 
+    async def get_kb_name_by_id(self, kb_id: str) -> Optional[str]:
+        """根据知识库 UUID 查询知识库名称。
+
+        Args:
+            kb_id: 知识库 UUID
+
+        Returns:
+            知识库名称，不存在时返回 None
+        """
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(SELECT_KB_NAME_BY_ID, (kb_id,))
+                row = await cursor.fetchone()
+        log_sql_result("get_kb_name_by_id", SELECT_KB_NAME_BY_ID.split("\n")[0].strip(), row, kb_id=kb_id)
+        return row["name"] if row else None
+
     async def get_all_kb(self, user_id: str = "") -> list[dict]:
         """列出某用户的所有知识库（按创建时间倒序），含文档计数。
 
@@ -711,6 +730,28 @@ class MySQLDB:
                 rows = await cursor.fetchall()
         log_sql_result("get_documents", SELECT_DOCUMENTS_BY_KB_ID.split("\n")[0].strip(), rows, kb_id=kb_id)
         return rows
+
+    async def get_doc_names(self, doc_ids: list[str]) -> dict[str, str]:
+        """根据文档 ID 列表查询对应的文件名。
+
+        Args:
+            doc_ids: 文档 UUID 列表
+
+        Returns:
+            {doc_id: filename} 字典，不存在的 ID 不包含在结果中
+        """
+        if not doc_ids:
+            return {}
+
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                placeholders = ", ".join(["%s"] * len(doc_ids))
+                sql = SELECT_DOC_NAMES_BY_IDS.format(placeholders)
+                await cursor.execute(sql, doc_ids)
+                rows = await cursor.fetchall()
+        log_sql_result("get_doc_names", f"SELECT id, filename FROM document WHERE id IN ({len(doc_ids)} ids)", rows)
+        return {row["id"]: row["filename"] for row in rows}
 
     async def soft_delete_document(self, doc_id: str) -> bool:
         """软删除文档（标记为 deleted 状态）。

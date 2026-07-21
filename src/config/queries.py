@@ -134,6 +134,13 @@ SELECT_KNOWLEDGE_BASE_ID_BY_NAME: str = """\
 SELECT id FROM knowledge_base WHERE user_id = %s AND name = %s AND status != 'deleted'
 """
 
+# 按 ID 查询知识库名称。参数：[kb_id]。
+# 被 get_kb_name_by_id() 调用。
+# 返回知识库名称，不存在时返回 None。
+SELECT_KB_NAME_BY_ID: str = """\
+SELECT name FROM knowledge_base WHERE id = %s
+"""
+
 # 列出某用户的所有知识库（最近创建的在前）。参数：[user_id]。
 SELECT_ALL_KNOWLEDGE_BASES: str = """\
 SELECT k.id, k.user_id, k.name, COUNT(d.id) AS doc_count
@@ -183,6 +190,13 @@ SELECT id, user_id, kb_id, filename, file_type, file_size, file_path, hash,
        status, processing_state, processing_progress, processing_message,
        error_msg, chunk_strategy, chunk_count, meta_info, created_at
 FROM document WHERE kb_id = %s AND status != 'deleted' ORDER BY created_at DESC
+"""
+
+# 按 ID 列表查询文档文件名。参数：动态 IN 占位符。
+# 被 get_doc_names() 调用。
+# 返回 (id, filename) 结果集，用于构建 {doc_id: filename} 字典。
+SELECT_DOC_NAMES_BY_IDS: str = """\
+SELECT id, filename FROM document WHERE id IN ({})
 """
 
 # 软删除文档（将 status 标记为 deleted）。参数：[doc_id]。
