@@ -22,7 +22,7 @@ from typing import Optional
 
 from loguru import logger
 
-from src.config import RAGAS_DATA_DIR
+from src.config import RAGAS_DATA_DIR, RAGAS_TESTSET_DIR
 
 
 def _ensure_vertexai_stub() -> None:
@@ -77,7 +77,7 @@ def _ensure_vertexai_stub() -> None:
 
 
 def _find_next_version(kb_id: str) -> int:
-    """扫描 data/ragas/ 下 testset_{kb_id}_v*.json，返回下一个版本号。
+    """扫描 testsets 目录下 testset_{kb_id}_v*.json，返回下一个版本号。
 
     Args:
         kb_id: 知识库 UUID
@@ -87,9 +87,9 @@ def _find_next_version(kb_id: str) -> int:
     """
     pattern = re.compile(rf"^testset_{re.escape(kb_id)}_v(\d+)\.json$")
     max_version = 0
-    ragas_dir = Path(RAGAS_DATA_DIR)
-    if ragas_dir.exists():
-        for f in ragas_dir.iterdir():
+    testset_dir = Path(RAGAS_TESTSET_DIR)
+    if testset_dir.exists():
+        for f in testset_dir.iterdir():
             m = pattern.match(f.name)
             if m:
                 ver = int(m.group(1))
@@ -112,11 +112,11 @@ def _load_latest_testset(kb_id: str, version: Optional[int] = None) -> tuple[lis
         FileNotFoundError: 没有找到该知识库的测试集文件
     """
     pattern = re.compile(rf"^testset_{re.escape(kb_id)}_v(\d+)\.json$")
-    ragas_dir = Path(RAGAS_DATA_DIR)
+    testset_dir = Path(RAGAS_TESTSET_DIR)
 
     if version is not None:
         # 指定版本
-        target_file = ragas_dir / f"testset_{kb_id}_v{version}.json"
+        target_file = testset_dir / f"testset_{kb_id}_v{version}.json"
         if not target_file.exists():
             raise FileNotFoundError(
                 f"测试集文件不存在: {target_file}"
@@ -126,8 +126,8 @@ def _load_latest_testset(kb_id: str, version: Optional[int] = None) -> tuple[lis
         # 自动取最新
         max_version = 0
         latest_file = None
-        if ragas_dir.exists():
-            for f in ragas_dir.iterdir():
+        if testset_dir.exists():
+            for f in testset_dir.iterdir():
                 m = pattern.match(f.name)
                 if m:
                     ver = int(m.group(1))
@@ -384,8 +384,8 @@ def run_generate(
     }
 
     # ---- 8. 原子写入 ----
-    os.makedirs(RAGAS_DATA_DIR, exist_ok=True)
-    output_path = os.path.join(RAGAS_DATA_DIR, f"testset_{kb_id}_v{version}.json")
+    os.makedirs(RAGAS_TESTSET_DIR, exist_ok=True)
+    output_path = os.path.join(RAGAS_TESTSET_DIR, f"testset_{kb_id}_v{version}.json")
     tmp_path = output_path + ".tmp"
 
     with open(tmp_path, "w", encoding="utf-8") as f:

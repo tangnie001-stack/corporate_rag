@@ -32,7 +32,7 @@ setup_logging()
 
 
 # 默认输出目录
-DEFAULT_OUTPUT_DIR: str = "data/reports"
+DEFAULT_OUTPUT_DIR: str = "data/ragas/reports"
 
 # Quality gate thresholds
 GATE_THRESHOLDS: dict[str, float] = {
@@ -63,7 +63,7 @@ def parse_args() -> argparse.Namespace:
         "--output",
         type=str,
         default=None,
-        help="CSV 输出路径（默认: data/reports/ragas_eval_<timestamp>.csv）",
+        help="CSV 输出路径（默认: data/ragas/reports/ragas_eval_<timestamp>.csv）",
     )
     parser.add_argument(
         "--session-id",

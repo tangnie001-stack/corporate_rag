@@ -50,6 +50,10 @@ RAGAS_LLM_MODEL: str = os.getenv("RAGAS_LLM_MODEL", "qwen3.7-plus-2026-05-26")
 RAGAS_TEST_SIZE: int = int(os.getenv("RAGAS_TEST_SIZE", "20"))
 # RAGAS 测试集存储目录
 RAGAS_DATA_DIR: str = os.getenv("RAGAS_DATA_DIR", "data/ragas")
+# RAGAS 测试集 JSON 文件存放目录
+RAGAS_TESTSET_DIR: str = os.getenv("RAGAS_TESTSET_DIR", "data/ragas/testset")
+# RAGAS 评估报告输出目录
+RAGAS_REPORT_DIR: str = os.getenv("RAGAS_REPORT_DIR", "data/ragas/reports")
 # RAGAS LLM 缓存目录（DiskCacheBackend，用于提速重复生成）
 RAGAS_LLM_CACHE_DIR: str = os.getenv("RAGAS_LLM_CACHE_DIR", "data/ragas/llm_cache")
 # RAGAS 默认用户 ID（查询知识库时使用）
