@@ -53,11 +53,13 @@ class TablePreservingChunker(BaseChunker):
     @staticmethod
     def _same_table_structure(seg_a: str, seg_b: str) -> bool:
         """判断两个表格段是否结构相同（列数一致）"""
+
         def _col_count(seg: str) -> int:
             for line in seg.split("\n"):
                 if line.strip().startswith("|") and not line.strip().startswith("|---"):
                     return line.count("|")
             return 0
+
         return _col_count(seg_a) == _col_count(seg_b) > 0
 
     @staticmethod
@@ -82,31 +84,33 @@ class TablePreservingChunker(BaseChunker):
         merge_count = 0
         i = 0
         while i < len(segments):
-            if (i + 2 < len(segments)
-                    and TablePreservingChunker.TABLE_PATTERN.search(segments[i])
-                    and TablePreservingChunker.TABLE_PATTERN.search(segments[i + 2])
-                    and TablePreservingChunker._same_table_structure(
-                        segments[i], segments[i + 2]
-                    )
-                    and len(segments[i + 1]) < CROSS_PAGE_TABLE_MERGE_THRESHOLD
-                    and len(segments[i]) + len(segments[i + 1]) + len(segments[i + 2])
-                    <= MAX_TABLE_CHARS):
+            if (
+                i + 2 < len(segments)
+                and TablePreservingChunker.TABLE_PATTERN.search(segments[i])
+                and TablePreservingChunker.TABLE_PATTERN.search(segments[i + 2])
+                and TablePreservingChunker._same_table_structure(
+                    segments[i], segments[i + 2]
+                )
+                and len(segments[i + 1]) < CROSS_PAGE_TABLE_MERGE_THRESHOLD
+                and len(segments[i]) + len(segments[i + 1]) + len(segments[i + 2])
+                <= MAX_TABLE_CHARS
+            ):
                 merge_count += 1
                 merged.append(
                     segments[i] + "\n" + segments[i + 1] + "\n" + segments[i + 2]
                 )
                 i += 3
                 # 链式合并：继续检查下一个 TABLE 段
-                while (i + 1 < len(segments)
-                        and TablePreservingChunker.TABLE_PATTERN.search(
-                            segments[i + 1]
-                        )
-                        and TablePreservingChunker._same_table_structure(
-                            merged[-1], segments[i + 1]
-                        )
-                        and len(segments[i]) < CROSS_PAGE_TABLE_MERGE_THRESHOLD
-                        and len(merged[-1]) + len(segments[i]) + len(segments[i + 1])
-                        <= MAX_TABLE_CHARS):
+                while (
+                    i + 1 < len(segments)
+                    and TablePreservingChunker.TABLE_PATTERN.search(segments[i + 1])
+                    and TablePreservingChunker._same_table_structure(
+                        merged[-1], segments[i + 1]
+                    )
+                    and len(segments[i]) < CROSS_PAGE_TABLE_MERGE_THRESHOLD
+                    and len(merged[-1]) + len(segments[i]) + len(segments[i + 1])
+                    <= MAX_TABLE_CHARS
+                ):
                     merged[-1] += "\n" + segments[i] + "\n" + segments[i + 1]
                     merge_count += 1
                     i += 2
