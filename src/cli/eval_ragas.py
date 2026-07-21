@@ -417,7 +417,10 @@ def main() -> None:
         print("Knowledge base is empty")
         sys.exit(1)
 
-    eval_model = settings.RAGAS_LLM_MODEL or settings.LLM_MODEL
+    if not settings.RAGAS_LLM_MODEL:
+        logger.error("RAGAS_LLM_MODEL 未配置，评估需要使用非推理模型（如 qwen-plus 系列）")
+        sys.exit(1)
+    eval_model = settings.RAGAS_LLM_MODEL
     logger.info("Initializing RAGAS evaluator ({})...", eval_model)
     llm = ChatOpenAI(
         model=eval_model,
