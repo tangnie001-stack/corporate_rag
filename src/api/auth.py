@@ -19,7 +19,9 @@ router = APIRouter()
 
 
 @router.post("/auth/login")
-async def login(body: LoginRequest, svc: AppService = Depends(get_app_service)) -> LoginResponse:
+async def login(
+    body: LoginRequest, svc: AppService = Depends(get_app_service)
+) -> LoginResponse:
     """用户登录或自动注册。
 
     若账号存在则验证密码，不存在则自动创建账号并返回新 token。

@@ -61,7 +61,9 @@ class PyMuPDFParser(BaseParser):
                 page_height = page.rect.height
 
                 # 先提取表格，按视觉顺序排序，过滤误检（不足 2 行的视为误检）
-                tables = sorted(page.find_tables(), key=lambda t: (t.bbox[1], t.bbox[0]))
+                tables = sorted(
+                    page.find_tables(), key=lambda t: (t.bbox[1], t.bbox[0])
+                )
                 tables = [t for t in tables if len(t.extract()) >= 2]
                 table_mds = self._extract_tables_from_page(page, tables)
                 table_bboxes = [t.bbox for t in tables]
@@ -73,7 +75,10 @@ class PyMuPDFParser(BaseParser):
                     # 收集非表格文本块
                     for b in blocks:
                         x0, y0, x1, y1, *_ = b
-                        if y1 < HEADER_FOOTER_MARGIN or y0 > page_height - HEADER_FOOTER_MARGIN:
+                        if (
+                            y1 < HEADER_FOOTER_MARGIN
+                            or y0 > page_height - HEADER_FOOTER_MARGIN
+                        ):
                             continue
                         bbox = fitz.Rect(x0, y0, x1, y1)
                         block_area = (x1 - x0) * (y1 - y0)
@@ -82,12 +87,16 @@ class PyMuPDFParser(BaseParser):
                             tr = fitz.Rect(tb)
                             if bbox.intersects(tr):
                                 inter = fitz.Rect(x0, y0, x1, y1).intersect(tr)
-                                inter_area = (inter.x1 - inter.x0) * (inter.y1 - inter.y0)
+                                inter_area = (inter.x1 - inter.x0) * (
+                                    inter.y1 - inter.y0
+                                )
                                 if inter_area / block_area > 0.5:
                                     in_table = True
                                     break
                         if not in_table:
-                            items.append(((y0 + y1) / 2, b[4] if len(b) > 4 else "", False))
+                            items.append(
+                                ((y0 + y1) / 2, b[4] if len(b) > 4 else "", False)
+                            )
                     # 收集表格 markdown（取表格的 Y 中心位置）
                     for table, md in zip(tables, table_mds):
                         tb = table.bbox
@@ -110,7 +119,10 @@ class PyMuPDFParser(BaseParser):
                     for b in blocks:
                         y0 = b[1]
                         y1 = b[3]
-                        if y1 < HEADER_FOOTER_MARGIN or y0 > page_height - HEADER_FOOTER_MARGIN:
+                        if (
+                            y1 < HEADER_FOOTER_MARGIN
+                            or y0 > page_height - HEADER_FOOTER_MARGIN
+                        ):
                             continue
                         content_blocks.append(b[4] if len(b) > 4 else "")
                     text = "\n".join(content_blocks)

@@ -98,7 +98,9 @@ def _find_next_version(kb_id: str) -> int:
     return max_version + 1
 
 
-def _load_latest_testset(kb_id: str, version: Optional[int] = None) -> tuple[list[str], list[str]]:
+def _load_latest_testset(
+    kb_id: str, version: Optional[int] = None
+) -> tuple[list[str], list[str]]:
     """加载指定知识库的测试集，支持指定版本或自动取最新。
 
     Args:
@@ -118,9 +120,7 @@ def _load_latest_testset(kb_id: str, version: Optional[int] = None) -> tuple[lis
         # 指定版本
         target_file = testset_dir / f"testset_{kb_id}_v{version}.json"
         if not target_file.exists():
-            raise FileNotFoundError(
-                f"测试集文件不存在: {target_file}"
-            )
+            raise FileNotFoundError(f"测试集文件不存在: {target_file}")
         latest_file = target_file
     else:
         # 自动取最新
@@ -250,7 +250,9 @@ def run_generate(
     # ---- 3. 初始化 RAGAS 组件（带 DiskCacheBackend 缓存） ----
     eval_model = model or settings.RAGAS_LLM_MODEL
     if not eval_model:
-        logger.error("RAGAS_LLM_MODEL 未配置，测试集生成需要使用非推理模型（如 qwen-plus 系列）")
+        logger.error(
+            "RAGAS_LLM_MODEL 未配置，测试集生成需要使用非推理模型（如 qwen-plus 系列）"
+        )
         print("✗ RAGAS_LLM_MODEL 未配置，可通过 --model 或环境变量指定")
         sys.exit(1)
     logger.info(

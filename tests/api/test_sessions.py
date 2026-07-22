@@ -7,10 +7,12 @@ from tests.api.mock_data import make_session, make_message
 
 def test_list_sessions(auth_client, mock_app_service):
     """POST /api/sessions/list 返回会话列表。"""
-    mock_app_service.db.get_sessions = AsyncMock(return_value=[
-        make_session("s1", "财报问答"),
-        make_session("s2", "年报分析"),
-    ])
+    mock_app_service.db.get_sessions = AsyncMock(
+        return_value=[
+            make_session("s1", "财报问答"),
+            make_session("s2", "年报分析"),
+        ]
+    )
 
     response = auth_client.post("/api/sessions/list", json={})
 
@@ -33,10 +35,12 @@ def test_list_sessions_empty(auth_client, mock_app_service):
 def test_session_messages(auth_client, mock_app_service):
     """POST /api/sessions/messages 返回消息列表。"""
     mock_app_service.db.get_session_by_id = AsyncMock(return_value=make_session("s1"))
-    mock_app_service.db.get_messages = AsyncMock(return_value=[
-        make_message("user", "2024年营收多少"),
-        make_message("assistant", "2024年营收为100亿"),
-    ])
+    mock_app_service.db.get_messages = AsyncMock(
+        return_value=[
+            make_message("user", "2024年营收多少"),
+            make_message("assistant", "2024年营收为100亿"),
+        ]
+    )
 
     response = auth_client.post("/api/sessions/messages", json={"session_id": "s1"})
 
@@ -51,7 +55,9 @@ def test_session_messages_not_found(auth_client, mock_app_service):
     """POST /api/sessions/messages session 不存在返回 404。"""
     mock_app_service.db.get_session_by_id = AsyncMock(return_value=None)
 
-    response = auth_client.post("/api/sessions/messages", json={"session_id": "missing"})
+    response = auth_client.post(
+        "/api/sessions/messages", json={"session_id": "missing"}
+    )
 
     assert response.status_code == 404
 

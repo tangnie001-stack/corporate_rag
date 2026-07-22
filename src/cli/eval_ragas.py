@@ -384,13 +384,17 @@ def main() -> None:
     # ---- 评估模式（原有流程改造）----
     session_id = args.session_id
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_path = args.output or f"{settings.RAGAS_REPORT_DIR}/ragas_eval_{timestamp}.csv"
+    output_path = (
+        args.output or f"{settings.RAGAS_REPORT_DIR}/ragas_eval_{timestamp}.csv"
+    )
 
     # 从 JSON 加载测试集
     from src.cli.eval_ragas_generate import _load_latest_testset
 
     try:
-        questions, ground_truth = _load_latest_testset(kb_id, version=args.testset_version)
+        questions, ground_truth = _load_latest_testset(
+            kb_id, version=args.testset_version
+        )
     except FileNotFoundError as e:
         print(f"error: {e}")
         sys.exit(1)
@@ -422,7 +426,9 @@ def main() -> None:
         sys.exit(1)
 
     if not settings.RAGAS_LLM_MODEL:
-        logger.error("RAGAS_LLM_MODEL 未配置，评估需要使用非推理模型（如 qwen-plus 系列）")
+        logger.error(
+            "RAGAS_LLM_MODEL 未配置，评估需要使用非推理模型（如 qwen-plus 系列）"
+        )
         sys.exit(1)
     eval_model = settings.RAGAS_LLM_MODEL
     logger.info("Initializing RAGAS evaluator ({})...", eval_model)

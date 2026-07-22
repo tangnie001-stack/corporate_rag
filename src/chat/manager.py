@@ -37,7 +37,9 @@ class ChatManager:
     """
 
     def __init__(
-        self, redis_url: Optional[str] = None, ttl: int = REDIS_TTL,
+        self,
+        redis_url: Optional[str] = None,
+        ttl: int = REDIS_TTL,
     ) -> None:
         """初始化 ChatManager。
 
@@ -65,7 +67,10 @@ class ChatManager:
     # ═══════════ 异步持久化（委托给 PersistenceService） ═══════════
 
     async def save_session_async(
-        self, session_id: str, title: str, kb_id: str,
+        self,
+        session_id: str,
+        title: str,
+        kb_id: str,
     ) -> None:
         """异步创建会话记录（首次消息时调用）。
 
@@ -102,7 +107,11 @@ class ChatManager:
         """
         if self._persistence:
             await self._persistence.save_messages(
-                session_id, kb_id, user_msg, assistant_msg, sources,
+                session_id,
+                kb_id,
+                user_msg,
+                assistant_msg,
+                sources,
             )
 
     def cleanup_session(self, session_id: str) -> None:
@@ -131,7 +140,8 @@ class ChatManager:
             self._redis = None
             self._in_memory = True
             logger.warning(
-                "ChatManager: Redis unavailable ({}), using InMemory fallback", e,
+                "ChatManager: Redis unavailable ({}), using InMemory fallback",
+                e,
             )
 
     def _get_sync_redis(self):
@@ -215,8 +225,15 @@ class ChatManager:
             return []
 
     def add_message(
-        self, session_id: str, role: str, content: str, sources=None,
-        prompt_tokens=0, completion_tokens=0, total_tokens=0, model_name="",
+        self,
+        session_id: str,
+        role: str,
+        content: str,
+        sources=None,
+        prompt_tokens=0,
+        completion_tokens=0,
+        total_tokens=0,
+        model_name="",
     ) -> None:
         """向会话追加一条消息。
 
@@ -234,11 +251,13 @@ class ChatManager:
         if sources:
             msg["sources"] = sources
         if prompt_tokens or completion_tokens or total_tokens:
-            msg.update({
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "total_tokens": total_tokens,
-            })
+            msg.update(
+                {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": total_tokens,
+                }
+            )
         if model_name:
             msg["model_name"] = model_name
 
@@ -258,7 +277,9 @@ class ChatManager:
             logger.warning("ChatManager: Redis add_message failed: {}", e)
 
     def get_window(
-        self, session_id: str, window_size: int = MEMORY_WINDOW,
+        self,
+        session_id: str,
+        window_size: int = MEMORY_WINDOW,
     ) -> list[dict]:
         """获取对话历史的滑动窗口（最近 N 条消息）。
 
@@ -316,7 +337,11 @@ class ChatManager:
             self._in_memory = True
 
     async def add_message_async(
-        self, session_id: str, role: str, content: str, **kwargs,
+        self,
+        session_id: str,
+        role: str,
+        content: str,
+        **kwargs,
     ) -> None:
         """异步向会话追加一条消息。
 

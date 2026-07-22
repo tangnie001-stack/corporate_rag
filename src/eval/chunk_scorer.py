@@ -137,7 +137,9 @@ def _check_structure_integrity(chunks: list[dict]) -> dict:
             rows_per_chunk = {}
             for row in table:
                 rows_per_chunk.setdefault(row["chunk_index"], []).append(row)
-            break_parts = [f"chunk {ci}: {len(rows_per_chunk[ci])} 行" for ci in sorted_indices]
+            break_parts = [
+                f"chunk {ci}: {len(rows_per_chunk[ci])} 行" for ci in sorted_indices
+            ]
 
             broken_tables.append(
                 {
@@ -249,8 +251,11 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return float(np.dot(a_np, b_np) / (norm_a * norm_b))
 
 
-def _calc_sbr(embeddings: list[list[float]], threshold: float = 0.35,
-              block_types: list[str] | None = None) -> dict:
+def _calc_sbr(
+    embeddings: list[list[float]],
+    threshold: float = 0.35,
+    block_types: list[str] | None = None,
+) -> dict:
     """计算语义断裂率（SBR）。
 
     比较相邻分块的 embedding 向量余弦相似度，
@@ -274,8 +279,12 @@ def _calc_sbr(embeddings: list[list[float]], threshold: float = 0.35,
     total = 0
     for i in range(len(embeddings) - 1):
         # 跳过跨类型边界（如 table↔text），这种差异是内容切换而非分块断裂
-        if block_types and block_types[i] and block_types[i + 1] \
-                and block_types[i] != block_types[i + 1]:
+        if (
+            block_types
+            and block_types[i]
+            and block_types[i + 1]
+            and block_types[i] != block_types[i + 1]
+        ):
             continue
         sim = _cosine_similarity(embeddings[i], embeddings[i + 1])
         total += 1
@@ -368,12 +377,18 @@ class ChunkQualityScorer:
                 "enabled": True,
                 "overall_score": None,
                 "passed": False,
-                "structure_integrity": self._safe_call("structure_integrity", _check_structure_integrity, chunks),
+                "structure_integrity": self._safe_call(
+                    "structure_integrity", _check_structure_integrity, chunks
+                ),
                 "sbr": self._safe_call("sbr", self._calc_sbr, chunks),
-                "granularity_cv": self._safe_call("granularity_cv", _calc_granularity_cv, chunks),
+                "granularity_cv": self._safe_call(
+                    "granularity_cv", _calc_granularity_cv, chunks
+                ),
             }
 
-        structure = self._safe_call("structure_integrity", _check_structure_integrity, chunks)
+        structure = self._safe_call(
+            "structure_integrity", _check_structure_integrity, chunks
+        )
         sbr_result = self._safe_call("sbr", self._calc_sbr, chunks)
         cv_result = self._safe_call("granularity_cv", _calc_granularity_cv, chunks)
 
@@ -386,7 +401,11 @@ class ChunkQualityScorer:
             "granularity_cv": 0.10,
         }
 
-        for key, result in [("structure_integrity", structure), ("sbr", sbr_result), ("granularity_cv", cv_result)]:
+        for key, result in [
+            ("structure_integrity", structure),
+            ("sbr", sbr_result),
+            ("granularity_cv", cv_result),
+        ]:
             if result.get("score") is not None:
                 scores.append(result["score"])
                 weights.append(metric_weights[key])

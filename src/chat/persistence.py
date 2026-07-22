@@ -17,7 +17,10 @@ class PersistenceService:
         self._mysql_db = mysql_db
 
     async def save_session(
-        self, session_id: str, title: str, kb_id: str,
+        self,
+        session_id: str,
+        title: str,
+        kb_id: str,
     ) -> None:
         """异步创建会话记录。
 
@@ -50,10 +53,18 @@ class PersistenceService:
         """
         try:
             await self._mysql_db.save_message(
-                session_id, kb_id, "user", user_msg, None,
+                session_id,
+                kb_id,
+                "user",
+                user_msg,
+                None,
             )
             await self._mysql_db.save_message(
-                session_id, kb_id, "assistant", assistant_msg, sources,
+                session_id,
+                kb_id,
+                "assistant",
+                assistant_msg,
+                sources,
             )
         except Exception as e:
             logger.warning("Failed to save messages async: {}", e)

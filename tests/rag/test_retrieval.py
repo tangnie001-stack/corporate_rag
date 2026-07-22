@@ -66,6 +66,7 @@ class TestRAGChainChat:
         assert len(contexts) == 1
         assert contexts[0].source == "a.pdf"
 
+
 class TestRAGChainQueryRewrite:
     """测试 RAGChain 的查询分类与改写方法。"""
 

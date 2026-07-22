@@ -9,7 +9,14 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from loguru import logger
 
 from src.core.logging import setup_logging
-from src.api import health_router, kb_router, doc_router, chat_router, sessions_router, kb_eval_router
+from src.api import (
+    health_router,
+    kb_router,
+    doc_router,
+    chat_router,
+    sessions_router,
+    kb_eval_router,
+)
 from src.api import auth as auth_routes
 from src.api import ragas_generate as ragas_generate_routes
 from src.config.response_codes import Code
@@ -126,7 +133,9 @@ app.add_middleware(
 
 app.middleware("http")(response_processor_middleware)
 app.middleware("http")(auth_middleware)
-app.middleware("http")(trace_id_middleware)  # 最后注册 = 最外层，确保所有路径都写 X-Trace-ID
+app.middleware("http")(
+    trace_id_middleware
+)  # 最后注册 = 最外层，确保所有路径都写 X-Trace-ID
 
 # 挂载路由模块
 app.include_router(auth_routes.router, prefix="/api", tags=["auth"])

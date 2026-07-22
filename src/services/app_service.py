@@ -47,7 +47,10 @@ class AppService:
         return await self.kb.list_knowledge_bases(user_id)
 
     async def create_knowledge_base(
-        self, name: str, description: str = "", user_id: str = "",
+        self,
+        name: str,
+        description: str = "",
+        user_id: str = "",
     ) -> tuple[str, bool]:
         return await self.kb.create_knowledge_base(name, description, user_id)
 
@@ -72,18 +75,27 @@ class AppService:
         return await self.document.get_documents(kb_id)
 
     async def delete_document(
-        self, kb_id: str, doc_id: str, user_id: str,
+        self,
+        kb_id: str,
+        doc_id: str,
+        user_id: str,
     ) -> dict:
         return await self.document.delete_document(kb_id, doc_id, user_id)
 
     def upload_and_process(
-        self, kb_id: str, file_path: str, filename: str,
+        self,
+        kb_id: str,
+        file_path: str,
+        filename: str,
     ) -> dict:
         return self.document.upload_and_process(kb_id, file_path, filename)
 
     # ==================== 问答 ====================
 
     def chat(
-        self, kb_id: str, session_id: str, query: str,
+        self,
+        kb_id: str,
+        session_id: str,
+        query: str,
     ) -> tuple[str, list[RAGContext]]:
         return self.chat.chat(kb_id, session_id, query)

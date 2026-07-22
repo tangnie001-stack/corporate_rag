@@ -61,7 +61,9 @@ async def ragas_generate(body: RagasGenerateRequest) -> BaseResponse:
             testset_size = len(data.get("samples", []))
             logger.info(
                 "Testset generated: kb_name={} version={} size={}",
-                body.kb_name, version, testset_size,
+                body.kb_name,
+                version,
+                testset_size,
             )
             return BaseResponse(
                 data={

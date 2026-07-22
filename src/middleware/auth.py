@@ -38,9 +38,7 @@ async def auth_middleware(
                 },
                 status_code=401,
             )
-        uid = await UserAuth.get_user_id_from_token_async(
-            get_redis_client(), token
-        )
+        uid = await UserAuth.get_user_id_from_token_async(get_redis_client(), token)
         if not uid:
             return JSONResponse(
                 {
@@ -58,9 +56,7 @@ async def auth_middleware(
     if path.startswith("/api/chat/") or path.startswith("/api/sessions/"):
         token = request.cookies.get("token")
         if token:
-            uid = await UserAuth.get_user_id_from_token_async(
-                get_redis_client(), token
-            )
+            uid = await UserAuth.get_user_id_from_token_async(get_redis_client(), token)
             if uid:
                 request.state.user_id = uid
                 current_user_id.set(uid)

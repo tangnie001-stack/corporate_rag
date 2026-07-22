@@ -26,7 +26,10 @@ class TestParseArgs:
         assert args.kb_id == "test-uuid"
         assert args.session_id == "ragas_eval_session"
 
-    @patch("sys.argv", ["eval_ragas.py", "--kb-id", "test-uuid", "--session-id", "custom_session"])
+    @patch(
+        "sys.argv",
+        ["eval_ragas.py", "--kb-id", "test-uuid", "--session-id", "custom_session"],
+    )
     def test_custom_args(self) -> None:
         """应正确解析自定义参数。"""
         from src.cli.eval_ragas import parse_args
@@ -35,7 +38,10 @@ class TestParseArgs:
         assert args.kb_id == "test-uuid"
         assert args.session_id == "custom_session"
 
-    @patch("sys.argv", ["eval_ragas.py", "--kb-id", "test-uuid", "--output", "/tmp/result.csv"])
+    @patch(
+        "sys.argv",
+        ["eval_ragas.py", "--kb-id", "test-uuid", "--output", "/tmp/result.csv"],
+    )
     def test_output_arg(self) -> None:
         """应正确解析输出路径参数。"""
         from src.cli.eval_ragas import parse_args

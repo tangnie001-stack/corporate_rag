@@ -15,8 +15,8 @@ class TablePreservingChunker(BaseChunker):
 
     def chunk(self, text: str, metadata: dict) -> list[dict]:
         segments, merge_count = self._split_by_table_boundary(text)
-        segments = self._merge_orphan_texts(segments)       # 阶段 2
-        segments = self._split_large_tables(segments)        # 阶段 3
+        segments = self._merge_orphan_texts(segments)  # 阶段 2
+        segments = self._split_large_tables(segments)  # 阶段 3
         parent_child = ParentChildChunker()
         result = []
         for seg in segments:
@@ -125,9 +125,7 @@ class TablePreservingChunker(BaseChunker):
         """
         result = []
         for seg in segments:
-            is_table = bool(
-                TablePreservingChunker.TABLE_PATTERN.search(seg)
-            )
+            is_table = bool(TablePreservingChunker.TABLE_PATTERN.search(seg))
             if not is_table or len(seg) <= TABLE_ROW_CHUNK_CHARS:
                 result.append(seg)
                 continue
@@ -154,7 +152,8 @@ class TablePreservingChunker(BaseChunker):
 
             # 数据行 = 不以 |---| 开头且不是表头的 |...| 行
             data_rows = [
-                line for line in lines
+                line
+                for line in lines
                 if line.strip().startswith("|")
                 and not line.strip().startswith("|---")
                 and line != header

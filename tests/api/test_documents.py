@@ -20,7 +20,9 @@ def test_get_documents(mock_app_service, auth_client):
 
 @patch("src.api.documents.asyncio.create_task", new_callable=MagicMock)
 @patch("src.api.documents.FileStore")
-def test_upload_document(mock_file_store_cls, mock_create_task, mock_app_service, auth_client):
+def test_upload_document(
+    mock_file_store_cls, mock_create_task, mock_app_service, auth_client
+):
     """POST /api/kbs/documents/upload 返回 202 Accepted。"""
     mock_svc = mock_app_service
     mock_svc.db = MagicMock()
@@ -44,11 +46,17 @@ def test_upload_document(mock_file_store_cls, mock_create_task, mock_app_service
 def test_document_status_processing(mock_app_service, auth_client):
     """POST /api/kbs/documents/status ��回文档处理状态。"""
     mock_svc = mock_app_service
-    mock_svc.db.get_documents = AsyncMock(return_value=[
-        make_doc("doc-1", status="processing",
-                 processing_progress=30, processing_state="extracting",
-                 processing_message="正在解析..."),
-    ])
+    mock_svc.db.get_documents = AsyncMock(
+        return_value=[
+            make_doc(
+                "doc-1",
+                status="processing",
+                processing_progress=30,
+                processing_state="extracting",
+                processing_message="正在解析...",
+            ),
+        ]
+    )
 
     response = auth_client.post(
         "/api/kbs/documents/status", json={"kb_id": "kb-1", "doc_id": "doc-1"}
@@ -78,13 +86,22 @@ def test_document_chunks_empty(mock_app_service, auth_client):
     mock_svc = mock_app_service
     mock_vs = MagicMock()
     mock_vs.get_chunks_paginated.return_value = {
-        "items": [], "total": 0, "page": 1, "page_size": 10,
+        "items": [],
+        "total": 0,
+        "page": 1,
+        "page_size": 10,
     }
     mock_svc.vector_store = mock_vs
 
-    response = auth_client.post("/api/kbs/documents/chunks", json={
-        "kb_id": "kb-1", "doc_id": "doc-1", "page": 1, "page_size": 10,
-    })
+    response = auth_client.post(
+        "/api/kbs/documents/chunks",
+        json={
+            "kb_id": "kb-1",
+            "doc_id": "doc-1",
+            "page": 1,
+            "page_size": 10,
+        },
+    )
 
     assert response.status_code == 200
     assert response.json()["data"]["total"] == 0
@@ -100,13 +117,21 @@ def test_document_chunks_with_parent_dedup(mock_app_service, auth_client):
             make_chunk("c2", "2024年净利润20亿", page=1, parent_content="营收概述"),
             make_chunk("c3", "毛利率45%", page=2, parent_content="财务指标"),
         ],
-        "total": 3, "page": 1, "page_size": 10,
+        "total": 3,
+        "page": 1,
+        "page_size": 10,
     }
     mock_svc.vector_store = mock_vs
 
-    response = auth_client.post("/api/kbs/documents/chunks", json={
-        "kb_id": "kb-1", "doc_id": "doc-1", "page": 1, "page_size": 10,
-    })
+    response = auth_client.post(
+        "/api/kbs/documents/chunks",
+        json={
+            "kb_id": "kb-1",
+            "doc_id": "doc-1",
+            "page": 1,
+            "page_size": 10,
+        },
+    )
 
     assert response.status_code == 200
     data = response.json()["data"]

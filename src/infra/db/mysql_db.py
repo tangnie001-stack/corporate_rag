@@ -172,7 +172,11 @@ class MySQLDB:
                         INSERT_KNOWLEDGE_BASE, (kb_id, user_id, name, description)
                     )
                 await conn.commit()
-                log_sql_result("get_or_create_kb", INSERT_KNOWLEDGE_BASE.split("\n")[0].strip(), (kb_id, True))
+                log_sql_result(
+                    "get_or_create_kb",
+                    INSERT_KNOWLEDGE_BASE.split("\n")[0].strip(),
+                    (kb_id, True),
+                )
                 return kb_id, True
             except aiomysql.IntegrityError:
                 # (user_id, name) 有联合 UNIQUE 约束：另一个请求已插入同名知识库
@@ -184,7 +188,7 @@ class MySQLDB:
                     raise RuntimeError(
                         f"IntegrityError on '{name}' but get_kb_by_name returned None"
                     ) from None
-                log_sql_result("get_or_create_kb", '', (existing_id, False))
+                log_sql_result("get_or_create_kb", "", (existing_id, False))
                 return existing_id, False
 
     async def add_document(
@@ -310,7 +314,9 @@ class MySQLDB:
             async with conn.cursor() as cursor:
                 await cursor.execute(SELECT_SESSION_BY_ID, (session_id,))
                 row = await cursor.fetchone()
-        log_sql_result("get_session_by_id", SELECT_SESSION_BY_ID.split("\n")[0].strip(), row)
+        log_sql_result(
+            "get_session_by_id", SELECT_SESSION_BY_ID.split("\n")[0].strip(), row
+        )
         return row
 
     async def get_messages(self, session_id: str) -> list[dict]:
@@ -327,7 +333,12 @@ class MySQLDB:
             async with conn.cursor() as cursor:
                 await cursor.execute(SELECT_MESSAGES_BY_SESSION, (session_id,))
                 rows = await cursor.fetchall()
-        log_sql_result("get_messages", SELECT_MESSAGES_BY_SESSION.split("\n")[0].strip(), rows, session_id=session_id)
+        log_sql_result(
+            "get_messages",
+            SELECT_MESSAGES_BY_SESSION.split("\n")[0].strip(),
+            rows,
+            session_id=session_id,
+        )
         return rows
 
     async def delete_session_and_messages(self, session_id: str) -> bool:
@@ -502,24 +513,35 @@ class MySQLDB:
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             async with conn.cursor() as cursor:
-                detail_str = json.dumps(report.get("detail_json", []), ensure_ascii=False) if report.get("detail_json") else None
-                await cursor.execute(INSERT_EVAL_REPORT, (
-                    str(uuid.uuid4()),
-                    report["kb_id"],
-                    report.get("run_type", "manual"),
-                    report["qa_count"],
-                    report.get("faithfulness"),
-                    report.get("answer_relevancy"),
-                    report.get("context_precision"),
-                    report.get("context_recall"),
-                    report.get("overall_score"),
-                    1 if report.get("passed") else 0,
-                    report.get("report_path"),
-                    report.get("triggered_by"),
-                    detail_str,
-                ))
+                detail_str = (
+                    json.dumps(report.get("detail_json", []), ensure_ascii=False)
+                    if report.get("detail_json")
+                    else None
+                )
+                await cursor.execute(
+                    INSERT_EVAL_REPORT,
+                    (
+                        str(uuid.uuid4()),
+                        report["kb_id"],
+                        report.get("run_type", "manual"),
+                        report["qa_count"],
+                        report.get("faithfulness"),
+                        report.get("answer_relevancy"),
+                        report.get("context_precision"),
+                        report.get("context_recall"),
+                        report.get("overall_score"),
+                        1 if report.get("passed") else 0,
+                        report.get("report_path"),
+                        report.get("triggered_by"),
+                        detail_str,
+                    ),
+                )
             await conn.commit()
-        logger.info("SQL: INSERT eval_report | kb_id={} run_type={}", report["kb_id"], report.get("run_type"))
+        logger.info(
+            "SQL: INSERT eval_report | kb_id={} run_type={}",
+            report["kb_id"],
+            report.get("run_type"),
+        )
 
     async def get_latest_eval_report(self, kb_id: str) -> dict | None:
         """获取知识库最新的 RAGAS 评估报告。
@@ -540,11 +562,17 @@ class MySQLDB:
                 row = await cursor.fetchone()
         if row:
             return {
-                "id": row[0], "kb_id": row[1], "run_type": row[2],
-                "qa_count": row[3], "faithfulness": row[4],
-                "answer_relevancy": row[5], "context_precision": row[6],
-                "context_recall": row[7], "overall_score": row[8],
-                "passed": bool(row[9]), "report_path": row[10],
+                "id": row[0],
+                "kb_id": row[1],
+                "run_type": row[2],
+                "qa_count": row[3],
+                "faithfulness": row[4],
+                "answer_relevancy": row[5],
+                "context_precision": row[6],
+                "context_recall": row[7],
+                "overall_score": row[8],
+                "passed": bool(row[9]),
+                "report_path": row[10],
                 "triggered_by": row[11],
                 "detail_json": json.loads(row[12]) if row[12] else None,
                 "eval_date": row[13],
@@ -587,7 +615,12 @@ class MySQLDB:
             async with conn.cursor() as cursor:
                 await cursor.execute(SELECT_USER_BY_ACCOUNT, (account,))
                 row = await cursor.fetchone()
-        log_sql_result("get_user_by_account", SELECT_USER_BY_ACCOUNT.split("\n")[0].strip(), row, account=account)
+        log_sql_result(
+            "get_user_by_account",
+            SELECT_USER_BY_ACCOUNT.split("\n")[0].strip(),
+            row,
+            account=account,
+        )
         return row
 
     async def update_user_token(self, user_id: str, token: str) -> None:
@@ -620,7 +653,9 @@ class MySQLDB:
             async with conn.cursor() as cursor:
                 await cursor.execute(SELECT_USER_BY_TOKEN, (token,))
                 row = await cursor.fetchone()
-        log_sql_result("get_user_by_token", SELECT_USER_BY_TOKEN.split("\n")[0].strip(), row)
+        log_sql_result(
+            "get_user_by_token", SELECT_USER_BY_TOKEN.split("\n")[0].strip(), row
+        )
         return row
 
     # ====== 知识库 CRUD ======
@@ -640,7 +675,13 @@ class MySQLDB:
             async with conn.cursor() as cursor:
                 await cursor.execute(SELECT_KNOWLEDGE_BASE_ID_BY_NAME, (user_id, name))
                 row = await cursor.fetchone()
-        log_sql_result("get_kb_by_name", SELECT_KNOWLEDGE_BASE_ID_BY_NAME.split("\n")[0].strip(), row, user_id=user_id, name=name)
+        log_sql_result(
+            "get_kb_by_name",
+            SELECT_KNOWLEDGE_BASE_ID_BY_NAME.split("\n")[0].strip(),
+            row,
+            user_id=user_id,
+            name=name,
+        )
         return row["id"] if row else None
 
     async def get_kb_name_by_id(self, kb_id: str) -> Optional[str]:
@@ -657,7 +698,12 @@ class MySQLDB:
             async with conn.cursor() as cursor:
                 await cursor.execute(SELECT_KB_NAME_BY_ID, (kb_id,))
                 row = await cursor.fetchone()
-        log_sql_result("get_kb_name_by_id", SELECT_KB_NAME_BY_ID.split("\n")[0].strip(), row, kb_id=kb_id)
+        log_sql_result(
+            "get_kb_name_by_id",
+            SELECT_KB_NAME_BY_ID.split("\n")[0].strip(),
+            row,
+            kb_id=kb_id,
+        )
         return row["name"] if row else None
 
     async def get_all_kb(self, user_id: str = "") -> list[dict]:
@@ -688,7 +734,12 @@ class MySQLDB:
             user_id,
             len(result),
         )
-        log_sql_result("get_all_kb", SELECT_ALL_KNOWLEDGE_BASES.split("\n")[0].strip(), result, user_id=user_id)
+        log_sql_result(
+            "get_all_kb",
+            SELECT_ALL_KNOWLEDGE_BASES.split("\n")[0].strip(),
+            result,
+            user_id=user_id,
+        )
         return result
 
     async def delete_kb(self, kb_id: str) -> bool:
@@ -728,7 +779,12 @@ class MySQLDB:
             async with conn.cursor() as cursor:
                 await cursor.execute(SELECT_DOCUMENTS_BY_KB_ID, (kb_id,))
                 rows = await cursor.fetchall()
-        log_sql_result("get_documents", SELECT_DOCUMENTS_BY_KB_ID.split("\n")[0].strip(), rows, kb_id=kb_id)
+        log_sql_result(
+            "get_documents",
+            SELECT_DOCUMENTS_BY_KB_ID.split("\n")[0].strip(),
+            rows,
+            kb_id=kb_id,
+        )
         return rows
 
     async def get_doc_names(self, doc_ids: list[str]) -> dict[str, str]:
@@ -750,7 +806,11 @@ class MySQLDB:
                 sql = SELECT_DOC_NAMES_BY_IDS.format(placeholders)
                 await cursor.execute(sql, doc_ids)
                 rows = await cursor.fetchall()
-        log_sql_result("get_doc_names", f"SELECT id, filename FROM document WHERE id IN ({len(doc_ids)} ids)", rows)
+        log_sql_result(
+            "get_doc_names",
+            f"SELECT id, filename FROM document WHERE id IN ({len(doc_ids)} ids)",
+            rows,
+        )
         return {row["id"]: row["filename"] for row in rows}
 
     async def soft_delete_document(self, doc_id: str) -> bool:

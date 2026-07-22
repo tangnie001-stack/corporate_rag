@@ -178,7 +178,9 @@ def test_granularity_cv_with_extremes():
 # ---- ChunkQualityScorer 集成测试 ----
 
 
-@pytest.mark.skipif(not os.getenv("DASHSCOPE_API_KEY"), reason="Requires DashScope API key")
+@pytest.mark.skipif(
+    not os.getenv("DASHSCOPE_API_KEY"), reason="Requires DashScope API key"
+)
 def test_evaluate_full_pipeline():
     """Full evaluate() should return the complete eval JSON."""
     from src.eval.chunk_scorer import ChunkQualityScorer

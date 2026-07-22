@@ -8,10 +8,12 @@ from tests.api.mock_data import make_kb
 def test_list_kbs(mock_app_service, auth_client):
     """POST /api/kbs/list 返回知识库列表。"""
     mock_svc = mock_app_service
-    mock_svc.list_knowledge_bases = AsyncMock(return_value=[
-        make_kb("kb-1", "年报知识库", doc_count=5),
-        make_kb("kb-2", "财报知识库", doc_count=3),
-    ])
+    mock_svc.list_knowledge_bases = AsyncMock(
+        return_value=[
+            make_kb("kb-1", "年报知识库", doc_count=5),
+            make_kb("kb-2", "财报知识库", doc_count=3),
+        ]
+    )
 
     response = auth_client.post("/api/kbs/list", json={})
 

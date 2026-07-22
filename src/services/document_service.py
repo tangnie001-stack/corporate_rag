@@ -61,16 +61,12 @@ class DocumentService:
         logger.info("Document deleted: {} ({})", doc["filename"], doc_id)
         return {"doc_id": doc_id, "filename": doc["filename"], "status": "deleted"}
 
-    def upload_and_process(
-        self, kb_id: str, file_path: str, filename: str
-    ) -> dict:
+    def upload_and_process(self, kb_id: str, file_path: str, filename: str) -> dict:
         """上传文档并执行完整处理流水线。
 
         同步执行，预计耗时 1-30 秒。
         """
-        file_type = (
-            filename.rsplit(".", 1)[-1].lower() if "." in filename else "txt"
-        )
+        file_type = filename.rsplit(".", 1)[-1].lower() if "." in filename else "txt"
         file_size = 0
         try:
             file_size = os.path.getsize(file_path)
@@ -118,13 +114,9 @@ class DocumentService:
 
         except Exception as e:
             error_msg = str(e)
-            logger.exception(
-                "Document processing failed: {} - {}", filename, error_msg
-            )
+            logger.exception("Document processing failed: {} - {}", filename, error_msg)
             try:
-                self.db.update_document_status(
-                    doc_id, "failed", error_msg=error_msg
-                )
+                self.db.update_document_status(doc_id, "failed", error_msg=error_msg)
             except Exception:
                 logger.exception(
                     "Failed to update document status after processing error",

@@ -55,7 +55,9 @@ async def llm_test(body: LlmTestRequest) -> BaseResponse:
         )
     except Exception as e:
         elapsed = round(time.time() - start, 2)
-        logger.error("LLM test failed: model={} latency={}s error={}", body.model, elapsed, e)
+        logger.error(
+            "LLM test failed: model={} latency={}s error={}", body.model, elapsed, e
+        )
         return BaseResponse(
             code=1,
             message=f"LLM 调用失败: {e}",

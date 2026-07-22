@@ -19,7 +19,9 @@ class KbEvalRequest(BaseModel):
 
 @router.post("/kbs/eval/latest")
 async def get_latest_kb_eval(
-    body: KbEvalRequest, svc: AppService = Depends(get_app_service), request: Request = None
+    body: KbEvalRequest,
+    svc: AppService = Depends(get_app_service),
+    request: Request = None,
 ) -> BaseResponse:
     """获取知识库最新的 RAGAS 评估结果。
 

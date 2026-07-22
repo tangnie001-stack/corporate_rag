@@ -96,7 +96,7 @@ def test_table_preserving_split_large_table():
     # 构建一个约 3000 字符的表格（80 行，每行 ~38 字符）
     header = "| 项目 | 金额（万元） | 占比（%） | 同比增长（%） |\n|---|---|---|---|\n"
     rows = [
-        f"| 项目{i} | {i}00万 | {i}.{i%10}% | +{i*10}.{i%10}% |"
+        f"| 项目{i} | {i}00万 | {i}.{i % 10}% | +{i * 10}.{i % 10}% |"
         for i in range(80)
     ]
     text = "开头\n" + header + "\n".join(rows) + "\n结尾"
@@ -105,12 +105,15 @@ def test_table_preserving_split_large_table():
 
     # 应产生多个 table chunk
     table_chunks = [r for r in result if r["metadata"]["block_type"] == "table"]
-    assert len(table_chunks) >= 2, f"大表格应被切分为多个子表，实际: {len(table_chunks)}"
+    assert len(table_chunks) >= 2, (
+        f"大表格应被切分为多个子表，实际: {len(table_chunks)}"
+    )
 
     # 每个子表都应包含表头行
     for tc in table_chunks:
-        assert "| 项目 | 金额（万元） | 占比（%） | 同比增长（%） |" in tc["content"], \
+        assert "| 项目 | 金额（万元） | 占比（%） | 同比增长（%） |" in tc["content"], (
             "每个子表块应包含表头"
+        )
 
     # 所有数据行应完整保留
     all_content = "".join(tc["content"] for tc in table_chunks)

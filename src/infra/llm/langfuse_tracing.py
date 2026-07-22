@@ -57,7 +57,10 @@ class LangfuseTracer:
             logger.warning("LangfuseTracer init failed: %s", e)
 
     def start_trace(
-        self, name: str, input_data: dict | None = None, session_id: Optional[str] = None
+        self,
+        name: str,
+        input_data: dict | None = None,
+        session_id: Optional[str] = None,
     ) -> Optional[str]:
         """创建新的 trace 并返回其 ID，失败时返回 None。
 

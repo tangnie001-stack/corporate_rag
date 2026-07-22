@@ -8,6 +8,10 @@ from src.api.sessions import router as sessions_router
 from src.api.kb_eval import router as kb_eval_router
 
 __all__ = [
-    "health_router", "kb_router", "doc_router", "chat_router",
-    "sessions_router", "kb_eval_router",
+    "health_router",
+    "kb_router",
+    "doc_router",
+    "chat_router",
+    "sessions_router",
+    "kb_eval_router",
 ]

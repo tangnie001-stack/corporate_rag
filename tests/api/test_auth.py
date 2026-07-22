@@ -18,9 +18,7 @@ def test_login_new_user_auto_register(mock_hash, mock_app_service, client):
     mock_svc.redis_client = MagicMock()
 
     with patch("src.api.auth.UserAuth.generate_token", return_value="test-token"):
-        with patch(
-            "src.api.auth.UserAuth.store_token_async", new_callable=AsyncMock
-        ):
+        with patch("src.api.auth.UserAuth.store_token_async", new_callable=AsyncMock):
             response = client.post(
                 "/api/auth/login", json={"account": "newuser", "password": "pass123"}
             )
@@ -42,9 +40,7 @@ def test_login_existing_user_correct_password(mock_hash, mock_app_service, clien
     mock_svc.redis_client = MagicMock()
 
     with patch("src.api.auth.UserAuth.generate_token", return_value="test-token"):
-        with patch(
-            "src.api.auth.UserAuth.store_token_async", new_callable=AsyncMock
-        ):
+        with patch("src.api.auth.UserAuth.store_token_async", new_callable=AsyncMock):
             response = client.post(
                 "/api/auth/login", json={"account": "existing", "password": "pass123"}
             )

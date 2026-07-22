@@ -18,7 +18,9 @@ class TestTxtParser:
         """每个测试前初始化解析器和测试文件路径。"""
         self.parser = TxtParser()
         self.sample_path = "data/test_docs/sample.txt"  # UTF-8 编码样本
-        self.gbk_path = "data/test_docs/sample_gbk.txt"  # GBK 编码样本（含中文金融数据）
+        self.gbk_path = (
+            "data/test_docs/sample_gbk.txt"  # GBK 编码样本（含中文金融数据）
+        )
 
     def test_parse_txt_returns_parse_result(self):
         """基本解析：返回 ParseResult 且统计信息合理。"""
