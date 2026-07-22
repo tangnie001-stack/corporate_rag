@@ -366,6 +366,9 @@ async def _process_document_task(
             # 从解析器分块反补 chunk 页码
             _enrich_chunk_pages(chunks, parse_result.chunks, full_text)
 
+            # 合并 tiny chunk — 将 < 50 tokens 的碎片合并到前一个 chunk
+            chunks = _merge_tiny_chunks(chunks, strategy)
+
             # 分块质量校验 — CPU，to_thread
             chunk_data_list = [
                 ChunkData(content=c["content"], metadata=c["metadata"]) for c in chunks
