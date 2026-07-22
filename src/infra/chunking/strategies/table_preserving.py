@@ -2,7 +2,7 @@ import re
 from loguru import logger
 from src.infra.chunking.strategies.base import BaseChunker
 from src.infra.chunking.strategies.parent_child import ParentChildChunker
-from src.config import CROSS_PAGE_TABLE_MERGE_THRESHOLD
+from src.config import CROSS_PAGE_TABLE_MERGE_THRESHOLD, ORPHAN_THRESHOLD_CHARS
 
 
 class TablePreservingChunker(BaseChunker):
@@ -61,6 +61,45 @@ class TablePreservingChunker(BaseChunker):
             return 0
 
         return _col_count(seg_a) == _col_count(seg_b) > 0
+
+    @staticmethod
+    def _merge_orphan_texts(segments: list[str]) -> list[str]:
+        """将小于 ORPHAN_THRESHOLD_CHARS 的孤立短文本合并到相邻 TABLE segment.
+
+        扫描 text segment，< ORPHAN_THRESHOLD_CHARS 且与 TABLE 相邻时：
+          - 优先向后合并（粘到后一个表格开头）
+          - 其次向前合并（粘到前一个表格末尾）
+        迭代扫描直到没有新的合并。
+        """
+        result = list(segments)
+        changed = True
+        while changed:
+            changed = False
+            i = 0
+            while i < len(result):
+                is_table = bool(TablePreservingChunker.TABLE_PATTERN.search(result[i]))
+                is_short = not is_table and len(result[i]) < ORPHAN_THRESHOLD_CHARS
+
+                if is_short:
+                    # 向后合并：粘到后一个 TABLE 开头
+                    if i + 1 < len(
+                        result
+                    ) and TablePreservingChunker.TABLE_PATTERN.search(result[i + 1]):
+                        result[i + 1] = result[i] + "\n" + result[i + 1]
+                        result.pop(i)
+                        changed = True
+                        continue
+
+                    # 向前合并：粘到前一个 TABLE 末尾
+                    if i > 0 and TablePreservingChunker.TABLE_PATTERN.search(
+                        result[i - 1]
+                    ):
+                        result[i - 1] = result[i - 1] + "\n" + result[i]
+                        result.pop(i)
+                        changed = True
+                        continue
+                i += 1
+        return result
 
     @staticmethod
     def _split_by_table_boundary(text: str) -> tuple[list[str], int]:
