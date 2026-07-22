@@ -37,6 +37,7 @@ from src.config.response_codes import Code
 from src.eval.chunk_scorer import ChunkQualityScorer
 from src.infra.errors import BusinessError, SystemError
 from src.infra.chunking.router import ChunkRouter
+from src.infra.chunking.strategies.base import BaseChunker
 from src.infra.chunking.validator import ChunkData, validate_chunks
 from src.infra.db.file_store import FileStore
 
@@ -251,6 +252,42 @@ def _enrich_chunk_pages(chunks: list[dict], parse_chunks: list, full_text: str) 
         end = pos + len(text)
         pages = {p for s, e, p in page_map if s < end and e > pos}
         chunk["metadata"]["page"] = min(pages)
+
+
+def _merge_tiny_chunks(
+    chunks: list[dict],
+    strategy: str = "",
+    min_tokens: int = 50,
+) -> list[dict]:
+    """将 tokens < min_tokens 的 tiny chunk 合并到前一个 chunk。
+
+    仅对 parent_child 和 table_preserving 策略生效。
+    qa 策略的 chunk 是完整问答对，合并会破坏语义结构，跳过。
+
+    Args:
+        chunks: chunker.chunk() 输出的 chunk 列表
+        strategy: 当前文档的分块策略
+        min_tokens: tiny chunk 判定阈值
+
+    Returns:
+        合并后的 chunk 列表
+    """
+    if strategy not in ("parent_child", "table_preserving"):
+        return chunks
+
+    merged: list[dict] = []
+    for c in chunks:
+        tokens = c["metadata"].get("tokens", 0) or BaseChunker.count_tokens(
+            c["content"]
+        )
+        if tokens < min_tokens and merged:
+            merged[-1]["content"] += "\n" + c["content"]
+            merged[-1]["metadata"]["tokens"] = BaseChunker.count_tokens(
+                merged[-1]["content"]
+            )
+        else:
+            merged.append(c)
+    return merged
 
 
 async def _process_document_task(

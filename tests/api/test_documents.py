@@ -2,6 +2,7 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from src.api.documents import _merge_tiny_chunks
 from tests.api.mock_data import make_doc, make_chunk
 
 
@@ -172,3 +173,56 @@ def test_delete_document_not_found(mock_app_service, auth_client):
 
     assert response.status_code == 200
     assert response.json()["data"]["success"] is False
+
+
+# Tests for _merge_tiny_chunks
+
+
+def test_merge_tiny_normal():
+    """Normal merge: text chunk (256 tokens) + tiny (44 tokens) -> 1 chunk."""
+    chunks = [
+        {"content": "A" * 512, "metadata": {"tokens": 256, "block_type": "text"}},  # 512 chars ≈ 256 tokens
+        {"content": "tiny tail", "metadata": {"tokens": 44, "block_type": "text"}},
+    ]
+    result = _merge_tiny_chunks(chunks, strategy="parent_child")
+    assert len(result) == 1
+    assert result[0]["metadata"]["tokens"] == 261  # (512 + 9 + 1("\n")) // 2 = 261
+
+
+def test_merge_tiny_first_chunk():
+    """First chunk is tiny: stays standalone."""
+    chunks = [
+        {"content": "tiny first", "metadata": {"tokens": 5, "block_type": "text"}},
+        {"content": "B" * 600, "metadata": {"tokens": 300, "block_type": "text"}},
+    ]
+    result = _merge_tiny_chunks(chunks)
+    assert len(result) == 2  # not merged
+
+
+def test_merge_tiny_consecutive():
+    """Multiple consecutive tiny chunks: all merged into predecessor."""
+    chunks = [
+        {"content": "C" * 500, "metadata": {"tokens": 250, "block_type": "text"}},
+        {"content": "tiny1", "metadata": {"tokens": 10, "block_type": "text"}},
+        {"content": "tiny2", "metadata": {"tokens": 8, "block_type": "text"}},
+        {"content": "D" * 600, "metadata": {"tokens": 300, "block_type": "text"}},
+    ]
+    result = _merge_tiny_chunks(chunks, strategy="parent_child")
+    assert len(result) == 2  # both tinies merge into chunk1, chunk4 stays
+    assert "tiny1" in result[0]["content"]
+    assert "tiny2" in result[0]["content"]
+
+
+def test_merge_tiny_qa_skip():
+    """QA strategy: passes through unchanged."""
+    chunks = [
+        {"content": "问：你好？答：我很好。", "metadata": {"tokens": 12, "block_type": "text"}},
+    ]
+    result = _merge_tiny_chunks(chunks, strategy="qa")
+    assert len(result) == 1  # no merge
+
+
+def test_merge_tiny_empty():
+    """Empty list: returns empty."""
+    result = _merge_tiny_chunks([])
+    assert result == []
