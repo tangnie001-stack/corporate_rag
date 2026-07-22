@@ -25,7 +25,7 @@ from src.infra.db.mysql_db import MySQLDB
 from src.infra.db.vector_store import VectorStore
 from src.config import TOP_K_RERANK
 
-setup_logging()
+setup_logging(configure_trace_id=True)
 
 
 def main() -> None:
