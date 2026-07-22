@@ -12,7 +12,7 @@
 
 import time
 import functools
-from typing import Callable, TypeVar
+from typing import Any, Callable, TypeVar
 
 from loguru import logger
 from langchain_openai import ChatOpenAI
@@ -178,7 +178,11 @@ def get_embeddings(model: str = EMBEDDING_MODEL) -> FixedDimDashScopeEmbeddings:
     )
 
 
-def get_llm(model: str = LLM_MODEL, temperature: float = LLM_TEMPERATURE) -> ChatOpenAI:
+def get_llm(
+    model: str = LLM_MODEL,
+    temperature: float = LLM_TEMPERATURE,
+    **kwargs: Any,
+) -> ChatOpenAI:
     """创建 DashScope 大语言模型实例（使用 OpenAI 兼容接口）。
 
     用于根据检索到的文档上下文生成最终回答。DashScope 的 qwen 系列模型
@@ -187,6 +191,7 @@ def get_llm(model: str = LLM_MODEL, temperature: float = LLM_TEMPERATURE) -> Cha
     Args:
         model: 模型名称，默认 qwen-max
         temperature: 温度参数，越低越确定性（金融场景推荐 0.1）
+        **kwargs: 传递给 ChatOpenAI 的额外参数（如 top_p、max_tokens 等）
 
     Returns:
         ChatOpenAI 实例，支持 .stream() 流式输出和 .invoke() 同步调用
@@ -196,6 +201,7 @@ def get_llm(model: str = LLM_MODEL, temperature: float = LLM_TEMPERATURE) -> Cha
         temperature=temperature,
         api_key=DASHSCOPE_API_KEY,
         base_url=DASHSCOPE_BASE_URL,
+        **kwargs,
     )
 
 
