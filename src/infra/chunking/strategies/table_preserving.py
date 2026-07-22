@@ -2,7 +2,7 @@ import re
 from loguru import logger
 from src.infra.chunking.strategies.base import BaseChunker
 from src.infra.chunking.strategies.parent_child import ParentChildChunker
-from src.config import CROSS_PAGE_TABLE_MERGE_THRESHOLD, MAX_TABLE_TOKENS
+from src.config import CROSS_PAGE_TABLE_MERGE_THRESHOLD
 
 
 class TablePreservingChunker(BaseChunker):
@@ -78,8 +78,6 @@ class TablePreservingChunker(BaseChunker):
             segments.append("\n".join(current))
 
         # 合并跨页表格：列数相同 + 中间短文本（< N 字）→ 同一张表，合并
-        # MAX_TABLE_TOKENS 是 token 数，*2 转字符数（中文 1 token ≈ 2 字符）
-        MAX_TABLE_CHARS = MAX_TABLE_TOKENS * 2
         merged = []
         merge_count = 0
         i = 0
@@ -92,8 +90,7 @@ class TablePreservingChunker(BaseChunker):
                     segments[i], segments[i + 2]
                 )
                 and len(segments[i + 1]) < CROSS_PAGE_TABLE_MERGE_THRESHOLD
-                and len(segments[i]) + len(segments[i + 1]) + len(segments[i + 2])
-                <= MAX_TABLE_CHARS
+                # removed size limit — merge regardless of combined size
             ):
                 merge_count += 1
                 merged.append(
@@ -108,8 +105,7 @@ class TablePreservingChunker(BaseChunker):
                         merged[-1], segments[i + 1]
                     )
                     and len(segments[i]) < CROSS_PAGE_TABLE_MERGE_THRESHOLD
-                    and len(merged[-1]) + len(segments[i]) + len(segments[i + 1])
-                    <= MAX_TABLE_CHARS
+                    # removed size limit — merge regardless of combined size
                 ):
                     merged[-1] += "\n" + segments[i] + "\n" + segments[i + 1]
                     merge_count += 1
