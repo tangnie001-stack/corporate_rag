@@ -115,6 +115,11 @@ CROSS_PAGE_TABLE_MERGE_THRESHOLD: int = int(
 # 使用时需 *2 转为字符数（中文 1 token ≈ 2 字符），如 2048 token → 4096 chars
 MAX_TABLE_TOKENS: int = int(os.getenv("MAX_TABLE_TOKENS", "2048"))
 
+# 大表格行级切分阈值：合并后的表格超过此字符数时，按行边界切分，复制表头
+TABLE_ROW_CHUNK_CHARS: int = int(os.getenv("TABLE_ROW_CHUNK_CHARS", "2000"))
+# 残差短文本合并阈值：小于此字符数的独立文本段，如果与表格相邻则粘到表格上
+ORPHAN_THRESHOLD_CHARS: int = int(os.getenv("ORPHAN_THRESHOLD_CHARS", "200"))
+
 # ====== Hybrid Search ======
 # 是否启用 BM25 + Dense 混合检索（通过 RRF 融合）
 HYBRID_SEARCH_ENABLED: bool = (
