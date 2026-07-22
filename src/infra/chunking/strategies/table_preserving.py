@@ -2,7 +2,11 @@ import re
 from loguru import logger
 from src.infra.chunking.strategies.base import BaseChunker
 from src.infra.chunking.strategies.parent_child import ParentChildChunker
-from src.config import CROSS_PAGE_TABLE_MERGE_THRESHOLD, ORPHAN_THRESHOLD_CHARS
+from src.config import (
+    CROSS_PAGE_TABLE_MERGE_THRESHOLD,
+    ORPHAN_THRESHOLD_CHARS,
+    TABLE_ROW_CHUNK_CHARS,
+)
 
 
 class TablePreservingChunker(BaseChunker):
@@ -11,6 +15,8 @@ class TablePreservingChunker(BaseChunker):
 
     def chunk(self, text: str, metadata: dict) -> list[dict]:
         segments, merge_count = self._split_by_table_boundary(text)
+        segments = self._merge_orphan_texts(segments)       # 阶段 2
+        segments = self._split_large_tables(segments)        # 阶段 3
         parent_child = ParentChildChunker()
         result = []
         for seg in segments:
@@ -99,6 +105,96 @@ class TablePreservingChunker(BaseChunker):
                         changed = True
                         continue
                 i += 1
+        return result
+
+    @staticmethod
+    def _split_large_tables(segments: list[str]) -> list[str]:
+        """将超过 TABLE_ROW_CHUNK_CHARS 的大表格按行切分，每段复制表头.
+
+        表格以 Markdown pipe 格式：
+          | 项目 | 2025年 | 2024年 |
+          |---|---|---|
+          | 收入 | 100 | 90 |
+          ...
+
+        切分策略：
+          - 提取表头行（第一行 |...|）和分隔行（|---|）
+          - 数据行贪心分组（每组 ~TABLE_ROW_CHUNK_CHARS 字符）
+          - 每组前复制表头+分隔行
+          - 无分隔行时：首行当表头，其余当数据行
+        """
+        result = []
+        for seg in segments:
+            is_table = bool(
+                TablePreservingChunker.TABLE_PATTERN.search(seg)
+            )
+            if not is_table or len(seg) <= TABLE_ROW_CHUNK_CHARS:
+                result.append(seg)
+                continue
+
+            lines = seg.split("\n")
+            # 定位表头行和分隔行
+            header_idx = -1
+            sep_idx = -1
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+                if stripped.startswith("|") and not stripped.startswith("|---"):
+                    if header_idx == -1:
+                        header_idx = i
+                if stripped.startswith("|---"):
+                    if sep_idx == -1:
+                        sep_idx = i
+
+            if header_idx == -1:
+                result.append(seg)
+                continue
+
+            header = lines[header_idx]
+            separator = lines[sep_idx] if sep_idx >= 0 else ""
+
+            # 数据行 = 不以 |---| 开头且不是表头的 |...| 行
+            data_rows = [
+                line for line in lines
+                if line.strip().startswith("|")
+                and not line.strip().startswith("|---")
+                and line != header
+            ]
+
+            if not data_rows:
+                result.append(seg)
+                continue
+
+            # 贪心分组：累计到 TABLE_ROW_CHUNK_CHARS 就切
+            current_group: list[str] = []
+            current_chars = 0
+            header_sep_chars = len(header) + len(separator) + 2  # 2 换行
+
+            def _flush():
+                if current_group:
+                    result.append(
+                        header
+                        + ("\n" + separator if separator else "")
+                        + "\n"
+                        + "\n".join(current_group)
+                    )
+
+            for row in data_rows:
+                row_chars = len(row) + 1
+                limit = TABLE_ROW_CHUNK_CHARS - header_sep_chars
+                if current_chars + row_chars > limit and current_group:
+                    _flush()
+                    current_group = []
+                    current_chars = 0
+                current_group.append(row)
+                current_chars += row_chars
+            _flush()
+
+            logger.debug(
+                "[table_preserving] split large table: {} chars -> {} sub-tables",
+                len(seg),
+                (len(seg) // TABLE_ROW_CHUNK_CHARS) + 1,
+            )
+
         return result
 
     @staticmethod
