@@ -270,7 +270,7 @@ def run_generate(
 
     _cache = DiskCacheBackend(cache_dir=settings.RAGAS_LLM_CACHE_DIR)
     _langchain_llm = get_llm(model=eval_model, temperature=0)
-    ragas_llm = _LLMWrapper(_langchain_llm, cache=_cache)
+    ragas_llm = _LLMWrapper(_langchain_llm, cache=_cache, bypass_n=True)
     embeddings_wrapper = _EmbeddingsWrapper(get_embeddings())
 
     generator = TestsetGenerator(llm=ragas_llm, embedding_model=embeddings_wrapper)
