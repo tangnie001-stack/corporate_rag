@@ -181,7 +181,10 @@ def test_delete_document_not_found(mock_app_service, auth_client):
 def test_merge_tiny_normal():
     """Normal merge: text chunk (256 tokens) + tiny (44 tokens) -> 1 chunk."""
     chunks = [
-        {"content": "A" * 512, "metadata": {"tokens": 256, "block_type": "text"}},  # 512 chars ≈ 256 tokens
+        {
+            "content": "A" * 512,
+            "metadata": {"tokens": 256, "block_type": "text"},
+        },  # 512 chars ≈ 256 tokens
         {"content": "tiny tail", "metadata": {"tokens": 44, "block_type": "text"}},
     ]
     result = _merge_tiny_chunks(chunks, strategy="parent_child")
@@ -216,7 +219,10 @@ def test_merge_tiny_consecutive():
 def test_merge_tiny_qa_skip():
     """QA strategy: passes through unchanged."""
     chunks = [
-        {"content": "问：你好？答：我很好。", "metadata": {"tokens": 12, "block_type": "text"}},
+        {
+            "content": "问：你好？答：我很好。",
+            "metadata": {"tokens": 12, "block_type": "text"},
+        },
     ]
     result = _merge_tiny_chunks(chunks, strategy="qa")
     assert len(result) == 1  # no merge
