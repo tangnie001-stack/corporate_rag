@@ -55,7 +55,9 @@ def log_sql_result(method: str, sql, rows, **extra) -> None:
     )
     if method in SQL_SKIP_FULL_LOG:
         extra_str = " | ".join(f"{k}={v}" for k, v in extra.items())
-        logger.info("[SQL] method={} | sql={} | rows={} | {}", method, sql, count, extra_str)
+        logger.info(
+            "[SQL] method={} | sql={} | rows={} | {}", method, sql, count, extra_str
+        )
     else:
         data_str = str(rows)
         if len(data_str) > LOG_MAX_BODY:
@@ -64,10 +66,19 @@ def log_sql_result(method: str, sql, rows, **extra) -> None:
                 + f"... (truncated, total={len(data_str)} chars)"
             )
         try:
-            logger.info("[SQL] method={} | sql={}| rows={} | data={}", method, sql, count, data_str)
+            logger.info(
+                "[SQL] method={} | sql={}| rows={} | data={}",
+                method,
+                sql,
+                count,
+                data_str,
+            )
         except Exception:
             logger.info(
-                "[SQL] method={} | sql={}| rows={} | data=<serialization_error>", method, sql, count
+                "[SQL] method={} | sql={}| rows={} | data=<serialization_error>",
+                method,
+                sql,
+                count,
             )
 
 
@@ -76,9 +87,15 @@ def _setup_trace_id_patcher() -> None:
 
     从 trace_context 模块的 ContextVar 中读取当前 trace_id，
     写入每一条日志记录的 extra 字段。
-    仅在 API 进程（有 HTTP 请求上下文）中启用。
+    如果 ContextVar 为空（CLI 模式），自动生成一个 trace_id。
     """
     from src.infra.llm.trace_context import current_trace_id as _trace_var
+
+    # CLI 模式：没有外部传入的 trace_id 时自动生成
+    if not _trace_var.get():
+        import uuid
+
+        _trace_var.set(f"trace_{uuid.uuid4()}")
 
     def _patcher(record):
         record["extra"]["trace_id"] = _trace_var.get() or ""
