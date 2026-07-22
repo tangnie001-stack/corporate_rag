@@ -26,9 +26,9 @@ from loguru import logger
 
 from src.core.logging import setup_logging
 
-from src.config import settings, DASHSCOPE_API_KEY, DASHSCOPE_BASE_URL
+from src.config import settings
 
-setup_logging()
+setup_logging(configure_trace_id=True)
 
 
 # Quality gate thresholds
@@ -409,8 +409,7 @@ def main() -> None:
         context_recall,
         context_precision,
     )
-    from langchain_openai import ChatOpenAI
-    from src.models import get_embeddings
+    from src.models import get_llm, get_embeddings
     from src.rag.chain import RAGChain
 
     logger.info("Initializing RAGChain...")
@@ -427,14 +426,9 @@ def main() -> None:
         sys.exit(1)
     eval_model = settings.RAGAS_LLM_MODEL
     logger.info("Initializing RAGAS evaluator ({})...", eval_model)
-    llm = ChatOpenAI(
-        model=eval_model,
-        temperature=0,
-        api_key=DASHSCOPE_API_KEY,
-        base_url=DASHSCOPE_BASE_URL,
-    )
+    llm = get_llm(model=eval_model, temperature=0)
     embeddings = get_embeddings()
-    llm_wrapper = LangchainLLMWrapper(llm)
+    llm_wrapper = LangchainLLMWrapper(llm, bypass_n=True)
     embeddings_wrapper = LangchainEmbeddingsWrapper(embeddings)
 
     logger.info("Generating answers for {} questions...", len(questions))
