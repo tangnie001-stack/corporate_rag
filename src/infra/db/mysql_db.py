@@ -562,20 +562,20 @@ class MySQLDB:
                 row = await cursor.fetchone()
         if row:
             return {
-                "id": row[0],
-                "kb_id": row[1],
-                "run_type": row[2],
-                "qa_count": row[3],
-                "faithfulness": row[4],
-                "answer_relevancy": row[5],
-                "context_precision": row[6],
-                "context_recall": row[7],
-                "overall_score": row[8],
-                "passed": bool(row[9]),
-                "report_path": row[10],
-                "triggered_by": row[11],
-                "detail_json": json.loads(row[12]) if row[12] else None,
-                "eval_date": row[13],
+                "id": row["id"],
+                "kb_id": row["kb_id"],
+                "run_type": row["run_type"],
+                "qa_count": row["qa_count"],
+                "faithfulness": row["faithfulness"],
+                "answer_relevancy": row["answer_relevancy"],
+                "context_precision": row["context_precision"],
+                "context_recall": row["context_recall"],
+                "overall_score": row["overall_score"],
+                "passed": bool(row["passed"]),
+                "report_path": row["report_path"],
+                "triggered_by": row["triggered_by"],
+                "detail_json": json.loads(row["detail_json"]) if row.get("detail_json") else None,
+                "eval_date": row["eval_date"],
             }
         return None
 

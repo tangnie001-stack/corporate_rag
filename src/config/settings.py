@@ -45,7 +45,7 @@ EMBEDDING_BATCH_SIZE: int = int(os.getenv("EMBEDDING_BATCH_SIZE", "20"))
 # RAGAS 评估专用模型（独立于生产 LLM，temperature 固定为 0）
 # 不可使用推理模型（如 qwen3.7-max），RAGAS 内部会传 n>1 参数，
 # 推理模型要求 n=1 会导致 BadRequestError。必须显式配置非推理模型。
-RAGAS_LLM_MODEL: str = os.getenv("RAGAS_LLM_MODEL", "qwen3.7-plus-2026-05-26")
+RAGAS_LLM_MODEL: str = os.getenv("RAGAS_LLM_MODEL", "qwen3.7-max-2026-05-20")
 # RAGAS 测试集生成条数
 RAGAS_TEST_SIZE: int = int(os.getenv("RAGAS_TEST_SIZE", "20"))
 # RAGAS 测试集存储目录
