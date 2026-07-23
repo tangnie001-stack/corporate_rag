@@ -99,7 +99,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def generate_answers_and_contexts(
+async def generate_answers_and_contexts(
     rag_chain: Any,
     kb_id: str,
     session_id: str,
@@ -125,7 +125,7 @@ def generate_answers_and_contexts(
         logger.info("Generating answer for Q{}: {}...", i + 1, q[:40])
 
         try:
-            token_gen, citations = rag_chain.chat_with_citations(kb_id, session_id, q)
+            token_gen, citations = await rag_chain.chat_with_citations(kb_id, session_id, q)
             full_answer = "".join([t for t in token_gen])
             answers.append(full_answer)
 
@@ -438,12 +438,12 @@ def main() -> None:
     embeddings_wrapper = LangchainEmbeddingsWrapper(embeddings)
 
     logger.info("Generating answers for {} questions...", len(questions))
-    answers, contexts = generate_answers_and_contexts(
+    answers, contexts = asyncio.run(generate_answers_and_contexts(
         rag_chain,
         kb_id,
         session_id,
         questions,
-    )
+    ))
 
     result = run_evaluation(
         questions,

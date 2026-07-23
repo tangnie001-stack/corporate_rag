@@ -103,7 +103,7 @@ class RAGChain:
 
     # ═══════════ chat_with_citations — 主入口 ═══════════
 
-    def chat_with_citations(
+    async def chat_with_citations(
         self,
         kb_id: str,
         session_id: str,
@@ -147,13 +147,7 @@ class RAGChain:
         # 检索
         try:
             t0 = time.perf_counter()
-            import asyncio
-
-            loop = asyncio.new_event_loop()
-            results = loop.run_until_complete(
-                search(query, kb_id, self.vector_store, self.bm25)
-            )
-            loop.close()
+            results = await search(query, kb_id, self.vector_store, self.bm25)
         except Exception as e:
             return self._handle_search_error(e, trace_id)
 
