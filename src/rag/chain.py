@@ -236,6 +236,36 @@ class RAGChain:
             rewritten = " ".join(rewritten)
         return rewritten
 
+    # ═══════════ 查询分类与改写 — 测试委托 ═══════════
+
+    def _classify_query(self, query: str) -> str:
+        """委托给 retrieval.classify_query。"""
+        from src.rag.retrieval import classify_query
+
+        return classify_query(query)
+
+    def _rewrite_query(self, query: str, history: list[dict]) -> str | list[str]:
+        """委托给 retrieval.rewrite_query。"""
+        return rewrite_query(query, history)
+
+    def _expand_query(self, query: str, history: list[dict]) -> str:
+        """委托给 retrieval.expand_query。"""
+        from src.rag.retrieval import expand_query
+
+        return expand_query(query, history)
+
+    def _condense_query(self, query: str) -> str:
+        """委托给 retrieval.condense_query。"""
+        from src.rag.retrieval import condense_query
+
+        return condense_query(query)
+
+    def _decompose_query(self, query: str) -> list[str]:
+        """委托给 retrieval.decompose_query。"""
+        from src.rag.retrieval import decompose_query
+
+        return decompose_query(query)
+
     # ═══════════ 公共方法 ═══════════
 
     def stream_answer(self, query, contexts, history, trace_id=None):

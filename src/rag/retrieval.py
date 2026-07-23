@@ -1,6 +1,7 @@
 """检索与查询改写 — 向量检索、Reranker 精排、查询分类与改写。"""
 
 import asyncio
+import re
 from typing import Optional
 
 from loguru import logger
@@ -116,17 +117,34 @@ def rerank_results(
 
 
 def classify_query(query: str) -> str:
-    """对用户查询进行分类。"""
+    """对用户查询进行三级分类。
+
+    Returns:
+        "simple":  单事实检索（如数字、年份+指标），走 Naive RAG
+        "medium":  需要 2-3 个事实关联或分析，走 Enhanced RAG
+        "complex": 多跳推理、跨文档对比，走 Agentic RAG
+    """
     cleaned = query.strip()
     if not cleaned:
-        return "clear"
+        return "simple"
+
+    # 对比/比较类 → complex
     if any(w in cleaned for w in ["对比", "比较", "差异", "versus", "vs"]):
-        return "compound"
-    if any(w in cleaned for w in ["分析", "解释", "说明", "为什么"]):
-        return "colloquial"
+        return "complex"
+
+    # 分析/推理类 → medium (need retrieval but not complex enough for grader)
+    if any(w in cleaned for w in ["分析", "解释", "说明", "为什么", "原因"]):
+        return "medium"
+
+    # 模糊短查询 → medium (needs context expansion)
     if len(cleaned) < 10:
-        return "fuzzy_short"
-    return "clear"
+        return "medium"
+
+    # 单事实数字查询 → simple
+    if re.search(r"\d{4}年", cleaned) or re.search(r"(营收|利润|收入|成本|资产|负债|现金流|净利润)", cleaned):
+        return "simple"
+
+    return "medium"  # default fallback
 
 
 def expand_query(query: str, history: list[dict]) -> str:
@@ -161,14 +179,22 @@ def decompose_query(query: str) -> list[str]:
 
 
 def rewrite_query(query: str, history: list[dict]) -> str | list[str]:
-    """根据分类执行相应的改写策略。"""
+    """根据三级分类执行相应的改写策略。
+
+    Returns:
+        str:      simple / medium 路径返回改写后的单条查询
+        list[str]: complex 路径返回分解后的多条子查询
+    """
     t = classify_query(query)
-    if t == "clear":
+    if t == "simple":
         return query
-    if t == "fuzzy_short":
-        return expand_query(query, history)
-    if t == "colloquial":
-        return condense_query(query)
-    if t == "compound":
+    if t == "medium":
+        # 模糊短查询 → 用历史上下文扩展；口语化查询 → 精简
+        if len(query.strip()) < 10:
+            return expand_query(query, history)
+        if any(w in query for w in ["分析", "解释", "说明", "为什么"]):
+            return condense_query(query)
+        return query
+    if t == "complex":
         return decompose_query(query)
     return query
