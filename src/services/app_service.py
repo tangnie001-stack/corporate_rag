@@ -13,6 +13,7 @@ from src.infra.db.mysql_db import MySQLDB
 from src.infra.db.vector_store import VectorStore
 from src.parsers.router import DocRouter
 from src.rag.chain import RAGChain, RAGContext
+from src.services.agent_service import AgentService
 from src.services.kb_service import KBService
 from src.services.document_service import DocumentService
 from src.services.chat_service import ChatService
@@ -21,7 +22,7 @@ from src.services.chat_service import ChatService
 class AppService:
     """UI 与后端之间的业务逻辑编排层。
 
-    持有 KBService / DocumentService / ChatService 三个子 service，
+    持有 KBService / DocumentService / ChatService、agent_service 四个子 service，
     编排跨子 service 的多步骤操作。
     """
 
@@ -31,11 +32,19 @@ class AppService:
         vector_store: Optional[VectorStore] = None,
         router: Optional[DocRouter] = None,
         rag_chain: Optional[RAGChain] = None,
+        agent_service: Optional[AgentService] = None,
     ) -> None:
         self.db = mysql_db or MySQLDB()
         self.vector_store = vector_store or VectorStore()
         self.router = router or DocRouter()
         self.rag_chain = rag_chain or RAGChain()
+        self.agent_service = agent_service or AgentService(
+            vector_store=self.vector_store,
+            bm25=self.rag_chain.bm25 if hasattr(self.rag_chain, 'bm25') else None,
+            llm=self.rag_chain.llm if hasattr(self.rag_chain, 'llm') else None,
+            reranker=self.rag_chain.reranker if hasattr(self.rag_chain, 'reranker') else None,
+            chat_manager=self.rag_chain.chat_manager,
+        )
 
         self.kb = KBService(self.db)
         self.document = DocumentService(self.db, self.vector_store, self.router)

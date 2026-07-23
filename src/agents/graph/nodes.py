@@ -5,11 +5,9 @@
 所有节点包含 trace_id 出入日志。
 """
 
-import time
 import asyncio
-from typing import Any, Callable
+from typing import Callable
 from loguru import logger
-from src.config import TOP_K_RERANK
 from src.infra.search.query_router import QueryRouter
 from src.rag.retrieval import search, rerank_results, rewrite_query
 from src.rag.stream import stream_answer, estimate_usage
@@ -112,7 +110,6 @@ def make_generate_node(llm, prompt_manager, tracer) -> Callable:
         tid = _tid(state)
         query = state.get("rewritten_query") or state.get("query", "")
         contexts = state.get("contexts", [])
-        downgraded = state.get("downgraded", False)
 
         if not contexts:
             # 降级到 Naive RAG

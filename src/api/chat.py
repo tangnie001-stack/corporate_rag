@@ -148,129 +148,14 @@ async def _stream_rag_response(
     session_id: str,
     query: str,
 ) -> AsyncGenerator[str, None]:
-    """以 SSE 事件流推送 RAG 响应：status → token → citation → done。
-
-    Args:
-        kb_id: 知识库 UUID（空字符串表示跨库搜索）
-        session_id: 会话 ID，用于对话历史上下文
-        query: 用户查询文本
-
-    Yields:
-        str: SSE 格式的文本行，依次为 status（检索/精排/生成阶段）、
-        token（回答片段）、citation（引用来源）、done（流结束标记）
-    """
+    """以 SSE 事件流推送 RAG 响应 — 委托给 agent_service。"""
     try:
-        logger.info(
-            "Chat stream start: session_id={} kb_id={} query_len={} query={}",
-            session_id,
-            kb_id,
-            len(query),
-            query,
-        )
-        # 启动 Langfuse trace
-        tracer = svc.rag_chain._tracer
-        trace_id = tracer.start_trace(
-            "chat_stream",
-            {"kb_id": kb_id, "session_id": session_id, "query": query},
-            session_id=session_id,
-        )
-
-        # Stage 1 — search
-        yield sse_status("retrieving", "正在检索相关文档...")
-        t0 = time.perf_counter()
-        results = await svc.rag_chain.search(query, kb_id)
-        t1 = time.perf_counter()
-
-        # Stage 2 — rerank
-        yield sse_status("reranking", f"已找到 {len(results)} 个候选，正在精排...")
-        contexts = svc.rag_chain.rerank(query, results)
-        t2 = time.perf_counter()
-
-        # Stage 3 — generate
-        yield sse_status("generating", "正在生成回答...")
-        full_answer = ""
-        for token in svc.rag_chain.stream_answer(
-            query, contexts, [], trace_id=trace_id
-        ):
-            full_answer += token
-            yield sse_token(token)
-            await asyncio.sleep(0)
-
-        t3 = time.perf_counter()
-
-        # 结束 Langfuse trace（在 citations 和持久化之前记录输出）
-        tracer.end_trace(trace_id, output=full_answer)
-
-        # Citations (deduplicated by source+page)
-        seen: set[tuple[str, int]] = set()
-        for ctx in contexts:
-            key = (ctx.source, ctx.page)
-            if key in seen:
-                continue
-            seen.add(key)
-
-            # Query-biased snippet with highlights
-            qbs = get_query_biased_snippet(query, ctx.content)
-            highlighted = _build_highlighted_snippet(qbs)
-
-            snippet = getattr(ctx, "parent_content", None) or ctx.content
-            yield sse_citation(
-                ctx.source,
-                ctx.page,
-                snippet[:200],
-                ctx.score,
-                highlighted_snippet=highlighted,
-            )
-            await asyncio.sleep(0)
-
-        tu = getattr(svc.rag_chain, "_last_token_usage", {})
-        logger.info(
-            "Chat stream completed: session_id={} | "
-            "search={:.1f}s rerank={:.1f}s generate={:.1f}s total={:.1f}s "
-            "| tokens: prompt={} completion={} total={} | citations={}",
-            session_id,
-            t1 - t0,
-            t2 - t1,
-            t3 - t2,
-            t3 - t0,
-            tu.get("prompt_tokens", 0),
-            tu.get("completion_tokens", 0),
-            tu.get("total_tokens", 0),
-            len(seen),
-        )
-
-        # Save assistant response to chat history (deduplicated)
-        seen_src: set[str] = set()
-        sources = []
-        for c in contexts:
-            s = f"{c.source} (第{c.page}页)"
-            if s in seen_src:
-                continue
-            seen_src.add(s)
-            sources.append(s)
-        tu = getattr(svc.rag_chain, "_last_token_usage", {})
-        model_name = os.getenv("LLM_MODEL", "qwen-max")
-        await svc.rag_chain.chat_manager.add_message_async(
-            session_id,
-            "assistant",
-            full_answer,
-            sources=sources,
-            prompt_tokens=tu.get("prompt_tokens", 0),
-            completion_tokens=tu.get("completion_tokens", 0),
-            total_tokens=tu.get("total_tokens", 0),
-            model_name=model_name,
-        )
-
-        # 同步等待 MySQL 持久化完成，确保 done 事件发出时数据已落盘
-        # 这样前端 loadSessions() / switchSession() 拿到的消息数一定正确
-        await _persist_conversation(svc, session_id, kb_id, query, full_answer, sources)
-
+        async for event in svc.agent_service.stream_chat(kb_id, session_id, query):
+            yield event
     except Exception as e:
-        logger.exception("Chat stream error: {}", str(e))
+        logger.exception("Chat stream unhandled error: {}", str(e))
         yield sse_error(str(e))
-
-    # Signal completion
-    yield sse_done()
+        yield sse_done()
 
 
 async def _persist_conversation(
