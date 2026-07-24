@@ -5,7 +5,6 @@
 所有节点包含 trace_id 出入日志。
 """
 
-import asyncio
 from typing import Callable
 from loguru import logger
 from src.infra.search.query_router import QueryRouter
@@ -56,19 +55,12 @@ def rewrite_node(state: AgentState) -> dict:
 
 def make_retrieve_node(vector_store, bm25) -> Callable:
     """创建检索节点工厂函数。"""
-    async def _search(query, kb_id):
-        loop = asyncio.new_event_loop()
-        try:
-            return loop.run_until_complete(search(query, kb_id, vector_store, bm25))
-        finally:
-            loop.close()
-
-    def retrieve_node(state: AgentState) -> dict:
+    async def retrieve_node(state: AgentState) -> dict:
         tid = _tid(state)
         q = state.get("rewritten_query") or state.get("query", "")
         kb_id = state.get("kb_id", "")
         logger.info("[{}] retrieve_node start: query={} kb_id={}", tid, q[:50], kb_id)
-        results = _search(q, kb_id)
+        results = await search(q, kb_id, vector_store, bm25)
         logger.info("[{}] retrieve_node done: results={}", tid, len(results))
         return {"retrieval_results": results}
     return retrieve_node
