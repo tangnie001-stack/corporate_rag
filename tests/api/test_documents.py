@@ -2,7 +2,7 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.api.documents import _merge_tiny_chunks
+from src.services.document_service import _merge_tiny_chunks
 from tests.api.mock_data import make_doc, make_chunk
 
 
