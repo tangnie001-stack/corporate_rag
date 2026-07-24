@@ -180,7 +180,7 @@ async def _persist_conversation(
         answer: LLM 生成的完整回答
         sources: 引用来源列表（去重后的 "文件名 (第x页)" 列表）
     """
-    svc.rag_chain.chat_manager.set_mysql_db(svc.db)
+    svc.chat_manager.set_mysql_db(svc.db)
 
     # 创建会话（如首次消息）。title = 首条消息前 20 字
     title = query[:20]
@@ -201,10 +201,10 @@ async def _persist_conversation(
                     )
 
     await retry(
-        lambda: svc.rag_chain.chat_manager.save_session_async(session_id, title, kb_id)
+        lambda: svc.chat_manager.save_session_async(session_id, title, kb_id)
     )
     await retry(
-        lambda: svc.rag_chain.chat_manager.save_messages_async(
+        lambda: svc.chat_manager.save_messages_async(
             session_id, kb_id, query, answer, sources
         )
     )
