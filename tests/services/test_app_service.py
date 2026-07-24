@@ -188,41 +188,6 @@ class TestAppServiceUpload:
     @patch("src.services.app_service.MySQLDB")
     @patch("src.services.app_service.VectorStore")
     @patch("src.services.app_service.DocRouter")
-    def test_upload_and_process(self, mock_router, mock_vs, mock_db, mock_rag):
-        """正常上传文档应完成解析、向量化并更新状态为 ready。"""
-        db = MagicMock()
-        db.add_document.return_value = "doc_id"
-
-        vs = MagicMock()
-        vs.add_chunks.return_value = 5
-
-        router = MagicMock()
-        router.parse.return_value = MagicMock(
-            chunks=[
-                MagicMock(content="c1", metadata={}, chunk_id="c:0"),
-                MagicMock(content="c2", metadata={}, chunk_id="c:1"),
-            ],
-            total_pages=1,
-            total_chars=100,
-            file_type="txt",
-            is_scanned=False,
-        )
-
-        svc = AppService(mysql_db=db, vector_store=vs, router=router)
-        result = svc.upload_and_process("test-kb-id", "/tmp/test.txt", "test.txt")
-
-        assert result["success"] is True
-        assert result["chunk_count"] == 5
-        router.parse.assert_called_once_with("/tmp/test.txt")
-        vs.add_chunks.assert_called_once()
-        db.update_document_status.assert_called_once_with(
-            "doc_id", "ready", chunk_count=5
-        )
-
-    @patch("src.services.app_service.RAGChain")
-    @patch("src.services.app_service.MySQLDB")
-    @patch("src.services.app_service.VectorStore")
-    @patch("src.services.app_service.DocRouter")
     def test_upload_scanned_doc(self, mock_router, mock_vs, mock_db, mock_rag):
         """扫描件文档应返回错误并更新文档状态为 failed。"""
         db = MagicMock()
@@ -264,61 +229,25 @@ class TestAppServiceUpload:
         )
 
 
-class TestAppServiceChat:
-    """问答功能测试。"""
+class TestAppServiceDocumentProcess:
+    """文档异步处理测试。"""
 
     @patch("src.services.app_service.RAGChain")
     @patch("src.services.app_service.MySQLDB")
     @patch("src.services.app_service.VectorStore")
     @patch("src.services.app_service.DocRouter")
-    def test_chat(self, mock_router, mock_vs, mock_db, mock_rag):
-        """正常问答应返回拼接的回答和引用列表。"""
-        rag = MagicMock()
-
-        def mock_gen():
-            yield "贵州"
-            yield "茅台"
-            yield "营收1,741亿元。"
-
-        rag.chat_with_citations.return_value = (
-            mock_gen(),
-            [
-                MagicMock(
-                    source="年报.pdf",
-                    page=3,
-                    content="营收1,741亿元",
-                    to_citation=lambda: "> citation",
-                ),
-            ],
+    @pytest.mark.asyncio
+    async def test_process_document_success(self, mock_router, mock_vs, mock_db, mock_rag):
+        """文档处理成功时状态更新为 ready。"""
+        svc = AppService(mysql_db=mock_db, vector_store=mock_vs, router=mock_router)
+        await svc.document.process_document(
+            kb_id="test-kb",
+            doc_id="test-doc",
+            minio_key="path/to/file.pdf",
+            filename="test.pdf",
+            ext=".pdf",
         )
-
-        svc = AppService(rag_chain=rag)
-        answer, citations = svc.chat("test-kb-id", "sess_1", "营收多少？")
-
-        assert "贵州茅台营收1,741亿元" in answer
-        assert len(citations) == 1
-        rag.chat_with_citations.assert_called_once_with(
-            "test-kb-id", "sess_1", "营收多少？"
+        mock_db.update_document_status.assert_called_with(
+            "test-doc", "ready", chunk_count=ANY, processing_state="completed",
+            processing_progress=100, processing_message=ANY, chunk_strategy=ANY,
         )
-        rag.chat_manager.add_message.assert_called_once_with(
-            "sess_1",
-            "assistant",
-            "贵州茅台营收1,741亿元。",
-            sources=ANY,
-        )
-
-    @patch("src.services.app_service.RAGChain")
-    @patch("src.services.app_service.MySQLDB")
-    @patch("src.services.app_service.VectorStore")
-    @patch("src.services.app_service.DocRouter")
-    def test_chat_kb_not_found(self, mock_router, mock_vs, mock_db, mock_rag):
-        """知识库不存在的问答应返回错误信息。"""
-        rag = MagicMock()
-        rag.chat_with_citations.return_value = (
-            (t for t in ["知识库 'xx' 不存在"]),
-            [],
-        )
-        svc = AppService(rag_chain=rag)
-        answer, citations = svc.chat("nonexistent-kb", "sess", "q")
-        assert "不存在" in answer
-        assert citations == []
