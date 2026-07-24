@@ -6,9 +6,9 @@
   - 支持滑动窗口（取最近 N 条消息），避免 token 溢出
 
 在 RAG 流水线中的位置：
-  用户提问 → ChatManager.get_window() 获取历史
+  用户提问 → ChatManager.get_history_async() 获取历史
            → RAGChain._build_prompt() 拼入 prompt
-           → ChatManager.add_message() 写入本轮问答
+           → ChatManager.add_message_async() 写入本轮问答
 """
 
 import json
@@ -18,7 +18,7 @@ import redis.asyncio as redis_async
 import redis as redis_sync
 from loguru import logger
 
-from src.config import MEMORY_WINDOW, REDIS_URL, REDIS_TTL
+from src.config import REDIS_URL, REDIS_TTL
 from src.chat.persistence import PersistenceService
 from src.infra.db.mysql_db import MySQLDB
 
@@ -114,14 +114,6 @@ class ChatManager:
                 sources,
             )
 
-    def cleanup_session(self, session_id: str) -> None:
-        """删除 Redis 中的会话 key（尽力而为，失败不抛异常）。
-
-        在 POST /api/sessions/delete 端点中被调用，
-        确保删除会话时同时清理 Redis 缓存。
-        """
-        self.clear_history(session_id)
-
     # ═══════════ Redis / InMemory 核心 ═══════════
 
     def _init_redis(self, redis_url: str) -> None:
@@ -144,53 +136,6 @@ class ChatManager:
                 e,
             )
 
-    def _get_sync_redis(self):
-        """创建同步 Redis 连接（用于同步方法的向后兼容）。"""
-        return redis_sync.from_url(self._redis_url, decode_responses=True)
-
-    def _ensure_redis(self) -> None:
-        """验证 Redis 连接存活，断开时自动降级为 InMemory；InMemory 期间尝试恢复 Redis。
-
-        使用同步 Redis 连接进行健康检查（向后兼容同步方法）。
-        两种场景：
-          - Redis 模式：ping 检测连接，失败则尝试重连一次，重连失败降级 InMemory
-          - InMemory 模式：尝试重连 Redis，成功则自动切回 Redis 模式
-
-        Note: 此方法仅用于同步方法。异步方法使用 _ensure_redis_async。
-        """
-        if self._in_memory:
-            # 内存模式：尝试恢复 Redis 连接（可能已重启）
-            try:
-                conn = self._get_sync_redis()
-                conn.ping()
-                conn.close()
-                self._in_memory = False
-                logger.info(
-                    "ChatManager: Redis reconnected, switched back from InMemory"
-                )
-            except Exception:
-                self._in_memory = True
-            return
-        try:
-            conn = self._get_sync_redis()
-            conn.ping()
-            conn.close()
-        except Exception:
-            # Redis 断开：尝试重连一次
-            logger.warning("ChatManager: Redis ping failed, attempting reconnect...")
-            try:
-                conn = self._get_sync_redis()
-                conn.ping()
-                conn.close()
-                logger.info("ChatManager: Redis reconnected")
-            except Exception as e:
-                logger.warning(
-                    "ChatManager: Redis reconnect failed, falling back to InMemory: {}",
-                    e,
-                )
-                self._redis = None
-                self._in_memory = True
-
     def _session_key(self, session_id: str) -> str:
         """生成 Redis key，格式为 "chat_history:{session_id}"。
 
@@ -201,118 +146,6 @@ class ChatManager:
             Redis key 字符串
         """
         return f"chat_history:{session_id}"
-
-    def get_history(self, session_id: str) -> list[dict]:
-        """获取指定会话的完整对话历史。
-
-        Args:
-            session_id: 会话 ID
-
-        Returns:
-            消息列表，每条为 {"role": "user"/"assistant", "content": "..."}
-        """
-        self._ensure_redis()
-        if self._in_memory:
-            return list(self._memory_store.get(session_id, []))
-        key = self._session_key(session_id)
-        try:
-            conn = self._get_sync_redis()
-            raw = conn.lrange(key, 0, -1)
-            conn.close()
-            return [json.loads(m) for m in raw]
-        except Exception as e:
-            logger.warning("ChatManager: Redis get_history failed: {}", e)
-            return []
-
-    def add_message(
-        self,
-        session_id: str,
-        role: str,
-        content: str,
-        sources=None,
-        prompt_tokens=0,
-        completion_tokens=0,
-        total_tokens=0,
-        model_name="",
-    ) -> None:
-        """向会话追加一条消息。
-
-        Args:
-            session_id: 会话 ID
-            role: 角色（"user" 或 "assistant"）
-            content: 消息文本内容
-            sources: 可选的来源引用列表（assistant 回答时附带的文档引用）
-            prompt_tokens: 提示 token 数
-            completion_tokens: 补全 token 数
-            total_tokens: 总 token 数
-            model_name: 模型名称（如 qwen-max）
-        """
-        msg: dict = {"role": role, "content": content}
-        if sources:
-            msg["sources"] = sources
-        if prompt_tokens or completion_tokens or total_tokens:
-            msg.update(
-                {
-                    "prompt_tokens": prompt_tokens,
-                    "completion_tokens": completion_tokens,
-                    "total_tokens": total_tokens,
-                }
-            )
-        if model_name:
-            msg["model_name"] = model_name
-
-        self._ensure_redis()
-        if self._in_memory:
-            if session_id not in self._memory_store:
-                self._memory_store[session_id] = []
-            self._memory_store[session_id].append(msg)
-            return
-        key = self._session_key(session_id)
-        try:
-            conn = self._get_sync_redis()
-            conn.rpush(key, json.dumps(msg, ensure_ascii=False))
-            conn.expire(key, self.ttl)
-            conn.close()
-        except Exception as e:
-            logger.warning("ChatManager: Redis add_message failed: {}", e)
-
-    def get_window(
-        self,
-        session_id: str,
-        window_size: int = MEMORY_WINDOW,
-    ) -> list[dict]:
-        """获取对话历史的滑动窗口（最近 N 条消息）。
-
-        用于构建 prompt 时限制上下文长度，避免 token 溢出。
-        例如 window_size=6 时，只取最近 3 轮对话（每轮 user + assistant 各 1 条）。
-
-        Args:
-            session_id: 会话 ID
-            window_size: 窗口大小（消息条数），默认 6
-
-        Returns:
-            最近 window_size 条消息的列表
-        """
-        history = self.get_history(session_id)
-        return history[-window_size:] if len(history) > window_size else history
-
-    def clear_history(self, session_id: str) -> None:
-        """清空指定会话的所有对话历史。
-
-        Args:
-            session_id: 会话 ID
-        """
-        self._ensure_redis()
-        if self._in_memory:
-            self._memory_store.pop(session_id, None)
-            return
-        key = self._session_key(session_id)
-        try:
-            conn = self._get_sync_redis()
-            conn.delete(key)
-            conn.close()
-        except Exception as e:
-            logger.warning("ChatManager: Redis clear_history failed: {}", e)
 
     # ═══════════ 异步方法 ═══════════
 
@@ -352,7 +185,10 @@ class ChatManager:
         """
         await self._ensure_redis_async()
         if self._in_memory:
-            self.add_message(session_id, role, content, **kwargs)
+            msg = {"role": role, "content": content}
+            if session_id not in self._memory_store:
+                self._memory_store[session_id] = []
+            self._memory_store[session_id].append(msg)
             return
         msg = {"role": role, "content": content}
         key = self._session_key(session_id)
