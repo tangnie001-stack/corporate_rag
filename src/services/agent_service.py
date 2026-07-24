@@ -13,7 +13,7 @@ from typing import AsyncGenerator
 
 from loguru import logger
 
-from src.infra.sse_utils import sse_status, sse_token, sse_citation, sse_done, sse_error
+from src.utils.sse import sse_status, sse_token, sse_citation, sse_done, sse_error
 from src.agents.graph.workflow import build_graph
 from src.agents.graph.state import AgentState
 from src.infra.db.vector_store import VectorStore
