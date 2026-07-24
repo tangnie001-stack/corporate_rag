@@ -203,7 +203,7 @@ def run_generate(
     from ragas.testset.synthesizers.generate import TestsetGenerator
     from src.models import get_embeddings
     from src.config import settings
-    from src.infra.desensitize import desensitize
+    from src.utils.desensitize import desensitize
     from src.config.settings import RAGAS_DOC_WHITELIST
     from src.infra.db.vector_store import VectorStore
     import ragas
