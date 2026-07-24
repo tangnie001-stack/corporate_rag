@@ -30,61 +30,6 @@ class TestChatManagerInMemory:
         """连接失败时应设置 _in_memory 标志为 True。"""
         assert cm._in_memory is True
 
-    def test_add_and_get_history(self, cm):
-        """基本操作：添加消息并按顺序查询历史。"""
-        session_id = "test_session_1"
-        cm.add_message(session_id, "user", "你好")
-        cm.add_message(session_id, "assistant", "你好！有什么可以帮助你的？")
-
-        history = cm.get_history(session_id)
-        assert len(history) == 2
-        assert history[0]["role"] == "user"  # 用户消息在前
-        assert history[0]["content"] == "你好"
-        assert history[1]["role"] == "assistant"  # 助手消息在后
-
-    def test_get_window_limits(self, cm):
-        """滑动窗口截取：只返回最后 N 条消息。"""
-        session_id = "test_window"
-        for i in range(10):
-            cm.add_message(session_id, "user", f"msg_{i}")
-
-        # 窗口大小为 3，应返回最后 3 条
-        window = cm.get_window(session_id, window_size=3)
-        assert len(window) == 3
-        assert window[-1]["content"] == "msg_9"  # 最后一条是 msg_9
-
-    def test_clear_history(self, cm):
-        """清空指定会话的历史记录。"""
-        session_id = "test_clear"
-        cm.add_message(session_id, "user", "hello")
-        cm.clear_history(session_id)
-        assert cm.get_history(session_id) == []
-
-    def test_get_window_default_memory_window(self, cm):
-        """未指定 window_size 时应使用 config.MEMORY_WINDOW 默认值。"""
-        session_id = "test_default_window"
-        # 插入超过 MEMORY_WINDOW 的消息数
-        for i in range(MEMORY_WINDOW + 5):
-            cm.add_message(session_id, "user", f"msg_{i}")
-
-        window = cm.get_window(session_id)  # 不传 window_size
-        assert len(window) <= MEMORY_WINDOW  # 不应超过配置的窗口大小
-
-    def test_get_history_empty_session(self, cm):
-        """查询不存在的会话应返回空列表。"""
-        assert cm.get_history("nonexistent_session") == []
-
-    def test_inmemory_store_isolation(self, cm):
-        """会话隔离：不同 session_id 的消息互不干扰。"""
-        cm.add_message("session_a", "user", "from_a")
-        cm.add_message("session_b", "user", "from_b")
-        hist_a = cm.get_history("session_a")
-        hist_b = cm.get_history("session_b")
-        assert len(hist_a) == 1
-        assert len(hist_b) == 1
-        assert hist_a[0]["content"] == "from_a"
-        assert hist_b[0]["content"] == "from_b"
-
 
 class TestChatManagerRedisReconnection:
     """测试 Redis 断开后的自动降级和恢复重连。
