@@ -16,12 +16,13 @@
 """
 
 import argparse
+import asyncio
 import os
 import sys
+import uuid
 from datetime import datetime
 from typing import Any
 
-import asyncio
 from loguru import logger
 
 from src.core.logging import setup_logging
@@ -100,7 +101,7 @@ def parse_args() -> argparse.Namespace:
 
 
 async def generate_answers_and_contexts(
-    rag_chain: Any,
+    graph: Any,
     kb_id: str,
     session_id: str,
     questions: list[str],
@@ -108,7 +109,7 @@ async def generate_answers_and_contexts(
     """对每个问题生成回答，并收集检索到的上下文.
 
     Args:
-        rag_chain: RAGChain 实例
+        graph: LangGraph 编译后的图实例
         kb_id: 知识库 UUID
         session_id: 会话 ID
         questions: 问题列表
@@ -125,12 +126,23 @@ async def generate_answers_and_contexts(
         logger.info("Generating answer for Q{}: {}...", i + 1, q[:40])
 
         try:
-            token_gen, citations = await rag_chain.chat_with_citations(kb_id, session_id, q)
-            full_answer = "".join([t for t in token_gen])
+            final_state = await graph.ainvoke({
+                "kb_id": kb_id,
+                "session_id": session_id,
+                "query": q,
+                "trace_id": f"trace_{uuid.uuid4().hex[:12]}",
+                "retrieval_retries": 0,
+                "downgraded": False,
+                "downgrade_reason": "",
+                "_history": [],
+            })
+            full_answer = final_state.get("answer", "")
             answers.append(full_answer)
 
             # 提取上下文字段列表（用于 context_recall / context_precision 评估）
-            ctx_list = [c.content for c in citations]
+            ctx_list = [
+                c.get("content", "") for c in final_state.get("contexts", [])
+            ]
             contexts.append(ctx_list)
 
             logger.info(
@@ -413,14 +425,19 @@ def main() -> None:
         context_recall,
         context_precision,
     )
-    from src.models import get_llm, get_embeddings
-    from src.rag.chain import RAGChain
+    from src.models import get_llm, get_embeddings, get_rerank
+    from src.infra.db.vector_store import VectorStore
+    from src.infra.search.bm25_index import BM25Index
+    from src.infra.llm.prompt_manager import PromptManager
+    from src.infra.llm.langfuse_tracing import LangfuseTracer
+    from src.agents.graph.workflow import build_graph
+    from src.config import HYBRID_SEARCH_ENABLED, BM25_INDEX_DIR
 
-    logger.info("Initializing RAGChain...")
-    rag_chain = RAGChain()
+    logger.info("Initializing RAG components...")
+    vector_store = VectorStore()
 
     logger.info("Checking KB vector store...")
-    if rag_chain.vector_store.get_or_create_collection(kb_id).count() == 0:
+    if vector_store.get_or_create_collection(kb_id).count() == 0:
         logger.error("Knowledge base '{}' vector store is empty", kb_id)
         print("Knowledge base is empty")
         sys.exit(1)
@@ -433,13 +450,20 @@ def main() -> None:
     eval_model = settings.RAGAS_LLM_MODEL
     logger.info("Initializing RAGAS evaluator ({})...", eval_model)
     llm = get_llm(model=eval_model, temperature=0)
+    reranker = get_rerank()
     embeddings = get_embeddings()
     llm_wrapper = LangchainLLMWrapper(llm, bypass_n=True)
     embeddings_wrapper = LangchainEmbeddingsWrapper(embeddings)
 
+    # 构建 LangGraph
+    prompt_manager = PromptManager()
+    tracer = LangfuseTracer()
+    bm25 = BM25Index(index_dir=BM25_INDEX_DIR) if HYBRID_SEARCH_ENABLED else None
+    graph = build_graph(vector_store, bm25, llm, reranker, prompt_manager, tracer)
+
     logger.info("Generating answers for {} questions...", len(questions))
     answers, contexts = asyncio.run(generate_answers_and_contexts(
-        rag_chain,
+        graph,
         kb_id,
         session_id,
         questions,
