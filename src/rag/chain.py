@@ -1,26 +1,22 @@
 """RAG 问答链 — 编排检索→精排→Prompt构建→流式生成的完整流水线。"""
 
-from typing import Generator, Optional
+from typing import Optional
 
 import time
 
 from loguru import logger
 
-from src.config import (
-    HYBRID_SEARCH_ENABLED,
-    BM25_INDEX_DIR,
-)
+from src.config import BM25_INDEX_DIR, HYBRID_SEARCH_ENABLED
 from src.infra.llm.langfuse_tracing import LangfuseTracer
 from src.infra.llm.prompt_manager import PromptManager
-from src.infra.search.query_router import QueryRouter
 from src.infra.search.bm25_index import BM25Index
 from src.infra.db.vector_store import VectorStore
 from src.infra.db.mysql_db import MySQLDB
-from src.chat import ChatManager
+from src.chat.manager import ChatManager
 from src.models import get_embeddings, get_llm, get_rerank
 from src.rag.context import RAGContext
-from src.rag.retrieval import search, rerank_results, rewrite_query
-from src.rag.prompt import build_prompt, build_simple_prompt
+from src.rag.retrieval import search, rerank_results
+from src.rag.prompt import build_prompt
 from src.rag.stream import stream_answer
 
 
@@ -44,7 +40,6 @@ class RAGChain:
         self._reranker = reranker
         self._tracer = LangfuseTracer()
         self._prompt_manager = PromptManager()
-        self.router = QueryRouter()
         self.bm25 = (
             BM25Index(index_dir=BM25_INDEX_DIR) if HYBRID_SEARCH_ENABLED else None
         )
@@ -103,162 +98,8 @@ class RAGChain:
 
     # ═══════════ chat_with_citations — 主入口 ═══════════
 
-    async def chat_with_citations(
-        self,
-        kb_id: str,
-        session_id: str,
-        query: str,
-    ) -> tuple[Generator[str, None, None], list[RAGContext]]:
-        """生成带引用来源的流式回答 — RAG 流水线主入口。"""
-        trace_id = self._tracer.start_trace(
-            "chat_with_citations",
-            {"kb_id": kb_id, "session_id": session_id, "query": query},
-            session_id=session_id,
-        )
-        route = self.router.route(query)
-        logger.info(
-            "Chat with citations: route={} query_len={} query={}",
-            route,
-            len(query),
-            query,
-        )
-        history = self.chat_manager.get_window(session_id)
-
-        # Simple route
-        if route == "simple":
-            return self._handle_simple_route(query, history, trace_id)
-
-        # Vague / Complex route — 改写查询
-        if route in ("vague", "complex"):
-            query_rewritten = self._rewrite_if_needed(query, history)
-            if query_rewritten != query:
-                logger.info(
-                    'Query rewritten: "{}" -> "{}"',
-                    query,
-                    query_rewritten,
-                )
-                query = query_rewritten
-
-        # Short query guard
-        SHORT_QUERY_THRESHOLD = 5
-        if len(query.strip()) < SHORT_QUERY_THRESHOLD:
-            return self._handle_short_query(trace_id)
-
-        # 检索
-        try:
-            t0 = time.perf_counter()
-            results = await search(query, kb_id, self.vector_store, self.bm25)
-        except Exception as e:
-            return self._handle_search_error(e, trace_id)
-
-        t1 = time.perf_counter()
-
-        if not results:
-            return self._handle_no_results(trace_id)
-
-        # Rerank → Prompt → Stream
-        rag_contexts = rerank_results(query, results, self.reranker)
-        t2 = time.perf_counter()
-        history = self.chat_manager.get_window(session_id)
-        token_generator = self.stream_answer(query, rag_contexts, history, trace_id)
-        t3 = time.perf_counter()
-        self.chat_manager.add_message(session_id, "user", query)
-        tu = getattr(self, "_last_token_usage", {})
-        logger.info(
-            "Chat with citations completed: "
-            "search={:.1f}s rerank={:.1f}s generate={:.1f}s total={:.1f}s "
-            "| results={} contexts={} "
-            "| tokens: prompt={} completion={} total={}",
-            t1 - t0,
-            t2 - t1,
-            t3 - t2,
-            t3 - t0,
-            len(results),
-            len(rag_contexts),
-            tu.get("prompt_tokens", 0),
-            tu.get("completion_tokens", 0),
-            tu.get("total_tokens", 0),
-        )
-        return token_generator, rag_contexts
-
-    # ═══════════ 子方法 ═══════════
-
-    def _handle_simple_route(self, query, history, trace_id):
-        """处理 simple 路由：无检索，直接 LLM 回答。"""
-        logger.info("Route: simple — direct LLM answer (no RAG)")
-        prompt = build_simple_prompt(query, history, self.prompt_manager)
-        token_gen = stream_answer(prompt, self.llm, self._tracer, trace_id)
-        self.chat_manager.add_message("", "user", query)
-        return token_gen, []
-
-    def _handle_short_query(self, trace_id):
-        """处理过短查询。"""
-        logger.info("Query too short (< {} chars)", 5)
-        citations: list[RAGContext] = []
-
-        def _gen():
-            yield '查询内容过短，请输入更具体的财务问题（如"2024年营业收入是多少？"）'
-
-        self._tracer.end_trace(trace_id, output="查询内容过短")
-        return _gen(), citations
-
-    def _handle_search_error(self, error: Exception, trace_id):
-        """处理检索失败。"""
-        error_msg = str(error)
-        logger.exception("Vector search failed: {}", error_msg)
-        citations: list[RAGContext] = []
-
-        def _gen():
-            yield f"检索失败: {error_msg}"
-
-        return _gen(), citations
-
-    def _handle_no_results(self, trace_id):
-        """处理检索结果为空。"""
-        logger.info("No results found")
-        citations: list[RAGContext] = []
-
-        def _gen():
-            yield "未在文档中找到相关数据。"
-
-        return _gen(), citations
-
-    def _rewrite_if_needed(self, query: str, history: list) -> str:
-        """根据需要执行查询改写。"""
-        rewritten = rewrite_query(query, history)
-        if isinstance(rewritten, list):
-            rewritten = " ".join(rewritten)
-        return rewritten
-
-    # ═══════════ 查询分类与改写 — 测试委托 ═══════════
-
-    def _classify_query(self, query: str) -> str:
-        """委托给 retrieval.classify_query。"""
-        from src.rag.retrieval import classify_query
-
-        return classify_query(query)
-
-    def _rewrite_query(self, query: str, history: list[dict]) -> str | list[str]:
-        """委托给 retrieval.rewrite_query。"""
-        return rewrite_query(query, history)
-
-    def _expand_query(self, query: str, history: list[dict]) -> str:
-        """委托给 retrieval.expand_query。"""
-        from src.rag.retrieval import expand_query
-
-        return expand_query(query, history)
-
-    def _condense_query(self, query: str) -> str:
-        """委托给 retrieval.condense_query。"""
-        from src.rag.retrieval import condense_query
-
-        return condense_query(query)
-
-    def _decompose_query(self, query: str) -> list[str]:
-        """委托给 retrieval.decompose_query。"""
-        from src.rag.retrieval import decompose_query
-
-        return decompose_query(query)
+    # 已删除 — 生产问答路径已迁移至 AgentService.stream_chat()。
+    # CLI eval 请直接使用 graph.ainvoke()。
 
     # ═══════════ 公共方法 ═══════════
 
