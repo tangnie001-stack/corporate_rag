@@ -4,8 +4,6 @@
 会话持久化在 MySQL 中，并缓存于 Redis。
 """
 
-import asyncio
-
 from fastapi import APIRouter, Depends
 from loguru import logger
 
@@ -120,8 +118,8 @@ async def delete_session(
     """
     session_id = body.session_id
 
-    # 清理 Redis（同步操作，通过 asyncio.to_thread 委托到线程池）
-    await asyncio.to_thread(svc.rag_chain.chat_manager.cleanup_session, session_id)
+    # 清理 Redis（通过 chat_manager.clear_history_async 异步清理）
+    await svc.chat_manager.clear_history_async(session_id)
 
     # 删除 MySQL 记录
     ok = await svc.db.delete_session_and_messages(session_id)

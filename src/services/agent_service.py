@@ -63,7 +63,7 @@ class AgentService:
         )
 
         history = await self._chat_manager.get_history_async(session_id) or []
-        self._chat_manager.add_message(session_id, "user", query)
+        await self._chat_manager.add_message_async(session_id, "user", query)
 
         initial_state: AgentState = {
             "session_id": session_id,
