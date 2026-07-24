@@ -10,7 +10,6 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from src.rag.chain import RAGChain, RAGContext
 

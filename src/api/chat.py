@@ -1,8 +1,6 @@
 """流式聊天 SSE 端点 — 支持分阶段状态推送和引用高亮。"""
 
 import asyncio
-import os
-import time
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, Query
@@ -11,7 +9,7 @@ from loguru import logger
 
 import jieba
 
-from src.api.sse_utils import sse_citation, sse_done, sse_error, sse_status, sse_token
+from src.api.sse_utils import sse_done, sse_error
 from src.api.dependencies import get_app_service
 from src.services.app_service import AppService
 

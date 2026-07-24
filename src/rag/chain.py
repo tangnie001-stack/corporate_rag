@@ -2,9 +2,7 @@
 
 from typing import Optional
 
-import time
 
-from loguru import logger
 
 from src.config import BM25_INDEX_DIR, HYBRID_SEARCH_ENABLED
 from src.infra.llm.langfuse_tracing import LangfuseTracer
@@ -15,7 +13,6 @@ from src.infra.db.mysql_db import MySQLDB
 from src.chat.manager import ChatManager
 from src.models import get_embeddings, get_llm, get_rerank
 from src.rag.context import RAGContext
-from src.rag.retrieval import search, rerank_results
 from src.rag.prompt import build_prompt
 from src.rag.stream import stream_answer
 

@@ -1,5 +1,5 @@
 """Tests for AgentState definition."""
-from src.agents.graph.state import AgentState, RAGContextItem
+from src.agents.graph.state import AgentState
 
 
 def test_agent_state_defaults():
