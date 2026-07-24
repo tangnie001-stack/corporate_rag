@@ -4,7 +4,6 @@ import asyncio
 import os
 import tempfile
 import time
-import uuid
 
 from loguru import logger
 
@@ -69,68 +68,6 @@ class DocumentService:
             raise BusinessError(Code.DOC_NOT_FOUND, Code.DOC_NOT_FOUND_MSG, 404)
         logger.info("Document deleted: {} ({})", doc["filename"], doc_id)
         return {"doc_id": doc_id, "filename": doc["filename"], "status": "deleted"}
-
-    def upload_and_process(self, kb_id: str, file_path: str, filename: str) -> dict:
-        """上传文档并执行完整处理流水线。
-
-        同步执行，预计耗时 1-30 秒。
-        """
-        file_type = filename.rsplit(".", 1)[-1].lower() if "." in filename else "txt"
-        file_size = 0
-        try:
-            file_size = os.path.getsize(file_path)
-        except OSError as e:
-            logger.warning("Cannot get file size for '{}': {}", filename, e)
-
-        doc_id = str(uuid.uuid4())
-        self.db.add_document(doc_id, kb_id, filename, file_type, file_size)
-
-        try:
-            parse_result = self.router.parse(file_path)
-            for chunk in parse_result.chunks:
-                chunk.metadata["source"] = filename
-
-            if parse_result.is_scanned:
-                error_msg = "文档为扫描件或无可提取文本，MVP 暂不支持 OCR"
-                self.db.update_document_status(doc_id, "failed", error_msg=error_msg)
-                logger.warning("Scanned document detected: {}", filename)
-                return {"success": False, "chunk_count": 0, "error": error_msg}
-
-            chunk_data_list = [
-                ChunkData(content=c.content, metadata=c.metadata)
-                for c in parse_result.chunks
-            ]
-            quality_report = validate_chunks(chunk_data_list)
-            if quality_report.tiny_chunks:
-                logger.warning(
-                    "Document '{}' has {} tiny chunks",
-                    filename,
-                    len(quality_report.tiny_chunks),
-                )
-            if quality_report.garbled_chunks:
-                logger.warning(
-                    "Document '{}' has {} garbled chunks",
-                    filename,
-                    len(quality_report.garbled_chunks),
-                )
-
-            chunk_count = self.vector_store.add_chunks(
-                kb_id, parse_result.chunks, doc_id
-            )
-            self.db.update_document_status(doc_id, "ready", chunk_count=chunk_count)
-            logger.info("Document processed: {} -> {} chunks", filename, chunk_count)
-            return {"success": True, "chunk_count": chunk_count, "error": ""}
-
-        except Exception as e:
-            error_msg = str(e)
-            logger.exception("Document processing failed: {} - {}", filename, error_msg)
-            try:
-                self.db.update_document_status(doc_id, "failed", error_msg=error_msg)
-            except Exception:
-                logger.exception(
-                    "Failed to update document status after processing error",
-                )
-            return {"success": False, "chunk_count": 0, "error": error_msg}
 
     # ── 以下为异步版后台任务的方法 ──
 
