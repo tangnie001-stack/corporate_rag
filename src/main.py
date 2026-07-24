@@ -24,7 +24,7 @@ from src.middleware.auth import auth_middleware
 from src.middleware.response_processor import response_processor_middleware
 from src.middleware.trace_id import trace_id_middleware
 from src.infra.db.mysql_db import MySQLDB
-from src.infra.errors import AppError
+from src.utils.errors import AppError
 
 
 @asynccontextmanager

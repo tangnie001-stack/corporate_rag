@@ -9,7 +9,7 @@ from loguru import logger
 from src.infra.db.mysql_db import MySQLDB
 from src.infra.db.vector_store import VectorStore
 from src.infra.chunking.validator import ChunkData, validate_chunks
-from src.infra.errors import BusinessError
+from src.utils.errors import BusinessError
 from src.config.response_codes import Code
 from src.parsers.router import DocRouter
 

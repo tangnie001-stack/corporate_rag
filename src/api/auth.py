@@ -11,7 +11,7 @@ from src.api.model.response import LoginResponse, VerifyResponse
 from src.services.app_service import AppService
 from src.api.dependencies import get_app_service
 from src.config.response_codes import Code
-from src.infra.errors import AuthError
+from src.utils.errors import AuthError
 from src.infra.auth.user_auth import UserAuth
 from src.infra.redis_client import get_redis_client
 

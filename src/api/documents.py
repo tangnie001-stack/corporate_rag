@@ -35,7 +35,7 @@ from src.api.dependencies import get_app_service
 from src.config import CHUNK_EVAL_ENABLED, MAX_FILE_SIZE, MAX_TABLE_TOKENS
 from src.config.response_codes import Code
 from src.eval.chunk_scorer import ChunkQualityScorer
-from src.infra.errors import BusinessError, SystemError
+from src.utils.errors import BusinessError, SystemError
 from src.infra.chunking.router import ChunkRouter
 from src.infra.chunking.strategies.base import BaseChunker
 from src.infra.chunking.validator import ChunkData, validate_chunks

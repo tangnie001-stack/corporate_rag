@@ -1,6 +1,6 @@
 """测试 AppError 业务异常层次。"""
 
-from src.infra.errors import BusinessError
+from src.utils.errors import BusinessError
 
 
 def test_api_error_requires_code_and_message():

@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 from src.services.app_service import AppService
-from src.infra.errors import AppError
+from src.utils.errors import AppError
 
 
 class TestAppServiceInit:

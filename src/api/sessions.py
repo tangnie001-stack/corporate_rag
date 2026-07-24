@@ -14,7 +14,7 @@ from src.api.model.response import SessionItem, MessageItem, SessionDeleteRespon
 from src.api.dependencies import get_app_service
 from src.services.app_service import AppService
 from src.config.response_codes import Code
-from src.infra.errors import BusinessError
+from src.utils.errors import BusinessError
 
 router = APIRouter()
 
