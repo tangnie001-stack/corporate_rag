@@ -1,6 +1,6 @@
 """应用业务逻辑编排入口。
 
-组合 KBService、DocumentService、ChatService 三个子 service，
+组合 KBService、DocumentService 两个子 service，
 对外提供统一的业务接口。
 """
 
@@ -12,17 +12,18 @@ from loguru import logger
 from src.infra.db.mysql_db import MySQLDB
 from src.infra.db.vector_store import VectorStore
 from src.parsers.router import DocRouter
-from src.rag.chain import RAGChain, RAGContext
+from src.chat.manager import ChatManager
+from src.config import BM25_INDEX_DIR, HYBRID_SEARCH_ENABLED
+from src.infra.search.bm25_index import BM25Index
 from src.services.agent_service import AgentService
-from src.services.kb_service import KBService
 from src.services.document_service import DocumentService
-from src.services.chat_service import ChatService
+from src.services.kb_service import KBService
 
 
 class AppService:
     """UI 与后端之间的业务逻辑编排层。
 
-    持有 KBService / DocumentService / ChatService、agent_service 四个子 service，
+    持有 KBService / DocumentService、agent_service 三个子 service，
     编排跨子 service 的多步骤操作。
     """
 
@@ -31,24 +32,23 @@ class AppService:
         mysql_db: Optional[MySQLDB] = None,
         vector_store: Optional[VectorStore] = None,
         router: Optional[DocRouter] = None,
-        rag_chain: Optional[RAGChain] = None,
+        chat_manager: Optional[ChatManager] = None,
         agent_service: Optional[AgentService] = None,
     ) -> None:
         self.db = mysql_db or MySQLDB()
         self.vector_store = vector_store or VectorStore()
         self.router = router or DocRouter()
-        self.rag_chain = rag_chain or RAGChain()
+        self.chat_manager = chat_manager or ChatManager()
+        self.bm25 = (
+            BM25Index(index_dir=BM25_INDEX_DIR) if HYBRID_SEARCH_ENABLED else None
+        )
         self.agent_service = agent_service or AgentService(
             vector_store=self.vector_store,
-            bm25=self.rag_chain.bm25 if hasattr(self.rag_chain, 'bm25') else None,
-            llm=self.rag_chain.llm if hasattr(self.rag_chain, 'llm') else None,
-            reranker=self.rag_chain.reranker if hasattr(self.rag_chain, 'reranker') else None,
-            chat_manager=self.rag_chain.chat_manager,
+            bm25=self.bm25,
+            chat_manager=self.chat_manager,
         )
-
         self.kb = KBService(self.db)
         self.document = DocumentService(self.db, self.vector_store, self.router)
-        self.chat = ChatService(self.rag_chain)
 
     # ==================== 知识库 ====================
 
@@ -100,11 +100,3 @@ class AppService:
         return self.document.upload_and_process(kb_id, file_path, filename)
 
     # ==================== 问答 ====================
-
-    def chat(
-        self,
-        kb_id: str,
-        session_id: str,
-        query: str,
-    ) -> tuple[str, list[RAGContext]]:
-        return self.chat.chat(kb_id, session_id, query)
