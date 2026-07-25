@@ -74,7 +74,7 @@ class BM25Index:
 
 
 def rrf_fusion(
-    dense: list[dict], bm25_res: list[dict], k: int = 60, top_n: int = 50
+    dense: list, bm25_res: list[dict], k: int = 60, top_n: int = 50
 ) -> list[dict]:
     """将 Dense 语义检索和 BM25 词法检索的结果通过 RRF 算法融合。
 
@@ -82,7 +82,7 @@ def rrf_fusion(
     k 参数控制排名衰减速度（k 越大，排名靠后的文档也能获得一定分数）。
 
     Args:
-        dense: Dense 语义检索结果列表（需包含 "id" 字段）
+        dense: Dense 语义检索结果列表（ChunkResult 或 dict，需包含 "id" 字段或 .id 属性）
         bm25_res: BM25 词法检索结果列表（需包含 "id" 字段）
         k: RRF 排名常数（默认 60）
         top_n: 融合后返回的结果数量上限
@@ -94,7 +94,7 @@ def rrf_fusion(
     data: dict[str, dict] = {}
 
     for rank, doc in enumerate(dense):
-        doc_id = doc.get("id", "")
+        doc_id = doc.id if hasattr(doc, "id") else doc.get("id", "")
         scores[doc_id] = scores.get(doc_id, 0) + 1.0 / (k + rank + 1)
         data[doc_id] = doc
 

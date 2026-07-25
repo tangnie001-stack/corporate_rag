@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.rag import retrieval
+from src.infra.db.entities.search import ChunkResult
 
 
 # ==================== 检索测试 ====================
@@ -57,11 +58,11 @@ class TestRerank:
             {"index": 0, "relevance_score": 0.9},
         ]
         results = [
-            {
-                "id": "d1:0",
-                "content": "test content",
-                "metadata": {"source": "a.pdf", "page": 1, "doc_id": "d1"},
-            }
+            ChunkResult(
+                id="d1:0",
+                content="test content",
+                metadata={"source": "a.pdf", "page": 1, "doc_id": "d1"},
+            )
         ]
         contexts = retrieval.rerank_results("query", results, reranker)
         assert len(contexts) == 1

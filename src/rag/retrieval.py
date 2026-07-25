@@ -26,12 +26,14 @@ async def search(
 ) -> list[dict]:
     """执行语义检索（混合模式可选）。"""
     if HYBRID_SEARCH_ENABLED and bm25 and kb_id:
+        logger.info("RAG search starting hybrid: kb_id={}", kb_id)
         dense_t = asyncio.to_thread(
             vector_store.similarity_search, kb_id, query, TOP_K_RETRIEVAL
         )
         bm25_t = asyncio.to_thread(bm25.search, kb_id, query, TOP_K_RETRIEVAL)
         d, b = await asyncio.gather(dense_t, bm25_t)
-        results = rrf_fusion(d, b)
+        logger.info("RAG search hybrid results: dense={} bm25={}", type(d).__name__, type(b).__name__)
+        results = rrf_fusion(d or [], b or [])
         logger.info(
             "RAG search: kb_id={} query_len={} results={} mode=hybrid",
             kb_id,
@@ -44,29 +46,35 @@ async def search(
         results = await asyncio.to_thread(
             vector_store.similarity_search_all, query, k=TOP_K_RETRIEVAL
         )
+        logger.info("RAG search search_all done: type={}", type(results).__name__)
+        return results or []
     else:
         results = await asyncio.to_thread(
             vector_store.similarity_search, kb_id, query, k=TOP_K_RETRIEVAL
         )
-    logger.info(
-        "RAG search: kb_id={} query_len={} results={} mode=dense",
-        kb_id,
-        len(query),
-        len(results),
-    )
-    return results
+        logger.info("RAG search dense done: type={} len={}", type(results).__name__, len(results) if results else 0)
+        logger.info(
+            "RAG search: kb_id={} query_len={} results={} mode=dense",
+            kb_id,
+            len(query),
+            len(results) if results else 0,
+        )
+        if results is None:
+            logger.warning("RAG search: results is None, returning empty list")
+            return []
+        return results
 
 
 def rerank_results(
     query: str,
-    results: list[dict],
+    results: list,
     reranker,
 ) -> list[RAGContext]:
     """Reranker 精排，返回 top-N 的 RAGContext 列表。"""
     if not results:
         return []
 
-    docs = [r["content"] for r in results]
+    docs = [r.content for r in results]
     try:
         reranked = with_retry(
             reranker.rerank,
@@ -81,7 +89,7 @@ def rerank_results(
             e,
         )
         reranked = [
-            {"index": i, "relevance_score": r.get("distance", 0)}
+            {"index": i, "relevance_score": r.distance or 0}
             for i, r in enumerate(results)
         ]
 
@@ -89,16 +97,16 @@ def rerank_results(
     for item in reranked[:TOP_K_RERANK]:
         idx = item["index"]
         r = results[idx]
-        metadata = r.get("metadata", {})
+        metadata = r.metadata
         pc = metadata.get("parent_content")
         score = item.get("relevance_score", 0)
         contexts.append(
             RAGContext(
-                content=pc if pc else r["content"],
+                content=pc if pc else r.content,
                 source=metadata.get("source", ""),
                 page=metadata.get("page", 0),
                 doc_id=metadata.get("doc_id", ""),
-                chunk_id=r["id"],
+                chunk_id=r.id,
                 parent_content=pc,
                 score=score,
             )

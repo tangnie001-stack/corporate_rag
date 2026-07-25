@@ -128,7 +128,7 @@ class TestVectorStore:
         assert len(results) == 2
         # 结果应按 distance 升序排列（越小越相似）
         for i in range(len(results) - 1):
-            assert results[i]["distance"] <= results[i + 1]["distance"]
+            assert results[i].distance <= results[i + 1].distance
 
     def test_similarity_search_all_no_collections(self, vs):
         """无任何 collection 时返回空列表。"""
