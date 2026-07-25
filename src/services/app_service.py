@@ -120,3 +120,22 @@ class AppService:
         return self.document.upload_and_process(kb_id, file_path, filename)
 
     # ==================== 问答 ====================
+
+    # ===== Session/Message Delegates =====
+
+    async def get_sessions(self) -> list[dict]:
+        """获取最近 50 个会话。"""
+        return await self.db.get_sessions()
+
+    async def get_session_by_id(self, session_id: str) -> Optional[dict]:
+        """按 ID 查询会话。"""
+        return await self.db.get_session_by_id(session_id)
+
+    async def get_messages(self, session_id: str) -> list[dict]:
+        """获取会话消息。"""
+        return await self.db.get_messages(session_id)
+
+    async def delete_session_and_messages(self, session_id: str) -> bool:
+        """删除会话及其消息。"""
+        await self.chat_manager.clear_history_async(session_id)
+        return await self.db.delete_session_and_messages(session_id)

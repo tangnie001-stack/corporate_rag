@@ -31,7 +31,7 @@ async def list_sessions(
     Returns:
         list[SessionItem]: 会话列表
     """
-    sessions = await svc.db.get_sessions()
+    sessions = await svc.get_sessions()
     result = []
     for row in sessions:
         result.append(
@@ -73,11 +73,11 @@ async def get_session_messages(
         BusinessError: 会话不存在时返回 404
     """
     session_id = body.session_id
-    session = await svc.db.get_session_by_id(session_id)
+    session = await svc.get_session_by_id(session_id)
     if not session:
         raise BusinessError(Code.SESSION_NOT_FOUND, Code.SESSION_NOT_FOUND_MSG, 404)
 
-    messages = await svc.db.get_messages(session_id)
+    messages = await svc.get_messages(session_id)
     result = []
     for row in messages:
         result.append(
@@ -118,11 +118,8 @@ async def delete_session(
     """
     session_id = body.session_id
 
-    # 清理 Redis（通过 chat_manager.clear_history_async 异步清理）
-    await svc.chat_manager.clear_history_async(session_id)
-
-    # 删除 MySQL 记录
-    ok = await svc.db.delete_session_and_messages(session_id)
+    # 清理 Redis + 删除 MySQL 记录
+    ok = await svc.delete_session_and_messages(session_id)
     if not ok:
         raise BusinessError(Code.SESSION_NOT_FOUND, Code.SESSION_NOT_FOUND_MSG, 404)
 
