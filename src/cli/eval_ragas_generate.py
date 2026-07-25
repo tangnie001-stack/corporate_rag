@@ -225,8 +225,8 @@ def run_generate(
             continue
 
         for c in chunks_data:
-            safe_content = desensitize(c["content"])
-            meta = dict(c.get("metadata", {}))
+            safe_content = desensitize(c.content)
+            meta = dict(c.metadata)
             meta["parent_content"] = ""  # 清空原文，避免敏感信息泄漏
             langchain_chunks.append(
                 LCDocument(

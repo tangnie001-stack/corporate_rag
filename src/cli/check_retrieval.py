@@ -78,17 +78,17 @@ def main() -> None:
     # 逐条打印每个检索结果：距离分数 + 来源 + 内容摘要
     for i, r in enumerate(results):
         dist_str = (
-            f"  [{i + 1}] Distance: {r.get('distance', 'N/A'):.4f}"
-            if r.get("distance")
+            f"  [{i + 1}] Distance: {r.distance:.4f}"
+            if r.distance is not None
             else f"  [{i + 1}]"
         )
         print(f"\n{dist_str}")
         print(
-            f"      Source: {r['metadata'].get('source', 'unknown')} "
-            f"(page {r['metadata'].get('page', '?')})"
+            f"      Source: {r.metadata.get('source', 'unknown')} "
+            f"(page {r.metadata.get('page', '?')})"
         )
         # 只显示前 200 字符的摘要，避免刷屏
-        print(f"      Content: {r['content'][:200]}...")
+        print(f"      Content: {r.content[:200]}...")
         print("-" * 60)
 
 

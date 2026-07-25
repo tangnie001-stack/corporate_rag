@@ -141,7 +141,7 @@ async def generate_answers_and_contexts(
 
             # 提取上下文字段列表（用于 context_recall / context_precision 评估）
             ctx_list = [
-                c.get("content", "") for c in final_state.get("contexts", [])
+                c.content for c in final_state.get("contexts", [])
             ]
             contexts.append(ctx_list)
 
