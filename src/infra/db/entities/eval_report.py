@@ -7,7 +7,24 @@ from typing import Optional
 
 @dataclass(slots=True)
 class EvalReportEntity:
-    """评估报告实体，对应 eval_report 表一行记录。"""
+    """评估报告实体，对应 eval_report 表一行记录。
+
+    Attributes:
+        id: 报告 UUID
+        kb_id: 关联的知识库 ID
+        run_type: 运行类型：manual / auto
+        qa_count: QA 对数量
+        faithfulness: 忠实度评分
+        answer_relevancy: 答案相关性评分
+        context_precision: 上下文精确度
+        context_recall: 上下文召回率
+        overall_score: 综合评分
+        passed: 是否通过评估
+        report_path: 报告文件路径
+        triggered_by: 触发者（用户 ID）
+        detail_json: 详细评估数据（JSON 可序列化）
+        eval_date: 评估日期
+    """
 
     id: str
     """报告 UUID。"""

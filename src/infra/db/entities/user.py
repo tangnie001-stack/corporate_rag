@@ -7,7 +7,15 @@ from typing import Optional
 
 @dataclass(slots=True)
 class UserEntity:
-    """用户实体，对应 users 表一行记录。"""
+    """用户实体，对应 users 表一行记录。
+
+    Attributes:
+        id: 用户 UUID
+        account: 登录账号
+        password: 密码的 bcrypt 哈希值
+        token: 当前登录 token
+        created_at: 注册时间
+    """
 
     id: str
     """用户 UUID。"""
