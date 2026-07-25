@@ -139,3 +139,26 @@ class AppService:
         """删除会话及其消息。"""
         await self.chat_manager.clear_history_async(session_id)
         return await self.db.delete_session_and_messages(session_id)
+
+    async def set_mysql_db(self, db: MySQLDB) -> None:
+        """设置 chat_manager 的 MySQL DB 实例。"""
+        await self.chat_manager.set_mysql_db(db)
+
+    async def save_session_async(
+        self, session_id: str, title: str, kb_id: str, user_id: str = ""
+    ) -> None:
+        """持久化保存会话。"""
+        await self.chat_manager.save_session_async(session_id, title, kb_id)
+
+    async def save_messages_async(
+        self,
+        session_id: str,
+        kb_id: str,
+        user_msg: str,
+        assistant_msg: str,
+        sources: Optional[list[str]] = None,
+    ) -> None:
+        """批量持久化保存消息。"""
+        await self.chat_manager.save_messages_async(
+            session_id, kb_id, user_msg, assistant_msg, sources
+        )

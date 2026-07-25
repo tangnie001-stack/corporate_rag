@@ -9,7 +9,7 @@ from loguru import logger
 
 import jieba
 
-from src.api.sse_utils import sse_done, sse_error
+from src.utils.sse import sse_done, sse_error
 from src.api.dependencies import get_app_service
 from src.services.app_service import AppService
 
@@ -178,7 +178,7 @@ async def _persist_conversation(
         answer: LLM 生成的完整回答
         sources: 引用来源列表（去重后的 "文件名 (第x页)" 列表）
     """
-    svc.chat_manager.set_mysql_db(svc.db)
+    svc.set_mysql_db(svc.db)
 
     # 创建会话（如首次消息）。title = 首条消息前 20 字
     title = query[:20]
@@ -198,13 +198,9 @@ async def _persist_conversation(
                         "Persist failed after {} retries: {}", max_retries, e
                     )
 
+    await retry(lambda: svc.save_session_async(session_id, title, kb_id))
     await retry(
-        lambda: svc.chat_manager.save_session_async(session_id, title, kb_id)
-    )
-    await retry(
-        lambda: svc.chat_manager.save_messages_async(
-            session_id, kb_id, query, answer, sources
-        )
+        lambda: svc.save_messages_async(session_id, kb_id, query, answer, sources)
     )
     logger.info(
         "Conversation persisted: session_id={} kb_id={} sources={}",
