@@ -7,7 +7,12 @@ from loguru import logger
 
 from src.infra.db.mysql_db import MySQLDB
 from src.utils.errors import BusinessError
-from src.utils.auth_crypto import hash_password, verify_password
+from src.utils.auth_crypto import (
+    hash_password,
+    verify_password,
+    verify_password_sha256,
+    is_bcrypt_hash,
+)
 
 
 class AuthService:
@@ -75,8 +80,16 @@ class AuthService:
         if not user:
             raise BusinessError("ACCOUNT_NOT_FOUND", "账号不存在")
 
-        if not verify_password(password, user["password"]):
-            raise BusinessError("WRONG_PASSWORD", "密码错误")
+        stored_hash = user["password"]
+
+        # 支持 bcrypt 和新旧两种哈希格式
+        if is_bcrypt_hash(stored_hash):
+            if not verify_password(password, stored_hash):
+                raise BusinessError("WRONG_PASSWORD", "密码错误")
+        else:
+            # 旧版 SHA-256 兼容
+            if not verify_password_sha256(password, stored_hash):
+                raise BusinessError("WRONG_PASSWORD", "密码错误")
 
         token = str(uuid.uuid4()).replace("-", "") + str(uuid.uuid4()).replace("-", "")
         user_id = user["id"]
