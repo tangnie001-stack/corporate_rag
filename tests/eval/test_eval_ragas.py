@@ -2,12 +2,13 @@
 
 测试覆盖：
   - TestParseArgs: 命令行参数解析
-  - TestGenerateAnswers: 答案生成流程（mock RAGChain）
+  - TestGenerateAnswers: 答案生成流程（mock graph）
   - TestRunEvaluation: RAGAS 评估流程（mock ragas）
   - TestSaveResults: CSV 结果保存
 """
 
-from unittest.mock import MagicMock, patch
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
 import os
 import tempfile
 
@@ -51,30 +52,32 @@ class TestParseArgs:
 
 
 class TestGenerateAnswers:
-    """答案生成流程测试（全 mock RAGChain）。"""
+    """答案生成流程测试（mock graph async invoke）。"""
 
     def test_generate_success(self) -> None:
         """正常情况应返回答案列表和上下文列表。"""
         from src.cli.eval_ragas import generate_answers_and_contexts
 
-        mock_chain = MagicMock()
+        mock_graph = MagicMock()
 
-        def mock_chat(kb: str, sess: str, q: str) -> tuple:
-            def gen() -> str:
-                yield f"Answer for: {q[:10]}"
+        async def mock_ainvoke(state: dict) -> dict:
+            return {
+                "answer": f"Answer for: {state['query'][:10]}",
+                "contexts": [
+                    {"content": "Context about 茅台营收1,741亿元"},
+                    {"content": "Context about 同比增长15.66%"},
+                ],
+            }
 
-            return gen(), [
-                MagicMock(content="Context about 茅台营收1,741亿元"),
-                MagicMock(content="Context about 同比增长15.66%"),
-            ]
+        mock_graph.ainvoke = AsyncMock(side_effect=mock_ainvoke)
 
-        mock_chain.chat_with_citations.side_effect = mock_chat
-
-        answers, contexts = generate_answers_and_contexts(
-            mock_chain,
-            "test_kb",
-            "sess_1",
-            ["贵州茅台营收多少？", "净利润多少？"],
+        answers, contexts = asyncio.run(
+            generate_answers_and_contexts(
+                mock_graph,
+                "test_kb",
+                "sess_1",
+                ["贵州茅台营收多少？", "净利润多少？"],
+            )
         )
 
         assert len(answers) == 2
@@ -86,24 +89,26 @@ class TestGenerateAnswers:
         """部分问题失败时应返回错误标记，不中断整体流程。"""
         from src.cli.eval_ragas import generate_answers_and_contexts
 
-        mock_chain = MagicMock()
+        mock_graph = MagicMock()
+        call_count = 0
 
-        def mock_chat(kb: str, sess: str, q: str) -> tuple:
+        async def mock_ainvoke(state: dict) -> dict:
+            nonlocal call_count
+            call_count += 1
+            q = state["query"]
             if "失败" in q:
                 raise ValueError("模拟错误")
+            return {"answer": "正常回答", "contexts": [{"content": "ctx"}]}
 
-            def gen() -> str:
-                yield "正常回答"
+        mock_graph.ainvoke = AsyncMock(side_effect=mock_ainvoke)
 
-            return gen(), [MagicMock(content="ctx")]
-
-        mock_chain.chat_with_citations.side_effect = mock_chat
-
-        answers, contexts = generate_answers_and_contexts(
-            mock_chain,
-            "kb",
-            "sess",
-            ["正常问题", "模拟失败", "正常问题2"],
+        answers, contexts = asyncio.run(
+            generate_answers_and_contexts(
+                mock_graph,
+                "kb",
+                "sess",
+                ["正常问题", "模拟失败", "正常问题2"],
+            )
         )
 
         assert len(answers) == 3

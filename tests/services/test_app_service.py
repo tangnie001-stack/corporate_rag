@@ -10,68 +10,63 @@ from src.utils.errors import AppError
 class TestAppServiceInit:
     """AppService 初始化测试。"""
 
-    @patch("src.services.app_service.RAGChain")
     @patch("src.services.app_service.MySQLDB")
     @patch("src.services.app_service.VectorStore")
     @patch("src.services.app_service.DocRouter")
-    def test_init_defaults(self, mock_router, mock_vs, mock_db, mock_rag):
+    def test_init_defaults(self, mock_router, mock_vs, mock_db):
         """默认初始化应创建所有依赖实例。"""
         svc = AppService()
-        assert svc.rag_chain is not None
         assert svc.db is not None
         assert svc.vector_store is not None
         assert svc.router is not None
 
-    @patch("src.services.app_service.RAGChain")
     @patch("src.services.app_service.MySQLDB")
     @patch("src.services.app_service.VectorStore")
     @patch("src.services.app_service.DocRouter")
-    def test_init_custom_deps(self, mock_router, mock_vs, mock_db, mock_rag):
+    def test_init_custom_deps(self, mock_router, mock_vs, mock_db):
         """应接受注入的自定义依赖。"""
         db = MagicMock()
         vs = MagicMock()
         router = MagicMock()
-        rag = MagicMock()
-        svc = AppService(mysql_db=db, vector_store=vs, router=router, rag_chain=rag)
+        svc = AppService(mysql_db=db, vector_store=vs, router=router)
         assert svc.db is db
         assert svc.vector_store is vs
         assert svc.router is router
-        assert svc.rag_chain is rag
 
 
 class TestAppServiceKBs:
     """知识库管理测试。"""
 
-    @patch("src.services.app_service.RAGChain")
+    @pytest.mark.asyncio
     @patch("src.services.app_service.MySQLDB")
     @patch("src.services.app_service.VectorStore")
     @patch("src.services.app_service.DocRouter")
-    def test_list_knowledge_bases(self, mock_router, mock_vs, mock_db, mock_rag):
+    async def test_list_knowledge_bases(self, mock_router, mock_vs, mock_db):
         """列出所有知识库应从 db.get_all_kb 获取数据。"""
         db = MagicMock()
-        db.get_all_kb.return_value = [("id1", "KB1"), ("id2", "KB2")]
+        db.get_all_kb = AsyncMock(return_value=[("id1", "KB1"), ("id2", "KB2")])
         svc = AppService(mysql_db=db)
-        result = svc.list_knowledge_bases()
+        result = await svc.list_knowledge_bases()
         assert result == [("id1", "KB1"), ("id2", "KB2")]
 
-    @patch("src.services.app_service.RAGChain")
+    @pytest.mark.asyncio
     @patch("src.services.app_service.MySQLDB")
     @patch("src.services.app_service.VectorStore")
     @patch("src.services.app_service.DocRouter")
-    def test_create_kb_success(self, mock_router, mock_vs, mock_db, mock_rag):
+    async def test_create_kb_success(self, mock_router, mock_vs, mock_db):
         """创建知识库应返回 (kb_id, is_new)。"""
         db = MagicMock()
-        db.get_or_create_kb.return_value = ("new_id", True)
+        db.get_or_create_kb = AsyncMock(return_value=("new_id", True))
         svc = AppService(mysql_db=db)
-        kid, is_new = svc.create_knowledge_base("测试库", "描述")
+        kid, is_new = await svc.create_knowledge_base("测试库", "描述")
         assert kid == "new_id"
         assert is_new is True
 
-    @patch("src.services.app_service.RAGChain")
+    @pytest.mark.asyncio
     @patch("src.services.app_service.MySQLDB")
     @patch("src.services.app_service.VectorStore")
     @patch("src.services.app_service.DocRouter")
-    async def test_delete_kb_success(self, mock_router, mock_vs, mock_db, mock_rag):
+    async def test_delete_kb_success(self, mock_router, mock_vs, mock_db):
         """删除知识库应软删除文档、清理向量、软删除 KB。"""
         db = MagicMock()
         db.soft_delete_documents_by_kb = AsyncMock()
@@ -85,11 +80,11 @@ class TestAppServiceKBs:
         vs.delete_collection.assert_called_once_with("kb_id")
         db.soft_delete_kb.assert_called_once_with("kb_id")
 
-    @patch("src.services.app_service.RAGChain")
+    @pytest.mark.asyncio
     @patch("src.services.app_service.MySQLDB")
     @patch("src.services.app_service.VectorStore")
     @patch("src.services.app_service.DocRouter")
-    async def test_delete_kb_not_found(self, mock_router, mock_vs, mock_db, mock_rag):
+    async def test_delete_kb_not_found(self, mock_router, mock_vs, mock_db):
         """删除不存在的知识库应返回 False 并提示。"""
         db = MagicMock()
         db.soft_delete_documents_by_kb = AsyncMock()
@@ -103,11 +98,11 @@ class TestAppServiceKBs:
 class TestAppServiceDeleteDocument:
     """文档删除测试。"""
 
-    @patch("src.services.app_service.RAGChain")
+    @pytest.mark.asyncio
     @patch("src.services.app_service.MySQLDB")
     @patch("src.services.app_service.VectorStore")
     @patch("src.services.app_service.DocRouter")
-    async def test_delete_not_found(self, mock_router, mock_vs, mock_db, mock_rag):
+    async def test_delete_not_found(self, mock_router, mock_vs, mock_db):
         """删除不存在的文档应抛 DOC_NOT_FOUND。"""
         db = MagicMock()
         db.get_document = AsyncMock(return_value=None)
@@ -116,11 +111,11 @@ class TestAppServiceDeleteDocument:
             await svc.delete_document("kb", "nonexistent", "user")
         assert exc.value.code == "DOC_NOT_FOUND"
 
-    @patch("src.services.app_service.RAGChain")
+    @pytest.mark.asyncio
     @patch("src.services.app_service.MySQLDB")
     @patch("src.services.app_service.VectorStore")
     @patch("src.services.app_service.DocRouter")
-    async def test_delete_not_owner(self, mock_router, mock_vs, mock_db, mock_rag):
+    async def test_delete_not_owner(self, mock_router, mock_vs, mock_db):
         """非上传者删除应抛 DOC_DELETE_NOT_ALLOWED。"""
         db = MagicMock()
         db.get_document = AsyncMock(
@@ -136,13 +131,11 @@ class TestAppServiceDeleteDocument:
             await svc.delete_document("kb", "d1", "other_user")
         assert exc.value.code == "DOC_DELETE_NOT_ALLOWED"
 
-    @patch("src.services.app_service.RAGChain")
+    @pytest.mark.asyncio
     @patch("src.services.app_service.MySQLDB")
     @patch("src.services.app_service.VectorStore")
     @patch("src.services.app_service.DocRouter")
-    async def test_delete_processing_status(
-        self, mock_router, mock_vs, mock_db, mock_rag
-    ):
+    async def test_delete_processing_status(self, mock_router, mock_vs, mock_db):
         """处理中的文档应抛 DOC_STATUS_CONFLICT。"""
         db = MagicMock()
         db.get_document = AsyncMock(
@@ -158,11 +151,11 @@ class TestAppServiceDeleteDocument:
             await svc.delete_document("kb", "d1", "user")
         assert exc.value.code == "DOC_STATUS_CONFLICT"
 
-    @patch("src.services.app_service.RAGChain")
+    @pytest.mark.asyncio
     @patch("src.services.app_service.MySQLDB")
     @patch("src.services.app_service.VectorStore")
     @patch("src.services.app_service.DocRouter")
-    async def test_delete_success(self, mock_router, mock_vs, mock_db, mock_rag):
+    async def test_delete_success(self, mock_router, mock_vs, mock_db):
         """正常删除应返回 deleted 状态。"""
         db = MagicMock()
         db.get_document = AsyncMock(
@@ -184,11 +177,10 @@ class TestAppServiceDeleteDocument:
 class TestAppServiceUpload:
     """文档上传处理测试。"""
 
-    @patch("src.services.app_service.RAGChain")
     @patch("src.services.app_service.MySQLDB")
     @patch("src.services.app_service.VectorStore")
     @patch("src.services.app_service.DocRouter")
-    def test_upload_scanned_doc(self, mock_router, mock_vs, mock_db, mock_rag):
+    def test_upload_scanned_doc(self, mock_router, mock_vs, mock_db):
         """扫描件文档应返回错误并更新文档状态为 failed。"""
         db = MagicMock()
         db.add_document.return_value = "doc_id"
@@ -209,11 +201,10 @@ class TestAppServiceUpload:
             "doc_id", "failed", error_msg=ANY
         )
 
-    @patch("src.services.app_service.RAGChain")
     @patch("src.services.app_service.MySQLDB")
     @patch("src.services.app_service.VectorStore")
     @patch("src.services.app_service.DocRouter")
-    def test_upload_parse_error(self, mock_router, mock_vs, mock_db, mock_rag):
+    def test_upload_parse_error(self, mock_router, mock_vs, mock_db):
         """解析抛出异常时应返回错误并记录失败状态。"""
         db = MagicMock()
         db.add_document.return_value = "doc_id"
@@ -232,12 +223,11 @@ class TestAppServiceUpload:
 class TestAppServiceDocumentProcess:
     """文档异步处理测试。"""
 
-    @patch("src.services.app_service.RAGChain")
     @patch("src.services.app_service.MySQLDB")
     @patch("src.services.app_service.VectorStore")
     @patch("src.services.app_service.DocRouter")
     @pytest.mark.asyncio
-    async def test_process_document_success(self, mock_router, mock_vs, mock_db, mock_rag):
+    async def test_process_document_success(self, mock_router, mock_vs, mock_db):
         """文档处理成功时状态更新为 ready。"""
         svc = AppService(mysql_db=mock_db, vector_store=mock_vs, router=mock_router)
         await svc.document.process_document(
@@ -248,6 +238,11 @@ class TestAppServiceDocumentProcess:
             ext=".pdf",
         )
         mock_db.update_document_status.assert_called_with(
-            "test-doc", "ready", chunk_count=ANY, processing_state="completed",
-            processing_progress=100, processing_message=ANY, chunk_strategy=ANY,
+            "test-doc",
+            "ready",
+            chunk_count=ANY,
+            processing_state="completed",
+            processing_progress=100,
+            processing_message=ANY,
+            chunk_strategy=ANY,
         )
