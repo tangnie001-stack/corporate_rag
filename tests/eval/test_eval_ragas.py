@@ -64,8 +64,8 @@ class TestGenerateAnswers:
             return {
                 "answer": f"Answer for: {state['query'][:10]}",
                 "contexts": [
-                    {"content": "Context about 茅台营收1,741亿元"},
-                    {"content": "Context about 同比增长15.66%"},
+                    MagicMock(content="Context about 茅台营收1,741亿元"),
+                    MagicMock(content="Context about 同比增长15.66%"),
                 ],
             }
 
@@ -98,7 +98,7 @@ class TestGenerateAnswers:
             q = state["query"]
             if "失败" in q:
                 raise ValueError("模拟错误")
-            return {"answer": "正常回答", "contexts": [{"content": "ctx"}]}
+            return {"answer": "正常回答", "contexts": [MagicMock(content="ctx")]}
 
         mock_graph.ainvoke = AsyncMock(side_effect=mock_ainvoke)
 
