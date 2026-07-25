@@ -15,10 +15,26 @@ from src.infra.db.entities import SessionEntity, SessionListItem, MessageEntity
 
 
 class ChatRepo:
+    """会话/消息 CRUD 仓库。
+
+    封装 sessions 和 conversation_history 表的查询操作，
+    返回 SessionEntity / SessionListItem / MessageEntity 类型对象。
+    """
+
     def __init__(self, mysql_db):
+        """初始化 ChatRepo。
+
+        Args:
+            mysql_db: MySQLDB 实例，用于获取连接池
+        """
         self._pool_getter = mysql_db._get_pool
 
     async def create_session(self, session: SessionEntity) -> None:
+        """创建一条新对话记录。
+
+        Args:
+            session: 待创建的对话实体
+        """
         pool = await self._pool_getter()
         async with pool.acquire() as conn:
             async with conn.cursor() as cursor:
@@ -29,6 +45,7 @@ class ChatRepo:
             await conn.commit()
 
     async def get_sessions(self) -> list[SessionListItem]:
+        """获取所有对话列表（含知识库名称和消息数）。"""
         pool = await self._pool_getter()
         async with pool.acquire() as conn:
             async with conn.cursor() as cursor:
@@ -48,6 +65,14 @@ class ChatRepo:
         ]
 
     async def get_session_by_id(self, session_id: str) -> Optional[SessionEntity]:
+        """按 ID 查询对话详情。
+
+        Args:
+            session_id: 对话 UUID
+
+        Returns:
+            对话实体，不存在时返回 None
+        """
         pool = await self._pool_getter()
         async with pool.acquire() as conn:
             async with conn.cursor() as cursor:
@@ -58,6 +83,14 @@ class ChatRepo:
         return SessionEntity(**row)
 
     async def get_messages(self, session_id: str) -> list[MessageEntity]:
+        """查询指定对话的所有消息。
+
+        Args:
+            session_id: 对话 UUID
+
+        Returns:
+            消息实体列表
+        """
         pool = await self._pool_getter()
         async with pool.acquire() as conn:
             async with conn.cursor() as cursor:
@@ -66,6 +99,11 @@ class ChatRepo:
         return [MessageEntity(**r) for r in rows]
 
     async def save_message(self, msg: MessageEntity) -> None:
+        """保存一条消息记录（含来源引用 JSON）。
+
+        Args:
+            msg: 待保存的消息实体
+        """
         pool = await self._pool_getter()
         sources_json = (
             json.dumps(msg.sources, ensure_ascii=False) if msg.sources else None
@@ -89,6 +127,14 @@ class ChatRepo:
             await conn.commit()
 
     async def delete_session_and_messages(self, session_id: str) -> bool:
+        """删除对话及其所有关联消息。
+
+        Args:
+            session_id: 对话 UUID
+
+        Returns:
+            是否成功删除了对话记录
+        """
         pool = await self._pool_getter()
         async with pool.acquire() as conn:
             async with conn.cursor() as cursor:

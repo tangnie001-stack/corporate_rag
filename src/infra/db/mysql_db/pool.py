@@ -21,13 +21,18 @@ from src.config.queries import (
 
 
 class MySQLDB:
-    """MySQL 连接池封装 — 仅管理连接池和表初始化。"""
+    """MySQL 连接池封装 — 管理连接池生命周期和表初始化。"""
 
     def __init__(self):
         self._pool: aiomysql.Pool | None = None
         self._pool_lock = asyncio.Lock()
 
     async def _get_pool(self) -> aiomysql.Pool:
+        """获取或创建连接池（双重检查锁定，线程安全）。
+
+        Returns:
+            已初始化的 aiomysql 连接池实例
+        """
         if self._pool is not None:
             return self._pool
         async with self._pool_lock:
@@ -51,6 +56,7 @@ class MySQLDB:
             return self._pool
 
     async def close(self) -> None:
+        """关闭连接池并释放所有资源。"""
         if self._pool:
             self._pool.close()
             await self._pool.wait_closed()
@@ -58,6 +64,7 @@ class MySQLDB:
             logger.info("MySQL connection pool closed")
 
     async def init_db(self) -> None:
+        """初始化数据库表结构（建表 + 删除冗余外键）。"""
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             async with conn.cursor() as cursor:

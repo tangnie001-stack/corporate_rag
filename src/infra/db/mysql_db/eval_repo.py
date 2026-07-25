@@ -12,10 +12,21 @@ from src.infra.db.entities import EvalReportEntity
 
 
 class EvalRepo:
+    """评估报告 CRUD 仓库。
+
+    封装 eval_report 表的所有查询操作，返回 EvalReportEntity 类型对象。
+    """
+
     def __init__(self, mysql_db):
+        """初始化 EvalRepo。
+
+        Args:
+            mysql_db: MySQLDB 实例，用于获取连接池
+        """
         self._pool_getter = mysql_db._get_pool
 
     async def ensure_table(self) -> None:
+        """确保评估报告表已创建。"""
         pool = await self._pool_getter()
         async with pool.acquire() as conn:
             async with conn.cursor() as cursor:
@@ -23,6 +34,11 @@ class EvalRepo:
             await conn.commit()
 
     async def insert_report(self, report: EvalReportEntity) -> None:
+        """插入一条评估报告记录（含详情 JSON 序列化）。
+
+        Args:
+            report: 待插入的评估报告实体
+        """
         await self.ensure_table()
         pool = await self._pool_getter()
         detail_str = (
@@ -53,6 +69,14 @@ class EvalRepo:
             await conn.commit()
 
     async def get_latest_report(self, kb_id: str) -> Optional[EvalReportEntity]:
+        """查询指定知识库的最新评估报告。
+
+        Args:
+            kb_id: 知识库 UUID
+
+        Returns:
+            评估报告实体（含反序列化的 detail_json），不存在时返回 None
+        """
         await self.ensure_table()
         pool = await self._pool_getter()
         async with pool.acquire() as conn:
