@@ -11,9 +11,23 @@ class BM25Index:
     """基于 BM25Okapi 的词法检索引擎。"""
 
     def __init__(self, index_dir: str = "data/bm25_index"):
+        """初始化 BM25 索引管理器。
+
+        Args:
+            index_dir: 索引文件存储目录，默认为 "data/bm25_index"
+        """
         self.index_dir = Path(index_dir)
 
     def build_index(self, kb_id: str, chunks: list[ChunkData]) -> None:
+        """构建并持久化知识库的 BM25 索引。
+
+        Args:
+            kb_id: 知识库 ID
+            chunks: 文档分块列表
+
+        Raises:
+            pickle.PickleError: 索引序列化失败时抛出
+        """
         kb_dir = self.index_dir / kb_id
         kb_dir.mkdir(parents=True, exist_ok=True)
         corpus = [list(chunk.content) for chunk in chunks]
@@ -22,6 +36,16 @@ class BM25Index:
             pickle.dump({"bm25": bm25, "chunks": chunks}, f)
 
     def search(self, kb_id: str, query: str, k: int = 150) -> list[ChunkResult]:
+        """执行 BM25 词法检索。
+
+        Args:
+            kb_id: 知识库 ID
+            query: 用户查询（按字符级分词）
+            k: 返回 top-K 结果数，默认为 150
+
+        Returns:
+            BM25 检索结果列表，按相关性降序排列；索引不存在时返回空列表
+        """
         kb_dir = self.index_dir / kb_id
         if not (kb_dir / "bm25.pkl").exists():
             return []
@@ -62,7 +86,17 @@ def rrf_fusion(
     k: int = 60,
     top_n: int = 50,
 ) -> list[ChunkResult]:
-    """RRF 融合 Dense 语义检索和 BM25 词法检索结果。"""
+    """RRF 融合 Dense 语义检索和 BM25 词法检索结果。
+
+    Args:
+        dense: 向量检索（Dense）结果列表
+        bm25_res: BM25 词法检索结果列表
+        k: RRF 排序常数，控制排名权重衰减速度，默认 60
+        top_n: 融合后保留的 top-N 结果数，默认 50
+
+    Returns:
+        融合后的结果列表，按 RRF 得分降序排列，长度不超过 top_n
+    """
     scores: dict[str, float] = {}
     data: dict[str, ChunkResult] = {}
 

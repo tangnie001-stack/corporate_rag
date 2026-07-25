@@ -19,7 +19,17 @@ async def search(
     vector_store: VectorStore,
     bm25: Optional[BM25Index] = None,
 ) -> list[ChunkResult]:
-    """执行语义检索（混合模式可选）。"""
+    """执行语义检索（混合模式可选）。
+
+    Args:
+        query: 用户查询文本
+        kb_id: 知识库 ID，为空时执行全局检索
+        vector_store: 向量数据库实例
+        bm25: BM25 ���法检索引擎实例，启用混合检索时传入
+
+    Returns:
+        检索结果列表，按相关性降序排列；混合模式为 RRF 融合结果
+    """
     if HYBRID_SEARCH_ENABLED and bm25 and kb_id:
         logger.info("RAG search starting hybrid: kb_id={}", kb_id)
         dense_t = asyncio.to_thread(
@@ -59,7 +69,16 @@ def rerank_results(
     results: list[ChunkResult],
     reranker,
 ) -> list[RAGContext]:
-    """Reranker 精排，返回 top-N 的 RAGContext 列表。"""
+    """Reranker 精排，返回 top-N 的 RAGContext 列表。
+
+    Args:
+        query: 用户原始查询（用于 reranker 的相关性计算）
+        results: 检索结果列表（已融合 Dense + BM25）
+        reranker: Reranker 模型实例
+
+    Returns:
+        精排后的 RAGContext 列表，按相关性降序排列，长度不超过 TOP_K_RERANK
+    """
     if not results:
         return []
 
