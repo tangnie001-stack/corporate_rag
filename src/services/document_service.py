@@ -105,6 +105,99 @@ class DocumentService:
         logger.info("Document deleted: {} ({})", doc["filename"], doc_id)
         return {"doc_id": doc_id, "filename": doc["filename"], "status": "deleted"}
 
+    async def store_and_process(
+        self,
+        kb_id: str,
+        filename: str,
+        content: bytes,
+        ext: str,
+        user_id: str = "",
+    ) -> dict:
+        """封装文件上传后的全流程：校验 → 去重 → MinIO 上传 → DB 写入 → 后台处理。
+
+        Args:
+            kb_id: 知识库 UUID
+            filename: 原始文件名
+            content: 文件二进制内容
+            ext: 文件扩展名（如 .pdf, .docx, .txt）
+            user_id: 用户 ID（用于构建 MinIO 路径）
+
+        Returns:
+            dict: 包含 doc_id, status, filename 和可选的 dedup 信息
+
+        Raises:
+            ValidationError: 文件类型不支持或文件过大
+        """
+        from src.config import MAX_FILE_SIZE
+        from src.infra.db.file_store import FileStore
+
+        # 1. 文件大小校验
+        if len(content) > MAX_FILE_SIZE:
+            from src.utils.errors import ValidationError
+
+            raise ValidationError("FILE_TOO_LARGE", "文件大小超过限制", 413)
+
+        # 2. 文件类型校验
+        ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt"}
+        if ext.lower() not in ALLOWED_EXTENSIONS:
+            from src.utils.errors import ValidationError
+
+            raise ValidationError("FILE_TYPE_UNSUPPORTED", "不支持的文件类型", 400)
+
+        # 3. MD5 去重
+        import hashlib
+
+        file_hash = hashlib.md5(content).hexdigest()
+        existing_docs = await self.db.get_documents(kb_id)
+        for doc in existing_docs:
+            if doc.get("hash") == file_hash:
+                logger.info(
+                    "Duplicate document detected: hash={} existing_doc_id={}",
+                    file_hash,
+                    doc["id"],
+                )
+                return {"doc_id": doc["id"], "filename": filename, "dedup": True}
+
+        # 4. 生成 doc_id 并上传到 MinIO
+        import uuid
+
+        doc_id = str(uuid.uuid4())
+        minio_key = FileStore.build_path(user_id, kb_id, doc_id, filename)
+        file_store = FileStore()
+        ok = await asyncio.to_thread(file_store.upload, minio_key, content)
+        if not ok:
+            from src.utils.errors import SystemError
+
+            raise SystemError("FILE_UPLOAD_FAILED", "文件上传到存储服务失败", 500)
+
+        # 5. 写入 MySQL 元信息
+        await self.db.add_document(
+            doc_id=doc_id,
+            kb_id=kb_id,
+            filename=filename,
+            file_type=ext.lstrip("."),
+            file_size=len(content),
+            user_id=user_id,
+            status="processing",
+            processing_state="extracting",
+            processing_progress=0,
+            file_path=minio_key,
+            hash=file_hash,
+        )
+
+        # 6. 启动后台处理任务
+        asyncio.create_task(
+            self.process_document(kb_id, doc_id, minio_key, filename, ext)
+        )
+
+        logger.info(
+            "Document submitted for processing: doc_id={} kb_id={} filename={}",
+            doc_id,
+            kb_id,
+            filename,
+        )
+        return {"doc_id": doc_id, "status": "processing", "filename": filename}
+
     # ── 以下为异步版后台任务的方法 ──
 
     def enrich_chunk_pages(

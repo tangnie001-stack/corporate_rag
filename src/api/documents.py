@@ -6,9 +6,7 @@
 """
 
 import asyncio
-import hashlib
 import json
-import uuid
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from loguru import logger
@@ -29,17 +27,9 @@ from src.api.model.response import (
 )
 from src.services.app_service import AppService
 from src.api.dependencies import get_app_service
-from src.config import MAX_FILE_SIZE, MAX_TABLE_TOKENS
-from src.config.response_codes import Code
-from src.utils.errors import BusinessError, SystemError
-from src.infra.db.file_store import FileStore
+from src.config import MAX_TABLE_TOKENS
 
 router = APIRouter()
-
-_process_semaphore = asyncio.Semaphore(3)
-
-
-ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt"}
 
 
 @router.post("/kbs/documents/list")
@@ -104,7 +94,7 @@ async def upload_document(
     request: Request = None,
     svc: AppService = Depends(get_app_service),
 ) -> UploadDocumentResponse:
-    """上传文档并立即返回（异步处理）。
+    """上传文档到知识库。
 
     文档在后台经历：解析 → 分块 → 入库 → ready/failed。
     可通过 POST /api/kbs/documents/status 轮询进度。
@@ -113,112 +103,37 @@ async def upload_document(
         file: 上传的文件对象（pdf / docx / txt）
         kb_id: 目标知识库 UUID
         request: FastAPI 请求对象（用于获取用户上下文）
+        svc: 应用服务实例
 
     Returns:
-        dict: 含 doc_id、status、filename、dedup 的立即返回结果
-
-    Raises:
-        BusinessError 413: 文件超过 10MB 上限
-        BusinessError 400: 不支持的文件类型
-        SystemError 500: 上传到存储服务失败
+        UploadDocumentResponse: 含 doc_id、status、filename 的立即返回结果
     """
     user_id = getattr(request.state, "user_id", "") if request else ""
-    contents = await file.read()
-    logger.info(
-        "Upload request: filename={} size={} kb_id={} user_id={}",
-        file.filename,
-        len(contents),
-        kb_id,
-        user_id[:8] + "..." if user_id else "",
-    )
-    if len(contents) > MAX_FILE_SIZE:
-        logger.warning(
-            "Upload rejected (too large): filename={} size={} max={}",
-            file.filename,
-            len(contents),
-            MAX_FILE_SIZE,
-        )
-        raise BusinessError(Code.FILE_TOO_LARGE, Code.FILE_TOO_LARGE_MSG, 413)
-
+    content = await file.read()
     ext = (
         f".{file.filename.rsplit('.', 1)[-1].lower()}"
         if "." in (file.filename or "")
         else ""
     )
-    if ext not in ALLOWED_EXTENSIONS:
-        logger.warning(
-            "Upload rejected (unsupported type): filename={} ext={}", file.filename, ext
-        )
-        raise BusinessError(
-            Code.FILE_TYPE_UNSUPPORTED, Code.FILE_TYPE_UNSUPPORTED_MSG, 400
-        )
-
-    # MD5 去重：相同 KB 内不允许重复文件
-    file_hash = hashlib.md5(contents).hexdigest()
-    docs = await svc.db.get_documents(kb_id)
-    for d in docs:
-        if d.get("hash") == file_hash:
-            logger.info(
-                "Duplicate document detected: {} (hash={})", file.filename, file_hash
-            )
-            # 去重时保留评估数据
-            if d.get("meta_info") and isinstance(d["meta_info"], str):
-                try:
-                    meta = json.loads(d["meta_info"])
-                    if "eval" in meta:
-                        await svc.db.update_document_meta_info(
-                            d["id"], {"eval": meta["eval"]}
-                        )
-                except (json.JSONDecodeError, Exception):
-                    pass
-            return UploadDocumentResponse(
-                doc_id=d["id"],
-                status=d["status"],
-                filename=d["filename"],
-                dedup=True,
-            )
-
-    # 先写入 MinIO 存储
-    doc_id = str(uuid.uuid4())
-    file_type = ext.lstrip(".")
-    minio_key = FileStore.build_path(user_id, kb_id, doc_id, file.filename)
-    fs = FileStore()
-    if not await asyncio.to_thread(fs.upload, minio_key, contents):
-        logger.error(
-            "Upload failed (MinIO): filename={} key={}", file.filename, minio_key
-        )
-        raise SystemError(Code.FILE_UPLOAD_FAILED, Code.FILE_UPLOAD_FAILED_MSG, 500)
-
-    # 再写入 MySQL 元信息
-    await svc.db.add_document(
-        doc_id,
-        kb_id,
-        file.filename,
-        file_type,
-        len(contents),
+    result = await svc.document.store_and_process(
+        kb_id=kb_id,
+        filename=file.filename,
+        content=content,
+        ext=ext,
         user_id=user_id,
-        status="processing",
-        processing_state="extracting",
-        processing_progress=0,
-        file_path=minio_key,
-        hash=file_hash,
     )
 
-    # 启动后台处理任务
-    asyncio.create_task(
-        svc.document.process_document(kb_id, doc_id, minio_key, file.filename, ext)
-    )
-
-    logger.info(
-        "Upload success: doc_id={} filename={} kb_id={} size={}",
-        doc_id,
-        file.filename,
-        kb_id,
-        len(contents),
-    )
+    if result.get("dedup"):
+        return UploadDocumentResponse(
+            doc_id=result["doc_id"],
+            status="ready",
+            filename=result["filename"],
+        )
 
     return UploadDocumentResponse(
-        doc_id=doc_id, status="processing", filename=file.filename
+        doc_id=result["doc_id"],
+        status=result["status"],
+        filename=result["filename"],
     )
 
 

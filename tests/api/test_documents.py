@@ -1,6 +1,6 @@
 """文档 API 端点测试 — list / upload / status / chunks / delete。"""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 from src.services.document_service import _merge_tiny_chunks
 from tests.api.mock_data import make_doc, make_chunk
@@ -19,21 +19,15 @@ def test_get_documents(mock_app_service, auth_client):
     assert data[0]["filename"] == "report.pdf"
 
 
-@patch("src.api.documents.asyncio.create_task", new_callable=MagicMock)
-@patch("src.api.documents.FileStore")
-def test_upload_document(
-    mock_file_store_cls, mock_create_task, mock_app_service, auth_client
-):
+def test_upload_document(mock_app_service, auth_client):
     """POST /api/kbs/documents/upload 返回 202 Accepted。"""
     mock_svc = mock_app_service
-    mock_svc.db = MagicMock()
-    mock_svc.db.get_documents = AsyncMock(return_value=[])
-    mock_svc.db.add_document = AsyncMock(return_value="test-doc-uuid")
-
-    mock_file_store_cls.build_path.return_value = "test/path.pdf"
-    mock_fs = MagicMock()
-    mock_fs.upload.return_value = True
-    mock_file_store_cls.return_value = mock_fs
+    mock_result = {
+        "doc_id": "test_doc_id",
+        "status": "processing",
+        "filename": "test.pdf",
+    }
+    mock_svc.document.store_and_process = AsyncMock(return_value=mock_result)
 
     response = auth_client.post(
         "/api/kbs/documents/upload",
@@ -42,6 +36,9 @@ def test_upload_document(
     )
 
     assert response.status_code == 202
+    data = response.json()["data"]
+    assert data["doc_id"] == "test_doc_id"
+    assert data["status"] == "processing"
 
 
 def test_document_status_processing(mock_app_service, auth_client):
