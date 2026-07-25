@@ -1,67 +1,73 @@
 """Auth 端点测试 — login / verify / logout / anonymous。"""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
-from tests.api.mock_data import make_user
+from src.utils.errors import BusinessError
 
 
 # ─── Login ───
 
 
-@patch("src.api.auth.UserAuth.hash_password", return_value="hashed_pwd")
-def test_login_new_user_auto_register(mock_hash, mock_app_service, client):
+def test_login_new_user_auto_register(mock_app_service, client):
     """新用户自动注册并返回 token。"""
     mock_svc = mock_app_service
-    mock_svc.db.get_user_by_account = AsyncMock(return_value=None)
-    mock_svc.db.add_user = AsyncMock()
-    mock_svc.db.update_user_token = AsyncMock()
-    mock_svc.redis_client = MagicMock()
+    mock_svc.auth_service = AsyncMock()
+    mock_svc.auth_service.register = AsyncMock(
+        return_value={"user_id": "new-uuid", "account": "newuser"}
+    )
+    mock_svc.auth_service.login = AsyncMock(
+        return_value={"token": "test-token", "user_id": "new-uuid"}
+    )
 
-    with patch("src.api.auth.UserAuth.generate_token", return_value="test-token"):
-        with patch("src.api.auth.UserAuth.store_token_async", new_callable=AsyncMock):
-            response = client.post(
-                "/api/auth/login", json={"account": "newuser", "password": "pass123"}
-            )
+    response = client.post(
+        "/api/auth/login", json={"account": "newuser", "password": "pass123"}
+    )
 
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["token"] == "test-token"
     assert len(data["user_id"]) > 0
+    mock_svc.auth_service.register.assert_called_once_with("newuser", "pass123")
+    mock_svc.auth_service.login.assert_called_once_with("newuser", "pass123")
 
 
-@patch("src.api.auth.UserAuth.hash_password", return_value="correct_hash")
-def test_login_existing_user_correct_password(mock_hash, mock_app_service, client):
+def test_login_existing_user_correct_password(mock_app_service, client):
     """已有用户，密码正确，返回 token。"""
     mock_svc = mock_app_service
-    mock_svc.db.get_user_by_account = AsyncMock(
-        return_value=make_user("u1", "existing", "correct_hash")
+    mock_svc.auth_service = AsyncMock()
+    mock_svc.auth_service.register = AsyncMock(
+        side_effect=BusinessError("ACCOUNT_EXISTS", "账号已存在")
     )
-    mock_svc.db.update_user_token = AsyncMock()
-    mock_svc.redis_client = MagicMock()
+    mock_svc.auth_service.login = AsyncMock(
+        return_value={"token": "test-token", "user_id": "u1"}
+    )
 
-    with patch("src.api.auth.UserAuth.generate_token", return_value="test-token"):
-        with patch("src.api.auth.UserAuth.store_token_async", new_callable=AsyncMock):
-            response = client.post(
-                "/api/auth/login", json={"account": "existing", "password": "pass123"}
-            )
+    response = client.post(
+        "/api/auth/login", json={"account": "existing", "password": "pass123"}
+    )
 
     assert response.status_code == 200
     assert response.json()["data"]["token"] == "test-token"
+    mock_svc.auth_service.register.assert_called_once_with("existing", "pass123")
+    mock_svc.auth_service.login.assert_called_once_with("existing", "pass123")
 
 
-@patch("src.api.auth.UserAuth.hash_password", return_value="wrong_hash")
-def test_login_wrong_password(mock_hash, mock_app_service, client):
-    """密码错误返回 401。"""
+def test_login_wrong_password(mock_app_service, client):
+    """密码错误返回 400（BusinessError 默认状态码）。"""
     mock_svc = mock_app_service
-    mock_svc.db.get_user_by_account = AsyncMock(
-        return_value=make_user("u1", "existing", "correct_hash")
+    mock_svc.auth_service = AsyncMock()
+    mock_svc.auth_service.register = AsyncMock(
+        side_effect=BusinessError("ACCOUNT_EXISTS", "账号已存在")
+    )
+    mock_svc.auth_service.login = AsyncMock(
+        side_effect=BusinessError("WRONG_PASSWORD", "密码错误")
     )
 
     response = client.post(
         "/api/auth/login", json={"account": "existing", "password": "wrong"}
     )
 
-    assert response.status_code == 401
+    assert response.status_code == 400
 
 
 def test_login_missing_password(client):
@@ -73,15 +79,15 @@ def test_login_missing_password(client):
 # ─── Verify ───
 
 
-@patch(
-    "src.api.auth.UserAuth.get_user_id_from_token_async",
-    new_callable=AsyncMock,
-    return_value="u1",
-)
-def test_verify_token_valid(mock_get_uid, mock_app_service, client):
+def test_verify_token_valid(mock_app_service, client):
     """有效 token 返回 valid=True + user_id。"""
+    mock_svc = mock_app_service
+    mock_svc.auth_service = AsyncMock()
+    mock_svc.auth_service.verify_token = AsyncMock(return_value="u1")
+
     client.cookies.set("token", "valid-token")
     response = client.post("/api/auth/verify")
+
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["valid"] is True
@@ -90,7 +96,12 @@ def test_verify_token_valid(mock_get_uid, mock_app_service, client):
 
 def test_verify_no_token(mock_app_service, client):
     """无 Cookie 时返回 valid=False。"""
+    mock_svc = mock_app_service
+    mock_svc.auth_service = AsyncMock()
+    mock_svc.auth_service.verify_token = AsyncMock(return_value=None)
+
     response = client.post("/api/auth/verify")
+
     assert response.status_code == 200
     assert response.json()["data"]["valid"] is False
 
@@ -98,13 +109,18 @@ def test_verify_no_token(mock_app_service, client):
 # ─── Logout ───
 
 
-@patch("src.api.auth.UserAuth.delete_token_async", new_callable=AsyncMock)
-def test_logout(mock_delete, mock_app_service, client):
+def test_logout(mock_app_service, client):
     """退出登录清除 token。"""
+    mock_svc = mock_app_service
+    mock_svc.auth_service = AsyncMock()
+    mock_svc.auth_service.logout = AsyncMock()
+
     client.cookies.set("token", "test-token")
     response = client.post("/api/auth/logout")
+
     assert response.status_code == 200
     assert response.json()["data"]["message"] == "已退出登录"
+    mock_svc.auth_service.logout.assert_called_once_with("test-token")
 
 
 # ─── Anonymous ───

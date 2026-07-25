@@ -16,6 +16,7 @@ from src.chat.manager import ChatManager
 from src.config import BM25_INDEX_DIR, HYBRID_SEARCH_ENABLED
 from src.infra.search.bm25_index import BM25Index
 from src.services.agent_service import AgentService
+from src.services.auth_service import AuthService
 from src.services.document_service import DocumentService
 from src.services.kb_service import KBService
 
@@ -49,6 +50,25 @@ class AppService:
         )
         self.kb = KBService(self.db)
         self.document = DocumentService(self.db, self.vector_store, self.router)
+        self._auth_service: Optional[AuthService] = None
+
+    # ==================== 认证 ====================
+
+    @property
+    def auth_service(self) -> AuthService:
+        """延迟初始化的 AuthService 单例。
+
+        Returns:
+            AuthService 实例（使用 AppService 的 db 和 Redis 连接）
+        """
+        if self._auth_service is None:
+            from src.infra.redis_client import get_redis_client
+
+            self._auth_service = AuthService(
+                db=self.db,
+                redis_client=get_redis_client(),
+            )
+        return self._auth_service
 
     # ==================== 知识库 ====================
 
