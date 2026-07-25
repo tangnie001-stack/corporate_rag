@@ -31,7 +31,7 @@ async def get_latest_kb_eval(
     Returns:
         BaseResponse: 含评估详情或 None
     """
-    report = await svc.db.get_latest_eval_report(body.kb_id)
+    report = await svc.get_latest_eval_report(body.kb_id)
     if report:
         logger.info(
             "KB eval report found: kb_id={} score={}",

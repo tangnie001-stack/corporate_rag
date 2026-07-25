@@ -162,3 +162,24 @@ class AppService:
         await self.chat_manager.save_messages_async(
             session_id, kb_id, user_msg, assistant_msg, sources
         )
+
+    # ==================== 配置 ====================
+
+    @property
+    def settings(self):
+        """返回配置模块，允许 api 层通过 svc.settings.X 访问配置。"""
+        import src.config.settings as _settings
+
+        return _settings
+
+    # ==================== 评估报告 ====================
+
+    async def get_latest_eval_report(self, kb_id: str) -> dict | None:
+        """获取知识库最新的 RAGAS 评估报告。"""
+        return await self.db.get_latest_eval_report(kb_id)
+
+    # ==================== 知识库名称查询 ====================
+
+    async def get_kb_by_name(self, user_id: str, name: str) -> str | None:
+        """按名称查询知识库 ID。"""
+        return await self.db.get_kb_by_name(user_id, name)

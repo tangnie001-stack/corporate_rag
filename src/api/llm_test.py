@@ -1,12 +1,13 @@
 """LLM 连通性测试 API — 直接调用 LLM 验证模型可用性和响应速度。"""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from langchain_openai import ChatOpenAI
 from loguru import logger
 from pydantic import BaseModel
 
+from src.api.dependencies import get_app_service
 from src.api.model.response import BaseResponse
-from src.config import settings, DASHSCOPE_API_KEY, DASHSCOPE_BASE_URL
+from src.services.app_service import AppService
 
 router = APIRouter()
 
@@ -14,13 +15,15 @@ router = APIRouter()
 class LlmTestRequest(BaseModel):
     """LLM 测试请求。"""
 
-    model: str = settings.LLM_MODEL  # 测试用的模型名，默认当前 LLM_MODEL
+    model: str = ""  # 空值表示使用默认模型
     prompt: str = "你好，请回复OK"  # 测试提示词
     temperature: float = 0  # 生成温度
 
 
 @router.post("/llm/test")
-async def llm_test(body: LlmTestRequest) -> BaseResponse:
+async def llm_test(
+    body: LlmTestRequest, svc: AppService = Depends(get_app_service)
+) -> BaseResponse:
     """测试 LLM 连通性 — 发送一条简单请求验证模型可用性和响应耗时。
 
     Args:
@@ -31,24 +34,25 @@ async def llm_test(body: LlmTestRequest) -> BaseResponse:
     Returns:
         BaseResponse: data 包含 model, response, latency_seconds
     """
-    logger.info("LLM test requested: model={} prompt={}", body.model, body.prompt[:50])
+    model_name = body.model or svc.settings.LLM_MODEL
+    logger.info("LLM test requested: model={} prompt={}", model_name, body.prompt[:50])
 
     import time
 
     start = time.time()
     try:
         llm = ChatOpenAI(
-            model=body.model,
+            model=model_name,
             temperature=body.temperature,
-            api_key=DASHSCOPE_API_KEY,
-            base_url=DASHSCOPE_BASE_URL,
+            api_key=svc.settings.DASHSCOPE_API_KEY,
+            base_url=svc.settings.DASHSCOPE_BASE_URL,
         )
         result = llm.invoke(body.prompt)
         elapsed = round(time.time() - start, 2)
-        logger.info("LLM test OK: model={} latency={}s", body.model, elapsed)
+        logger.info("LLM test OK: model={} latency={}s", model_name, elapsed)
         return BaseResponse(
             data={
-                "model": body.model,
+                "model": model_name,
                 "response": result.content,
                 "latency_seconds": elapsed,
             }
@@ -56,13 +60,13 @@ async def llm_test(body: LlmTestRequest) -> BaseResponse:
     except Exception as e:
         elapsed = round(time.time() - start, 2)
         logger.error(
-            "LLM test failed: model={} latency={}s error={}", body.model, elapsed, e
+            "LLM test failed: model={} latency={}s error={}", model_name, elapsed, e
         )
         return BaseResponse(
             code=1,
             message=f"LLM 调用失败: {e}",
             data={
-                "model": body.model,
+                "model": model_name,
                 "latency_seconds": elapsed,
                 "error": str(e),
             },

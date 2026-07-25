@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from src.api.dependencies import get_app_service
 from src.api.model.response import HealthResponse, AppConfigResponse
-from src.config import MAX_FILE_SIZE
+from src.services.app_service import AppService
 
 router = APIRouter()
 
@@ -20,34 +21,11 @@ async def health_check() -> HealthResponse:
     return HealthResponse(status="ok")
 
 
-def _get_service() -> _ConfigService:
-    """获取配置服务实例。
-
-    Returns:
-        _ConfigService: 配置服务实例
-    """
-    return _ConfigService()
-
-
-class _ConfigService:
-    """内部配置服务，封装系统配置读取。"""
-
-    async def get_max_upload_size(self) -> int:
-        """获取上传大小限制。
-
-        Returns:
-            int: 单文件上传上限（字节）
-        """
-        return MAX_FILE_SIZE
-
-
 @router.post("/config")
-async def app_config() -> AppConfigResponse:
+async def app_config(svc: AppService = Depends(get_app_service)) -> AppConfigResponse:
     """前端配置 — 返回前端需要的系统参数。
 
     Returns:
         AppConfigResponse: 含 max_upload_size 等前端配置
     """
-    svc = _get_service()
-    max_size = await svc.get_max_upload_size()
-    return AppConfigResponse(max_upload_size=max_size)
+    return AppConfigResponse(max_upload_size=svc.settings.MAX_FILE_SIZE)

@@ -9,7 +9,6 @@ from pydantic import BaseModel
 
 from src.api.model.response import BaseResponse
 from src.cli.eval_ragas_generate import _find_next_version, run_generate
-from src.config import RAGAS_DATA_DIR, RAGAS_USER_ID
 from src.services.app_service import AppService
 
 router = APIRouter()
@@ -38,7 +37,7 @@ async def ragas_generate(body: RagasGenerateRequest) -> BaseResponse:
     try:
         # ---- 查询 kb_id ----
         svc = AppService()
-        kb_id = await svc.db.get_kb_by_name(RAGAS_USER_ID, body.kb_name)
+        kb_id = await svc.get_kb_by_name(svc.settings.RAGAS_USER_ID, body.kb_name)
         if not kb_id:
             logger.warning("Knowledge base '{}' not found", body.kb_name)
             return BaseResponse(
@@ -54,7 +53,9 @@ async def ragas_generate(body: RagasGenerateRequest) -> BaseResponse:
         run_generate(body.kb_name, kb_id, body.size, model="")
 
         # ---- 从生成的 JSON 中读取测试集信息 ----
-        output_path = os.path.join(RAGAS_DATA_DIR, f"testset_{kb_id}_v{version}.json")
+        output_path = os.path.join(
+            svc.settings.RAGAS_DATA_DIR, f"testset_{kb_id}_v{version}.json"
+        )
         if os.path.exists(output_path):
             with open(output_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
