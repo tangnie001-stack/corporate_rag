@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Corporate RAG 架构图 — 当前状态</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true,theme:'neutral',securityLevel:'loose'})</script>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f8fafc}
+.card{background:white;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.1);padding:20px;margin-bottom:24px}
+.badge{display:inline-block;padding:2px 10px;border-radius:9999px;font-size:12px;font-weight:600}
+.badge-violation{background:#fef2f2;color:#991b1b}
+.badge-ok{background:#f0fdf4;color:#166534}
+.badge-warn{background:#fffbeb;color:#92400e}
+</style>
+</head>
+<body>
+<div class="max-w-6xl mx-auto p-6">
+
+<h1 class="text-3xl font-bold mb-1">Corporate RAG — 当前架构图</h1>
+<p class="text-gray-500 mb-6">Phase 3 重构后状态 · 2026-07-25</p>
+
+<!-- 层叠架构图 -->
+<div class="card">
+<h2 class="text-xl font-bold mb-4">1. 分层架构总览</h2>
+<div class="mermaid">
+flowchart TB
+    subgraph HTTP["🌐 HTTP (Nginx :80)"]
+    end
+
+    subgraph API["📡 API 层 — src/api/"]
+        direction LR
+        A_auth["auth.py<br/>login/verify/logout"]
+        A_chat["chat.py<br/>chat/stream"]
+        A_doc["documents.py<br/>upload/list/status"]
+        A_sessions["sessions.py<br/>list/delete"]
+        A_kb["knowledge_base.py<br/>crud"]
+        A_kbeval["kb_eval.py<br/>eval report"]
+        A_health["health.py"]
+    end
+
+    subgraph SVC["⚙️ Service 层 — src/services/"]
+        direction TB
+        S_app["app_service.py<br/>全局依赖 + 编排"]
+        S_agent["agent_service.py<br/>LangGraph 图生命周期"]
+        S_doc["document_service.py<br/>文档处理流水线"]
+        S_kb["kb_service.py<br/>知识库 CRUD"]
+    end
+
+    subgraph RAG["🧠 RAG 流水线 — src/rag/ + src/agents/"]
+        direction TB
+        G_workflow["workflow.py<br/>StateGraph 编译"]
+        G_nodes["nodes.py<br/>7 个节点函数"]
+        G_grader["grader.py<br/>检索质量评分"]
+        G_retrieval["retrieval.py<br/>search/rerank/rewrite"]
+        G_prompt["prompt.py<br/>Prompt 构建"]
+        G_stream["stream.py<br/>流式生成"]
+        G_context["context.py<br/>RAGContext"]
+    end
+
+    subgraph INFRA["🔧 基础设施层 — src/infra/"]
+        direction LR
+        I_mysql["db/mysql_db.py<br/>883行 ⚠️"]
+        I_chroma["db/vector_store.py<br/>602行 ⚠️"]
+        I_minio["db/file_store.py<br/>MinIO 存储"]
+        I_redis["redis_client.py"]
+        I_auth["auth/user_auth.py<br/>密码+token"]
+        I_llm["llm/langfuse/...<br/>追踪+提示"]
+        I_search["search/bm25+router<br/>BM25+分类"]
+        I_chunk["chunking/<br/>分块策略"]
+    end
+
+    subgraph CHAT["💬 对话管理 — src/chat/"]
+        C_mgr["manager.py<br/>Redis + InMemory"]
+        C_persist["persistence.py<br/>MySQL 持久化"]
+    end
+
+    subgraph UTIL["🧰 工具层 — src/utils/"]
+        U_sse["sse.py"]
+        U_err["errors.py"]
+        U_desense["desensitize.py"]
+    end
+
+    subgraph EVAL["📊 CLI 评估"]
+        E_ragas["cli/eval_ragas.py<br/>597行 ⚠️"]
+    end
+
+    HTTP --> API
+
+    API --> SVC
+    API -->|"❌ 违规直调"| INFRA
+    API -->|"❌ 违规直调 svc.db"| I_mysql
+
+    SVC --> RAG
+    SVC --> CHAT
+    SVC --> INFRA
+
+    RAG --> INFRA
+    CHAT --> INFRA
+</div>
+</div>
+
+<!-- 调用关系图 -->
+<div class="card">
+<h2 class="text-xl font-bold mb-4">2. 生产问答调用链（SSE 路径）</h2>
+<div class="mermaid">
+sequenceDiagram
+    participant F as 前端
+    participant A as api/chat.py
+    participant AS as agent_service.py
+    participant G as LangGraph
+    participant R as infra/
+
+    F->>A: GET /chat/stream
+    A->>AS: stream_chat()
+    AS->>G: astream_events()
+    Note over G: classify → rewrite → retrieve → grader → rerank → generate → format
+    G->>R: search()
+    G->>R: rerank()
+    G-->>AS: yield SSE events
+    AS-->>A: yield SSE events
+    A-->>F: StreamingResponse
+</div>
+</div>
+
+<!-- 违规标注图 -->
+<div class="card">
+<h2 class="text-xl font-bold mb-4">3. ⚠️ API 层违规调用（"过度肥胖的路由"）</h2>
+<div class="mermaid">
+flowchart LR
+    subgraph API_ROUTES["api/"]
+        A1["auth.py:login()"]
+        A2["auth.py:verify()"]
+        A3["auth.py:logout()"]
+        A4["documents.py:upload()"]
+        A5["kb_eval.py:report()"]
+        A6["sessions.py:delete()"]
+    end
+
+    subgraph WHAT_SHOULD_BE["应有的 Service 层封装"]
+        SA["services/auth_service.py<br/>⛔ 不存在"]
+        SD["services/document_service.py<br/>已有但 store_and_process 缺失"]
+    end
+
+    subgraph DIRECT_CALLS["当前直接调用"]
+        D1["UserAuth.hash/generate/store<hr>Redis → get_redis_client"]
+        D2["svc.db.get_user_by_account()<br/>svc.db.add_user()"]
+        D3["FileStore().upload()<br/>svc.db.add_document()"]
+        D4["svc.db.get_latest_eval_report()"]
+        D5["chat_manager.clear_history_async()"]
+    end
+
+    A1 --> D1
+    A1 --> D2
+    A2 --> D1
+    A3 --> D1
+    A4 --> D3
+    A5 --> D4
+    A6 --> D5
+
+    style SA stroke:#dc2626,stroke-dasharray:5 5
+    style SD stroke:#f59e0b,stroke-dasharray:5 5
+</div>
+</div>
+
+<!-- 应然状态对比 -->
+<div class="card">
+<h2 class="text-xl font-bold mb-4">4. 应然架构（修复合规后）</h2>
+<div class="mermaid">
+flowchart TB
+    subgraph API_OK["api/ — 纯路由"]
+        A_auth_ok["auth.py<br/>3 行：参数校验 → 调 service → 返回"]
+        A_doc_ok["documents.py<br/>upload：调 document_service"]
+        A_other_ok["其他路由<br/>同理只调 service"]
+    end
+
+    subgraph SVC_OK["services/ — 业务逻辑"]
+        S_auth_ok["auth_service.py ✅ NEW<br/>login/verify/logout 全流程"]
+        S_doc_ok["document_service.py<br/>+ store_and_process() ✅"]
+        S_app_ok["app_service.py<br/>+ get_eval_report wrapper"]
+    end
+
+    subgraph INFRA_OK["infra/ — 纯实现"]
+        I_auth_ok["auth/user_auth.py"]
+        I_redis_ok["redis_client.py"]
+        I_file_ok["db/file_store.py"]
+        I_mysql_ok["db/mysql_db.py"]
+    end
+
+    API_OK -->|"仅调 service"| SVC_OK
+    SVC_OK -->|"调 infra"| INFRA_OK
+
+    style API_OK fill:#f0fdf4
+    style SVC_OK fill:#f0fdf4
+</div>
+</div>
+
+<!-- 项目目录对照 -->
+<div class="card">
+<h2 class="text-xl font-bold mb-4">5. 当前目录 vs 业界推荐结构</h2>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+<div class="bg-gray-50 rounded-lg p-4">
+<h3 class="font-bold text-red-600">当前（Layer-based）</h3>
+<pre class="text-xs mt-2">
+src/
+├── api/           ← 混入业务逻辑 ⚠️
+│   ├── auth.py       ← 违规
+│   ├── documents.py  ← 违规
+│   ├── sessions.py   ← 违规
+│   └── kb_eval.py    ← 违规
+├── services/
+│   ├── app_service.py
+│   ├── agent_service.py
+│   ├── document_service.py
+│   └── ❌ 缺 auth_service
+├── rag/
+│   └── chain.py      ← 死代码 ⚠️
+├── infra/             ✓ 纯基础设施
+├── chat/              ✓ 纯 async
+├── utils/             ✓ 新建
+└── agents/            ✓ LangGraph
+</pre>
+</div>
+
+<div class="bg-gray-50 rounded-lg p-4">
+<h3 class="font-bold text-green-600">应然（Layer-based + 完整 Service）</h3>
+<pre class="text-xs mt-2">
+src/
+├── api/           ← 纯路由路由
+│   └── auth.py       ← 3 行薄代码
+├── services/          ← 完整业务层
+│   ├── auth_service.py   🆕
+│   ├── document_service.py  ← 含 store
+│   ├── app_service.py
+│   └── agent_service.py
+├── rag/
+│   └── ✅ chain.py 已删除
+├── infra/             ✓ 不变
+├── chat/              ✓ 不变
+├── utils/             ✓ 不变
+└── agents/            ✓ 不变
+</pre>
+</div>
+
+</div>
+</div>
+
+<!-- 违规汇总表 -->
+<div class="card">
+<h2 class="text-xl font-bold mb-4">6. 违规汇总</h2>
+<table class="w-full text-sm">
+<thead>
+<tr class="border-b text-left">
+<th class="pb-2">位置</th>
+<th class="pb-2">违规类型</th>
+<th class="pb-2">调用内容</th>
+<th class="pb-2">严重度</th>
+</tr>
+</thead>
+<tbody>
+<tr class="border-b"><td class="py-2">api/auth.py:38</td><td>业务逻辑</td><td>UserAuth.hash_password()</td><td><span class="badge badge-violation">P0</span></td></tr>
+<tr class="border-b"><td class="py-2">api/auth.py:48-49</td><td>业务逻辑</td><td>UserAuth.generate/store_token + Redis</td><td><span class="badge badge-violation">P0</span></td></tr>
+<tr class="border-b"><td class="py-2">api/auth.py:39-46</td><td>绕过 service</td><td>svc.db.get/add_user()</td><td><span class="badge badge-violation">P0</span></td></tr>
+<tr class="border-b"><td class="py-2">api/auth.py:68</td><td>业务逻辑</td><td>UserAuth.get_user_from_token + Redis</td><td><span class="badge badge-violation">P0</span></td></tr>
+<tr class="border-b"><td class="py-2">api/auth.py:85</td><td>业务逻辑</td><td>UserAuth.delete_token + Redis</td><td><span class="badge badge-violation">P0</span></td></tr>
+<tr class="border-b"><td class="py-2">api/documents.py:184-196</td><td>业务逻辑</td><td>FileStore.upload() + svc.db.add_document()</td><td><span class="badge badge-violation">P1</span></td></tr>
+<tr class="border-b"><td class="py-2">api/kb_eval.py:34</td><td>绕过 service</td><td>svc.db.get_latest_eval_report()</td><td><span class="badge badge-warn">P2</span></td></tr>
+<tr class="border-b"><td class="py-2">api/sessions.py:122</td><td>绕过 service</td><td>svc.chat_manager.clear_history()</td><td><span class="badge badge-warn">P2</span></td></tr>
+</tbody>
+</table>
+</div>
+
+<p class="text-center text-gray-400 text-sm mt-4">Corporate RAG Architecture Map</p>
+</div>
+</body>
+</html>

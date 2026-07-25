@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Corporate RAG 架构审查报告 — Phase 3 复盘</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true,theme:'neutral'})</script>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+.card{border-left:4px solid #e5e7eb}.critical{border-left-color:#dc2626}.strong{border-left-color:#ef4444}.explore{border-left-color:#f59e0b}.spec{border-left-color:#3b82f6}.done{border-left-color:#16a34a}
+.badge{display:inline-block;padding:2px 8px;border-radius:9999px;font-size:12px;font-weight:600}
+.badge-critical{background:#fef2f2;color:#991b1b}.badge-strong{background:#fef2f2;color:#991b1b}.badge-explore{background:#fffbeb;color:#92400e}.badge-spec{background:#eff6ff;color:#1e40af}.badge-done{background:#f0fdf4;color:#166534}
+:root{--mermaid-bg:#f8fafc} svg{max-width:100%}
+.status-ok{color:#16a34a;font-weight:600}.status-fail{color:#dc2626;font-weight:600}
+</style>
+</head>
+<body class="bg-gray-50">
+<div class="max-w-5xl mx-auto p-6">
+
+<h1 class="text-3xl font-bold mb-2">Corporate RAG 架构审查 — Phase 3 复���</h1>
+<p class="text-gray-500 mb-6">2026-07-25 · Phase 3 重构后代码评估 + 死代码检测</p>
+
+<div class="grid grid-cols-5 gap-3 mb-8">
+  <div class="bg-white rounded-lg shadow p-4 text-center">
+    <div class="text-3xl font-bold text-red-600">7</div>
+    <div class="text-sm text-gray-500">Critical</div>
+  </div>
+  <div class="bg-white rounded-lg shadow p-4 text-center">
+    <div class="text-3xl font-bold text-red-600">8</div>
+    <div class="text-sm text-gray-500">Strong</div>
+  </div>
+  <div class="bg-white rounded-lg shadow p-4 text-center">
+    <div class="text-3xl font-bold text-amber-600">4</div>
+    <div class="text-sm text-gray-500">Worth exploring</div>
+  </div>
+  <div class="bg-white rounded-lg shadow p-4 text-center">
+    <div class="text-3xl font-bold text-blue-600">2</div>
+    <div class="text-sm text-gray-500">Speculative</div>
+  </div>
+  <div class="bg-white rounded-lg shadow p-4 text-center">
+    <div class="text-3xl font-bold text-green-600">5</div>
+    <div class="text-sm text-gray-500">✅ 已修复</div>
+  </div>
+</div>
+
+<!-- ==================== 摘要 ==================== -->
+<div class="bg-white rounded-lg shadow p-5 mb-8">
+<h2 class="text-xl font-bold mb-3">Phase 3 重构成果验证</h2>
+<div class="grid grid-cols-2 md:grid-cols-5 gap-4 text-center">
+<div><span class="status-ok">✅</span> sync 方法清理</div>
+<div><span class="status-ok">✅</span> new_event_loop 消除</div>
+<div><span class="status-ok">✅</span> utils/ 目录创建</div>
+<div><span class="status-ok">✅</span> AppService 重组</div>
+<div><span class="status-ok">✅</span> Path A 删除</div>
+</div>
+<div class="mt-3 grid grid-cols-2 md:grid-cols-3 gap-4 text-center">
+<div><span class="status-ok">✅</span> SSE 桥接层待删</div>
+<div><span class="status-fail">❌</span> RAGChain 整类死代码</div>
+<div><span class="status-fail">❌</span> 文件红线超标 3 个</div>
+</div>
+</div>
+
+<h2 class="text-2xl font-bold mb-4">P0 — 必须修复</h2>
+<div class="space-y-4">
+
+<!-- P0-1: 测试引用已删方法 -->
+<div class="card critical bg-white rounded-lg shadow p-5">
+<div class="flex justify-between items-start mb-2">
+<h3 class="text-lg font-bold text-red-800">测试引用已删除的方法</h3>
+<span class="badge badge-critical">Critical</span>
+</div>
+<p class="text-gray-600 mb-2">3 个测试文件引用 RAGChain 中已删除的方法（_format_context、_build_prompt、_stream_answer、_langfuse_handler），运行即 Fail。</p>
+<div class="flex gap-2 mb-3">
+<span class="text-xs bg-gray-100 px-2 py-1 rounded">tests/rag/test_prompt.py</span>
+<span class="text-xs bg-gray-100 px-2 py-1 rounded">tests/rag/test_stream.py</span>
+<span class="text-xs bg-gray-100 px-2 py-1 rounded">tests/rag/test_rag_chain_tracing.py</span>
+</div>
+<div class="p-3 bg-gray-50 rounded text-sm">
+<pre class="text-xs">AttributeError: type object 'RAGChain' has no attribute '_format_context'
+AttributeError: type object 'RAGChain' has no attribute '_langfuse_handler'</pre>
+</div>
+<p class="mt-2 text-sm text-gray-500">修复: 更新或删除这些测试。RAGChain 已不再提供这些方法。</p>
+</div>
+
+<!-- P0-2: api/ 直接导入 infra/ -->
+<div class="card critical bg-white rounded-lg shadow p-5">
+<div class="flex justify-between items-start mb-2">
+<h3 class="text-lg font-bold text-red-800">API 层直接导入 infra/</h3>
+<span class="badge badge-critical">Critical</span>
+</div>
+<p class="text-gray-600 mb-1">3 处 api/ 文件直接导入 infra/，违反层间调用规约。</p>
+<div class="flex gap-2 mb-3">
+<span class="text-xs bg-gray-100 px-2 py-1 rounded">src/api/auth.py:15</span>
+<span class="text-xs bg-gray-100 px-2 py-1 rounded">src/api/auth.py:16</span>
+<span class="text-xs bg-gray-100 px-2 py-1 rounded">src/api/documents.py:35</span>
+</div>
+<div class="mermaid">
+graph LR
+    subgraph 当前
+        api_auth --> infra_auth[infra/auth/user_auth]
+        api_auth --> infra_redis[infra/redis_client]
+        api_doc --> infra_file[infra/db/file_store]
+    end
+    subgraph 应然
+        api_auth2 --> svc_auth[services/auth_service]
+        svc_auth --> infra_auth2[infra/auth/user_auth]
+        api_doc2 --> svc_doc2[services/document_service]
+        svc_doc2 --> infra_file2[infra/db/file_store]
+    end
+</div>
+<p class="mt-2 text-sm text-gray-500">收益: 遵循层间规约，api/ 回归纯路由职责</p>
+</div>
+
+</div>
+
+<h2 class="text-2xl font-bold mt-8 mb-4">P1 — 必须处理</h2>
+<div class="space-y-4">
+
+<!-- P1-1: RAGChain 死代码 -->
+<div class="card strong bg-white rounded-lg shadow p-5">
+<div class="flex justify-between items-start mb-2">
+<h3 class="text-lg font-bold text-red-800">RAGChain 整类死代码</h3>
+<span class="badge badge-strong">Strong</span>
+</div>
+<p class="text-gray-600 mb-1">RAGChain（121 行）已无生产调用者。所有问答路径走 AgentService。构造函数仍初始化 VectorStore/MySQLDB/ChatManager/BM25Index，但类不会被实例化。</p>
+<div class="flex gap-2 mb-3">
+<span class="text-xs bg-gray-100 px-2 py-1 rounded">src/rag/chain.py:20-121</span>
+</div>
+<div class="p-3 bg-gray-50 rounded text-sm">
+<div class="flex flex-col md:flex-row gap-4">
+<div class="flex-1">
+<p class="font-semibold text-red-600">生产调用者</p>
+<pre class="text-xs bg-gray-100 p-2 rounded mt-1">src/services/app_service.py        ← 已移除
+src/services/chat_service.py       ← 已删除
+src/cli/eval_ragas.py              ← 已改用 graph.ainvoke()
+src/api/*.py                        ← 无引用
+⇒ 零生产调用者</pre>
+</div>
+<div class="flex-1">
+<p class="font-semibold text-green-600">仅测试引用</p>
+<pre class="text-xs bg-gray-100 p-2 rounded mt-1">tests/rag/test_chain.py
+tests/rag/test_prompt.py
+tests/rag/test_stream.py
+tests/rag/test_rag_chain_tracing.py
+tests/eval/test_eval_ragas.py
+tests/services/test_app_service.py (patch)</pre>
+</div>
+</div>
+</div>
+<p class="mt-2 text-sm text-gray-500">建议: 删除 chain.py，更新 rag/__init__.py 只导 RAGContext</p>
+</div>
+
+<!-- P1-2: 文件大小超标 -->
+<div class="card strong bg-white rounded-lg shadow p-5">
+<div class="flex justify-between items-start mb-2">
+<h3 class="text-lg font-bold text-red-800">3 个文件超出 400 行红线</h3>
+<span class="badge badge-strong">Strong</span>
+</div>
+<p class="text-gray-600 mb-1">项目规约要求单文件不超过 400 行。</p>
+<div class="flex gap-2 mb-3">
+<span class="text-xs bg-gray-100 px-2 py-1 rounded">src/infra/db/mysql_db.py (883行)</span>
+<span class="text-xs bg-gray-100 px-2 py-1 rounded">src/infra/db/vector_store.py (602行)</span>
+<span class="text-xs bg-gray-100 px-2 py-1 rounded">src/cli/eval_ragas.py (597行)</span>
+</div>
+<div class="mermaid">
+graph LR
+    subgraph 超标文件
+        mysql_db["mysql_db.py<br/>883行 ⚠️"]
+        vector_store["vector_store.py<br/>602行 ⚠️"]
+        eval_ragas["eval_ragas.py<br/>597行 ⚠️"]
+    end
+    subgraph 建议拆分
+        mysql_db --> mysql_crud[crud.py]
+        mysql_db --> mysql_health[health.py]
+        vector_store --> vs_crud[crud.py]
+        vector_store --> vs_admin[admin.py]
+        eval_ragas --> eval_core[core.py]
+        eval_ragas --> eval_metrics[metrics.py]
+    end
+</div>
+<p class="mt-2 text-sm text-gray-500">mysql_db.py 和 vector_store.py 是最大违规，建议拆为模块包</p>
+</div>
+
+<!-- P1-3: mock 路径不存在 -->
+<div class="card strong bg-white rounded-lg shadow p-5">
+<div class="flex justify-between items-start mb-2">
+<h3 class="text-lg font-bold text-red-800">测试 mock 路径不存在</h3>
+<span class="badge badge-strong">Strong</span>
+</div>
+<p class="text-gray-600 mb-1">test_app_service.py 中的 @patch("src.services.app_service.RAGChain") 引用了已删除的导入路径，mock 创建后从未使用/断言。</p>
+<div class="flex gap-2 mb-3">
+<span class="text-xs bg-gray-100 px-2 py-1 rounded">tests/services/test_app_service.py:14处path</span>
+</div>
+<p class="mt-2 text-sm text-gray-500">风险: 测试静默通过但无实际校验价值，14 处 patch 需清理</p>
+</div>
+
+</div>
+
+<h2 class="text-2xl font-bold mt-8 mb-4">P2 — 值得处理</h2>
+<div class="space-y-4">
+
+<!-- P2-1: 重复方法 -->
+<div class="card explore bg-white rounded-lg shadow p-5">
+<div class="flex justify-between items-start mb-2">
+<h3 class="text-lg font-bold text-amber-800">DocumentService 公有/私有方法重复</h3>
+<span class="badge badge-explore">Worth exploring</span>
+</div>
+<p class="text-gray-600 mb-1">enrich_chunk_pages（公有）与 _enrich_chunk_pages（私有）代码完全一致；模块级 _merge_tiny_chunks 与类方法 _merge_tiny_chunks 代码完全一致。</p>
+<div class="flex gap-2 mb-3">
+<span class="text-xs bg-gray-100 px-2 py-1 rounded">src/services/document_service.py:25</span>
+<span class="text-xs bg-gray-100 px-2 py-1 rounded">src/services/document_service.py:110</span>
+<span class="text-xs bg-gray-100 px-2 py-1 rounded">src/services/document_service.py:158</span>
+</div>
+<p class="mt-2 text-sm text-gray-500">修复: 删除公有方法，统一用私有版本</p>
+</div>
+
+<!-- P2-2: route_by_grader 修改 state -->
+<div class="card explore bg-white rounded-lg shadow p-5">
+<div class="flex justify-between items-start mb-2">
+<h3 class="text-lg font-bold text-amber-800">workflow.py 条件边直接修改 state</h3>
+<span class="badge badge-explore">Worth exploring</span>
+</div>
+<p class="text-gray-600 mb-1">LangGraph 条件边函数 `route_by_*` 不应直接修改 state，应只返回下一节点名。但 workflow.py 有直接 state 修改。</p>
+<div class="flex gap-2 mb-3">
+<span class="text-xs bg-gray-100 px-2 py-1 rounded">src/agents/graph/workflow.py:22-35</span>
+</div>
+<p class="mt-2 text-sm text-gray-500">风险: LangGraph 条件边的 state 修改可能不生效，需在 grader_node 中完成</p>
+</div>
+
+<!-- P2-3: API 绕过 service 层 -->
+<div class="card explore bg-white rounded-lg shadow p-5">
+<div class="flex justify-between items-start mb-2">
+<h3 class="text-lg font-bold text-amber-800">API 路由绕过 service 层</h3>
+<span class="badge badge-explore">Worth exploring</span>
+</div>
+<p class="text-gray-600 mb-1">kb_eval.py 直接访问 svc.db.get_latest_eval_report()；sessions.py 直接访问 svc.chat_manager.clear_history_async()。</p>
+<div class="flex gap-2 mb-3">
+<span class="text-xs bg-gray-100 px-2 py-1 rounded">src/api/kb_eval.py:34</span>
+<span class="text-xs bg-gray-100 px-2 py-1 rounded">src/api/sessions.py:122</span>
+</div>
+<p class="mt-2 text-sm text-gray-500">修复: 在 AppService 加对应的 wrapper 方法</p>
+</div>
+
+</div>
+
+<h2 class="text-2xl font-bold mt-8 mb-4">P3 — 可优化</h2>
+<div class="space-y-4">
+
+<!-- P3-1: SSE 桥接层 -->
+<div class="card spec bg-white rounded-lg shadow p-5">
+<div class="flex justify-between items-start mb-2">
+<h3 class="text-lg font-bold text-blue-800">SSE 桥接层可删除</h3>
+<span class="badge badge-spec">Speculative</span>
+</div>
+<p class="text-gray-600 mb-1">src/api/sse_utils.py 仅做兼容重导出，更新 chat.py import 后可直接删除。</p>
+<div class="flex gap-2 mb-3">
+<span class="text-xs bg-gray-100 px-2 py-1 rounded">src/api/sse_utils.py</span>
+</div>
+</div>
+
+<!-- P3-2: _ConfigService 过度抽象 -->
+<div class="card spec bg-white rounded-lg shadow p-5">
+<div class="flex justify-between items-start mb-2">
+<h3 class="text-lg font-bold text-blue-800">_ConfigService 过度抽象</h3>
+<span class="badge badge-spec">Speculative</span>
+</div>
+<p class="text-gray-600 mb-1">health.py 的 _ConfigService.get_max_upload_size() 仅返回常量 MAX_FILE_SIZE，可内联。</p>
+<div class="flex gap-2 mb-3">
+<span class="text-xs bg-gray-100 px-2 py-1 rounded">src/api/health.py:23-41</span>
+</div>
+</div>
+</div>
+
+<h2 class="text-2xl font-bold mt-8 mb-4">Phase 3 ✅ 已修复验证</h2>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+<div class="card done bg-white rounded-lg shadow p-4">
+<h4 class="font-bold text-green-800">✅ sync 方法清理</h4>
+<p class="text-sm text-gray-600">ChatManager 已无同步方法，全部 async</p>
+</div>
+<div class="card done bg-white rounded-lg shadow p-4">
+<h4 class="font-bold text-green-800">✅ new_event_loop 消除</h4>
+<p class="text-sm text-gray-600">retrieve_node 已改为 async def</p>
+</div>
+<div class="card done bg-white rounded-lg shadow p-4">
+<h4 class="font-bold text-green-800">✅ utils/ 目录创建</h4>
+<p class="text-sm text-gray-600">sse.py / errors.py / desensitize.py 已迁入</p>
+</div>
+<div class="card done bg-white rounded-lg shadow p-4">
+<h4 class="font-bold text-green-800">✅ AppService 重组</h4>
+<p class="text-sm text-gray-600">无 RAGChain/ChatService 引用</p>
+</div>
+<div class="card done bg-white rounded-lg shadow p-4">
+<h4 class="font-bold text-green-800">✅ Path A 删除</h4>
+<p class="text-sm text-gray-600">chat_with_citations + ChatService 已删除</p>
+</div>
+
+</div>
+
+<h2 class="text-2xl font-bold mt-8 mb-4">推荐优先级</h2>
+
+<div class="bg-white rounded-lg shadow p-5 space-y-4">
+<div class="bg-indigo-50 border-l-4 border-indigo-500 p-4 rounded">
+<h3 class="font-bold text-lg text-indigo-900">#1: 修复测试引用已删方法（P0）</h3>
+<p class="text-gray-700 mt-1">test_prompt.py / test_stream.py / test_rag_chain_tracing.py 引用已删除的 RAGChain 方法，直接导致 pytest 失败。先修这个让测试恢复。</p>
+</div>
+
+<div class="bg-indigo-50 border-l-4 border-indigo-500 p-4 rounded mt-3">
+<h3 class="font-bold text-lg text-indigo-900">#2: 删除 RAGChain 死代码（P1）</h3>
+<p class="text-gray-700 mt-1">RAGChain 整类无生产调用者。删除后可消除 6 个测试文件的依赖，同时删除 api/sse_utils.py 桥接层。</p>
+</div>
+
+<div class="bg-indigo-50 border-l-4 border-indigo-500 p-4 rounded mt-3">
+<h3 class="font-bold text-lg text-indigo-900">#3: 拆分超标文件（P1）</h3>
+<p class="text-gray-700 mt-1">mysql_db.py（883行）、vector_store.py（602行）、eval_ragas.py（597行）超出红线，影响可维护性。</p>
+</div>
+</div>
+
+<p class="text-center text-gray-400 text-sm mt-8">Report generated by improve-codebase-architecture skill · Phase 3 review</p>
+</div>
+</body>
+</html>
