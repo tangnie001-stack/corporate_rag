@@ -43,7 +43,9 @@ async def test_document_crud():
     kb_name = f"test-doc-kb-{uuid.uuid4().hex[:8]}"
     kb_id, _ = await kb_repo.get_or_create_kb(user_id, kb_name)
     doc_id = str(uuid.uuid4())
-    doc = DocEntity(id=doc_id, kb_id=kb_id, filename="test.pdf", file_type="pdf", file_size=100)
+    doc = DocEntity(
+        id=doc_id, kb_id=kb_id, filename="test.pdf", file_type="pdf", file_size=100
+    )
     await doc_repo.add_document(doc)
     docs = await doc_repo.get_documents(kb_id)
     doc_ids = [d.id for d in docs]
@@ -84,9 +86,33 @@ async def test_get_doc_names():
     doc_id_1 = str(uuid.uuid4())
     doc_id_2 = str(uuid.uuid4())
     doc_id_3 = str(uuid.uuid4())
-    await doc_repo.add_document(DocEntity(id=doc_id_1, kb_id=kb_id, filename="report.pdf", file_type="pdf", file_size=100))
-    await doc_repo.add_document(DocEntity(id=doc_id_2, kb_id=kb_id, filename="summary.docx", file_type="docx", file_size=200))
-    await doc_repo.add_document(DocEntity(id=doc_id_3, kb_id=kb_id, filename="data.xlsx", file_type="xlsx", file_size=300))
+    await doc_repo.add_document(
+        DocEntity(
+            id=doc_id_1,
+            kb_id=kb_id,
+            filename="report.pdf",
+            file_type="pdf",
+            file_size=100,
+        )
+    )
+    await doc_repo.add_document(
+        DocEntity(
+            id=doc_id_2,
+            kb_id=kb_id,
+            filename="summary.docx",
+            file_type="docx",
+            file_size=200,
+        )
+    )
+    await doc_repo.add_document(
+        DocEntity(
+            id=doc_id_3,
+            kb_id=kb_id,
+            filename="data.xlsx",
+            file_type="xlsx",
+            file_size=300,
+        )
+    )
 
     # 查询部分文档
     result = await doc_repo.get_doc_names([doc_id_1, doc_id_3])

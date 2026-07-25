@@ -6,8 +6,13 @@ from loguru import logger
 
 from src.agents.graph.state import AgentState
 from src.agents.graph.nodes import (
-    classify_node, rewrite_node, grader_node, format_node,
-    make_retrieve_node, make_rerank_node, make_generate_node,
+    classify_node,
+    rewrite_node,
+    grader_node,
+    format_node,
+    make_retrieve_node,
+    make_rerank_node,
+    make_generate_node,
 )
 from src.infra.db.vector_store import VectorStore
 from src.infra.search.bm25_index import BM25Index
@@ -30,14 +35,26 @@ def route_by_grader(state: AgentState) -> str:
         logger.info("route_by_grader: score={:.2f} >= 0.5 -> pass", score)
         return "pass"
     if retries < 3:
-        logger.info("route_by_grader: score={:.2f} retries={} < 3 -> rewrite", score, retries)
+        logger.info(
+            "route_by_grader: score={:.2f} retries={} < 3 -> rewrite", score, retries
+        )
         return "rewrite"
-    logger.info("route_by_grader: score={:.2f} retries={} >= 3 -> pass (downgrade)", score, retries)
+    logger.info(
+        "route_by_grader: score={:.2f} retries={} >= 3 -> pass (downgrade)",
+        score,
+        retries,
+    )
     return "pass"
 
 
-def build_graph(vector_store: VectorStore, bm25: BM25Index | None,
-                llm, reranker, prompt_manager, tracer) -> StateGraph:
+def build_graph(
+    vector_store: VectorStore,
+    bm25: BM25Index | None,
+    llm,
+    reranker,
+    prompt_manager,
+    tracer,
+) -> StateGraph:
     """构建并编译 StateGraph。"""
     builder = StateGraph(AgentState)
 
@@ -53,11 +70,13 @@ def build_graph(vector_store: VectorStore, bm25: BM25Index | None,
     # ── 条件边：三级路由 ──────────────────────────
     builder.set_entry_point("classify")
     builder.add_conditional_edges(
-        "classify", route_by_intent, {
-            "simple":  "generate",    # Naive RAG：无检索
-            "medium":  "rewrite",     # Enhanced RAG
-            "complex": "rewrite",     # Agentic RAG
-        }
+        "classify",
+        route_by_intent,
+        {
+            "simple": "generate",  # Naive RAG：无检索
+            "medium": "rewrite",  # Enhanced RAG
+            "complex": "rewrite",  # Agentic RAG
+        },
     )
 
     # medium + complex → rewrite → retrieve
@@ -68,10 +87,12 @@ def build_graph(vector_store: VectorStore, bm25: BM25Index | None,
 
     # grader 条件边：通过 → rerank，不通过（+ retry < 2）→ rewrite
     builder.add_conditional_edges(
-        "grader", route_by_grader, {
-            "pass":    "rerank",
+        "grader",
+        route_by_grader,
+        {
+            "pass": "rerank",
             "rewrite": "rewrite",
-        }
+        },
     )
 
     builder.add_edge("rerank", "generate")

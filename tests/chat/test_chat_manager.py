@@ -71,7 +71,9 @@ class TestChatManagerRedisReconnection:
         assert cm._in_memory is False  # 初始连接正常
 
         # 让缓存的 Redis client ping 失败（模拟 Redis 断开）
-        working_client.ping = AsyncMock(side_effect=ConnectionError("Redis disconnected"))
+        working_client.ping = AsyncMock(
+            side_effect=ConnectionError("Redis disconnected")
+        )
 
         # 触发 get_history_async → _ensure_redis_async → ping 失败 → 降级
         history = await cm.get_history_async("test_session")
@@ -96,7 +98,9 @@ class TestChatManagerRedisReconnection:
         assert cm._in_memory is False
 
         # 模拟 Redis 断开：缓存 client 的 ping 失败
-        working_client.ping = AsyncMock(side_effect=ConnectionError("Redis disconnected"))
+        working_client.ping = AsyncMock(
+            side_effect=ConnectionError("Redis disconnected")
+        )
 
         # 触发降级
         await cm.get_history_async("sess")
@@ -127,7 +131,9 @@ class TestChatManagerRedisReconnection:
         cm = ChatManager(redis_url="redis://localhost:6379/0")
 
         # 模拟 Redis 断开：缓存 client 的 ping 失败
-        working_client.ping = AsyncMock(side_effect=ConnectionError("Redis disconnected"))
+        working_client.ping = AsyncMock(
+            side_effect=ConnectionError("Redis disconnected")
+        )
 
         # 写入消息（应降级到 InMemory）
         await cm.add_message_async("sess", "user", "测试消息")

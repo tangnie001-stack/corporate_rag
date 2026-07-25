@@ -26,7 +26,8 @@ class ChromaClient:
             )
             logger.info(
                 "ChromaDB PersistentClient created: persist_dir={} model={}",
-                self._persist_dir, EMBEDDING_MODEL,
+                self._persist_dir,
+                EMBEDDING_MODEL,
             )
         return self._client
 

@@ -17,17 +17,29 @@ def similarity_search(collection, embed_fn, kb_id, query, k=5) -> list[ChunkResu
     formatted = []
     if results["ids"] and results["ids"][0]:
         for i in range(len(results["ids"][0])):
-            formatted.append(ChunkResult(
-                id=results["ids"][0][i],
-                content=results["documents"][0][i] if results["documents"] else "",
-                metadata=results["metadatas"][0][i] if results["metadatas"] else {},
-                distance=results["distances"][0][i] if results.get("distances") else None,
-            ))
-    logger.info("ChromaDB search: kb_id={} query_len={} results={} model={}",
-                kb_id, len(query), len(formatted), EMBEDDING_MODEL)
-    logger.debug("[CHROMA] method=similarity_search | kb_id={} | rows={} | data={}",
-                 kb_id, len(formatted),
-                 str(formatted)[:LOG_MAX_BODY] if formatted else "[]")
+            formatted.append(
+                ChunkResult(
+                    id=results["ids"][0][i],
+                    content=results["documents"][0][i] if results["documents"] else "",
+                    metadata=results["metadatas"][0][i] if results["metadatas"] else {},
+                    distance=results["distances"][0][i]
+                    if results.get("distances")
+                    else None,
+                )
+            )
+    logger.info(
+        "ChromaDB search: kb_id={} query_len={} results={} model={}",
+        kb_id,
+        len(query),
+        len(formatted),
+        EMBEDDING_MODEL,
+    )
+    logger.debug(
+        "[CHROMA] method=similarity_search | kb_id={} | rows={} | data={}",
+        kb_id,
+        len(formatted),
+        str(formatted)[:LOG_MAX_BODY] if formatted else "[]",
+    )
     return formatted
 
 
@@ -45,10 +57,16 @@ def similarity_search_all(
             logger.warning("搜索 collection '{}' 失败: {}", kb_id, e)
             continue
 
-    all_results.sort(key=lambda r: r.distance if r.distance is not None else float("inf"))
+    all_results.sort(
+        key=lambda r: r.distance if r.distance is not None else float("inf")
+    )
     result = all_results[:k]
-    logger.info("ChromaDB search_all: collections={} query_len={} results={}",
-                len(collections_dict), len(query), len(result))
+    logger.info(
+        "ChromaDB search_all: collections={} query_len={} results={}",
+        len(collections_dict),
+        len(query),
+        len(result),
+    )
     return result
 
 
@@ -60,19 +78,27 @@ def get_chunks_by_doc_id(collection, doc_id: str) -> list[ChunkResult]:
             return []
         chunks = []
         for i in range(len(results["ids"])):
-            chunks.append(ChunkResult(
-                id=results["ids"][i],
-                content=results["documents"][i] if results["documents"] else "",
-                metadata=results["metadatas"][i] if results["metadatas"] else {},
-            ))
-        logger.info("[CHROMA] method=get_chunks_by_doc_id | doc_id={} | rows={}", doc_id, len(chunks))
+            chunks.append(
+                ChunkResult(
+                    id=results["ids"][i],
+                    content=results["documents"][i] if results["documents"] else "",
+                    metadata=results["metadatas"][i] if results["metadatas"] else {},
+                )
+            )
+        logger.info(
+            "[CHROMA] method=get_chunks_by_doc_id | doc_id={} | rows={}",
+            doc_id,
+            len(chunks),
+        )
         return chunks
     except Exception as e:
         logger.warning("Failed to get chunks for doc_id={}: {}", doc_id, e)
         return []
 
 
-def get_chunks_paginated(collection, doc_id: str, page: int = 1, page_size: int = 50) -> ChunkQueryResult:
+def get_chunks_paginated(
+    collection, doc_id: str, page: int = 1, page_size: int = 50
+) -> ChunkQueryResult:
     """分页查询指定文档的分块。"""
     try:
         all_ids = collection.get(where={"doc_id": doc_id}, include=[])
@@ -89,14 +115,22 @@ def get_chunks_paginated(collection, doc_id: str, page: int = 1, page_size: int 
         )
         items = []
         for i in range(len(results["ids"])):
-            items.append(ChunkResult(
-                id=results["ids"][i],
-                content=results["documents"][i] if results["documents"] else "",
-                metadata=results["metadatas"][i] if results["metadatas"] else {},
-            ))
-        logger.info("[CHROMA] method=get_chunks_paginated | doc_id={} | page={} | total={}",
-                    doc_id, page, total)
-        return ChunkQueryResult(items=items, total=total, page=page, page_size=page_size)
+            items.append(
+                ChunkResult(
+                    id=results["ids"][i],
+                    content=results["documents"][i] if results["documents"] else "",
+                    metadata=results["metadatas"][i] if results["metadatas"] else {},
+                )
+            )
+        logger.info(
+            "[CHROMA] method=get_chunks_paginated | doc_id={} | page={} | total={}",
+            doc_id,
+            page,
+            total,
+        )
+        return ChunkQueryResult(
+            items=items, total=total, page=page, page_size=page_size
+        )
     except Exception as e:
         logger.warning("Failed to get paginated chunks for doc_id={}: {}", doc_id, e)
         return ChunkQueryResult(items=[], total=0, page=page, page_size=page_size)

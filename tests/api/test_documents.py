@@ -111,9 +111,36 @@ def test_document_chunks_with_parent_dedup(mock_app_service, auth_client):
     mock_svc.get_chunks_paginated = AsyncMock(
         return_value=ChunkQueryResult(
             items=[
-                ChunkResult(id="c1", content="2024年营收100亿", metadata={"page": 1, "tokens": 10, "block_type": "text", "parent_content": "营收概述"}),
-                ChunkResult(id="c2", content="2024年净利润20亿", metadata={"page": 1, "tokens": 10, "block_type": "text", "parent_content": "营收概述"}),
-                ChunkResult(id="c3", content="毛利率45%", metadata={"page": 2, "tokens": 5, "block_type": "text", "parent_content": "财务指标"}),
+                ChunkResult(
+                    id="c1",
+                    content="2024年营收100亿",
+                    metadata={
+                        "page": 1,
+                        "tokens": 10,
+                        "block_type": "text",
+                        "parent_content": "营收概述",
+                    },
+                ),
+                ChunkResult(
+                    id="c2",
+                    content="2024年净利润20亿",
+                    metadata={
+                        "page": 1,
+                        "tokens": 10,
+                        "block_type": "text",
+                        "parent_content": "营收概述",
+                    },
+                ),
+                ChunkResult(
+                    id="c3",
+                    content="毛利率45%",
+                    metadata={
+                        "page": 2,
+                        "tokens": 5,
+                        "block_type": "text",
+                        "parent_content": "财务指标",
+                    },
+                ),
             ],
             total=3,
             page=1,

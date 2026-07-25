@@ -3,9 +3,13 @@
 from typing import Optional
 import json
 from src.config.queries import (
-    INSERT_SESSION, SELECT_SESSIONS, SELECT_SESSION_BY_ID,
-    SELECT_MESSAGES_BY_SESSION, INSERT_MESSAGE,
-    DELETE_SESSION, DELETE_MESSAGES_BY_SESSION,
+    INSERT_SESSION,
+    SELECT_SESSIONS,
+    SELECT_SESSION_BY_ID,
+    SELECT_MESSAGES_BY_SESSION,
+    INSERT_MESSAGE,
+    DELETE_SESSION,
+    DELETE_MESSAGES_BY_SESSION,
 )
 from src.infra.db.entities import SessionEntity, SessionListItem, MessageEntity
 
@@ -18,8 +22,10 @@ class ChatRepo:
         pool = await self._pool_getter()
         async with pool.acquire() as conn:
             async with conn.cursor() as cursor:
-                await cursor.execute(INSERT_SESSION,
-                    (session.id, session.user_id, session.title, session.kb_id))
+                await cursor.execute(
+                    INSERT_SESSION,
+                    (session.id, session.user_id, session.title, session.kb_id),
+                )
             await conn.commit()
 
     async def get_sessions(self) -> list[SessionListItem]:
@@ -28,11 +34,18 @@ class ChatRepo:
             async with conn.cursor() as cursor:
                 await cursor.execute(SELECT_SESSIONS)
                 rows = await cursor.fetchall()
-        return [SessionListItem(
-            id=r["id"], title=r["title"], kb_id=r["kb_id"],
-            kb_name=r["kb_name"], message_count=r["message_count"],
-            created_at=r.get("created_at"), updated_at=r.get("updated_at"),
-        ) for r in rows]
+        return [
+            SessionListItem(
+                id=r["id"],
+                title=r["title"],
+                kb_id=r["kb_id"],
+                kb_name=r["kb_name"],
+                message_count=r["message_count"],
+                created_at=r.get("created_at"),
+                updated_at=r.get("updated_at"),
+            )
+            for r in rows
+        ]
 
     async def get_session_by_id(self, session_id: str) -> Optional[SessionEntity]:
         pool = await self._pool_getter()
@@ -54,13 +67,25 @@ class ChatRepo:
 
     async def save_message(self, msg: MessageEntity) -> None:
         pool = await self._pool_getter()
-        sources_json = json.dumps(msg.sources, ensure_ascii=False) if msg.sources else None
+        sources_json = (
+            json.dumps(msg.sources, ensure_ascii=False) if msg.sources else None
+        )
         async with pool.acquire() as conn:
             async with conn.cursor() as cursor:
-                await cursor.execute(INSERT_MESSAGE, (
-                    msg.session_id, msg.kb_id, msg.role, msg.content, sources_json,
-                    msg.prompt_tokens, msg.completion_tokens, msg.total_tokens, msg.model_name,
-                ))
+                await cursor.execute(
+                    INSERT_MESSAGE,
+                    (
+                        msg.session_id,
+                        msg.kb_id,
+                        msg.role,
+                        msg.content,
+                        sources_json,
+                        msg.prompt_tokens,
+                        msg.completion_tokens,
+                        msg.total_tokens,
+                        msg.model_name,
+                    ),
+                )
             await conn.commit()
 
     async def delete_session_and_messages(self, session_id: str) -> bool:

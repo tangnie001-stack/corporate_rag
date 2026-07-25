@@ -46,8 +46,12 @@ class AgentService:
         self._tracer = LangfuseTracer()
 
         self._graph = build_graph(
-            vector_store, bm25, self._llm, self._reranker,
-            self._prompt_manager, self._tracer,
+            vector_store,
+            bm25,
+            self._llm,
+            self._reranker,
+            self._prompt_manager,
+            self._tracer,
         )
         logger.info("AgentService initialized with compiled graph")
 
@@ -145,7 +149,8 @@ class AgentService:
             logger.info(
                 "[{}] AgentService stream_chat completed: total={:.1f}s "
                 "downgraded={} reason={} contexts={}",
-                trace_id, t1 - t0,
+                trace_id,
+                t1 - t0,
                 downgraded,
                 downgrade_reason,
                 len(contexts),

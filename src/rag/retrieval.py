@@ -28,8 +28,12 @@ async def search(
         bm25_t = asyncio.to_thread(bm25.search, kb_id, query, TOP_K_RETRIEVAL)
         d, b = await asyncio.gather(dense_t, bm25_t)
         results = rrf_fusion(d or [], b or [])
-        logger.info("RAG search: kb_id={} query_len={} results={} mode=hybrid",
-                    kb_id, len(query), len(results))
+        logger.info(
+            "RAG search: kb_id={} query_len={} results={} mode=hybrid",
+            kb_id,
+            len(query),
+            len(results),
+        )
         return results
 
     if not kb_id:
@@ -40,9 +44,13 @@ async def search(
         results = await asyncio.to_thread(
             vector_store.similarity_search, kb_id, query, k=TOP_K_RETRIEVAL
         )
-    logger.info("RAG search: kb_id={} query_len={} results={} mode={}",
-                kb_id, len(query), len(results) if results else 0,
-                "search_all" if not kb_id else "dense")
+    logger.info(
+        "RAG search: kb_id={} query_len={} results={} mode={}",
+        kb_id,
+        len(query),
+        len(results) if results else 0,
+        "search_all" if not kb_id else "dense",
+    )
     return results or []
 
 
@@ -64,8 +72,11 @@ def rerank_results(
             backoff=RETRY_BACKOFF_FACTOR,
         )(query, docs)
     except Exception as e:
-        logger.warning("Rerank failed after {} attempts (using raw order): {}",
-                       RETRY_MAX_ATTEMPTS, e)
+        logger.warning(
+            "Rerank failed after {} attempts (using raw order): {}",
+            RETRY_MAX_ATTEMPTS,
+            e,
+        )
         reranked = [
             {"index": i, "relevance_score": r.distance or 0}
             for i, r in enumerate(results)
@@ -77,18 +88,24 @@ def rerank_results(
         r = results[idx]
         pc = r.metadata.get("parent_content")
         score = item.get("relevance_score", 0)
-        contexts.append(RAGContext(
-            content=pc if pc else r.content,
-            source=r.metadata.get("source", ""),
-            page=r.metadata.get("page", 0),
-            doc_id=r.metadata.get("doc_id", ""),
-            chunk_id=r.id,
-            parent_content=pc,
-            score=score,
-        ))
+        contexts.append(
+            RAGContext(
+                content=pc if pc else r.content,
+                source=r.metadata.get("source", ""),
+                page=r.metadata.get("page", 0),
+                doc_id=r.metadata.get("doc_id", ""),
+                chunk_id=r.id,
+                parent_content=pc,
+                score=score,
+            )
+        )
     if contexts:
-        logger.info("Rerank completed: {} -> {} contexts, top_score={:.4f}",
-                    len(results), len(contexts), contexts[0].score)
+        logger.info(
+            "Rerank completed: {} -> {} contexts, top_score={:.4f}",
+            len(results),
+            len(contexts),
+            contexts[0].score,
+        )
     return contexts
 
 
@@ -124,7 +141,9 @@ def classify_query(query: str) -> str:
         return "medium"
 
     # 单事实数字查询 → simple
-    if re.search(r"\d{4}年", cleaned) or re.search(r"(营收|利润|收入|成本|资产|负债|现金流|净利润)", cleaned):
+    if re.search(r"\d{4}年", cleaned) or re.search(
+        r"(营收|利润|收入|成本|资产|负债|现金流|净利润)", cleaned
+    ):
         return "simple"
 
     return "medium"  # default fallback

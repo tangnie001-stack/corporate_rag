@@ -12,10 +12,7 @@ class KBService:
     async def list_knowledge_bases(self, user_id: str = "") -> list[dict]:
         """列出所有知识库（含文档计数）。"""
         kbs = await self._kb_repo.get_all_kb(user_id)
-        return [
-            {"id": kb.id, "name": kb.name, "doc_count": kb.doc_count}
-            for kb in kbs
-        ]
+        return [{"id": kb.id, "name": kb.name, "doc_count": kb.doc_count} for kb in kbs]
 
     async def create_knowledge_base(
         self,

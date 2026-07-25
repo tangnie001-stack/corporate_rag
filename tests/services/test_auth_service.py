@@ -58,7 +58,9 @@ class TestLogin:
         """登录成功应返回 token 和 user_id。"""
         password_hash = "$2b$12$..."
         mock_user_repo.get_user_by_account.return_value = UserEntity(
-            id="user_1", account="test_user", password=password_hash,
+            id="user_1",
+            account="test_user",
+            password=password_hash,
         )
         with patch(
             "src.services.auth_service.hash_password", return_value=password_hash
@@ -74,7 +76,9 @@ class TestLogin:
     async def test_login_wrong_password(self, auth_service, mock_user_repo):
         """错误密码应抛出 BusinessError。"""
         mock_user_repo.get_user_by_account.return_value = UserEntity(
-            id="user_1", account="test_user", password="hashed_pwd",
+            id="user_1",
+            account="test_user",
+            password="hashed_pwd",
         )
         with patch("src.services.auth_service.verify_password", return_value=False):
             with pytest.raises(BusinessError):

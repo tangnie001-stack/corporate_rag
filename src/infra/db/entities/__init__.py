@@ -8,10 +8,14 @@ from src.infra.db.entities.user import UserEntity
 from src.infra.db.entities.eval_report import EvalReportEntity
 
 __all__ = [
-    "ChunkResult", "ChunkQueryResult",
-    "KbEntity", "KbListItem",
+    "ChunkResult",
+    "ChunkQueryResult",
+    "KbEntity",
+    "KbListItem",
     "DocEntity",
-    "SessionEntity", "SessionListItem", "MessageEntity",
+    "SessionEntity",
+    "SessionListItem",
+    "MessageEntity",
     "UserEntity",
     "EvalReportEntity",
 ]

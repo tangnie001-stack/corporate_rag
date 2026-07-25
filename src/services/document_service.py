@@ -80,15 +80,22 @@ class DocumentService:
         docs = await self._doc_repo.get_documents(kb_id)
         return [
             {
-                "id": d.id, "kb_id": d.kb_id, "filename": d.filename,
-                "file_type": d.file_type, "file_size": d.file_size,
-                "user_id": d.user_id, "status": d.status,
-                "file_path": d.file_path, "hash": d.hash,
+                "id": d.id,
+                "kb_id": d.kb_id,
+                "filename": d.filename,
+                "file_type": d.file_type,
+                "file_size": d.file_size,
+                "user_id": d.user_id,
+                "status": d.status,
+                "file_path": d.file_path,
+                "hash": d.hash,
                 "processing_state": d.processing_state,
                 "processing_progress": d.processing_progress,
                 "processing_message": d.processing_message,
-                "chunk_strategy": d.chunk_strategy, "chunk_count": d.chunk_count,
-                "error_msg": d.error_msg, "meta_info": d.meta_info,
+                "chunk_strategy": d.chunk_strategy,
+                "chunk_count": d.chunk_count,
+                "error_msg": d.error_msg,
+                "meta_info": d.meta_info,
                 "created_at": d.created_at,
             }
             for d in docs
@@ -192,19 +199,21 @@ class DocumentService:
             raise SystemError("FILE_UPLOAD_FAILED", "文件上传到存储服务失败", 500)
 
         # 5. 写入 MySQL 元信息
-        await self._doc_repo.add_document(DocEntity(
-            id=doc_id,
-            kb_id=kb_id,
-            filename=filename,
-            file_type=ext.lstrip("."),
-            file_size=len(content),
-            user_id=user_id,
-            status="processing",
-            processing_state="extracting",
-            processing_progress=0,
-            file_path=minio_key,
-            hash=file_hash,
-        ))
+        await self._doc_repo.add_document(
+            DocEntity(
+                id=doc_id,
+                kb_id=kb_id,
+                filename=filename,
+                file_type=ext.lstrip("."),
+                file_size=len(content),
+                user_id=user_id,
+                status="processing",
+                processing_state="extracting",
+                processing_progress=0,
+                file_path=minio_key,
+                hash=file_hash,
+            )
+        )
 
         # 6. 启动后台处理任务
         asyncio.create_task(

@@ -126,23 +126,23 @@ async def generate_answers_and_contexts(
         logger.info("Generating answer for Q{}: {}...", i + 1, q[:40])
 
         try:
-            final_state = await graph.ainvoke({
-                "kb_id": kb_id,
-                "session_id": session_id,
-                "query": q,
-                "trace_id": f"trace_{uuid.uuid4().hex[:12]}",
-                "retrieval_retries": 0,
-                "downgraded": False,
-                "downgrade_reason": "",
-                "_history": [],
-            })
+            final_state = await graph.ainvoke(
+                {
+                    "kb_id": kb_id,
+                    "session_id": session_id,
+                    "query": q,
+                    "trace_id": f"trace_{uuid.uuid4().hex[:12]}",
+                    "retrieval_retries": 0,
+                    "downgraded": False,
+                    "downgrade_reason": "",
+                    "_history": [],
+                }
+            )
             full_answer = final_state.get("answer", "")
             answers.append(full_answer)
 
             # 提取上下文字段列表（用于 context_recall / context_precision 评估）
-            ctx_list = [
-                c.content for c in final_state.get("contexts", [])
-            ]
+            ctx_list = [c.content for c in final_state.get("contexts", [])]
             contexts.append(ctx_list)
 
             logger.info(
@@ -462,12 +462,14 @@ def main() -> None:
     graph = build_graph(vector_store, bm25, llm, reranker, prompt_manager, tracer)
 
     logger.info("Generating answers for {} questions...", len(questions))
-    answers, contexts = asyncio.run(generate_answers_and_contexts(
-        graph,
-        kb_id,
-        session_id,
-        questions,
-    ))
+    answers, contexts = asyncio.run(
+        generate_answers_and_contexts(
+            graph,
+            kb_id,
+            session_id,
+            questions,
+        )
+    )
 
     result = run_evaluation(
         questions,

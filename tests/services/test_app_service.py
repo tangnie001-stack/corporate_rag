@@ -10,6 +10,7 @@ from src.infra.db.entities import DocEntity, KbListItem
 
 # ==================== Init ====================
 
+
 class TestAppServiceInit:
     """AppService 初始化测试。"""
 
@@ -39,6 +40,7 @@ class TestAppServiceInit:
 
 # ==================== KB ====================
 
+
 class TestAppServiceKBs:
     """知识库管理测试。"""
 
@@ -54,13 +56,24 @@ class TestAppServiceKBs:
     @patch("src.services.app_service.UserRepo")
     @patch("src.services.app_service.EvalRepo")
     async def test_list_knowledge_bases(
-        self, mock_eval_repo, mock_user_repo, mock_chat_repo, mock_doc_repo,
-        mock_kb_repo, mock_agent, mock_chat_mgr, mock_router, mock_vs, mock_db,
+        self,
+        mock_eval_repo,
+        mock_user_repo,
+        mock_chat_repo,
+        mock_doc_repo,
+        mock_kb_repo,
+        mock_agent,
+        mock_chat_mgr,
+        mock_router,
+        mock_vs,
+        mock_db,
     ):
         """列出所有知识库应从 _kb_repo.get_all_kb 获取数据。"""
         mock_kb_repo.return_value.get_all_kb = AsyncMock(
-            return_value=[KbListItem(id="id1", user_id="u1", name="KB1", doc_count=0),
-                          KbListItem(id="id2", user_id="u1", name="KB2", doc_count=0)]
+            return_value=[
+                KbListItem(id="id1", user_id="u1", name="KB1", doc_count=0),
+                KbListItem(id="id2", user_id="u1", name="KB2", doc_count=0),
+            ]
         )
         svc = AppService()
         result = await svc.list_knowledge_bases()
@@ -81,8 +94,17 @@ class TestAppServiceKBs:
     @patch("src.services.app_service.UserRepo")
     @patch("src.services.app_service.EvalRepo")
     async def test_create_kb_success(
-        self, mock_eval_repo, mock_user_repo, mock_chat_repo, mock_doc_repo,
-        mock_kb_repo, mock_agent, mock_chat_mgr, mock_router, mock_vs, mock_db,
+        self,
+        mock_eval_repo,
+        mock_user_repo,
+        mock_chat_repo,
+        mock_doc_repo,
+        mock_kb_repo,
+        mock_agent,
+        mock_chat_mgr,
+        mock_router,
+        mock_vs,
+        mock_db,
     ):
         """创建知识库应返回 (kb_id, is_new)。"""
         mock_kb_repo.return_value.get_or_create_kb = AsyncMock(
@@ -105,8 +127,17 @@ class TestAppServiceKBs:
     @patch("src.services.app_service.UserRepo")
     @patch("src.services.app_service.EvalRepo")
     async def test_delete_kb_success(
-        self, mock_eval_repo, mock_user_repo, mock_chat_repo, mock_doc_repo,
-        mock_kb_repo, mock_agent, mock_chat_mgr, mock_router, mock_vs, mock_db,
+        self,
+        mock_eval_repo,
+        mock_user_repo,
+        mock_chat_repo,
+        mock_doc_repo,
+        mock_kb_repo,
+        mock_agent,
+        mock_chat_mgr,
+        mock_router,
+        mock_vs,
+        mock_db,
     ):
         """删除知识库应软删除文档、清理向量、软删除 KB。"""
         mock_doc_repo.return_value.soft_delete_documents_by_kb = AsyncMock()
@@ -115,7 +146,9 @@ class TestAppServiceKBs:
         svc = AppService(vector_store=vs)
         ok, msg = await svc.delete_knowledge_base("kb_id")
         assert ok is True
-        mock_doc_repo.return_value.soft_delete_documents_by_kb.assert_called_once_with("kb_id")
+        mock_doc_repo.return_value.soft_delete_documents_by_kb.assert_called_once_with(
+            "kb_id"
+        )
         # delete_collection is called via asyncio.to_thread, so it's a bit trickier to verify
         mock_kb_repo.return_value.soft_delete_kb.assert_called_once_with("kb_id")
 
@@ -131,8 +164,17 @@ class TestAppServiceKBs:
     @patch("src.services.app_service.UserRepo")
     @patch("src.services.app_service.EvalRepo")
     async def test_delete_kb_not_found(
-        self, mock_eval_repo, mock_user_repo, mock_chat_repo, mock_doc_repo,
-        mock_kb_repo, mock_agent, mock_chat_mgr, mock_router, mock_vs, mock_db,
+        self,
+        mock_eval_repo,
+        mock_user_repo,
+        mock_chat_repo,
+        mock_doc_repo,
+        mock_kb_repo,
+        mock_agent,
+        mock_chat_mgr,
+        mock_router,
+        mock_vs,
+        mock_db,
     ):
         """删除不存在的知识库应返回 False 并提示。"""
         mock_doc_repo.return_value.soft_delete_documents_by_kb = AsyncMock()
@@ -144,6 +186,7 @@ class TestAppServiceKBs:
 
 
 # ==================== Delete Document ====================
+
 
 class TestAppServiceDeleteDocument:
     """文档删除测试。"""
@@ -160,8 +203,17 @@ class TestAppServiceDeleteDocument:
     @patch("src.services.app_service.UserRepo")
     @patch("src.services.app_service.EvalRepo")
     async def test_delete_not_found(
-        self, mock_eval_repo, mock_user_repo, mock_chat_repo, mock_doc_repo,
-        mock_kb_repo, mock_agent, mock_chat_mgr, mock_router, mock_vs, mock_db,
+        self,
+        mock_eval_repo,
+        mock_user_repo,
+        mock_chat_repo,
+        mock_doc_repo,
+        mock_kb_repo,
+        mock_agent,
+        mock_chat_mgr,
+        mock_router,
+        mock_vs,
+        mock_db,
     ):
         """删除不存在的文档应抛 DOC_NOT_FOUND。"""
         mock_doc_repo.return_value.get_document = AsyncMock(return_value=None)
@@ -182,12 +234,23 @@ class TestAppServiceDeleteDocument:
     @patch("src.services.app_service.UserRepo")
     @patch("src.services.app_service.EvalRepo")
     async def test_delete_not_owner(
-        self, mock_eval_repo, mock_user_repo, mock_chat_repo, mock_doc_repo,
-        mock_kb_repo, mock_agent, mock_chat_mgr, mock_router, mock_vs, mock_db,
+        self,
+        mock_eval_repo,
+        mock_user_repo,
+        mock_chat_repo,
+        mock_doc_repo,
+        mock_kb_repo,
+        mock_agent,
+        mock_chat_mgr,
+        mock_router,
+        mock_vs,
+        mock_db,
     ):
         """非上传者删除应抛 DOC_DELETE_NOT_ALLOWED。"""
         mock_doc_repo.return_value.get_document = AsyncMock(
-            return_value=DocEntity(id="d1", kb_id="kb", user_id="owner", filename="t.pdf", status="ready")
+            return_value=DocEntity(
+                id="d1", kb_id="kb", user_id="owner", filename="t.pdf", status="ready"
+            )
         )
         svc = AppService()
         with pytest.raises(AppError) as exc:
@@ -206,12 +269,27 @@ class TestAppServiceDeleteDocument:
     @patch("src.services.app_service.UserRepo")
     @patch("src.services.app_service.EvalRepo")
     async def test_delete_processing_status(
-        self, mock_eval_repo, mock_user_repo, mock_chat_repo, mock_doc_repo,
-        mock_kb_repo, mock_agent, mock_chat_mgr, mock_router, mock_vs, mock_db,
+        self,
+        mock_eval_repo,
+        mock_user_repo,
+        mock_chat_repo,
+        mock_doc_repo,
+        mock_kb_repo,
+        mock_agent,
+        mock_chat_mgr,
+        mock_router,
+        mock_vs,
+        mock_db,
     ):
         """处理中的文档应抛 DOC_STATUS_CONFLICT。"""
         mock_doc_repo.return_value.get_document = AsyncMock(
-            return_value=DocEntity(id="d1", kb_id="kb", user_id="user", filename="t.pdf", status="processing")
+            return_value=DocEntity(
+                id="d1",
+                kb_id="kb",
+                user_id="user",
+                filename="t.pdf",
+                status="processing",
+            )
         )
         svc = AppService()
         with pytest.raises(AppError) as exc:
@@ -230,12 +308,23 @@ class TestAppServiceDeleteDocument:
     @patch("src.services.app_service.UserRepo")
     @patch("src.services.app_service.EvalRepo")
     async def test_delete_success(
-        self, mock_eval_repo, mock_user_repo, mock_chat_repo, mock_doc_repo,
-        mock_kb_repo, mock_agent, mock_chat_mgr, mock_router, mock_vs, mock_db,
+        self,
+        mock_eval_repo,
+        mock_user_repo,
+        mock_chat_repo,
+        mock_doc_repo,
+        mock_kb_repo,
+        mock_agent,
+        mock_chat_mgr,
+        mock_router,
+        mock_vs,
+        mock_db,
     ):
         """正常删除应返回 deleted 状态。"""
         mock_doc_repo.return_value.get_document = AsyncMock(
-            return_value=DocEntity(id="d1", kb_id="kb", user_id="user", filename="t.pdf", status="ready")
+            return_value=DocEntity(
+                id="d1", kb_id="kb", user_id="user", filename="t.pdf", status="ready"
+            )
         )
         mock_doc_repo.return_value.soft_delete_document = AsyncMock(return_value=True)
         vs = MagicMock()
@@ -244,5 +333,3 @@ class TestAppServiceDeleteDocument:
         assert result == {"doc_id": "d1", "filename": "t.pdf", "status": "deleted"}
         # delete_document called via asyncio.to_thread
         mock_doc_repo.return_value.soft_delete_document.assert_called_once_with("d1")
-
-

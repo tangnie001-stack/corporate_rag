@@ -12,12 +12,14 @@ from src.rag.context import RAGContext
 
 class RAGQueryIntent(TypedDict, total=False):
     """查询意图分类结果。"""
+
     route: str  # "simple" | "medium" | "complex"
     rewritten: bool
 
 
 class AgentState(TypedDict, total=False):
     """LangGraph 图执行状态。"""
+
     # ── 输入 ─────
     session_id: str
     kb_id: str

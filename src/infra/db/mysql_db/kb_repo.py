@@ -4,8 +4,12 @@ import uuid
 from typing import Optional
 import aiomysql
 from src.config.queries import (
-    INSERT_KNOWLEDGE_BASE, SELECT_KNOWLEDGE_BASE_ID_BY_NAME, SELECT_KB_NAME_BY_ID,
-    SELECT_ALL_KNOWLEDGE_BASES, DELETE_KNOWLEDGE_BASE_BY_ID, SOFT_DELETE_KNOWLEDGE_BASE_BY_ID,
+    INSERT_KNOWLEDGE_BASE,
+    SELECT_KNOWLEDGE_BASE_ID_BY_NAME,
+    SELECT_KB_NAME_BY_ID,
+    SELECT_ALL_KNOWLEDGE_BASES,
+    DELETE_KNOWLEDGE_BASE_BY_ID,
+    SOFT_DELETE_KNOWLEDGE_BASE_BY_ID,
 )
 from src.infra.db.entities import KbListItem
 
@@ -14,20 +18,26 @@ class KbRepo:
     def __init__(self, mysql_db):
         self._pool_getter = mysql_db._get_pool
 
-    async def get_or_create_kb(self, user_id: str, name: str, description: str = "") -> tuple[str, bool]:
+    async def get_or_create_kb(
+        self, user_id: str, name: str, description: str = ""
+    ) -> tuple[str, bool]:
         pool = await self._pool_getter()
         kb_id = str(uuid.uuid4())
         async with pool.acquire() as conn:
             try:
                 async with conn.cursor() as cursor:
-                    await cursor.execute(INSERT_KNOWLEDGE_BASE, (kb_id, user_id, name, description))
+                    await cursor.execute(
+                        INSERT_KNOWLEDGE_BASE, (kb_id, user_id, name, description)
+                    )
                 await conn.commit()
                 return kb_id, True
             except aiomysql.IntegrityError:
                 await conn.rollback()
                 existing_id = await self.get_kb_by_name(user_id, name)
                 if existing_id is None:
-                    raise RuntimeError(f"IntegrityError on '{name}' but get_kb_by_name returned None")
+                    raise RuntimeError(
+                        f"IntegrityError on '{name}' but get_kb_by_name returned None"
+                    )
                 return existing_id, False
 
     async def get_kb_by_name(self, user_id: str, name: str) -> Optional[str]:

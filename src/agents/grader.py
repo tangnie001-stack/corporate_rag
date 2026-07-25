@@ -45,8 +45,7 @@ class RetrievalGrader:
             return 0.0
 
         covered = sum(
-            1 for kw in keywords
-            if any(kw in content for content in top_contents)
+            1 for kw in keywords if any(kw in content for content in top_contents)
         )
         coverage = covered / len(keywords)
         logger.debug("RetrievalGrader: coverage={:.2f} keywords={}", coverage, keywords)

@@ -1,7 +1,12 @@
 """用户 Repo — users 表 CRUD。"""
 
 from typing import Optional
-from src.config.queries import INSERT_USER, SELECT_USER_BY_ACCOUNT, UPDATE_USER_TOKEN, SELECT_USER_BY_TOKEN
+from src.config.queries import (
+    INSERT_USER,
+    SELECT_USER_BY_ACCOUNT,
+    UPDATE_USER_TOKEN,
+    SELECT_USER_BY_TOKEN,
+)
 from src.infra.db.entities import UserEntity
 
 

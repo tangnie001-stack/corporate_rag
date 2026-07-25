@@ -10,8 +10,16 @@ from typing import Optional
 
 from loguru import logger
 
-from src.infra.db.mysql_db import MySQLDB, KbRepo, DocumentRepo, ChatRepo, UserRepo, EvalRepo
+from src.infra.db.mysql_db import (
+    MySQLDB,
+    KbRepo,
+    DocumentRepo,
+    ChatRepo,
+    UserRepo,
+    EvalRepo,
+)
 from src.infra.db.entities import EvalReportEntity
+from src.infra.db.entities.search import ChunkQueryResult
 from src.infra.db.vector_store import VectorStore
 from src.parsers.router import DocRouter
 from src.chat.manager import ChatManager
@@ -130,9 +138,13 @@ class AppService:
         items = await self._chat_repo.get_sessions()
         return [
             {
-                "id": s.id, "title": s.title, "kb_id": s.kb_id,
-                "kb_name": s.kb_name, "message_count": s.message_count,
-                "created_at": s.created_at, "updated_at": s.updated_at,
+                "id": s.id,
+                "title": s.title,
+                "kb_id": s.kb_id,
+                "kb_name": s.kb_name,
+                "message_count": s.message_count,
+                "created_at": s.created_at,
+                "updated_at": s.updated_at,
             }
             for s in items
         ]
@@ -143,9 +155,12 @@ class AppService:
         if session is None:
             return None
         return {
-            "id": session.id, "title": session.title,
-            "kb_id": session.kb_id, "user_id": session.user_id,
-            "created_at": session.created_at, "updated_at": session.updated_at,
+            "id": session.id,
+            "title": session.title,
+            "kb_id": session.kb_id,
+            "user_id": session.user_id,
+            "created_at": session.created_at,
+            "updated_at": session.updated_at,
         }
 
     async def get_messages(self, session_id: str) -> list[dict]:
@@ -153,11 +168,15 @@ class AppService:
         msgs = await self._chat_repo.get_messages(session_id)
         return [
             {
-                "session_id": m.session_id, "role": m.role,
-                "content": m.content, "kb_id": m.kb_id,
-                "sources": m.sources, "prompt_tokens": m.prompt_tokens,
+                "session_id": m.session_id,
+                "role": m.role,
+                "content": m.content,
+                "kb_id": m.kb_id,
+                "sources": m.sources,
+                "prompt_tokens": m.prompt_tokens,
                 "completion_tokens": m.completion_tokens,
-                "total_tokens": m.total_tokens, "model_name": m.model_name,
+                "total_tokens": m.total_tokens,
+                "model_name": m.model_name,
                 "created_at": m.created_at,
             }
             for m in msgs
@@ -208,14 +227,17 @@ class AppService:
         if report is None:
             return None
         return {
-            "id": report.id, "kb_id": report.kb_id,
-            "run_type": report.run_type, "qa_count": report.qa_count,
+            "id": report.id,
+            "kb_id": report.kb_id,
+            "run_type": report.run_type,
+            "qa_count": report.qa_count,
             "faithfulness": report.faithfulness,
             "answer_relevancy": report.answer_relevancy,
             "context_precision": report.context_precision,
             "context_recall": report.context_recall,
             "overall_score": report.overall_score,
-            "passed": report.passed, "report_path": report.report_path,
+            "passed": report.passed,
+            "report_path": report.report_path,
             "triggered_by": report.triggered_by,
             "detail_json": report.detail_json,
             "eval_date": report.eval_date,
@@ -252,9 +274,11 @@ class AppService:
         self, doc_id: str, kb_id: str, page: int = 1, page_size: int = 50
     ):
         """分页查询文档的分块内容。"""
-        from src.infra.db.entities.search import ChunkQueryResult
-        result = await asyncio.to_thread(
+        result: ChunkQueryResult = await asyncio.to_thread(
             self.vector_store.get_chunks_paginated,
-            doc_id, kb_id, page=page, page_size=page_size,
+            doc_id,
+            kb_id,
+            page=page,
+            page_size=page_size,
         )
         return result

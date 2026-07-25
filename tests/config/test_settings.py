@@ -16,7 +16,10 @@ def test_langfuse_secret_key_defaults_to_empty():
         with patch.dict(os.environ):
             os.environ.pop("LANGFUSE_SECRET_KEY", None)
             reloaded = reload(_s)
-            assert reloaded.LANGFUSE_SECRET_KEY == "sk-lf-8665d453-271d-4ce2-9f3b-5b471dad5ce2"
+            assert (
+                reloaded.LANGFUSE_SECRET_KEY
+                == "sk-lf-8665d453-271d-4ce2-9f3b-5b471dad5ce2"
+            )
 
 
 def test_langfuse_public_key_defaults_to_empty():
@@ -28,7 +31,10 @@ def test_langfuse_public_key_defaults_to_empty():
         with patch.dict(os.environ):
             os.environ.pop("LANGFUSE_PUBLIC_KEY", None)
             reloaded = reload(_s)
-            assert reloaded.LANGFUSE_PUBLIC_KEY == "pk-lf-96995ff8-f6e4-4205-b02d-eba6e5ed94c8"
+            assert (
+                reloaded.LANGFUSE_PUBLIC_KEY
+                == "pk-lf-96995ff8-f6e4-4205-b02d-eba6e5ed94c8"
+            )
 
 
 def test_langfuse_host_default():

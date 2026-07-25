@@ -30,7 +30,9 @@ class VectorStore:
         collection = self._chroma.get_or_create_collection(kb_id)
         return _store.add_chunks(collection, kb_id, chunks, doc_id)
 
-    def similarity_search(self, kb_id: str, query: str, k: int = 5) -> list[ChunkResult]:
+    def similarity_search(
+        self, kb_id: str, query: str, k: int = 5
+    ) -> list[ChunkResult]:
         collection = self._chroma.get_or_create_collection(kb_id)
         return _search.similarity_search(collection, self._embed_fn, kb_id, query, k)
 

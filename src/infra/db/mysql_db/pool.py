@@ -3,10 +3,20 @@
 import asyncio
 import aiomysql
 from loguru import logger
-from src.config import MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE
+from src.config import (
+    MYSQL_HOST,
+    MYSQL_PORT,
+    MYSQL_USER,
+    MYSQL_PASSWORD,
+    MYSQL_DATABASE,
+)
 from src.config.queries import (
-    CREATE_TABLE_USERS, CREATE_TABLE_KNOWLEDGE_BASE, CREATE_TABLE_DOCUMENT,
-    CREATE_TABLE_CONVERSATION_HISTORY, CREATE_TABLE_SESSIONS, DROP_CONVERSATION_HISTORY_FK,
+    CREATE_TABLE_USERS,
+    CREATE_TABLE_KNOWLEDGE_BASE,
+    CREATE_TABLE_DOCUMENT,
+    CREATE_TABLE_CONVERSATION_HISTORY,
+    CREATE_TABLE_SESSIONS,
+    DROP_CONVERSATION_HISTORY_FK,
 )
 
 
@@ -24,11 +34,18 @@ class MySQLDB:
             if self._pool is not None:
                 return self._pool
             self._pool = await aiomysql.create_pool(
-                host=MYSQL_HOST, port=MYSQL_PORT,
-                user=MYSQL_USER, password=MYSQL_PASSWORD,
-                db=MYSQL_DATABASE, charset="utf8mb4",
-                cursorclass=aiomysql.DictCursor, autocommit=True,
-                minsize=2, maxsize=10, connect_timeout=10, pool_recycle=3600,
+                host=MYSQL_HOST,
+                port=MYSQL_PORT,
+                user=MYSQL_USER,
+                password=MYSQL_PASSWORD,
+                db=MYSQL_DATABASE,
+                charset="utf8mb4",
+                cursorclass=aiomysql.DictCursor,
+                autocommit=True,
+                minsize=2,
+                maxsize=10,
+                connect_timeout=10,
+                pool_recycle=3600,
             )
             logger.info("MySQL connection pool created (minsize=2, maxsize=10)")
             return self._pool

@@ -1,4 +1,5 @@
 """Tests for AgentState definition."""
+
 from src.agents.graph.state import AgentState
 
 
@@ -13,9 +14,16 @@ def test_agent_state_with_contexts():
     """AgentState SHALL hold RAGContextItem list."""
     state: AgentState = {
         "query": "净利润多少",
-        "contexts": [{"content": "净利润100亿", "source": "财报.pdf",
-                      "page": 5, "doc_id": "doc-1", "chunk_id": "chunk-1",
-                      "score": 0.95}],
+        "contexts": [
+            {
+                "content": "净利润100亿",
+                "source": "财报.pdf",
+                "page": 5,
+                "doc_id": "doc-1",
+                "chunk_id": "chunk-1",
+                "score": 0.95,
+            }
+        ],
     }
     assert len(state["contexts"]) == 1
     assert state["contexts"][0]["content"] == "净利润100亿"
@@ -23,8 +31,11 @@ def test_agent_state_with_contexts():
 
 def test_agent_state_downgrade_fields():
     """AgentState SHALL support downgrade tracking."""
-    state: AgentState = {"query": "test", "downgraded": True,
-                         "downgrade_reason": "rerank_empty"}
+    state: AgentState = {
+        "query": "test",
+        "downgraded": True,
+        "downgrade_reason": "rerank_empty",
+    }
     assert state["downgraded"] is True
     assert state["downgrade_reason"] == "rerank_empty"
 

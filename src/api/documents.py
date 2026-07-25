@@ -5,7 +5,6 @@
 分块预览：POST /api/kbs/documents/chunks
 """
 
-import asyncio
 import json
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile

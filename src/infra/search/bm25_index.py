@@ -36,25 +36,31 @@ class BM25Index:
             chunk = chunks[idx]
             # chunks 可能是 dict（旧格式）或 ChunkData（新格式）
             if isinstance(chunk, dict):
-                results.append(ChunkResult(
-                    id=chunk.get("id", chunk.get("chunk_id", "")),
-                    content=chunk.get("content", ""),
-                    metadata=chunk.get("metadata", {}),
-                    bm25_score=float(scores[idx]),
-                ))
+                results.append(
+                    ChunkResult(
+                        id=chunk.get("id", chunk.get("chunk_id", "")),
+                        content=chunk.get("content", ""),
+                        metadata=chunk.get("metadata", {}),
+                        bm25_score=float(scores[idx]),
+                    )
+                )
             else:
-                results.append(ChunkResult(
-                    id=chunk.chunk_id,
-                    content=chunk.content,
-                    metadata=chunk.metadata,
-                    bm25_score=float(scores[idx]),
-                ))
+                results.append(
+                    ChunkResult(
+                        id=chunk.chunk_id,
+                        content=chunk.content,
+                        metadata=chunk.metadata,
+                        bm25_score=float(scores[idx]),
+                    )
+                )
         return results
 
 
 def rrf_fusion(
-    dense: list[ChunkResult], bm25_res: list[ChunkResult],
-    k: int = 60, top_n: int = 50,
+    dense: list[ChunkResult],
+    bm25_res: list[ChunkResult],
+    k: int = 60,
+    top_n: int = 50,
 ) -> list[ChunkResult]:
     """RRF 融合 Dense 语义检索和 BM25 词法检索结果。"""
     scores: dict[str, float] = {}
