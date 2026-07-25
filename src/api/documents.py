@@ -27,7 +27,6 @@ from src.api.model.response import (
 )
 from src.services.app_service import AppService
 from src.api.dependencies import get_app_service
-from src.config import MAX_TABLE_TOKENS
 
 router = APIRouter()
 
@@ -189,7 +188,7 @@ async def get_document_chunks(
     items = [
         ChunkItem(
             chunk_id=c["id"],
-            content=c["content"][: MAX_TABLE_TOKENS * 2],
+            content=c["content"][: svc.settings.MAX_TABLE_TOKENS * 2],
             page=c.get("metadata", {}).get("page", 1),
             tokens=c.get("metadata", {}).get("tokens", 0),
             char_count=len(c["content"]),
