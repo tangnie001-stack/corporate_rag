@@ -3,18 +3,13 @@
 import asyncio
 import re
 from typing import Optional
-
 from loguru import logger
-
 from src.config import TOP_K_RETRIEVAL, TOP_K_RERANK, HYBRID_SEARCH_ENABLED
 from src.infra.search.bm25_index import BM25Index, rrf_fusion
 from src.infra.db.vector_store import VectorStore
+from src.infra.db.entities import ChunkResult
 from src.models import with_retry
-from src.config import (
-    RETRY_MAX_ATTEMPTS,
-    RETRY_INITIAL_INTERVAL,
-    RETRY_BACKOFF_FACTOR,
-)
+from src.config import RETRY_MAX_ATTEMPTS, RETRY_INITIAL_INTERVAL, RETRY_BACKOFF_FACTOR
 from src.rag.context import RAGContext
 
 
@@ -23,7 +18,7 @@ async def search(
     kb_id: str,
     vector_store: VectorStore,
     bm25: Optional[BM25Index] = None,
-) -> list[dict]:
+) -> list[ChunkResult]:
     """执行语义检索（混合模式可选）。"""
     if HYBRID_SEARCH_ENABLED and bm25 and kb_id:
         logger.info("RAG search starting hybrid: kb_id={}", kb_id)
@@ -32,42 +27,28 @@ async def search(
         )
         bm25_t = asyncio.to_thread(bm25.search, kb_id, query, TOP_K_RETRIEVAL)
         d, b = await asyncio.gather(dense_t, bm25_t)
-        logger.info("RAG search hybrid results: dense={} bm25={}", type(d).__name__, type(b).__name__)
         results = rrf_fusion(d or [], b or [])
-        logger.info(
-            "RAG search: kb_id={} query_len={} results={} mode=hybrid",
-            kb_id,
-            len(query),
-            len(results),
-        )
+        logger.info("RAG search: kb_id={} query_len={} results={} mode=hybrid",
+                    kb_id, len(query), len(results))
         return results
 
     if not kb_id:
         results = await asyncio.to_thread(
             vector_store.similarity_search_all, query, k=TOP_K_RETRIEVAL
         )
-        logger.info("RAG search search_all done: type={}", type(results).__name__)
-        return results or []
     else:
         results = await asyncio.to_thread(
             vector_store.similarity_search, kb_id, query, k=TOP_K_RETRIEVAL
         )
-        logger.info("RAG search dense done: type={} len={}", type(results).__name__, len(results) if results else 0)
-        logger.info(
-            "RAG search: kb_id={} query_len={} results={} mode=dense",
-            kb_id,
-            len(query),
-            len(results) if results else 0,
-        )
-        if results is None:
-            logger.warning("RAG search: results is None, returning empty list")
-            return []
-        return results
+    logger.info("RAG search: kb_id={} query_len={} results={} mode={}",
+                kb_id, len(query), len(results) if results else 0,
+                "search_all" if not kb_id else "dense")
+    return results or []
 
 
 def rerank_results(
     query: str,
-    results: list,
+    results: list[ChunkResult],
     reranker,
 ) -> list[RAGContext]:
     """Reranker 精排，返回 top-N 的 RAGContext 列表。"""
@@ -83,11 +64,8 @@ def rerank_results(
             backoff=RETRY_BACKOFF_FACTOR,
         )(query, docs)
     except Exception as e:
-        logger.warning(
-            "Rerank failed after {} attempts (using raw order): {}",
-            RETRY_MAX_ATTEMPTS,
-            e,
-        )
+        logger.warning("Rerank failed after {} attempts (using raw order): {}",
+                       RETRY_MAX_ATTEMPTS, e)
         reranked = [
             {"index": i, "relevance_score": r.distance or 0}
             for i, r in enumerate(results)
@@ -97,29 +75,26 @@ def rerank_results(
     for item in reranked[:TOP_K_RERANK]:
         idx = item["index"]
         r = results[idx]
-        metadata = r.metadata
-        pc = metadata.get("parent_content")
+        pc = r.metadata.get("parent_content")
         score = item.get("relevance_score", 0)
-        contexts.append(
-            RAGContext(
-                content=pc if pc else r.content,
-                source=metadata.get("source", ""),
-                page=metadata.get("page", 0),
-                doc_id=metadata.get("doc_id", ""),
-                chunk_id=r.id,
-                parent_content=pc,
-                score=score,
-            )
-        )
+        contexts.append(RAGContext(
+            content=pc if pc else r.content,
+            source=r.metadata.get("source", ""),
+            page=r.metadata.get("page", 0),
+            doc_id=r.metadata.get("doc_id", ""),
+            chunk_id=r.id,
+            parent_content=pc,
+            score=score,
+        ))
     if contexts:
-        logger.info(
-            "Rerank completed: {} -> {} contexts, top_score={:.4f}",
-            len(results),
-            len(contexts),
-            contexts[0].score,
-        )
+        logger.info("Rerank completed: {} -> {} contexts, top_score={:.4f}",
+                    len(results), len(contexts), contexts[0].score)
     return contexts
 
+
+# ═══ 以下函数不变 ═══
+# classify_query, expand_query, condense_query, decompose_query, rewrite_query
+# （以上函数不涉及 dict 访问，不需要修改）
 
 # ═══════════════════ 查询改写 ═══════════════════
 
