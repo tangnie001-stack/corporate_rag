@@ -61,20 +61,36 @@ def make_retrieve_node(vector_store, bm25) -> Callable:
         kb_id = state.get("kb_id", "")
         logger.info("[{}] retrieve_node start: query={} kb_id={}", tid, q[:50], kb_id)
         results = await search(q, kb_id, vector_store, bm25)
+        if results is None:
+            results = []
+            logger.warning("[{}] retrieve_node: search returned None, using empty list", tid)
         logger.info("[{}] retrieve_node done: results={}", tid, len(results))
         return {"retrieval_results": results}
     return retrieve_node
 
 
 def grader_node(state: AgentState) -> dict:
-    """质量评分节点：关键字覆盖度评分。"""
+    """质量评分节点：关键字覆盖度评分 + 重试计数管理。"""
     tid = _tid(state)
     query = state.get("rewritten_query") or state.get("query", "")
     results = state.get("retrieval_results", [])
     grader = RetrievalGrader()
     score = grader.grade(query, results, results)
-    logger.info("[{}] grader_node: score={:.2f}", tid, score)
-    return {"grader_score": score}
+    retries = state.get("retrieval_retries", 0)
+    logger.info("[{}] grader_node: score={:.2f} retries={}", tid, score, retries)
+
+    retries = state.get("retrieval_retries", 0)
+    if score is not None and score >= 0.5:
+        return {"grader_score": score, "retrieval_retries": 0}
+    if retries < 2:
+        return {"grader_score": score, "retrieval_retries": retries + 1}
+    # 重试用尽，降级到 Enhanced RAG
+    return {
+        "grader_score": score,
+        "retrieval_retries": retries + 1,
+        "downgraded": True,
+        "downgrade_reason": "grader_retries_exhausted",
+    }
 
 
 def make_rerank_node(reranker) -> Callable:
@@ -86,13 +102,9 @@ def make_rerank_node(reranker) -> Callable:
         if not results:
             return {"contexts": []}
         contexts = rerank_results(query, results, reranker)
-        ctx_list = [
-            {"content": c.content, "source": c.source, "page": c.page,
-             "doc_id": c.doc_id, "chunk_id": c.chunk_id, "score": c.score}
-            for c in contexts
-        ]
-        logger.info("[{}] rerank_node: contexts={}", tid, len(ctx_list))
-        return {"contexts": ctx_list}
+        # 直接存 RAGContext 列表，不做 dict 转换
+        logger.info("[{}] rerank_node: contexts={}", tid, len(contexts))
+        return {"contexts": contexts}
     return rerank_node
 
 
@@ -108,10 +120,8 @@ def make_generate_node(llm, prompt_manager, tracer) -> Callable:
             logger.info("[{}] generate_node: empty contexts, Naive RAG fallback", tid)
             prompt = build_simple_prompt(query, state.get("_history", []), prompt_manager)
         else:
-            # TypedDict → RAGContext 转换
-            from src.rag.context import RAGContext
-            rag_ctx_list = [RAGContext(**c) for c in contexts]
-            context_str = format_context(rag_ctx_list)
+            # contexts 已经是 list[RAGContext]，不需要转换
+            context_str = format_context(contexts)
             prompt = build_prompt(query, context_str, state.get("_history", []), prompt_manager)
 
         # 收集所有 token，组装完整文本
@@ -137,15 +147,15 @@ def format_node(state: AgentState) -> dict:
     seen = set()
     citations = []
     for ctx in contexts:
-        key = (ctx.get("source", ""), ctx.get("page", 0))
+        key = (ctx.source, ctx.page)
         if key in seen:
             continue
         seen.add(key)
         citations.append({
-            "source": ctx.get("source", ""),
-            "page": ctx.get("page", 0),
-            "snippet": ctx.get("content", "")[:200],
-            "score": ctx.get("score", 0),
+            "source": ctx.source,
+            "page": ctx.page,
+            "snippet": ctx.content[:200],
+            "score": ctx.score,
         })
     logger.info("[{}] format_node: citations={}", tid, len(citations))
     return {"citations": citations}

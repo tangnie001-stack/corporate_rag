@@ -6,21 +6,14 @@
 
 from typing import TypedDict, Optional, List
 
+from src.infra.db.entities import ChunkResult
+from src.rag.context import RAGContext
+
 
 class RAGQueryIntent(TypedDict, total=False):
     """查询意图分类结果。"""
     route: str  # "simple" | "medium" | "complex"
     rewritten: bool
-
-
-class RAGContextItem(TypedDict, total=False):
-    """检索结果上下文项（对应 rag/context.py 中的 RAGContext）。"""
-    content: str
-    source: str
-    page: int
-    doc_id: str
-    chunk_id: str
-    score: float
 
 
 class AgentState(TypedDict, total=False):
@@ -32,8 +25,8 @@ class AgentState(TypedDict, total=False):
     # ── 中间态 ───
     intent: RAGQueryIntent
     rewritten_query: Optional[str]
-    retrieval_results: List[dict]
-    contexts: List[RAGContextItem]
+    retrieval_results: List[ChunkResult]
+    contexts: List[RAGContext]
     grader_score: Optional[float]
     retrieval_retries: int
     # ── 输出 ─────

@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 
 
-@dataclass
+@dataclass(slots=True)
 class RAGContext:
     """单个检索上下文分块 — 包含原文内容和来源元数据。"""
 
