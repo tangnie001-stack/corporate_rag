@@ -14,7 +14,8 @@ from src.infra.chunking.router import ChunkRouter
 from src.infra.chunking.strategies.base import BaseChunker
 from src.infra.chunking.validator import ChunkData, validate_chunks
 from src.infra.db.file_store import FileStore
-from src.infra.db.mysql_db import MySQLDB
+from src.infra.db.mysql_db import DocumentRepo
+from src.infra.db.entities import DocEntity
 from src.infra.db.vector_store import VectorStore
 from src.parsers.router import DocRouter
 from src.utils.errors import BusinessError
@@ -66,30 +67,45 @@ class DocumentService:
 
     def __init__(
         self,
-        db: MySQLDB,
+        doc_repo: DocumentRepo,
         vector_store: VectorStore,
         router: DocRouter,
     ) -> None:
-        self.db = db
+        self._doc_repo = doc_repo
         self.vector_store = vector_store
         self.router = router
 
     async def get_documents(self, kb_id: str) -> list[dict]:
         """获取知识库下的文档列表。"""
-        return await self.db.get_documents(kb_id)
+        docs = await self._doc_repo.get_documents(kb_id)
+        return [
+            {
+                "id": d.id, "kb_id": d.kb_id, "filename": d.filename,
+                "file_type": d.file_type, "file_size": d.file_size,
+                "user_id": d.user_id, "status": d.status,
+                "file_path": d.file_path, "hash": d.hash,
+                "processing_state": d.processing_state,
+                "processing_progress": d.processing_progress,
+                "processing_message": d.processing_message,
+                "chunk_strategy": d.chunk_strategy, "chunk_count": d.chunk_count,
+                "error_msg": d.error_msg, "meta_info": d.meta_info,
+                "created_at": d.created_at,
+            }
+            for d in docs
+        ]
 
     async def delete_document(self, kb_id: str, doc_id: str, user_id: str) -> dict:
         """删除文档（合法性校验 + ChromaDB 清理 + MySQL 软删除）。"""
-        doc = await self.db.get_document(doc_id)
+        doc = await self._doc_repo.get_document(doc_id)
         if not doc:
             raise BusinessError(Code.DOC_NOT_FOUND, Code.DOC_NOT_FOUND_MSG, 404)
-        if doc["user_id"] != user_id:
+        if doc.user_id != user_id:
             raise BusinessError(
                 Code.DOC_DELETE_NOT_ALLOWED,
                 Code.DOC_DELETE_NOT_ALLOWED_MSG,
                 403,
             )
-        if doc["status"] not in ("ready", "failed"):
+        if doc.status not in ("ready", "failed"):
             raise BusinessError(
                 Code.DOC_STATUS_CONFLICT,
                 Code.DOC_STATUS_CONFLICT_MSG,
@@ -99,11 +115,11 @@ class DocumentService:
             await asyncio.to_thread(self.vector_store.delete_document, kb_id, doc_id)
         except Exception:
             logger.warning("ChromaDB delete failed for doc_id={}, will retry", doc_id)
-        deleted = await self.db.soft_delete_document(doc_id)
+        deleted = await self._doc_repo.soft_delete_document(doc_id)
         if not deleted:
             raise BusinessError(Code.DOC_NOT_FOUND, Code.DOC_NOT_FOUND_MSG, 404)
-        logger.info("Document deleted: {} ({})", doc["filename"], doc_id)
-        return {"doc_id": doc_id, "filename": doc["filename"], "status": "deleted"}
+        logger.info("Document deleted: {} ({})", doc.filename, doc_id)
+        return {"doc_id": doc_id, "filename": doc.filename, "status": "deleted"}
 
     async def store_and_process(
         self,
@@ -148,19 +164,19 @@ class DocumentService:
         import hashlib
 
         file_hash = hashlib.md5(content).hexdigest()
-        existing_docs = await self.db.get_documents(kb_id)
+        existing_docs = await self._doc_repo.get_documents(kb_id)
         for doc in existing_docs:
-            if doc.get("hash") == file_hash:
+            if doc.hash == file_hash:
                 logger.info(
                     "Duplicate document detected: hash={} existing_doc_id={}",
                     file_hash,
-                    doc["id"],
+                    doc.id,
                 )
                 return {
-                    "doc_id": doc["id"],
+                    "doc_id": doc.id,
                     "filename": filename,
                     "dedup": True,
-                    "status": doc.get("status", "ready"),
+                    "status": doc.status,
                 }
 
         # 4. 生成 doc_id 并上传到 MinIO
@@ -176,8 +192,8 @@ class DocumentService:
             raise SystemError("FILE_UPLOAD_FAILED", "文件上传到存储服务失败", 500)
 
         # 5. 写入 MySQL 元信息
-        await self.db.add_document(
-            doc_id=doc_id,
+        await self._doc_repo.add_document(DocEntity(
+            id=doc_id,
             kb_id=kb_id,
             filename=filename,
             file_type=ext.lstrip("."),
@@ -188,7 +204,7 @@ class DocumentService:
             processing_progress=0,
             file_path=minio_key,
             hash=file_hash,
-        )
+        ))
 
         # 6. 启动后台处理任务
         asyncio.create_task(
@@ -303,7 +319,7 @@ class DocumentService:
             tmp_path = None
             try:
                 # DB 是异步的 — 直接 await
-                await self.db.update_document_status(
+                await self._doc_repo.update_document_status(
                     doc_id,
                     "processing",
                     processing_state="extracting",
@@ -336,7 +352,7 @@ class DocumentService:
                     parse_result.encoding,
                 )
                 if parse_result.is_scanned:
-                    await self.db.update_document_status(
+                    await self._doc_repo.update_document_status(
                         doc_id, "failed", error_msg="扫描件暂不支持"
                     )
                     logger.warning("Scanned document detected: {}", filename)
@@ -388,7 +404,7 @@ class DocumentService:
                         eval_result = await asyncio.to_thread(
                             scorer.evaluate, chunks, filename, strategy
                         )
-                        await self.db.update_document_meta_info(
+                        await self._doc_repo.update_document_meta_info(
                             doc_id, {"eval": eval_result}
                         )
                         logger.info(
@@ -410,7 +426,7 @@ class DocumentService:
 
                 # DB 更新 — 异步，直接 await
                 t3 = time.perf_counter()
-                await self.db.update_document_status(
+                await self._doc_repo.update_document_status(
                     doc_id,
                     "ready",
                     chunk_count=count,
@@ -438,7 +454,7 @@ class DocumentService:
                     filename,
                     error_msg,
                 )
-                await self.db.update_document_status(
+                await self._doc_repo.update_document_status(
                     doc_id, "failed", error_msg=error_msg
                 )
             finally:

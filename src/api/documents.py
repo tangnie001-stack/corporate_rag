@@ -150,18 +150,18 @@ async def get_document_status(
     Returns:
         DocumentStatusResponse: 含 status、chunk_count、progress、error         以及处理阶段详情
     """
-    docs = await svc.db.get_documents(body.kb_id)
-    doc = next((d for d in docs if d["id"] == body.doc_id), None)
+    docs = await svc._doc_repo.get_documents(body.kb_id)
+    doc = next((d for d in docs if d.id == body.doc_id), None)
     if not doc:
         return DocumentStatusResponse(status="not_found")
     return DocumentStatusResponse(
-        status=doc["status"],
-        chunk_count=doc.get("chunk_count"),
-        progress=doc.get("processing_progress"),
-        error=doc.get("error_msg"),
-        processing_state=doc.get("processing_state"),
-        processing_progress=doc.get("processing_progress"),
-        processing_message=doc.get("processing_message"),
+        status=doc.status,
+        chunk_count=doc.chunk_count,
+        progress=doc.processing_progress,
+        error=doc.error_msg,
+        processing_state=doc.processing_state,
+        processing_progress=doc.processing_progress,
+        processing_message=doc.processing_message,
     )
 
 
@@ -178,8 +178,7 @@ async def get_document_chunks(
     Returns:
         ChunksResponse: 含 items（当前页分块列表）、total（总量）、page、page_size
     """
-    result = await asyncio.to_thread(
-        svc.vector_store.get_chunks_paginated,
+    result = await svc.get_chunks_paginated(
         body.doc_id,
         body.kb_id,
         page=body.page,
@@ -187,20 +186,20 @@ async def get_document_chunks(
     )
     items = [
         ChunkItem(
-            chunk_id=c["id"],
-            content=c["content"][: svc.settings.MAX_TABLE_TOKENS * 2],
-            page=c.get("metadata", {}).get("page", 1),
-            tokens=c.get("metadata", {}).get("tokens", 0),
-            char_count=len(c["content"]),
-            block_type=c.get("metadata", {}).get("block_type", "text"),
-            parent_content=c.get("metadata", {}).get("parent_content"),
+            chunk_id=c.id,
+            content=c.content[: svc.settings.MAX_TABLE_TOKENS * 2],
+            page=c.metadata.get("page", 1),
+            tokens=c.metadata.get("tokens", 0),
+            char_count=len(c.content),
+            block_type=c.metadata.get("block_type", "text"),
+            parent_content=c.metadata.get("parent_content"),
         )
-        for c in result["items"]
+        for c in result.items
     ]
 
     # 去重 parent_content：相同内容只传一次，其余用 parent_key 引用
     parent_map = {}
-    parent_keys = {}  # parent_content → parent_key
+    parent_keys = {}
     key_counter = 0
     for item in items:
         if item.parent_content:
@@ -210,13 +209,13 @@ async def get_document_chunks(
                 parent_keys[item.parent_content] = key
                 parent_map[key] = item.parent_content
             item.parent_key = parent_keys[item.parent_content]
-            item.parent_content = None  # 从 items 中移除，只放 parent_map
+            item.parent_content = None
 
     return ChunksResponse(
         items=items,
-        total=result["total"],
-        page=result["page"],
-        page_size=result["page_size"],
+        total=result.total,
+        page=result.page,
+        page_size=result.page_size,
         parent_map=parent_map,
     )
 
@@ -234,7 +233,7 @@ async def delete_document(
     Returns:
         DocumentDeleteResponse: 含 success 布尔值
     """
-    ok = await svc.db.soft_delete_document(body.doc_id)
+    ok = await svc.document._doc_repo.soft_delete_document(body.doc_id)
     if ok:
         svc.vector_store.delete_document(body.kb_id, body.doc_id)
         logger.info("Document deleted: kb_id={} doc_id={}", body.kb_id, body.doc_id)

@@ -20,7 +20,7 @@ from loguru import logger
 
 from src.config import REDIS_URL, REDIS_TTL
 from src.chat.persistence import PersistenceService
-from src.infra.db.mysql_db import MySQLDB
+from src.infra.db.mysql_db import ChatRepo
 
 
 class ChatManager:
@@ -56,13 +56,13 @@ class ChatManager:
         self._persistence: Optional[PersistenceService] = None
         self._init_redis(self._redis_url)
 
-    def set_mysql_db(self, mysql_db: MySQLDB) -> None:
-        """注入 MySQLDB 实例（包装为 PersistenceService）。
+    def set_chat_repo(self, chat_repo: ChatRepo) -> None:
+        """注入 ChatRepo 实例（包装为 PersistenceService）。
 
         在 SSE 流结束后由 _persist_conversation() 调用，
         确保 ChatManager 可以异步写入 MySQL。
         """
-        self._persistence = PersistenceService(mysql_db)
+        self._persistence = PersistenceService(chat_repo)
 
     # ═══════════ 异步持久化（委托给 PersistenceService） ═══════════
 

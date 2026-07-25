@@ -1,6 +1,7 @@
 """流式聊天 SSE 端点 — 支持分阶段状态推送和引用高亮。"""
 
 import asyncio
+import json
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, Query
@@ -146,14 +147,43 @@ async def _stream_rag_response(
     session_id: str,
     query: str,
 ) -> AsyncGenerator[str, None]:
-    """以 SSE 事件流推送 RAG 响应 — 委托给 agent_service。"""
+    """以 SSE 事件流推送 RAG 响应 — 委托给 agent_service。
+
+    流结束后异步持久化对话到 MySQL。
+    """
+    full_answer = ""
+    sources: list[str] = []
     try:
         async for event in svc.agent_service.stream_chat(kb_id, session_id, query):
+            # 从 token 事件中收集完整回答
+            if event.startswith("event: token"):
+                try:
+                    data_str = event.split("\n")[1].replace("data: ", "", 1)
+                    payload = json.loads(data_str)
+                    full_answer += payload.get("token", "")
+                except Exception:
+                    pass
+            # 从 citation 事件中收集来源
+            elif event.startswith("event: citation"):
+                try:
+                    data_str = event.split("\n")[1].replace("data: ", "", 1)
+                    payload = json.loads(data_str)
+                    src = payload.get("source", "")
+                    page = payload.get("page", 0)
+                    sources.append(f"{src} (第{page}页)")
+                except Exception:
+                    pass
             yield event
     except Exception as e:
         logger.exception("Chat stream unhandled error: {}", str(e))
         yield sse_error(str(e))
         yield sse_done()
+        return
+
+    # 流结束后持久化对话
+    asyncio.create_task(
+        _persist_conversation(svc, session_id, kb_id, query, full_answer, sources)
+    )
 
 
 async def _persist_conversation(
@@ -178,7 +208,7 @@ async def _persist_conversation(
         answer: LLM 生成的完整回答
         sources: 引用来源列表（去重后的 "文件名 (第x页)" 列表）
     """
-    svc.set_mysql_db(svc.db)
+    await svc.set_chat_repo()
 
     # 创建会话（如首次消息）。title = 首条消息前 20 字
     title = query[:20]

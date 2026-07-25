@@ -9,6 +9,7 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD:-corporate_rag_pass}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-financial_qa}
+      TZ: Asia/Shanghai
     ports:
       - "3306:3306"
     volumes:

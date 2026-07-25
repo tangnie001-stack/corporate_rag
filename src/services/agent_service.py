@@ -83,6 +83,10 @@ class AgentService:
 
         try:
             t0 = time.perf_counter()
+            contexts: list[dict] = []
+            downgraded = False
+            downgrade_reason = ""
+
             async for event in self._graph.astream_events(
                 initial_state,
                 version="v2",
@@ -109,8 +113,16 @@ class AgentService:
                         full_answer += content
                         yield sse_token(content)
 
-            final_state = await self._graph.ainvoke(initial_state)
-            contexts = final_state.get("contexts", [])
+                elif kind == "on_chain_end":
+                    output = event.get("data", {}).get("output", {})
+                    if "rerank" in name and isinstance(output, dict):
+                        contexts = output.get("contexts", contexts)
+                    elif "grader" in name and isinstance(output, dict):
+                        if output.get("downgraded"):
+                            downgraded = True
+                            downgrade_reason = output.get("downgrade_reason", "")
+
+            # 从流式事件中已收集了 contexts / downgraded，不再需要 ainvoke
             seen = set()
             for ctx in contexts:
                 key = (ctx.get("source", ""), ctx.get("page", 0))
@@ -134,8 +146,8 @@ class AgentService:
                 "[{}] AgentService stream_chat completed: total={:.1f}s "
                 "downgraded={} reason={} contexts={}",
                 trace_id, t1 - t0,
-                final_state.get("downgraded"),
-                final_state.get("downgrade_reason"),
+                downgraded,
+                downgrade_reason,
                 len(contexts),
             )
 

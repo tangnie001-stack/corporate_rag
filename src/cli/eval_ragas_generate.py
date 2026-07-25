@@ -177,11 +177,11 @@ def run_generate(
     """
     _ensure_vertexai_stub()
 
-    from src.infra.db.mysql_db import MySQLClient
+    from src.infra.db.mysql_db import MySQLDB
 
     # ---- 0. 从 MySQL 查询 kb_name 和 doc_names ----
     async def _query_meta() -> tuple[str, dict[str, str]]:
-        db = MySQLClient()
+        db = MySQLDB()
         name = await db.get_kb_name_by_id(kb_id)
         if not name:
             raise ValueError(f"知识库 {kb_id} 不存在")

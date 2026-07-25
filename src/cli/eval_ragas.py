@@ -550,7 +550,7 @@ def _save_eval_report(
         overall = weighted_sum / total_w if total_w > 0 else None
 
         async def _do_insert():
-            await svc.db.insert_eval_report(
+            await svc.insert_eval_report(
                 {
                     "kb_id": kb_id,
                     "run_type": "manual",

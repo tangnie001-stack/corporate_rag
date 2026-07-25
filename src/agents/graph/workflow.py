@@ -20,18 +20,19 @@ def route_by_intent(state: AgentState) -> str:
 
 
 def route_by_grader(state: AgentState) -> str:
-    """根据 grader 分数决定继续还是重试。"""
+    """根据 grader 分数决定继续还是重试（纯条件函数，不修改 state）。"""
+    if state.get("downgraded"):
+        logger.info("route_by_grader: downgraded=true -> pass")
+        return "pass"
     score = state.get("grader_score", 0)
     retries = state.get("retrieval_retries", 0)
     if score is not None and score >= 0.5:
+        logger.info("route_by_grader: score={:.2f} >= 0.5 -> pass", score)
         return "pass"
-    if retries < 2:
-        # route_by_grader 内部增加重试计数
-        state["retrieval_retries"] = retries + 1  # type: ignore
+    if retries < 3:
+        logger.info("route_by_grader: score={:.2f} retries={} < 3 -> rewrite", score, retries)
         return "rewrite"
-    # 重试用尽，降级到 Enhanced RAG
-    state["downgraded"] = True  # type: ignore
-    state["downgrade_reason"] = "grader_retries_exhausted"  # type: ignore
+    logger.info("route_by_grader: score={:.2f} retries={} >= 3 -> pass (downgrade)", score, retries)
     return "pass"
 
 
