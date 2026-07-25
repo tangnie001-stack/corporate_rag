@@ -68,6 +68,9 @@ async def verify_token(
     Returns:
         VerifyResponse: valid 表示是否有效，user_id 为对应用户 ID
     """
+    if not token:
+        return VerifyResponse(valid=False, user_id=None)
+
     user_id = await svc.auth_service.verify_token(token)
     if user_id:
         return VerifyResponse(valid=True, user_id=user_id)
