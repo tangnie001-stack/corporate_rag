@@ -156,7 +156,12 @@ class DocumentService:
                     file_hash,
                     doc["id"],
                 )
-                return {"doc_id": doc["id"], "filename": filename, "dedup": True}
+                return {
+                    "doc_id": doc["id"],
+                    "filename": filename,
+                    "dedup": True,
+                    "status": doc.get("status", "ready"),
+                }
 
         # 4. 生成 doc_id 并上传到 MinIO
         import uuid

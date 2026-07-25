@@ -126,8 +126,9 @@ async def upload_document(
     if result.get("dedup"):
         return UploadDocumentResponse(
             doc_id=result["doc_id"],
-            status="ready",
+            status=result.get("status", "ready"),
             filename=result["filename"],
+            dedup=True,
         )
 
     return UploadDocumentResponse(
