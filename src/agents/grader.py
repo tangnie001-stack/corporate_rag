@@ -23,7 +23,7 @@ class RetrievalGrader:
     KEYWORD_MIN_LEN = 2
     DEFAULT_PASS = 0.8
 
-    def grade(self, query: str, results: list[dict], reranked: list[dict]) -> float:
+    def grade(self, query: str, results: list, reranked: list) -> float:
         """返回质量分数 0~1。
 
         Args:
@@ -40,7 +40,7 @@ class RetrievalGrader:
         if not keywords:
             return self.DEFAULT_PASS
 
-        top_contents = [c.get("content", "") for c in reranked[:TOP_K_RERANK]]
+        top_contents = [c.content for c in reranked[:TOP_K_RERANK]]
         if not top_contents:
             return 0.0
 
