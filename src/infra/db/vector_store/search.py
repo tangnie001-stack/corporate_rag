@@ -7,7 +7,20 @@ from src.infra.db.entities.search import ChunkResult, ChunkQueryResult
 
 
 def similarity_search(collection, embed_fn, kb_id, query, k=5) -> list[ChunkResult]:
-    """语义相似度检索，返回 list[ChunkResult]。"""
+    """语义相似度检索，返回最相似的 k 个分块。
+
+    将查询文本转为嵌入向量后在指定 collection 中进行余弦相似度搜索。
+
+    Args:
+        collection: ChromaDB Collection 实例
+        embed_fn: 嵌入函数（需实现 embed_query 方法）
+        kb_id: 知识库 ID（仅用于日志）
+        query: 查询文本
+        k: 返回结果数量上限，默认 5（最大 100）
+
+    Returns:
+        检索结果列表，按相关性降序排列（距离越小越相关）
+    """
     query_vec = embed_fn.embed_query(query)
     results = collection.query(
         query_embeddings=[query_vec],
@@ -46,7 +59,19 @@ def similarity_search(collection, embed_fn, kb_id, query, k=5) -> list[ChunkResu
 def similarity_search_all(
     collections_dict, embed_fn, query, k=TOP_K_RETRIEVAL
 ) -> list[ChunkResult]:
-    """在所有 collection 中进行语义搜索，合并后排序取 top-k。"""
+    """在所有 collection 中进行语义搜索，合并后排序取 top-k。
+
+    遍历所有知识库逐一执行 similarity_search，汇总后按距离升序排列。
+
+    Args:
+        collections_dict: 知识库 ID 到 Collection 的映射字典
+        embed_fn: 嵌入函数
+        query: 查询文本
+        k: 最终返回结果上限，默认使用全局配置 TOP_K_RETRIEVAL
+
+    Returns:
+        合并排序后的检索结果列表
+    """
     all_results: list[ChunkResult] = []
     for kb_id in collections_dict:
         try:
@@ -71,7 +96,17 @@ def similarity_search_all(
 
 
 def get_chunks_by_doc_id(collection, doc_id: str) -> list[ChunkResult]:
-    """查询指定文档的所有分块。"""
+    """查询指定文档的所有分块。
+
+    通过 doc_id 元数据过滤获取全部关联分块。
+
+    Args:
+        collection: ChromaDB Collection 实例
+        doc_id: 文档 ID
+
+    Returns:
+        分块结果列表（查不到时返回空列表）
+    """
     try:
         results = collection.get(where={"doc_id": doc_id})
         if not results["ids"]:
@@ -99,7 +134,19 @@ def get_chunks_by_doc_id(collection, doc_id: str) -> list[ChunkResult]:
 def get_chunks_paginated(
     collection, doc_id: str, page: int = 1, page_size: int = 50
 ) -> ChunkQueryResult:
-    """分页查询指定文档的分块。"""
+    """分页查询指定文档的分块。
+
+    先统计总数，再按 offset/limit 获取指定页数据。
+
+    Args:
+        collection: ChromaDB Collection 实例
+        doc_id: 文档 ID
+        page: 页码，从 1 开始，默认 1
+        page_size: 每页数量，默认 50
+
+    Returns:
+        分页查询结果（items / total / page / page_size），查询失败时返回空结果
+    """
     try:
         all_ids = collection.get(where={"doc_id": doc_id}, include=[])
         total = len(all_ids["ids"]) if all_ids.get("ids") else 0
