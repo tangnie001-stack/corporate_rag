@@ -108,9 +108,10 @@ class AuthService:
             try:
                 cached = await self._redis.get("token:{}".format(token))
                 if cached:
-                    user_id = (
-                        cached.decode("utf-8") if isinstance(cached, bytes) else cached
-                    )
+                    if isinstance(cached, bytes):
+                        user_id = cached.decode("utf-8")
+                    else:
+                        user_id = cached
                     return user_id
             except Exception:
                 pass

@@ -1,4 +1,4 @@
-"""Tests for auth service layer."""
+"""测试认证服务层。"""
 
 import pytest
 from unittest.mock import AsyncMock, patch
@@ -34,7 +34,7 @@ def auth_service(mock_db, mock_redis):
 class TestRegister:
     @pytest.mark.asyncio
     async def test_register_success(self, auth_service, mock_db):
-        """Register success returns user_id and account."""
+        """注册成功应返回 user_id 和 account。"""
         mock_db.get_user_by_account.return_value = None
         result = await auth_service.register("test_user", "password123")
         assert "user_id" in result
@@ -43,7 +43,7 @@ class TestRegister:
 
     @pytest.mark.asyncio
     async def test_register_duplicate_account(self, auth_service, mock_db):
-        """Duplicate account raises BusinessError."""
+        """重复账号应抛出 BusinessError。"""
         mock_db.get_user_by_account.return_value = {
             "id": "existing",
             "account": "test_user",
@@ -55,7 +55,7 @@ class TestRegister:
 class TestLogin:
     @pytest.mark.asyncio
     async def test_login_success(self, auth_service, mock_db, mock_redis):
-        """Login success returns token and user_id."""
+        """登录成功应返回 token 和 user_id。"""
         password_hash = "$2b$12$..."
         mock_db.get_user_by_account.return_value = {
             "id": "user_1",
@@ -74,7 +74,7 @@ class TestLogin:
 
     @pytest.mark.asyncio
     async def test_login_wrong_password(self, auth_service, mock_db):
-        """Wrong password raises BusinessError."""
+        """错误密码应抛出 BusinessError。"""
         mock_db.get_user_by_account.return_value = {
             "id": "user_1",
             "account": "test_user",
@@ -88,14 +88,14 @@ class TestLogin:
 class TestVerifyToken:
     @pytest.mark.asyncio
     async def test_verify_valid_token(self, auth_service, mock_redis):
-        """Valid token returns user_id."""
+        """有效 token 应返回 user_id。"""
         mock_redis.get.return_value = b"user_123"
         result = await auth_service.verify_token("valid_token")
         assert result == "user_123"
 
     @pytest.mark.asyncio
     async def test_verify_invalid_token(self, auth_service):
-        """Invalid token returns None."""
+        """无效 token 应返回 None。"""
         result = await auth_service.verify_token("invalid_token")
         assert result is None
 
@@ -103,6 +103,6 @@ class TestVerifyToken:
 class TestLogout:
     @pytest.mark.asyncio
     async def test_logout_deletes_redis_key(self, auth_service, mock_redis):
-        """Logout deletes Redis token cache."""
+        """退出登录应删除 Redis 中的 token 缓存。"""
         await auth_service.logout("some_token")
         mock_redis.delete.assert_awaited_once_with("token:some_token")
