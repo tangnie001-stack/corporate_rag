@@ -21,6 +21,7 @@ from loguru import logger
 from src.config import REDIS_URL, REDIS_TTL
 from src.chat.persistence import PersistenceService
 from src.infra.db.mysql_db import ChatRepo
+from src.infra.llm.chat_message import ChatMessage
 
 
 class ChatManager:
@@ -71,6 +72,7 @@ class ChatManager:
         session_id: str,
         title: str,
         kb_id: str,
+        user_id: str = "",
     ) -> None:
         """异步创建会话记录（首次消息时调用）。
 
@@ -81,9 +83,10 @@ class ChatManager:
             session_id: 会话 ID
             title: 会话标题（截取首条消息前 20 字）
             kb_id: 关联的知识库 ID
+            user_id: 所属用户 ID
         """
         if self._persistence:
-            await self._persistence.save_session(session_id, title, kb_id)
+            await self._persistence.save_session(session_id, title, kb_id, user_id)
 
     async def save_messages_async(
         self,
@@ -198,22 +201,24 @@ class ChatManager:
         except Exception as e:
             logger.warning("add_message_async failed: {}", e)
 
-    async def get_history_async(self, session_id: str) -> list[dict]:
+    async def get_history_async(self, session_id: str) -> list[ChatMessage]:
         """异步获取指定会话的完整对话历史。
 
         Args:
             session_id: 会话 ID
 
         Returns:
-            消息列表，每条为 {"role": "user"/"assistant", "content": "..."}
+            消息列表，每条为 ChatMessage
         """
         await self._ensure_redis_async()
         if self._in_memory:
-            return list(self._memory_store.get(session_id, []))
+            return [
+                ChatMessage(**msg) for msg in self._memory_store.get(session_id, [])
+            ]
         key = self._session_key(session_id)
         try:
             raw = await self._redis.lrange(key, 0, -1)
-            return [json.loads(m) for m in raw]
+            return [ChatMessage(**json.loads(m)) for m in raw]
         except Exception as e:
             logger.warning("get_history_async failed: {}", e)
             return []

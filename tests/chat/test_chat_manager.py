@@ -140,7 +140,7 @@ class TestChatManagerRedisReconnection:
         history = await cm.get_history_async("sess")
         assert cm._in_memory is True
         assert len(history) == 1
-        assert history[0]["content"] == "测试消息"
+        assert history[0].content == "测试消息"
 
 
 class TestChatManagerAsync:
@@ -157,8 +157,8 @@ class TestChatManagerAsync:
         await cm.add_message_async("s1", "user", "hello")
         h = await cm.get_history_async("s1")
         assert len(h) == 1
-        assert h[0]["content"] == "hello"
-        assert h[0]["role"] == "user"
+        assert h[0].content == "hello"
+        assert h[0].role == "user"
 
     @pytest.mark.asyncio
     async def test_async_in_memory_clear(self, cm):
@@ -181,5 +181,5 @@ class TestChatManagerAsync:
         await cm.add_message_async("s_b", "user", "from_b")
         h_a = await cm.get_history_async("s_a")
         h_b = await cm.get_history_async("s_b")
-        assert len(h_a) == 1 and h_a[0]["content"] == "from_a"
-        assert len(h_b) == 1 and h_b[0]["content"] == "from_b"
+        assert len(h_a) == 1 and h_a[0].content == "from_a"
+        assert len(h_b) == 1 and h_b[0].content == "from_b"

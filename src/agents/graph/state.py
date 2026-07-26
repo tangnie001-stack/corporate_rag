@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Optional
 from src.infra.db.entities import ChunkResult
+from src.infra.llm.chat_message import ChatMessage
 from src.rag.context import RAGContext
 
 
@@ -26,7 +27,7 @@ class AgentState:
     citations: list[dict] = field(default_factory=list)
     downgraded: bool = False
     downgrade_reason: str = ""
-    _history: list[dict] = field(default_factory=list)
+    _history: list[ChatMessage] = field(default_factory=list)
     _token_usage: dict = field(default_factory=dict)
     timings: dict = field(default_factory=dict)
 

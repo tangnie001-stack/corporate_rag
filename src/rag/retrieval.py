@@ -8,6 +8,7 @@ from src.config import TOP_K_RETRIEVAL, TOP_K_RERANK, HYBRID_SEARCH_ENABLED
 from src.infra.search.bm25_index import BM25Index, rrf_fusion
 from src.infra.db.vector_store import VectorStore
 from src.infra.db.entities import ChunkResult
+from src.infra.llm.chat_message import ChatMessage
 from src.models import with_retry
 from src.config import RETRY_MAX_ATTEMPTS, RETRY_INITIAL_INTERVAL, RETRY_BACKOFF_FACTOR
 from src.rag.context import RAGContext
@@ -30,6 +31,9 @@ async def search(
     Returns:
         检索结果列表，按相关性降序排列；混合模式为 RRF 融合结果
     """
+    logger.info("[DIAG] search() called: kb_id={!r} kb_id_empty={} query_len={} hybrid={}",
+        kb_id, not kb_id, len(query), HYBRID_SEARCH_ENABLED and bool(bm25) and bool(kb_id))
+
     if HYBRID_SEARCH_ENABLED and bm25 and kb_id:
         logger.info("RAG search starting hybrid: kb_id={}", kb_id)
         dense_t = asyncio.to_thread(
@@ -80,6 +84,7 @@ def rerank_results(
         精排后的 RAGContext 列表，按相关性降序排列，长度不超过 TOP_K_RERANK
     """
     if not results:
+        logger.info("[DIAG] rerank_results: input empty, returning []")
         return []
 
     docs = [r.content for r in results]
@@ -97,7 +102,7 @@ def rerank_results(
             e,
         )
         reranked = [
-            {"index": i, "relevance_score": r.distance or 0}
+            {"index": i, "relevance_score": 1 - r.distance if r.distance is not None else 0}
             for i, r in enumerate(results)
         ]
 
@@ -139,7 +144,7 @@ def classify_query(query: str) -> str:
     """对用户查询进行三级分类。
 
     Returns:
-        "simple":  单事实检索（如数字、年份+指标），走 Naive RAG
+        "simple":  单事实查询（如数字、年份+指标），不走改写直接检索
         "medium":  需要 2-3 个事实关联或分析，走 Enhanced RAG
         "complex": 多跳推理、跨文档对比，走 Agentic RAG
     """
@@ -159,7 +164,23 @@ def classify_query(query: str) -> str:
     if len(cleaned) < 10:
         return "medium"
 
-    # 单事实数字查询 → simple
+    # ── 守卫条件：以下情况虽然含年份/财务指标，但需要检索文档 ──
+
+    # 引用具体文档（"在...报告中"、"根据...报告"）
+    if re.search(r"[在根据][^。，]{1,30}(报告|文件|文档|数据)", cleaned):
+        return "medium"
+
+    # 长查询（>40字）包含财务指标 → 大概率是文档特定查询
+    if len(cleaned) > 40 and re.search(
+        r"(营收|利润|收入|成本|资产|负债|现金流|净利润)", cleaned
+    ):
+        return "medium"
+
+    # 多问句（"分别为多少"）
+    if re.search(r"(分别|各自).*(多少|如何|怎样)", cleaned):
+        return "medium"
+
+    # ── 单事实数字查询 → simple ──
     if re.search(r"\d{4}年", cleaned) or re.search(
         r"(营收|利润|收入|成本|资产|负债|现金流|净利润)", cleaned
     ):
@@ -168,13 +189,13 @@ def classify_query(query: str) -> str:
     return "medium"  # default fallback
 
 
-def expand_query(query: str, history: list[dict]) -> str:
+def expand_query(query: str, history: list[ChatMessage]) -> str:
     """对模糊短查询进行扩展。"""
     if not history:
         return query
     for msg in reversed(history):
-        if msg.get("role") == "user" and msg["content"] != query:
-            return f"{msg['content']} {query}"
+        if msg.role == "user" and msg.content != query:
+            return f"{msg.content} {query}"
     return query
 
 
@@ -199,7 +220,7 @@ def decompose_query(query: str) -> list[str]:
     return [p for p in parts if p]
 
 
-def rewrite_query(query: str, history: list[dict]) -> str | list[str]:
+def rewrite_query(query: str, history: list[ChatMessage]) -> str | list[str]:
     """根据三级分类执行相应的改写策略。
 
     Returns:

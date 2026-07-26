@@ -16,6 +16,7 @@ import pytest
 
 from src.rag import retrieval
 from src.infra.db.entities.search import ChunkResult
+from src.infra.llm.chat_message import ChatMessage
 
 
 # ==================== 检索测试 ====================
@@ -114,7 +115,7 @@ class TestQueryRewrite:
 
     def test_short_query_expands(self):
         """模糊短查询应触发 expand_query。"""
-        history = [{"role": "user", "content": "茅台2024年营收情况"}]
+        history = [ChatMessage(role="user", content="茅台2024年营收情况")]
         result = retrieval.rewrite_query("净利润呢", history)
         assert "茅台" in result
         assert "净利润" in result
@@ -133,9 +134,9 @@ class TestQueryRewrite:
     def test_expand_with_history(self):
         """expand_query 应使用最近用户消息扩展短查询。"""
         history = [
-            {"role": "user", "content": "茅台2024年营收情况"},
-            {"role": "assistant", "content": "营收1741亿元"},
-            {"role": "user", "content": "净利润呢"},
+            ChatMessage(role="user", content="茅台2024年营收情况"),
+            ChatMessage(role="assistant", content="营收1741亿元"),
+            ChatMessage(role="user", content="净利润呢"),
         ]
         result = retrieval.expand_query("净利润呢", history)
         assert "净利润呢" in result
