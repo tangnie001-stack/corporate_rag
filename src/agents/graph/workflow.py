@@ -20,18 +20,17 @@ from src.infra.search.bm25_index import BM25Index
 
 def route_by_intent(state: AgentState) -> str:
     """根据意图路由到不同路径。"""
-    intent = state.get("intent", {})
-    return intent.get("route", "medium")
+    return state.intent.route or "medium"
 
 
 def route_by_grader(state: AgentState) -> str:
     """根据 grader 分数决定继续还是重试（纯条件函数，不修改 state）。"""
-    if state.get("downgraded"):
+    if state.downgraded:
         logger.info("route_by_grader: downgraded=true -> pass")
         return "pass"
-    score = state.get("grader_score", 0)
-    retries = state.get("retrieval_retries", 0)
-    if score is not None and score >= 0.5:
+    score = state.grader_score or 0
+    retries = state.retrieval_retries
+    if score >= 0.5:
         logger.info("route_by_grader: score={:.2f} >= 0.5 -> pass", score)
         return "pass"
     if retries < 3:

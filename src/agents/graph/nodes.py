@@ -12,20 +12,20 @@ from src.rag.retrieval import search, rerank_results, rewrite_query
 from src.rag.stream import stream_answer, estimate_usage
 from src.rag.prompt import build_prompt, build_simple_prompt, format_context
 from src.agents.grader import RetrievalGrader
-from src.agents.graph.state import AgentState
+from src.agents.graph.state import AgentState, RAGQueryIntent
 
 
 def _tid(state: AgentState) -> str:
-    return state.get("trace_id", "unknown")
+    return state.trace_id
 
 
 def classify_node(state: AgentState) -> dict:
     """查询分类节点：基于 QueryRouter 输出三级路由。"""
     tid = _tid(state)
-    logger.info("[{}] classify_node start: query={}", tid, state.get("query", "")[:50])
+    logger.info("[{}] classify_node start: query={}", tid, state.query[:50])
 
     router = QueryRouter()
-    raw_route = router.route(state.get("query", ""))
+    raw_route = router.route(state.query)
 
     # 映射 vague → medium
     route_map = {
@@ -37,24 +37,24 @@ def classify_node(state: AgentState) -> dict:
     route = route_map.get(raw_route, "medium")
 
     logger.info("[{}] classify_node done: raw={} mapped={}", tid, raw_route, route)
-    return {"intent": {"route": route, "rewritten": False}}
+    return {"intent": RAGQueryIntent(route=route, rewritten=False)}
 
 
 def rewrite_node(state: AgentState) -> dict:
     """查询改写节点：对非 simple 路径的查询进行改写。"""
     tid = _tid(state)
-    query = state.get("query", "")
-    rewritten = rewrite_query(query, state.get("_history", []))
+    query = state.query
+    rewritten = rewrite_query(query, state._history or [])
 
     if isinstance(rewritten, list):
         rewritten = " ".join(rewritten)
 
     result = {"rewritten_query": rewritten}
     if rewritten != query:
-        result["intent"] = {
-            "route": state.get("intent", {}).get("route", "medium"),
-            "rewritten": True,
-        }
+        result["intent"] = RAGQueryIntent(
+            route=state.intent.route or "medium",
+            rewritten=True,
+        )
         logger.info("[{}] rewrite_node: {} -> {}", tid, query[:30], rewritten[:30])
     else:
         logger.info("[{}] rewrite_node: no rewrite", tid)
@@ -66,8 +66,8 @@ def make_retrieve_node(vector_store, bm25) -> Callable:
 
     async def retrieve_node(state: AgentState) -> dict:
         tid = _tid(state)
-        q = state.get("rewritten_query") or state.get("query", "")
-        kb_id = state.get("kb_id", "")
+        q = state.rewritten_query or state.query
+        kb_id = state.kb_id
         logger.info("[{}] retrieve_node start: query={} kb_id={}", tid, q[:50], kb_id)
         results = await search(q, kb_id, vector_store, bm25)
         if results is None:
@@ -84,14 +84,14 @@ def make_retrieve_node(vector_store, bm25) -> Callable:
 def grader_node(state: AgentState) -> dict:
     """质量评分节点：关键字覆盖度评分 + 重试计数管理。"""
     tid = _tid(state)
-    query = state.get("rewritten_query") or state.get("query", "")
-    results = state.get("retrieval_results", [])
+    query = state.rewritten_query or state.query
+    results = state.retrieval_results or []
     grader = RetrievalGrader()
     score = grader.grade(query, results, results)
-    retries = state.get("retrieval_retries", 0)
+    retries = state.retrieval_retries
     logger.info("[{}] grader_node: score={:.2f} retries={}", tid, score, retries)
 
-    retries = state.get("retrieval_retries", 0)
+    retries = state.retrieval_retries  # noqa: PLW2901 — 从 state 刷新，后续逻辑用
     if score is not None and score >= 0.5:
         return {"grader_score": score, "retrieval_retries": 0}
     if retries < 2:
@@ -110,8 +110,8 @@ def make_rerank_node(reranker) -> Callable:
 
     def rerank_node(state: AgentState) -> dict:
         tid = _tid(state)
-        query = state.get("rewritten_query") or state.get("query", "")
-        results = state.get("retrieval_results", [])
+        query = state.rewritten_query or state.query
+        results = state.retrieval_results or []
         if not results:
             return {"contexts": []}
         contexts = rerank_results(query, results, reranker)
@@ -127,20 +127,20 @@ def make_generate_node(llm, prompt_manager, tracer) -> Callable:
 
     def generate_node(state: AgentState) -> dict:
         tid = _tid(state)
-        query = state.get("rewritten_query") or state.get("query", "")
-        contexts = state.get("contexts", [])
+        query = state.rewritten_query or state.query
+        contexts = state.contexts or []
 
         if not contexts:
             # 降级到 Naive RAG
             logger.info("[{}] generate_node: empty contexts, Naive RAG fallback", tid)
             prompt = build_simple_prompt(
-                query, state.get("_history", []), prompt_manager
+                query, state._history or [], prompt_manager
             )
         else:
             # contexts 已经是 list[RAGContext]，不需要转换
             context_str = format_context(contexts)
             prompt = build_prompt(
-                query, context_str, state.get("_history", []), prompt_manager
+                query, context_str, state._history or [], prompt_manager
             )
 
         # 收集所有 token，组装完整文本
@@ -167,7 +167,7 @@ def make_generate_node(llm, prompt_manager, tracer) -> Callable:
 def format_node(state: AgentState) -> dict:
     """格式化节点：去重后的引用列表。"""
     tid = _tid(state)
-    contexts = state.get("contexts", [])
+    contexts = state.contexts or []
     seen = set()
     citations = []
     for ctx in contexts:

@@ -8,19 +8,19 @@
 """
 
 import time
-import uuid
 from typing import AsyncGenerator
 
 from loguru import logger
 
 from src.utils.sse import sse_status, sse_token, sse_citation, sse_done, sse_error
 from src.agents.graph.workflow import build_graph
-from src.agents.graph.state import AgentState
+from src.agents.graph.state import make_initial_state, AgentState
 from src.infra.db.vector_store import VectorStore
 from src.infra.search.bm25_index import BM25Index
 from src.infra.llm.langfuse_tracing import LangfuseTracer
 from src.infra.llm.prompt_manager import PromptManager
 from src.chat.manager import ChatManager
+from src.infra.llm.trace_context import current_trace_id
 
 
 class AgentService:
@@ -62,7 +62,7 @@ class AgentService:
         query: str,
     ) -> AsyncGenerator[str, None]:
         """执行图并流式返回 SSE 事件。"""
-        trace_id = f"trace_{uuid.uuid4().hex[:12]}"
+        trace_id = current_trace_id.get()
         tracer_trace_id = self._tracer.start_trace(
             "chat_stream_agent",
             {"kb_id": kb_id, "session_id": session_id, "query": query},
@@ -72,16 +72,7 @@ class AgentService:
         history = await self._chat_manager.get_history_async(session_id) or []
         await self._chat_manager.add_message_async(session_id, "user", query)
 
-        initial_state: AgentState = {
-            "session_id": session_id,
-            "kb_id": kb_id,
-            "query": query,
-            "trace_id": trace_id,
-            "retrieval_retries": 0,
-            "downgraded": False,
-            "downgrade_reason": "",
-            "_history": history,
-        }
+        initial_state: AgentState = make_initial_state(session_id, kb_id, query, trace_id, history)
 
         full_answer = ""
 
@@ -129,15 +120,15 @@ class AgentService:
             # 从流式事件中已收集了 contexts / downgraded，不再需要 ainvoke
             seen = set()
             for ctx in contexts:
-                key = (ctx.get("source", ""), ctx.get("page", 0))
+                key = (ctx.source, ctx.page or 0)
                 if key in seen:
                     continue
                 seen.add(key)
                 yield sse_citation(
-                    ctx.get("source", ""),
-                    ctx.get("page", 0),
-                    (ctx.get("content", "")[:200]),
-                    ctx.get("score", 0),
+                    ctx.source or "",
+                    ctx.page or 0,
+                    (ctx.content or "")[:200],
+                    ctx.score or 0,
                 )
 
             if full_answer:
