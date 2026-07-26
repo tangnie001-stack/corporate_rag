@@ -16,8 +16,8 @@ def test_parent_child_has_parent_content():
     text = ("这是第一段内容。" * 50) + ("这是第二段内容。" * 50)
     result = chunker.chunk(text, {"source": "t.txt", "doc_id": "d1"})
     assert len(result) > 0
-    assert result[0]["metadata"]["chunk_strategy"] == "parent_child"
-    assert "parent_content" in result[0]["metadata"]
+    assert result[0].metadata["chunk_strategy"] == "parent_child"
+    assert "parent_content" in result[0].metadata
 
 
 def test_qa_no_parent():
@@ -25,19 +25,19 @@ def test_qa_no_parent():
     text = "问：营收多少？\n答：100亿\n问：利润多少？\n答：20亿"
     result = chunker.chunk(text, {"source": "q.txt", "doc_id": "d2"})
     for r in result:
-        assert r["metadata"]["parent_content"] is None
-        assert r["metadata"]["chunk_strategy"] == "qa"
+        assert r.metadata["parent_content"] is None
+        assert r.metadata["chunk_strategy"] == "qa"
 
 
 def test_table_preserving_keeps_table():
     chunker = TablePreservingChunker()
     text = "开头\n| 项目 | 金额 |\n|--- |--- |\n| 营收 | 100亿 |\n| 利润 | 20亿 |\n结尾"
     result = chunker.chunk(text, {"source": "f.txt", "doc_id": "d3"})
-    table_chunks = [r for r in result if "| 营收" in r["content"]]
+    table_chunks = [r for r in result if "| 营收" in r.content]
     assert len(table_chunks) >= 1
     for tc in table_chunks:
-        assert "| 营收 | 100亿 |" in tc["content"]
-        assert "| 利润 | 20亿 |" in tc["content"]
+        assert "| 营收 | 100亿 |" in tc.content
+        assert "| 利润 | 20亿 |" in tc.content
 
 
 def test_chunk_router_qa():
@@ -80,13 +80,13 @@ def test_table_preserving_orphan_text_merge():
     )
     result = chunker.chunk(text, {"source": "f.txt", "doc_id": "d4"})
     # 短文本应被合并到相邻表格上，不应作为独立 text chunk
-    text_chunks = [r for r in result if r["metadata"]["block_type"] != "table"]
-    orphan_texts = [r for r in text_chunks if "审计报告" in r["content"]]
+    text_chunks = [r for r in result if r.metadata["block_type"] != "table"]
+    orphan_texts = [r for r in text_chunks if "审计报告" in r.content]
     assert len(orphan_texts) == 0, "短文本应被合并到表格，不应独立成块"
 
     # 第一个表格应包含 "注：以上数据来自审计报告"
-    table_chunks = [r for r in result if r["metadata"]["block_type"] == "table"]
-    merged = any("审计报告" in c["content"] for c in table_chunks)
+    table_chunks = [r for r in result if r.metadata["block_type"] == "table"]
+    merged = any("审计报告" in c.content for c in table_chunks)
     assert merged, "表格 chunk 应包含被合并的短文本"
 
 
@@ -104,19 +104,19 @@ def test_table_preserving_split_large_table():
     result = chunker.chunk(text, {"source": "f.txt", "doc_id": "d5"})
 
     # 应产生多个 table chunk
-    table_chunks = [r for r in result if r["metadata"]["block_type"] == "table"]
+    table_chunks = [r for r in result if r.metadata["block_type"] == "table"]
     assert len(table_chunks) >= 2, (
         f"大表格应被切分为多个子表，实际: {len(table_chunks)}"
     )
 
     # 每个子表都应包含表头行
     for tc in table_chunks:
-        assert "| 项目 | 金额（万元） | 占比（%） | 同比增长（%） |" in tc["content"], (
+        assert "| 项目 | 金额（万元） | 占比（%） | 同比增长（%） |" in tc.content, (
             "每个子表块应包含表头"
         )
 
     # 所有数据行应完整保留
-    all_content = "".join(tc["content"] for tc in table_chunks)
+    all_content = "".join(tc.content for tc in table_chunks)
     for i in range(80):
         assert f"| 项目{i}" in all_content, f"数据行 项目{i} 应被保留"
 
@@ -129,9 +129,9 @@ def test_table_preserving_split_no_separator():
     text = table  # >2000 chars with 25 rows
 
     result = chunker.chunk(text, {"source": "f.txt", "doc_id": "d6"})
-    table_chunks = [r for r in result if r["metadata"]["block_type"] == "table"]
+    table_chunks = [r for r in result if r.metadata["block_type"] == "table"]
     assert len(table_chunks) >= 1
 
     # 首个数据行的内容应保持一致
     if len(table_chunks) >= 2:
-        assert "| col0 | value0 |" in table_chunks[0]["content"]
+        assert "| col0 | value0 |" in table_chunks[0].content

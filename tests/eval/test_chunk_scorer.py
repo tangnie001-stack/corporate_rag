@@ -5,15 +5,16 @@ import os
 import pytest
 
 from src.eval.chunk_scorer import _check_structure_integrity
+from src.infra.chunking.validator import ChunkData
 
 
 def test_table_fully_contained():
     """A complete markdown table in one chunk should score 1.0."""
     chunks = [
-        {
-            "content": "| A | B |\n|---| ---|\n| 1 | 2 |\n| 3 | 4 |",
-            "metadata": {"page": 1},
-        },
+        ChunkData(
+            content="| A | B |\n|---| ---|\n| 1 | 2 |\n| 3 | 4 |",
+            metadata={"page": 1},
+        ),
     ]
     result = _check_structure_integrity(chunks)
     assert result["table"]["score"] == 1.0
@@ -24,8 +25,8 @@ def test_table_fully_contained():
 def test_table_split_across_chunks():
     """A table split across two chunks should be marked broken."""
     chunks = [
-        {"content": "| A | B |\n|---| ---|\n| 1 | 2 |", "metadata": {}},
-        {"content": "| 3 | 4 |", "metadata": {}},
+        ChunkData(content="| A | B |\n|---| ---|\n| 1 | 2 |", metadata={}),
+        ChunkData(content="| 3 | 4 |", metadata={}),
     ]
     result = _check_structure_integrity(chunks)
     assert result["table"]["score"] == 0.0
@@ -36,9 +37,9 @@ def test_table_split_across_chunks():
 def test_multiple_tables_some_broken():
     """Only broken tables should be in the broken list."""
     chunks = [
-        {"content": "| X | Y |\n|---|---|\n| a | b |", "metadata": {}},
-        {"content": "some text", "metadata": {}},
-        {"content": "| M | N |\n|---|---|\n| c | d |", "metadata": {}},
+        ChunkData(content="| X | Y |\n|---|---|\n| a | b |", metadata={}),
+        ChunkData(content="some text", metadata={}),
+        ChunkData(content="| M | N |\n|---|---|\n| c | d |", metadata={}),
     ]
     result = _check_structure_integrity(chunks)
     assert result["table"]["total"] == 2
@@ -49,7 +50,7 @@ def test_multiple_tables_some_broken():
 def test_heading_detected_and_intact():
     """A heading and its body in the same chunk should be intact."""
     chunks = [
-        {"content": "3. 主营业务分析\n公司主要经营业务包括...", "metadata": {}},
+        ChunkData(content="3. 主营业务分析\n公司主要经营业务包括...", metadata={}),
     ]
     result = _check_structure_integrity(chunks)
     assert result["heading"]["score"] == 1.0
@@ -59,8 +60,8 @@ def test_heading_detected_and_intact():
 def test_heading_separated_from_body():
     """A heading at end of chunk N with body in chunk N+1 should be broken."""
     chunks = [
-        {"content": "3. 主营业务分析", "metadata": {}},
-        {"content": "公司主要经营业务包括...", "metadata": {}},
+        ChunkData(content="3. 主营业务分析", metadata={}),
+        ChunkData(content="公司主要经营业务包括...", metadata={}),
     ]
     result = _check_structure_integrity(chunks)
     assert len(result["heading"]["broken"]) == 1
@@ -70,7 +71,7 @@ def test_heading_separated_from_body():
 def test_chinese_numbered_heading():
     """Chinese numbered headings like （一） should be detected."""
     chunks = [
-        {"content": "（一）主要会计数据和财务指标\n总资产 1.7亿", "metadata": {}},
+        ChunkData(content="（一）主要会计数据和财务指标\n总资产 1.7亿", metadata={}),
     ]
     result = _check_structure_integrity(chunks)
     assert result["heading"]["score"] == 1.0
@@ -79,7 +80,7 @@ def test_chinese_numbered_heading():
 def test_clause_continuity_intact():
     """Clauses in the same chunk should not be broken."""
     chunks = [
-        {"content": "1、公司董事会\n2、监事会\n3、高管", "metadata": {}},
+        ChunkData(content="1、公司董事会\n2、监事会\n3、高管", metadata={}),
     ]
     result = _check_structure_integrity(chunks)
     assert result["clause"]["score"] == 1.0
@@ -88,8 +89,8 @@ def test_clause_continuity_intact():
 def test_clause_split():
     """A clause split across chunks should be marked broken."""
     chunks = [
-        {"content": "1、公司董事会、监事会及董事、", "metadata": {}},
-        {"content": "监事、高级管理人员保证...", "metadata": {}},
+        ChunkData(content="1、公司董事会、监事会及董事、", metadata={}),
+        ChunkData(content="监事、高级管理人员保证...", metadata={}),
     ]
     result = _check_structure_integrity(chunks)
     assert len(result["clause"]["broken"]) >= 1
@@ -97,7 +98,7 @@ def test_clause_split():
 
 def test_no_table_in_document():
     """Document with no tables should skip table sub-dimension gracefully."""
-    chunks = [{"content": "纯文本段落", "metadata": {}}]
+    chunks = [ChunkData(content="纯文本段落", metadata={})]
     result = _check_structure_integrity(chunks)
     assert result["table"]["total"] == 0
     assert result["table"]["score"] is None  # skipped
@@ -105,7 +106,7 @@ def test_no_table_in_document():
 
 def test_no_headings_detected():
     """Document with no headings should skip heading gracefully."""
-    chunks = [{"content": "纯文本内容，没有标题", "metadata": {}}]
+    chunks = [ChunkData(content="纯文本内容，没有标题", metadata={})]
     result = _check_structure_integrity(chunks)
     assert result["heading"]["total"] == 0
     assert result["heading"]["score"] is None
@@ -113,7 +114,7 @@ def test_no_headings_detected():
 
 def test_no_clauses():
     """Document with no clauses should skip clause gracefully."""
-    chunks = [{"content": "纯文本", "metadata": {}}]
+    chunks = [ChunkData(content="纯文本", metadata={})]
     result = _check_structure_integrity(chunks)
     assert result["clause"]["total"] == 0
     assert result["clause"]["score"] is None
@@ -152,9 +153,9 @@ def test_granularity_cv_uniform():
     from src.eval.chunk_scorer import _calc_granularity_cv
 
     chunks = [
-        {"content": "A" * 200, "metadata": {}},
-        {"content": "B" * 200, "metadata": {}},
-        {"content": "C" * 200, "metadata": {}},
+        ChunkData(content="A" * 200, metadata={}),
+        ChunkData(content="B" * 200, metadata={}),
+        ChunkData(content="C" * 200, metadata={}),
     ]
     result = _calc_granularity_cv(chunks)
     assert result["cv"] == 0.0
@@ -166,9 +167,9 @@ def test_granularity_cv_with_extremes():
     from src.eval.chunk_scorer import _calc_granularity_cv
 
     chunks = [
-        {"content": "A" * 200, "metadata": {}},
-        {"content": "tiny", "metadata": {}},  # < 50 tokens
-        {"content": "C" * 200, "metadata": {}},
+        ChunkData(content="A" * 200, metadata={}),
+        ChunkData(content="tiny", metadata={}),  # < 50 tokens
+        ChunkData(content="C" * 200, metadata={}),
     ]
     result = _calc_granularity_cv(chunks)
     assert len(result["extreme_chunks"]) >= 1
@@ -187,8 +188,8 @@ def test_evaluate_full_pipeline():
 
     scorer = ChunkQualityScorer()
     chunks = [
-        {"content": "| A | B |\n|---|---|\n| 1 | 2 |", "metadata": {"page": 1}},
-        {"content": "（一）主要会计数据\n总资产 1.7亿元", "metadata": {"page": 1}},
+        ChunkData(content="| A | B |\n|---|---|\n| 1 | 2 |", metadata={"page": 1}),
+        ChunkData(content="（一）主要会计数据\n总资产 1.7亿元", metadata={"page": 1}),
     ]
     result = scorer.evaluate(chunks, "test.pdf")
     assert "overall_score" in result
@@ -210,7 +211,7 @@ def test_evaluate_graceful_degradation():
 
     scorer = FailingScorer()
     chunks = [
-        {"content": "test content", "metadata": {}},
+        ChunkData(content="test content", metadata={}),
     ]
     result = scorer.evaluate(chunks, "test.pdf")
     assert result["sbr"]["error"] is not None

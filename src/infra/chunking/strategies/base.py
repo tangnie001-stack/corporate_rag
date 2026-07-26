@@ -2,6 +2,8 @@
 
 from abc import ABC, abstractmethod
 
+from src.infra.chunking.validator import ChunkData
+
 
 class BaseChunker(ABC):
     """分块器抽象基类。所有分块器必须继承此类并实现 chunk()。"""
@@ -9,7 +11,7 @@ class BaseChunker(ABC):
     chunk_strategy: str = ""
 
     @abstractmethod
-    def chunk(self, text: str, metadata: dict) -> list[dict]: ...
+    def chunk(self, text: str, metadata: dict) -> list[ChunkData]: ...
 
     @staticmethod
     def count_tokens(text: str) -> int:

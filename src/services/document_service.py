@@ -24,10 +24,10 @@ _process_semaphore = asyncio.Semaphore(3)
 
 
 def _merge_tiny_chunks(
-    chunks: list[dict],
+    chunks: list[ChunkData],
     strategy: str = "",
     min_tokens: int = 50,
-) -> list[dict]:
+) -> list[ChunkData]:
     """将 tokens < min_tokens 的 tiny chunk 合并到前一个 chunk。
 
     仅对 parent_child 和 table_preserving 策略生效。
@@ -44,16 +44,12 @@ def _merge_tiny_chunks(
     if strategy not in ("parent_child", "table_preserving"):
         return chunks
 
-    merged: list[dict] = []
+    merged: list[ChunkData] = []
     for c in chunks:
-        tokens = c["metadata"].get("tokens", 0) or BaseChunker.count_tokens(
-            c["content"]
-        )
+        tokens = c.tokens or BaseChunker.count_tokens(c.content)
         if tokens < min_tokens and merged:
-            merged[-1]["content"] += "\n" + c["content"]
-            merged[-1]["metadata"]["tokens"] = BaseChunker.count_tokens(
-                merged[-1]["content"]
-            )
+            merged[-1].content += "\n" + c.content
+            merged[-1].tokens = BaseChunker.count_tokens(merged[-1].content)
         else:
             merged.append(c)
     return merged
@@ -231,7 +227,7 @@ class DocumentService:
     # ── 以下为异步版后台任务的方法 ──
 
     def enrich_chunk_pages(
-        self, chunks: list[dict], parse_chunks: list, full_text: str
+        self, chunks: list[ChunkData], parse_chunks: list, full_text: str
     ) -> None:
         """从解析器分块反推 chunk 页码。"""
         offset = 0
@@ -241,16 +237,16 @@ class DocumentService:
             page_map.append((offset, offset + len(c.content), page))
             offset += len(c.content) + 2
         for chunk in chunks:
-            text = chunk["content"]
+            text = chunk.content
             pos = full_text.find(text)
             if pos < 0:
                 continue
             end = pos + len(text)
             pages = {p for s, e, p in page_map if s < end and e > pos}
-            chunk["metadata"]["page"] = min(pages)
+            chunk.metadata["page"] = min(pages)
 
     def _enrich_chunk_pages(
-        self, chunks: list[dict], parse_chunks: list, full_text: str
+        self, chunks: list[ChunkData], parse_chunks: list, full_text: str
     ) -> None:
         """从解析器分块反推 chunk 页码（私有版本，供 process_document 调用）。"""
         offset = 0
@@ -260,20 +256,20 @@ class DocumentService:
             page_map.append((offset, offset + len(c.content), page))
             offset += len(c.content) + 2
         for chunk in chunks:
-            text = chunk["content"]
+            text = chunk.content
             pos = full_text.find(text)
             if pos < 0:
                 continue
             end = pos + len(text)
             pages = {p for s, e, p in page_map if s < end and e > pos}
-            chunk["metadata"]["page"] = min(pages)
+            chunk.metadata["page"] = min(pages)
 
     def _merge_tiny_chunks(
         self,
-        chunks: list[dict],
+        chunks: list[ChunkData],
         strategy: str = "",
         min_tokens: int = 50,
-    ) -> list[dict]:
+    ) -> list[ChunkData]:
         """将 tokens < min_tokens 的 tiny chunk 合并到前一个 chunk。
 
         仅对 parent_child 和 table_preserving 策略生效。
@@ -290,16 +286,12 @@ class DocumentService:
         if strategy not in ("parent_child", "table_preserving"):
             return chunks
 
-        merged: list[dict] = []
+        merged: list[ChunkData] = []
         for c in chunks:
-            tokens = c["metadata"].get("tokens", 0) or BaseChunker.count_tokens(
-                c["content"]
-            )
+            tokens = c.tokens or BaseChunker.count_tokens(c.content)
             if tokens < min_tokens and merged:
-                merged[-1]["content"] += "\n" + c["content"]
-                merged[-1]["metadata"]["tokens"] = BaseChunker.count_tokens(
-                    merged[-1]["content"]
-                )
+                merged[-1].content += "\n" + c.content
+                merged[-1].tokens = BaseChunker.count_tokens(merged[-1].content)
             else:
                 merged.append(c)
         return merged
@@ -388,11 +380,7 @@ class DocumentService:
                 chunks = self._merge_tiny_chunks(chunks, strategy)
 
                 # 分块质量校验 — CPU，to_thread
-                chunk_data_list = [
-                    ChunkData(content=c["content"], metadata=c["metadata"])
-                    for c in chunks
-                ]
-                quality = await asyncio.to_thread(validate_chunks, chunk_data_list)
+                quality = await asyncio.to_thread(validate_chunks, chunks)
                 if quality.tiny_chunks:
                     logger.warning(
                         "Document '{}' has {} tiny chunks",
@@ -430,7 +418,7 @@ class DocumentService:
                 # ChromaDB — 同步库，to_thread
                 t2 = time.perf_counter()
                 count = await asyncio.to_thread(
-                    self.vector_store.add_chunks, kb_id, chunk_data_list, doc_id
+                    self.vector_store.add_chunks, kb_id, chunks, doc_id
                 )
 
                 # DB 更新 — 异步，直接 await

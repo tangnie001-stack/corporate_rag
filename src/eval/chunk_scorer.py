@@ -13,6 +13,7 @@ import statistics
 
 import numpy as np
 
+from src.infra.chunking.validator import ChunkData
 from src.models import get_embeddings
 
 # 标题检测模式（面向金融文档）
@@ -73,7 +74,7 @@ def _detect_clauses(lines: list[str]) -> list[int]:
     return indices
 
 
-def _detect_tables(chunks: list[dict]) -> list[list[dict]]:
+def _detect_tables(chunks: list[ChunkData]) -> list[list[dict]]:
     """将跨分块的连续 |...| 行分组为逻辑表格。
 
     Args:
@@ -88,7 +89,7 @@ def _detect_tables(chunks: list[dict]) -> list[list[dict]]:
     in_table = False
 
     for ci, chunk in enumerate(chunks):
-        lines = chunk["content"].split("\n")
+        lines = chunk.content.split("\n")
         for li, line in enumerate(lines):
             stripped = line.strip()
             if TABLE_LINE.match(stripped):
@@ -112,11 +113,11 @@ def _detect_tables(chunks: list[dict]) -> list[list[dict]]:
     return tables
 
 
-def _check_structure_integrity(chunks: list[dict]) -> dict:
+def _check_structure_integrity(chunks: list[ChunkData]) -> dict:
     """检查分块的结构完整性：表格/标题/条款的连续性。
 
     Args:
-        chunks: 包含 "content" 和 "metadata" 键的字典列表
+        chunks: ChunkData 列表
 
     Returns:
         包含整体得分和各子维度结果的字典
@@ -130,7 +131,7 @@ def _check_structure_integrity(chunks: list[dict]) -> dict:
             sorted_indices = sorted(chunk_indices)
             pages = []
             for ci in sorted_indices:
-                p = chunks[ci].get("metadata", {}).get("page")
+                p = chunks[ci].metadata.get("page")
                 pages.append(p if p is not None else "?")
 
             # 统计各 chunk 中的行数
@@ -161,7 +162,7 @@ def _check_structure_integrity(chunks: list[dict]) -> dict:
     all_lines = []
     line_to_chunk = []
     for ci, chunk in enumerate(chunks):
-        for line in chunk["content"].split("\n"):
+        for line in chunk.content.split("\n"):
             all_lines.append(line)
             line_to_chunk.append(ci)
 
@@ -176,7 +177,7 @@ def _check_structure_integrity(chunks: list[dict]) -> dict:
                     {
                         "index": len(broken_headings),
                         "text": all_lines[idx][:50],
-                        "page": chunks[ci].get("metadata", {}).get("page"),
+                        "page": chunks[ci].metadata.get("page"),
                     }
                 )
 
@@ -198,7 +199,7 @@ def _check_structure_integrity(chunks: list[dict]) -> dict:
                     {
                         "index": len(broken_clauses),
                         "text": all_lines[idx][:50],
-                        "page": chunks[ci].get("metadata", {}).get("page"),
+                        "page": chunks[ci].metadata.get("page"),
                     }
                 )
 
@@ -311,7 +312,7 @@ def _count_tokens(text: str) -> int:
     return max(1, len(text) // 2)
 
 
-def _calc_granularity_cv(chunks: list[dict]) -> dict:
+def _calc_granularity_cv(chunks: list[ChunkData]) -> dict:
     """计算粒度变异系数（CV）并检测极端分块。
 
     Args:
@@ -329,7 +330,7 @@ def _calc_granularity_cv(chunks: list[dict]) -> dict:
             "extreme_chunks": [],
         }
 
-    token_counts = [_count_tokens(c["content"]) for c in chunks]
+    token_counts = [_count_tokens(c.content) for c in chunks]
     mean = statistics.mean(token_counts)
     cv = statistics.stdev(token_counts) / mean if mean > 0 else 0.0
 
@@ -360,11 +361,13 @@ class ChunkQualityScorer:
 
     SBR_THRESHOLD = 0.35
 
-    def evaluate(self, chunks: list[dict], source: str, strategy: str = "") -> dict:
+    def evaluate(
+        self, chunks: list[ChunkData], source: str, strategy: str = ""
+    ) -> dict:
         """运行全部 3 个指标并返回完整评估 JSON。
 
         Args:
-            chunks: 分块列表，每个分块包含 "content" 和 "metadata" 键
+            chunks: ChunkData 列表
             source: 源文件名，用于日志
             strategy: 分块策略（当前未使用，保留兼容）
 
@@ -427,11 +430,11 @@ class ChunkQualityScorer:
             "granularity_cv": cv_result,
         }
 
-    def _calc_sbr(self, chunks: list[dict]) -> dict:
+    def _calc_sbr(self, chunks: list[ChunkData]) -> dict:
         """对全部分块批量 embedding 后计算 SBR。
 
         Args:
-            chunks: 分块列表
+            chunks: ChunkData 列表
 
         Returns:
             dict: SBR 结果，broken_boundaries 含 preview 字段
@@ -439,7 +442,7 @@ class ChunkQualityScorer:
         if len(chunks) < 2:
             return {"score": 1.0, "total_boundaries": 0, "broken_boundaries": []}
 
-        texts = [c["content"] for c in chunks]
+        texts = [c.content for c in chunks]
         embedder = get_embeddings()
         embeddings = embedder.embed_documents(texts)
 
@@ -447,7 +450,7 @@ class ChunkQualityScorer:
         # table 块有 "table"，text 块可能无此字段，统一归一化为 "text"
         block_types = []
         for c in chunks:
-            bt = c.get("metadata", {}).get("block_type")
+            bt = c.metadata.get("block_type")
             block_types.append(bt if bt else "text")
 
         result = _calc_sbr(embeddings, self.SBR_THRESHOLD, block_types)
@@ -455,10 +458,8 @@ class ChunkQualityScorer:
             idx = b["index"]
             b["preview_before"] = texts[idx][:50]
             b["preview_after"] = texts[idx + 1][:50]
-            meta_before = chunks[idx].get("metadata", {})
-            meta_after = chunks[idx + 1].get("metadata", {})
-            b["page_before"] = meta_before.get("page")
-            b["page_after"] = meta_after.get("page")
+            b["page_before"] = chunks[idx].metadata.get("page")
+            b["page_after"] = chunks[idx + 1].metadata.get("page")
 
         return result
 

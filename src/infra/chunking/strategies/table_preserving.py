@@ -2,6 +2,7 @@ import re
 from loguru import logger
 from src.infra.chunking.strategies.base import BaseChunker
 from src.infra.chunking.strategies.parent_child import ParentChildChunker
+from src.infra.chunking.validator import ChunkData
 from src.config import (
     CROSS_PAGE_TABLE_MERGE_THRESHOLD,
     ORPHAN_THRESHOLD_CHARS,
@@ -13,7 +14,7 @@ class TablePreservingChunker(BaseChunker):
     chunk_strategy = "table_preserving"
     TABLE_PATTERN = re.compile(r"(^\|.+\|[\s\S]*?^\|.+\|)", re.MULTILINE)
 
-    def chunk(self, text: str, metadata: dict) -> list[dict]:
+    def chunk(self, text: str, metadata: dict) -> list[ChunkData]:
         segments, merge_count = self._split_by_table_boundary(text)
         segments = self._merge_orphan_texts(segments)  # 阶段 2
         segments = self._split_large_tables(segments)  # 阶段 3
@@ -23,22 +24,22 @@ class TablePreservingChunker(BaseChunker):
             is_table = bool(self.TABLE_PATTERN.search(seg))
             if is_table:
                 result.append(
-                    {
-                        "content": self.inject_heading_prefix(
+                    ChunkData(
+                        content=self.inject_heading_prefix(
                             seg, metadata.get("heading_path", "")
                         ),
-                        "metadata": {
+                        metadata={
                             **metadata,
                             "block_type": "table",
-                            "tokens": self.count_tokens(seg),
                             "chunk_strategy": self.chunk_strategy,
                         },
-                    }
+                        tokens=self.count_tokens(seg),
+                    )
                 )
             else:
                 text_chunks = parent_child.chunk(seg, metadata)
                 for c in text_chunks:
-                    c["metadata"]["chunk_strategy"] = self.chunk_strategy
+                    c.metadata["chunk_strategy"] = self.chunk_strategy
                 result.extend(text_chunks)
         table_segments = sum(1 for s in segments if self.TABLE_PATTERN.search(s))
         text_segments = len(segments) - table_segments
@@ -46,13 +47,13 @@ class TablePreservingChunker(BaseChunker):
             "[table_preserving] chunks={} (table={} text={}) "
             "segments={} tables={} texts={} merges={} tokens={}",
             len(result),
-            sum(1 for c in result if c["metadata"].get("block_type") == "table"),
-            sum(1 for c in result if c["metadata"].get("block_type") != "table"),
+            sum(1 for c in result if c.metadata.get("block_type") == "table"),
+            sum(1 for c in result if c.metadata.get("block_type") != "table"),
             len(segments),
             table_segments,
             text_segments,
             merge_count,
-            sum(c["metadata"]["tokens"] for c in result),
+            sum(c.tokens for c in result),
         )
         return result
 
