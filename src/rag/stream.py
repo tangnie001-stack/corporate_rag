@@ -1,5 +1,6 @@
 """流式生成 — LLM 流式回答生成 + Token 估算。"""
 
+from dataclasses import dataclass
 import time
 from typing import Generator, Optional
 
@@ -8,14 +9,27 @@ from loguru import logger
 from src.config import RETRY_MAX_ATTEMPTS, RETRY_INITIAL_INTERVAL, RETRY_BACKOFF_FACTOR
 
 
-def estimate_usage(messages: list, output: str) -> dict:
+@dataclass
+class TokenUsage:
+    """Token 用量统一结构。"""
+
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+
+def estimate_usage(messages: list, output: str) -> TokenUsage:
     """粗略估算 token 用量。"""
     input_text = " ".join(
         getattr(m, "content", "") for m in messages if hasattr(m, "content")
     )
-    input_tokens = max(1, len(input_text) // 2)
-    output_tokens = max(1, len(output) // 2)
-    return {"input": input_tokens, "output": output_tokens, "unit": "TOKENS"}
+    prompt_tokens = max(1, len(input_text) // 2)
+    completion_tokens = max(1, len(output) // 2)
+    return TokenUsage(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=prompt_tokens + completion_tokens,
+    )
 
 
 def stream_answer(
@@ -40,7 +54,7 @@ def stream_answer(
 
     last_error: Optional[Exception] = None
     full_output = ""
-    last_token_usage = {}
+    last_token_usage = TokenUsage()
     _stream_start = time.monotonic()
     _first_token = True
 
@@ -58,23 +72,25 @@ def stream_answer(
                     yield content
                 if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
                     u = chunk.usage_metadata
-                    last_token_usage = {
-                        "prompt_tokens": u.get("input_tokens", 0),
-                        "completion_tokens": u.get("output_tokens", 0),
-                        "total_tokens": u.get("total_tokens", 0),
-                    }
-            if not last_token_usage:
-                usage = estimate_usage(messages, full_output)
-                last_token_usage = {
-                    "prompt_tokens": usage.get("input", 0),
-                    "completion_tokens": usage.get("output", 0),
-                    "total_tokens": usage.get("input", 0) + usage.get("output", 0),
-                }
+                    last_token_usage = TokenUsage(
+                        prompt_tokens=u.get("input_tokens", 0),
+                        completion_tokens=u.get("output_tokens", 0),
+                        total_tokens=u.get("total_tokens", 0),
+                    )
+            if (
+                not last_token_usage.prompt_tokens
+                and not last_token_usage.completion_tokens
+            ):
+                last_token_usage = estimate_usage(messages, full_output)
             tracer.end_generation(
                 gen_id,
                 trace_id,
                 output=full_output,
-                usage=last_token_usage,
+                usage={
+                    "prompt_tokens": last_token_usage.prompt_tokens,
+                    "completion_tokens": last_token_usage.completion_tokens,
+                    "total_tokens": last_token_usage.total_tokens,
+                },
             )
             _gen_latency = (time.monotonic() - _stream_start) * 1000
             logger.info(
@@ -82,9 +98,9 @@ def stream_answer(
                 "| tokens: prompt={} completion={} total={}",
                 len(full_output),
                 _gen_latency,
-                last_token_usage.get("prompt_tokens", 0),
-                last_token_usage.get("completion_tokens", 0),
-                last_token_usage.get("total_tokens", 0),
+                last_token_usage.prompt_tokens,
+                last_token_usage.completion_tokens,
+                last_token_usage.total_tokens,
             )
             return
         except Exception as e:

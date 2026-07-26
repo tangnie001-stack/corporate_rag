@@ -133,9 +133,7 @@ def make_generate_node(llm, prompt_manager, tracer) -> Callable:
         if not contexts:
             # 降级到 Naive RAG
             logger.info("[{}] generate_node: empty contexts, Naive RAG fallback", tid)
-            prompt = build_simple_prompt(
-                query, state._history or [], prompt_manager
-            )
+            prompt = build_simple_prompt(query, state._history or [], prompt_manager)
         else:
             # contexts 已经是 list[RAGContext]，不需要转换
             context_str = format_context(contexts)
@@ -157,7 +155,7 @@ def make_generate_node(llm, prompt_manager, tracer) -> Callable:
             "[{}] generate_node done: answer_len={} tokens={}",
             tid,
             len(full_text),
-            usage.get("total", 0),
+            usage.total_tokens,
         )
         return result
 
