@@ -1,45 +1,40 @@
-# src/agents/graph/state.py
-"""AgentState — LangGraph 图状态定义。
-
-包含 RAG 流水线完整状态（输入/中间态/输出）和图控制字段。
-"""
-
-from typing import TypedDict, Optional, List
-
+from dataclasses import dataclass, field
+from typing import Optional
 from src.infra.db.entities import ChunkResult
 from src.rag.context import RAGContext
 
 
-class RAGQueryIntent(TypedDict, total=False):
-    """查询意图分类结果。"""
+@dataclass
+class RAGQueryIntent:
+    route: str = ""
+    rewritten: bool = False
 
-    route: str  # "simple" | "medium" | "complex"
-    rewritten: bool
+
+@dataclass
+class AgentState:
+    session_id: str = ""
+    kb_id: str = ""
+    query: str = ""
+    trace_id: str = "unknown"
+    intent: RAGQueryIntent = field(default_factory=RAGQueryIntent)
+    rewritten_query: str = ""
+    retrieval_results: list[ChunkResult] = field(default_factory=list)
+    contexts: list[RAGContext] = field(default_factory=list)
+    grader_score: Optional[float] = None
+    retrieval_retries: int = 0
+    answer: str = ""
+    citations: list[dict] = field(default_factory=list)
+    downgraded: bool = False
+    downgrade_reason: str = ""
+    _history: list[dict] = field(default_factory=list)
+    _token_usage: dict = field(default_factory=dict)
+    timings: dict = field(default_factory=dict)
+
+    @classmethod
+    def make_initial_state(cls, session_id, kb_id, query, trace_id, history):
+        return cls(session_id=session_id, kb_id=kb_id, query=query,
+                   trace_id=trace_id, _history=history)
 
 
-class AgentState(TypedDict, total=False):
-    """LangGraph 图执行状态。"""
-
-    # ── 输入 ─────
-    session_id: str
-    kb_id: str
-    query: str
-    # ── 中间态 ───
-    intent: RAGQueryIntent
-    rewritten_query: Optional[str]
-    retrieval_results: List[ChunkResult]
-    contexts: List[RAGContext]
-    grader_score: Optional[float]
-    retrieval_retries: int
-    # ── 输出 ─────
-    answer: str
-    citations: List[dict]
-    # ── 可观测 ───
-    trace_id: str
-    timings: dict
-    # ── 降级控制 ─
-    downgraded: bool
-    downgrade_reason: str
-    # ── 内部 ─────
-    _history: list
-    _token_usage: dict
+# 模块级别名，兼容 from ... import make_initial_state 的已有调用方
+make_initial_state = AgentState.make_initial_state
