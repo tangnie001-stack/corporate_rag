@@ -508,6 +508,7 @@ def _save_eval_report(
     """
     try:
         from src.services.app_service import AppService
+        from src.infra.db.entities.eval_report import EvalReportEntity
 
         svc = AppService()
 
@@ -552,22 +553,22 @@ def _save_eval_report(
         overall = weighted_sum / total_w if total_w > 0 else None
 
         async def _do_insert():
-            await svc.insert_eval_report(
-                {
-                    "kb_id": kb_id,
-                    "run_type": "manual",
-                    "qa_count": qa_count,
-                    "faithfulness": faith,
-                    "answer_relevancy": relevancy,
-                    "context_precision": precision,
-                    "context_recall": recall,
-                    "overall_score": overall,
-                    "passed": overall >= 0.70 if overall is not None else False,
-                    "report_path": output_path,
-                    "triggered_by": None,
-                    "detail_json": detail,
-                }
+            entity = EvalReportEntity(
+                id=str(uuid.uuid4()),
+                kb_id=kb_id,
+                run_type="manual",
+                qa_count=qa_count,
+                faithfulness=faith,
+                answer_relevancy=relevancy,
+                context_precision=precision,
+                context_recall=recall,
+                overall_score=overall,
+                passed=overall >= 0.70 if overall is not None else False,
+                report_path=output_path,
+                triggered_by=None,
+                detail_json=detail,
             )
+            await svc.insert_eval_report(entity)
 
         asyncio.run(_do_insert())
         logger.info("Eval report saved to eval_report table for KB '{}'", kb_id)

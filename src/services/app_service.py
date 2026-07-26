@@ -5,7 +5,6 @@
 """
 
 import asyncio
-import uuid
 from typing import Optional
 
 from loguru import logger
@@ -133,9 +132,13 @@ class AppService:
 
     # ===== Session/Message Delegates =====
 
-    async def get_sessions(self) -> list[dict]:
-        """获取最近 50 个会话。"""
-        items = await self._chat_repo.get_sessions()
+    async def get_sessions(self, user_id: str = "") -> list[dict]:
+        """获取最近 50 个会话。
+
+        Args:
+            user_id: 用户 ID，用于过滤属于该用户的会话
+        """
+        items = await self._chat_repo.get_sessions(user_id)
         return [
             {
                 "id": s.id,
@@ -195,7 +198,7 @@ class AppService:
         self, session_id: str, title: str, kb_id: str, user_id: str = ""
     ) -> None:
         """持久化保存会话。"""
-        await self.chat_manager.save_session_async(session_id, title, kb_id)
+        await self.chat_manager.save_session_async(session_id, title, kb_id, user_id)
 
     async def save_messages_async(
         self,
@@ -243,24 +246,9 @@ class AppService:
             "eval_date": report.eval_date,
         }
 
-    async def insert_eval_report(self, report: dict) -> None:
-        """插入 RAGAS 评估报告（字典格式）。"""
-        entity = EvalReportEntity(
-            id=str(uuid.uuid4()),
-            kb_id=report["kb_id"],
-            run_type=report.get("run_type", "manual"),
-            qa_count=report["qa_count"],
-            faithfulness=report.get("faithfulness"),
-            answer_relevancy=report.get("answer_relevancy"),
-            context_precision=report.get("context_precision"),
-            context_recall=report.get("context_recall"),
-            overall_score=report.get("overall_score"),
-            passed=report.get("passed", False),
-            report_path=report.get("report_path"),
-            triggered_by=report.get("triggered_by"),
-            detail_json=report.get("detail_json"),
-        )
-        await self._eval_repo.insert_report(entity)
+    async def insert_eval_report(self, report: EvalReportEntity) -> None:
+        """插入 RAGAS 评估报告。"""
+        await self._eval_repo.insert_report(report)
 
     # ==================== 知识库名称查询 ====================
 
