@@ -1,0 +1,29 @@
+# litellm/config.yaml
+model_list:
+  # DashScope LLM（OpenAI 兼容模式）
+  - model_name: qwen3.7-max
+    litellm_params:
+      model: openai/qwen3.7-max
+      api_key: os.environ/DASHSCOPE_API_KEY
+      api_base: https://dashscope.aliyuncs.com/compatible-mode/v1
+
+  # DeepSeek LLM（原生模式）
+  - model_name: deepseek-v4-pro
+    litellm_params:
+      model: deepseek/deepseek-v4-pro
+      api_key: os.environ/DEEPSEEK_API_KEY
+      api_base: https://api.deepseek.com
+
+  # DashScope Embedding（OpenAI 兼容模式）
+  - model_name: qwen3.7-text-embedding
+    litellm_params:
+      model: openai/qwen3.7-text-embedding
+      api_key: os.environ/DASHSCOPE_API_KEY
+      api_base: https://dashscope.aliyuncs.com/compatible-mode/v1
+
+  # DeepSeek Embedding（OpenAI 兼容模式）
+  - model_name: deepseek-embed-v4
+    litellm_params:
+      model: openai/deepseek-embed-v4
+      api_key: os.environ/DEEPSEEK_API_KEY
+      api_base: https://api.deepseek.com

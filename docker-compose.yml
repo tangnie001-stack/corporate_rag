@@ -2,8 +2,8 @@ name: corporate_rag
 services:
   mysql:
     image: mysql:8.0
-    mem_limit: 256m
-    mem_reservation: 128m
+    mem_limit: 512m
+    mem_reservation: 256m
     container_name: corporate-rag-mysql
     restart: unless-stopped
     environment:
@@ -47,8 +47,8 @@ services:
 
   postgres:
     image: postgres:15-alpine
-    mem_limit: 256m
-    mem_reservation: 128m
+    mem_limit: 512m
+    mem_reservation: 256m
     container_name: corporate-rag-postgres
     profiles: ["langfuse"]
     restart: unless-stopped
@@ -96,8 +96,8 @@ services:
 
   minio:
     image: cgr.dev/chainguard/minio
-    mem_limit: 256m
-    mem_reservation: 128m
+    mem_limit: 512m
+    mem_reservation: 256m
     container_name: corporate-rag-minio
     restart: unless-stopped
     entrypoint: sh
@@ -198,6 +198,23 @@ services:
       TZ: Asia/Shanghai
     depends_on:
       - app
+    networks:
+      - app-network
+
+  litellm-proxy:
+    image: docker.litellm.ai/berriai/litellm:main-stable
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?err}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:?err}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      LITELLM_LOG: WARNING
+      LITELLM_MODE: DEV
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "1"]
+    restart: unless-stopped
     networks:
       - app-network
 
