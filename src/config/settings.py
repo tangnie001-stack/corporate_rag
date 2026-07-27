@@ -30,18 +30,32 @@ DASHSCOPE_BASE_URL: str = os.getenv(
 )
 
 # ====== 模型选择 ======
-# 大语言模型：用于生成最终回答，qwen-max 效果最佳
+# 大语言模型：用于生成最终回答
 LLM_MODEL: str = os.getenv("LLM_MODEL", "qwen3.7-max")
-# 向量化模型：将文本转为向量，用于 ChromaDB 语义检索
-EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "qwen3.7-text-embedding")
-# 向量输出维度：固定维度后切换模型无需重建 ChromaDB collection
-EMBEDDING_DIMENSION: int = int(os.getenv("EMBEDDING_DIMENSION", "1024"))
-# 重排序模型：对检索结果二次打分排序，提高最终送入 LLM 的上下文质量
-RERANK_MODEL: str = os.getenv("RERANK_MODEL", "gte-rerank-v1")
+# LLM API Key（如未设置，自动 fallback 到 DASHSCOPE_API_KEY）
+LLM_API_KEY: str = os.getenv("LLM_API_KEY") or os.getenv("DASHSCOPE_API_KEY", "")
+# LLM API 地址（默认指向 LiteLLM Proxy，可改为直连地址）
+LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "http://litellm-proxy:4000")
 # LLM 温度参数：越低回答越确定性（适合金融场景），0.1 几乎不产生随机性
 LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.1"))
+# LLM 额外参数（JSON 格式，如 {"extra_body": {"enable_thinking": false}}）
+LLM_KWARGS: str = os.getenv("LLM_KWARGS", "{}")
+
+# 向量化模型：将文本转为向量，用于 ChromaDB 语义检索
+EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "qwen3.7-text-embedding")
+# Embedding API Key（fallback: LLM_API_KEY → DASHSCOPE_API_KEY）
+EMBEDDING_API_KEY: str = os.getenv("EMBEDDING_API_KEY") or os.getenv("LLM_API_KEY") or os.getenv("DASHSCOPE_API_KEY", "")
+# Embedding API 地址（fallback: LLM_BASE_URL）
+EMBEDDING_BASE_URL: str = os.getenv("EMBEDDING_BASE_URL") or os.getenv("LLM_BASE_URL", "http://litellm-proxy:4000")
+# 向量输出维度：固定维度后切换模型无需重建 ChromaDB collection
+EMBEDDING_DIMENSION: int = int(os.getenv("EMBEDDING_DIMENSION", "1024"))
 # Embedding API 单次 batch 上限（DashScope 限制 20 条，超出需分批）
 EMBEDDING_BATCH_SIZE: int = int(os.getenv("EMBEDDING_BATCH_SIZE", "20"))
+
+# 重排序模型
+RERANK_MODEL: str = os.getenv("RERANK_MODEL", "qwen3-rerank")
+# Rerank API Key（fallback 到 DASHSCOPE_API_KEY，非 LLM_API_KEY）
+RERANK_API_KEY: str = os.getenv("RERANK_API_KEY") or os.getenv("DASHSCOPE_API_KEY") or os.getenv("LLM_API_KEY", "")
 # RAGAS 评估专用模型（独立于生产 LLM，temperature 固定为 0）
 # 不可使用推理模型（如 qwen3.7-max），RAGAS 内部会传 n>1 参数，
 # 推理模型要求 n=1 会导致 BadRequestError。必须显式配置非推理模型。

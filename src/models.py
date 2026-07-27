@@ -1,33 +1,35 @@
 """模型工厂模块 — 提供 LLM、Embedding、Rerank 三类模型的实例化工厂函数。
 
-本模块封装了 DashScope API 的三种模型创建逻辑，并提供了通用的指数退避重试装饰器。
-所有模型实例采用延迟初始化（调用时才创建），避免模块导入时产生不必要的网络请求。
+所有模型参数从配置读取，支持通过 LiteLLM Proxy 或直接调用 Provider API。
+切换 Provider 只需修改 .env 配置，无需改动代码。
 
 核心组件：
   - with_retry：通用重试装饰器，支持指数退避
   - get_embeddings：创建文本向量化模型实例
-  - get_llm：创建大语言模型实例（OpenAI 兼容接口）
+  - get_llm：创建大语言模型实例
   - get_rerank：创建文本重排序模型实例
 """
 
+import json
 import time
 import functools
 from typing import Any, Callable, TypeVar
 
 from loguru import logger
-from langchain_openai import ChatOpenAI
-from langchain_community.embeddings import DashScopeEmbeddings
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.document_compressors.dashscope_rerank import DashScopeRerank
 
 from src.config import (
-    DASHSCOPE_API_KEY,
-    DASHSCOPE_BASE_URL,
-    EMBEDDING_DIMENSION,
     LLM_MODEL,
-    EMBEDDING_MODEL,
-    RERANK_MODEL,
+    LLM_API_KEY,
+    LLM_BASE_URL,
     LLM_TEMPERATURE,
-    EMBEDDING_BATCH_SIZE,
+    LLM_KWARGS,
+    EMBEDDING_MODEL,
+    EMBEDDING_API_KEY,
+    EMBEDDING_BASE_URL,
+    RERANK_MODEL,
+    RERANK_API_KEY,
     TOP_K_RERANK,
     RETRY_MAX_ATTEMPTS,
     RETRY_INITIAL_INTERVAL,
@@ -104,77 +106,21 @@ def with_retry(
     return wrapper
 
 
-class FixedDimDashScopeEmbeddings(DashScopeEmbeddings):
-    """始终以固定维度调用 DashScope Embedding API。
+def get_embeddings(model: str = EMBEDDING_MODEL) -> OpenAIEmbeddings:
+    """创建文本向量化模型实例（配置驱动，通过 Proxy 或直连）。
 
-    确保无论使用哪个模型版本（text-embedding-v3/v4），输出的向量维度一致，
-    切换模型时无需重建 ChromaDB collection。
-    """
-
-    EMBEDDING_DIMENSION: int = EMBEDDING_DIMENSION
-
-    def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        """将文本列表转为固定维度的向量。
-
-        分批调用 DashScope API：单次 batch 上限由 `EMBEDDING_BATCH_SIZE`
-        配置项控制（默认 20），超出时自动分批后再合并结果。
-
-        Args:
-            texts: 待编码的文本列表
-
-        Returns:
-            固定维度的向量列表
-        """
-        from langchain_community.embeddings.dashscope import embed_with_retry
-
-        all_embeddings: list[list[float]] = []
-
-        logger.debug(
-            "Embedding documents: model={} batch_size={} dim={}",
-            self.model,
-            len(texts),
-            self.EMBEDDING_DIMENSION,
-        )
-
-        for i in range(0, len(texts), EMBEDDING_BATCH_SIZE):
-            batch = texts[i : i + EMBEDDING_BATCH_SIZE]
-            result = embed_with_retry(
-                self,
-                input=batch,
-                text_type="document",
-                model=self.model,
-                dimensions=self.EMBEDDING_DIMENSION,
-            )
-            all_embeddings.extend(item["embedding"] for item in result)
-
-        return all_embeddings
-
-    def embed_query(self, text: str) -> list[float]:
-        """将单条文本转为固定维度的向量。
-
-        Args:
-            text: 待编码的文本
-
-        Returns:
-            固定维度的向量
-        """
-        return self.embed_documents([text])[0]
-
-
-def get_embeddings(model: str = EMBEDDING_MODEL) -> FixedDimDashScopeEmbeddings:
-    """创建固定维度的 DashScope 文本向量化模型实例。
-
-    始终输出 1024 维向量，切换 embedding 模型时无需重建 ChromaDB collection。
+    从环境变量读取 API Key 和 Base URL，支持 DashScope / DeepSeek / LiteLLM Proxy。
 
     Args:
         model: 模型名称，默认 qwen3.7-text-embedding
 
     Returns:
-        FixedDimDashScopeEmbeddings 实例，可直接用于 LangChain 的 embedding 接口
+        OpenAIEmbeddings 实例
     """
-    return FixedDimDashScopeEmbeddings(
+    return OpenAIEmbeddings(
         model=model,
-        dashscope_api_key=DASHSCOPE_API_KEY,
+        api_key=EMBEDDING_API_KEY,
+        base_url=EMBEDDING_BASE_URL,
     )
 
 
@@ -183,43 +129,45 @@ def get_llm(
     temperature: float = LLM_TEMPERATURE,
     **kwargs: Any,
 ) -> ChatOpenAI:
-    """创建 DashScope 大语言模型实例（使用 OpenAI 兼容接口）。
+    """创建大语言模型实例（配置驱动，通过 Proxy 或直连）。
 
-    用于根据检索到的文档上下文生成最终回答。DashScope 的 qwen 系列模型
-    兼容 OpenAI API 格式，因此使用 ChatOpenAI 作为客户端。
+    从环境变量读取 API Key、Base URL 和额外参数，支持 DashScope / DeepSeek / LiteLLM Proxy。
 
     Args:
-        model: 模型名称，默认 qwen-max
+        model: 模型名称，默认 qwen3.7-max
         temperature: 温度参数，越低越确定性（金融场景推荐 0.1）
-        **kwargs: 传递给 ChatOpenAI 的额外参数（如 top_p、max_tokens 等）
+        **kwargs: 额外参数，会与 LLM_KWARGS（JSON 环境变量）合并
 
     Returns:
-        ChatOpenAI 实例，支持 .stream() 流式输出和 .invoke() 同步调用
+        ChatOpenAI 实例
     """
+    # 合并 LLM_KWARGS 和显式传入的 kwargs
+    extra_kwargs: dict = json.loads(LLM_KWARGS)
+    extra_kwargs.update(kwargs)
     return ChatOpenAI(
         model=model,
         temperature=temperature,
-        api_key=DASHSCOPE_API_KEY,
-        base_url=DASHSCOPE_BASE_URL,
-        **kwargs,
+        api_key=LLM_API_KEY,
+        base_url=LLM_BASE_URL,
+        **extra_kwargs,
     )
 
 
 def get_rerank(model: str = RERANK_MODEL, top_n: int = TOP_K_RERANK) -> DashScopeRerank:
-    """创建 DashScope 文本重排序模型实例。
+    """创建文本重排序模型实例（固定走 DashScope Rerank API）。
 
-    对向量检索返回的候选文档进行二次精排，按相关性重新打分，
-    确保最终送入 LLM 的上下文是最相关的片段。
+    Rerank 不走 LiteLLM Proxy，因为 LiteLLM 不支持 DashScope 的 rerank 端点。
+    API Key 使用 RERANK_API_KEY（默认 fallback 到 DASHSCOPE_API_KEY）。
 
     Args:
-        model: 模型名称，默认 gte-rerank-v2
+        model: 模型名称，默认 qwen3-rerank
         top_n: 重排序后保留的文档数量（默认 5）
 
     Returns:
-        DashScopeRerank 实例，调用 .rerank(query, docs) 返回排序后的结果
+        DashScopeRerank 实例
     """
     return DashScopeRerank(
         model=model,
         top_n=top_n,
-        dashscope_api_key=DASHSCOPE_API_KEY,
+        dashscope_api_key=RERANK_API_KEY,
     )
