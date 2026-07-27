@@ -23,6 +23,7 @@ from src.infra.llm.langfuse_tracing import LangfuseTracer
 from src.infra.llm.prompt_manager import PromptManager
 from src.chat.manager import ChatManager
 from src.infra.llm.trace_context import current_trace_id
+from src.infra.llm.langfuse_tracing import TraceInput
 from src.config.const import LangGraph, SSE_STATUS
 
 
@@ -68,8 +69,7 @@ class AgentService:
         trace_id = current_trace_id.get()
         self._tracer.start_trace(
             "chat_stream_agent",
-            {"kb_id": kb_id, "session_id": session_id, "query": query},
-            session_id=session_id,
+            TraceInput(kb_id=kb_id, session_id=session_id, query=query),
         )
 
         history = await self._chat_manager.get_history_async(session_id) or []

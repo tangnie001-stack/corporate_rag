@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>架构评审 — Corporate RAG</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+  </script>
+  <style>
+    .seam { stroke-dasharray: 4 4; }
+    .leak { stroke: #dc2626; stroke-width:2; }
+    .deep { background: linear-gradient(135deg, #0f172a, #1e293b); }
+    .before-box { border: 2px solid #94a3b8; background: #f8fafc; }
+    .after-box { border: 3px solid #0f172a; background: linear-gradient(135deg, #f1f5f9, #e2e8f0); }
+    .arrow-line { stroke: #475569; stroke-width: 2; fill: none; }
+    .arrow-head { fill: #475569; }
+    .shallow-zone { background: repeating-linear-gradient(45deg, #fef2f2, #fef2f2 4px, #fff 4px, #fff 8px); }
+  </style>
+</head>
+<body class="bg-stone-50 text-slate-900 font-sans antialiased">
+<main class="max-w-5xl mx-auto px-6 py-12 space-y-16">
+
+  <!-- ═══ 页头 ═══ -->
+  <header class="space-y-3">
+    <h1 class="text-3xl font-bold tracking-tight">Corporate RAG — 架构评审</h1>
+    <p class="text-sm text-slate-500">2026-07-27</p>
+    <div class="flex flex-wrap gap-3 text-xs">
+      <span class="inline-flex items-center gap-1.5"><span class="inline-block w-4 h-4 border-2 border-slate-400 bg-white rounded"></span> 模块</span>
+      <span class="inline-flex items-center gap-1.5"><span class="inline-block w-8 h-0 border-t-2 border-dashed border-slate-400"></span> 接缝</span>
+      <span class="inline-flex items-center gap-1.5"><svg width="20" height="6"><line x1="0" y1="3" x2="20" y2="3" stroke="#dc2626" stroke-width="2"/></svg> 泄露</span>
+      <span class="inline-flex items-center gap-1.5"><span class="inline-block w-4 h-4 rounded" style="background:linear-gradient(135deg,#0f172a,#1e293b)"></span> 深层模块</span>
+    </div>
+    <p class="text-slate-600 text-sm border-l-4 border-slate-300 pl-4">
+      基于 <code class="text-xs font-mono bg-slate-100 px-1">src/services/agent_service.py</code> 及其周边模块分析
+    </p>
+  </header>
+
+  <!-- ═══ 候选列表 ═══ -->
+  <section id="candidates" class="space-y-14">
+
+
+    <!-- ─── 候选 1 ─── -->
+    <article class="space-y-4">
+      <div class="flex items-start justify-between gap-4">
+        <h2 class="text-xl font-bold">1. 加深 trace 输入接口</h2>
+        <span class="shrink-0 inline-flex items-center rounded-full bg-emerald-100 text-emerald-800 text-xs font-semibold px-3 py-1">强烈推荐</span>
+      </div>
+
+      <div class="text-xs text-slate-500 font-mono space-x-4">
+        <span>src/services/agent_service.py:69-73</span>
+        <span>src/infra/llm/langfuse_tracing.py:67-90</span>
+        <span>src/rag/stream.py:48-52</span>
+      </div>
+
+      <!-- 改造前后对比 -->
+      <div class="grid grid-cols-2 gap-6">
+        <!-- 改造前 -->
+        <div class="before-box rounded-lg p-4 space-y-2">
+          <div class="text-xs uppercase tracking-wider text-slate-400 font-semibold">改造前</div>
+          <pre class="mermaid text-xs">
+flowchart LR
+    subgraph stream_chat
+        A[kb_id] --> D
+        B[session_id] --> D
+        C[query] --> D
+        D["{kb_id, session_id, query}"] --> E[start_trace]
+        B -.-> E
+    end
+    style D fill:#fef2f2,stroke:#dc2626,stroke-width:1
+    style E fill:#e2e8f0,stroke:#94a3b8,stroke-width:1
+          </pre>
+          <p class="text-xs text-slate-600 mt-2">
+            调用方手动从自己的参数构造 dict——key 名和变量名完全重复，<code>session_id</code> 出现两次。接口宽度和 dict 构造代码一样长。
+          </p>
+        </div>
+        <!-- 改造后 -->
+        <div class="after-box rounded-lg p-4 space-y-2">
+          <div class="text-xs uppercase tracking-wider text-slate-400 font-semibold">改造后</div>
+          <pre class="mermaid text-xs">
+flowchart LR
+    subgraph stream_chat
+        A[kb_id] --> D[TraceInput]
+        B[session_id] --> D
+        C[query] --> D
+        D --> E[start_trace]
+    end
+    D -.->|dataclass| E
+    style D fill:#ecfdf5,stroke:#059669,stroke-width:1
+    style E fill:#e2e8f0,stroke:#94a3b8,stroke-width:1
+          </pre>
+          <p class="text-xs text-slate-600 mt-2">
+            一个 <code>TraceInput</code> dataclass 封装可追踪的参数面。构造函数就是接口，没有 dict、没有重复。
+          </p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-3 gap-4 text-sm">
+        <div class="bg-white rounded-lg border border-slate-200 p-3">
+          <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">问题</div>
+          <p>每个调用点都手动构造 <code>{"kb_id": kb_id, ...}</code> 从自己的参数。新增参数意味着要在 2+ 处更新 dict。<code>session_id</code> 重复了两次（dict key + 具名参数）。接口很浅——调用方知道太多 tracer 输入结构的细节。</p>
+        </div>
+        <div class="bg-white rounded-lg border border-slate-200 p-3">
+          <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">方案</div>
+          <p>定义一个 <code>@dataclass TraceInput</code>，包含 <code>kb_id</code>、<code>session_id</code>、<code>query</code> 字段。<code>start_trace</code> 直接接收它。调用方只构造一次。dict 的映射关系只存在于 dataclass 的 <code>__init__</code> 中。</p>
+        </div>
+        <div class="bg-white rounded-lg border border-slate-200 p-3">
+          <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">收益</div>
+          <ul class="list-disc list-inside text-xs space-y-1 text-slate-600">
+            <li><strong>局部性</strong>：映射关系只在一个类型中定义，而不是 N 个调用方</li>
+            <li><strong>杠杆</strong>：加一个字段→所有调用方自动获得</li>
+            <li><strong>接口缩小</strong>：<code>start_trace(name, TraceInput)</code> vs <code>start_trace(name, dict, session_id=…)</code></li>
+            <li><strong>可测试性</strong>：<code>TraceInput</code> 是纯 dataclass，构造零成本</li>
+            <li><strong>删除测试</strong>：移除手动 dict 构造后，复杂度集中到一种类型</li>
+          </ul>
+        </div>
+      </div>
+    </article>
+
+
+    <!-- ─── 候选 2 ─── -->
+    <article class="space-y-4">
+      <div class="flex items-start justify-between gap-4">
+        <h2 class="text-xl font-bold">2. 把 Tracing 从图执行中抽离</h2>
+        <span class="shrink-0 inline-flex items-center rounded-full bg-emerald-100 text-emerald-800 text-xs font-semibold px-3 py-1">强烈推荐</span>
+      </div>
+
+      <div class="text-xs text-slate-500 font-mono space-x-4">
+        <span>src/services/agent_service.py:69,152</span>
+        <span>src/rag/stream.py:48-52,84-92</span>
+        <span>src/infra/llm/langfuse_tracing.py</span>
+      </div>
+
+      <!-- 调用图折叠 -->
+      <div class="grid grid-cols-2 gap-6">
+        <div class="before-box rounded-lg p-4">
+          <div class="text-xs uppercase tracking-wider text-slate-400 font-semibold mb-2">改造前——tracing 调用散落在两层</div>
+          <pre class="mermaid text-xs">
+flowchart TD
+    subgraph "agent_service.py"
+        A[stream_chat] --> B["start_trace()"]
+        A --> C["end_trace()"]
+    end
+    subgraph "rag/stream.py"
+        D[stream_answer] --> E["start_generation()"]
+        D --> F["end_generation()"]
+    end
+    B -.-> G((Langfuse))
+    C -.-> G
+    E -.-> G
+    F -.-> G
+    style G fill:#e2e8f0,stroke:#94a3b8,stroke-width:1
+          </pre>
+        </div>
+        <div class="after-box rounded-lg p-4">
+          <div class="text-xs uppercase tracking-wider text-slate-400 font-semibold mb-2">改造后——tracing 在一个适配器后</div>
+          <pre class="mermaid text-xs">
+flowchart TD
+    subgraph "agent_service.py"
+        A[stream_chat] --> H["TracingAdapter.graph_exec(graph, state)"]
+    end
+    subgraph "适配器"
+        H --> I["start_trace"]
+        H --> J["end_trace"]
+        H --> K["start_generation"]
+        H --> L["end_generation"]
+    end
+    I -.-> M((Langfuse))
+    K -.-> M
+    style H fill:#0f172a,stroke:#0f172a,stroke-width:2
+    style I fill:#e2e8f0,stroke:#94a3b8,stroke-width:1
+    style J fill:#e2e8f0,stroke:#94a3b8,stroke-width:1
+    style K fill:#e2e8f0,stroke:#94a3b8,stroke-width:1
+    style L fill:#e2e8f0,stroke:#94a3b8,stroke-width:1
+          </pre>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-3 gap-4 text-sm">
+        <div class="bg-white rounded-lg border border-slate-200 p-3">
+          <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">问题</div>
+          <p>Trace 生命周期管理（<code>start_trace</code>/<code>end_trace</code>）是横切关注点。它和 SSE 事件处理交织在 <code>agent_service.py</code> 中。同时 <code>start_generation</code>/<code>end_generation</code> 散落在 <code>rag/stream.py</code> 里。两层都直接调 Langfuse——同一个外部系统有两个接缝。</p>
+        </div>
+        <div class="bg-white rounded-lg border border-slate-200 p-3">
+          <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">方案</div>
+          <p>创建一个 <code>GraphExecutionAdapter</code>，封装整个图执行生命周期——start trace、运行图、end trace、内部管理 generation spans。<code>agent_service.py</code> 调 <code>adapter.execute()</code> 并获取事件。<code>stream_answer</code> 不再直接调用 tracer。</p>
+        </div>
+        <div class="bg-white rounded-lg border border-slate-200 p-3">
+          <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">收益</div>
+          <ul class="list-disc list-inside text-xs space-y-1 text-slate-600">
+            <li><strong>局部性</strong>：所有 tracing 逻辑在一个接缝后，而不是两个层</li>
+            <li><strong>杠杆</strong>：替换适配器就能禁用/改变整个图的 tracing 方式</li>
+            <li><strong>接口缩小</strong>：<code>stream_chat</code> 减少 3 行 trace 样板代码</li>
+            <li><strong>可测试性</strong>：mock 一个适配器，不需要分别 patch <code>start_trace</code> 和 <code>start_generation</code></li>
+          </ul>
+        </div>
+      </div>
+    </article>
+
+
+    <!-- ─── 候选 3 ─── -->
+    <article class="space-y-4">
+      <div class="flex items-start justify-between gap-4">
+        <h2 class="text-xl font-bold">3. 将 SSE 事件转换合并到一个模块</h2>
+        <span class="shrink-0 inline-flex items-center rounded-full bg-amber-100 text-amber-800 text-xs font-semibold px-3 py-1">值得探索</span>
+      </div>
+
+      <div class="text-xs text-slate-500 font-mono space-x-4">
+        <span>src/services/agent_service.py:92-117,119-130</span>
+        <span>src/api/chat.py:159-176</span>
+      </div>
+
+      <!-- 横截面图 -->
+      <div class="grid grid-cols-2 gap-6">
+        <div class="before-box rounded-lg p-4">
+          <div class="text-xs uppercase tracking-wider text-slate-400 font-semibold mb-3">改造前——SSE 解析分散在两层</div>
+          <div class="space-y-2">
+            <div class="h-8 bg-red-50 border border-red-200 rounded flex items-center px-3 text-xs">
+              <span class="font-semibold text-red-700">api/chat.py</span>
+              <span class="ml-2 text-red-600">_stream_rag_response： 解析 SSE 字符串 → 提取 tokens/sources</span>
+            </div>
+            <svg width="24" height="16" class="mx-auto"><line x1="12" y1="0" x2="12" y2="16" stroke="#94a3b8" stroke-width="2" stroke-dasharray="4 4"/></svg>
+            <div class="h-12 bg-amber-50 border border-amber-200 rounded flex items-center px-3 text-xs">
+              <span class="font-semibold text-amber-700">agent_service.py</span>
+              <span class="ml-2 text-amber-600">stream_chat：处理图事件 → 构建 SSE 字符串</span>
+            </div>
+            <svg width="24" height="16" class="mx-auto"><line x1="12" y1="0" x2="12" y2="16" stroke="#94a3b8" stroke-width="2" stroke-dasharray="4 4"/></svg>
+            <div class="h-8 bg-slate-50 border border-slate-200 rounded flex items-center px-3 text-xs">
+              <span class="font-semibold text-slate-700">src/utils/sse.py</span>
+              <span class="ml-2 text-slate-600">6 个纯格式化函数（无解析）</span>
+            </div>
+          </div>
+          <p class="text-xs text-slate-600 mt-3">
+            三个层参与 SSE：工具层有纯格式化函数；agent_service 构建事件；api/chat 又把它们反解析回来。API 层有脆弱的字符串解析。
+          </p>
+        </div>
+        <div class="after-box rounded-lg p-4">
+          <div class="text-xs uppercase tracking-wider text-slate-400 font-semibold mb-3">改造后——一个模块拥有 SSE 契约</div>
+          <div class="space-y-2">
+            <div class="h-10 bg-slate-50 border border-slate-200 rounded flex items-center px-3 text-xs">
+              <span class="font-semibold text-slate-700">api/chat.py</span>
+              <span class="ml-2 text-slate-600">接收结构化事件，yield SSE 字符串</span>
+            </div>
+            <svg width="24" height="16" class="mx-auto"><line x1="12" y1="0" x2="12" y2="16" stroke="#94a3b8" stroke-width="2" stroke-dasharray="4 4"/></svg>
+            <div class="h-12 deep rounded flex items-center px-3 text-xs text-white">
+              <span class="font-semibold">sse_event_stream 模块</span>
+              <span class="ml-2 opacity-70">图事件 → SSE 字符串；去重；引用提取</span>
+            </div>
+            <p class="text-xs text-slate-500 mt-1">agent_service yield 结构化事件 dict；新模块负责所有 SSE 格式化。</p>
+          </div>
+          <p class="text-xs text-slate-600 mt-3">
+            一个模块完成图事件到 SSE 字符串的转换。API 层不再解析——只需 yield 字符串。AgentService 不再做格式化。
+          </p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-3 gap-4 text-sm">
+        <div class="bg-white rounded-lg border border-slate-200 p-3">
+          <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">问题</div>
+          <p><code>agent_service.py</code> yield 的是 SSE 格式化的字符串（<code>sse_token()</code>、<code>sse_citation()</code>），但 <code>api/chat.py</code> 又反解析同样的字符串（<code>if event.startswith("event: token")</code>）来提取数据。同一份数据先序列化再立即反序列化——脆弱的浅层三明治。</p>
+        </div>
+        <div class="bg-white rounded-lg border border-slate-200 p-3">
+          <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">方案</div>
+          <p>让 <code>agent_service.stream_chat</code> yield 结构化 dict（如 <code>{"type": "token", "data": "净利润"}</code>）。在 <code>src/rag/</code> 或 <code>src/utils/</code> 下创建新的 <code>SSEEventStream</code> 模块，负责将这些 dict 转为 SSE 字符串。API 层委托给这个 SSE 模块。</p>
+        </div>
+        <div class="bg-white rounded-lg border border-slate-200 p-3">
+          <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">收益</div>
+          <ul class="list-disc list-inside text-xs space-y-1 text-slate-600">
+            <li><strong>局部性</strong>：所有 SSE 格式/解析知识在一个模块</li>
+            <li><strong>杠杆</strong>：新增事件类型→更新一个模块，不是两个</li>
+            <li><strong>接口缩小</strong>：agent_service yield 类型化 dict，而不是格式化字符串</li>
+            <li><strong>删除测试</strong>：删除 <code>api/chat.py</code> 的解析→SSE 模块仍然可用</li>
+          </ul>
+        </div>
+      </div>
+    </article>
+
+
+    <!-- ─── 候选 4 ─── -->
+    <article class="space-y-4">
+      <div class="flex items-start justify-between gap-4">
+        <h2 class="text-xl font-bold">4. 给 AgentService 增加测试接缝</h2>
+        <span class="shrink-0 inline-flex items-center rounded-full bg-amber-100 text-amber-800 text-xs font-semibold px-3 py-1">值得探索</span>
+      </div>
+
+      <div class="text-xs text-slate-500 font-mono space-x-4">
+        <span>src/services/agent_service.py</span>
+        <span>tests/api/test_chat.py</span>
+      </div>
+
+      <!-- 质量图 -->
+      <div class="grid grid-cols-2 gap-6">
+        <div class="before-box rounded-lg p-4">
+          <div class="text-xs uppercase tracking-wider text-slate-400 font-semibold mb-3">改造前——零测试，浅层 mock</div>
+          <div class="flex gap-6 justify-center">
+            <div class="text-center">
+              <div class="text-xs text-slate-400 mb-1">AgentService 接口</div>
+              <div class="w-24 h-20 bg-red-50 border-2 border-red-200 rounded mx-auto flex items-center justify-center text-xs text-red-600 font-mono">
+                stream_chat<br/>(1 个方法)
+              </div>
+            </div>
+            <div class="text-center">
+              <div class="text-xs text-slate-400 mb-1">测试</div>
+              <div class="w-20 h-16 bg-slate-100 border border-slate-300 rounded mx-auto flex items-center justify-center text-xs text-slate-500">
+                0 个测试
+              </div>
+              <div class="text-xs text-slate-400 mt-2">test_chat.py mock<br/>rag_chain 而非 AgentService</div>
+            </div>
+          </div>
+          <p class="text-xs text-slate-600 mt-3">
+            图生命周期（状态初始化、SSE 事件路由、降级处理、去重）没有任何直接测试。现有的 chat 测试 mock 了一个已经不存在的 <code>rag_chain</code> 属性。
+          </p>
+        </div>
+        <div class="after-box rounded-lg p-4">
+          <div class="text-xs uppercase tracking-wider text-slate-400 font-semibold mb-3">改造后——测试面和接口匹配</div>
+          <div class="flex gap-6 justify-center">
+            <div class="text-center">
+              <div class="text-xs text-slate-400 mb-1">AgentService 接口</div>
+              <div class="w-24 h-20 deep rounded mx-auto flex items-center justify-center text-xs text-white font-mono">
+                stream_chat<br/>(1 个方法)
+              </div>
+            </div>
+            <div class="text-center">
+              <div class="text-xs text-slate-400 mb-1">测试</div>
+              <div class="w-20 h-24 bg-emerald-50 border-2 border-emerald-300 rounded mx-auto flex items-center justify-center text-xs text-emerald-700">
+                8-12 个测试
+              </div>
+              <div class="text-xs text-slate-400 mt-2">mock graph，直接测<br/>SSE 输出</div>
+            </div>
+          </div>
+          <p class="text-xs text-slate-600 mt-3">
+            Mock 编译后的 graph，直接测试 stream_chat 的输出事件。覆盖状态初始化、事件路由、去重、降级、异常处理。
+          </p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-3 gap-4 text-sm">
+        <div class="bg-white rounded-lg border border-slate-200 p-3">
+          <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">问题</div>
+          <p><code>AgentService.stream_chat</code> 负责图生命周期、SSE 事件路由、状态初始化、降级处理——全部未经测试。唯一的测试（<code>test_chat.py</code>）mock 的是 <code>rag_chain</code> 属性，这个属性在 <code>AgentService</code> 上根本不存在，所以这个测试实际是死的。</p>
+        </div>
+        <div class="bg-white rounded-lg border border-slate-200 p-3">
+          <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">方案</div>
+          <p>Override <code>AgentService._graph</code> 为一个 mock 编译图，让它 yield 已知事件。测试 <code>stream_chat</code> 在每种场景下（正常、降级、空结果、异常）是否产生正确的 SSE 事件。注入 mock <code>chat_manager</code> 来验证历史调用。</p>
+        </div>
+        <div class="bg-white rounded-lg border border-slate-200 p-3">
+          <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">收益</div>
+          <ul class="list-disc list-inside text-xs space-y-1 text-slate-600">
+            <li><strong>局部性</strong>：直接测模块的接口，不通过 HTTP</li>
+            <li><strong>杠杆</strong>：一个 mock graph 覆盖事件路由、去重、异常、降级</li>
+            <li><strong>删除测试</strong>：如果 mock graph 下测试通过，说明模块接口是充分的</li>
+            <li><strong>接缝</strong>：<code>_graph</code> 和 <code>_chat_manager</code> 本来就是可注入的——用起来</li>
+          </ul>
+        </div>
+      </div>
+    </article>
+
+  </section>
+
+  <!-- ═══ 优先推荐 ═══ -->
+  <section id="top-recommendation" class="bg-slate-900 rounded-xl p-8 text-white space-y-4">
+    <h2 class="text-2xl font-bold">从这里开始：候选 1（trace 输入接口）</h2>
+    <p class="text-slate-300 leading-relaxed">
+      这是你的原始问题，零风险，改动最小，前后对比最清晰。一个 <code>TraceInput</code> dataclass（不到 10 行）就能消除 dict 样板代码、消除 <code>session_id</code> 重复，并为候选 2 的 tracing 改造建立模式基础。
+    </p>
+    <p class="text-slate-400 text-sm">
+      之后候选 4（测试接缝）能消除最大风险——<code>agent_service.py</code> 目前的测试空白意味着事件路由或降级处理的 bug 只能在生产环境被发现。
+    </p>
+  </section>
+
+</main>
+</body>
+</html>

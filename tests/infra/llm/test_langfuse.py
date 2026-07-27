@@ -4,6 +4,7 @@
   - 无密钥时静默降级（_initialized == False）
   - 有密钥时正常初始化（mock Langfuse 客户端）
   - 未初始化时所有方法返回 None / 不报错
+  - TraceInput dataclass 传参
 """
 
 from unittest.mock import MagicMock, patch
@@ -85,6 +86,40 @@ def test_start_trace_returns_none_when_not_initialized():
     tracer._initialized = False
     result = tracer.start_trace("test")
     assert result is None
+
+
+def test_start_trace_with_trace_input():
+    """TraceInput dataclass 传参时自动提取 session_id 和 input_data。"""
+    with (
+        patch("src.infra.llm.langfuse_tracing.Langfuse") as MockLangfuse,
+        patch("src.config.LANGFUSE_SECRET_KEY", "sk-test"),
+        patch("src.config.LANGFUSE_PUBLIC_KEY", "pk-test"),
+        patch("src.config.LANGFUSE_HOST", "http://localhost:3000"),
+    ):
+        from src.infra.llm.langfuse_tracing import LangfuseTracer, TraceInput
+
+        mock_client = MagicMock()
+        mock_result = MagicMock()
+        mock_result.id = "trace-id-123"
+        mock_client.trace.return_value = mock_result
+        MockLangfuse.return_value = mock_client
+
+        tracer = LangfuseTracer()
+        trace_input = TraceInput(
+            kb_id="kb-1", session_id="session-1", query="净利润多少"
+        )
+        result = tracer.start_trace("chat_stream_agent", trace_input)
+
+        assert result == "trace-id-123"
+        mock_client.trace.assert_called_once_with(
+            name="chat_stream_agent",
+            input={
+                "kb_id": "kb-1",
+                "session_id": "session-1",
+                "query": "净利润多少",
+            },
+            session_id="session-1",
+        )
 
 
 def test_end_trace_does_nothing_when_not_initialized():

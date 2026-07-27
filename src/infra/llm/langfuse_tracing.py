@@ -5,6 +5,7 @@ start_generation / end_generation），使消费方（rag_chain.py）零改动�
 延迟初始化，配置缺失或初始化失败时静默降级。
 """
 
+from dataclasses import dataclass, asdict
 from typing import Optional
 
 from loguru import logger
@@ -12,6 +13,18 @@ from loguru import logger
 from langfuse import Langfuse
 
 from src.infra.llm.trace_context import current_trace_id
+
+
+@dataclass(frozen=True)
+class TraceInput:
+    """Tracing 输入数据 — 用于 start_trace 的统一输入结构。
+
+    使用 dataclass 替代手动构造 dict，消除 key 名与变量名的重复维护。
+    """
+
+    kb_id: str   # 知识库 ID（空字符串 = 跨库搜索）
+    session_id: str  # 会话 ID（用于 Langfuse 会话聚合）
+    query: str  # 用户查询文本
 
 
 class LangfuseTracer:
@@ -67,21 +80,30 @@ class LangfuseTracer:
     def start_trace(
         self,
         name: str,
-        input_data: dict | None = None,
+        input_data: TraceInput | dict | None = None,
         session_id: Optional[str] = None,
     ) -> Optional[str]:
         """创建新的 trace 并返回其 ID，失败时返回 None。
 
+        支持两种输入方式：
+        1. 传入 TraceInput dataclass — 自动提取 session_id 和 input dict
+        2. 传入 dict + session_id — 兼容旧调用方
+
         Args:
             name: trace 名称（如 "chat_with_citations"）
-            input_data: trace 的输入数据（可选）
-            session_id: 关联的会话 ID（可选，用于 Langfuse 会话聚合）
+            input_data: trace 的输入数据（TraceInput 或 dict，可选）
+            session_id: 关联的会话 ID（可选，TraceInput 传值时自动提取）
 
         Returns:
             trace ID，未初始化时返回 None
         """
-        if not self._check_ready("start_trace"):
-            return None
+        if self._client is None:
+            logger.warning("LangfuseTracer.start_trace: skipped (not initialized)")
+            return
+        if isinstance(input_data, TraceInput):
+            if session_id is None:
+                session_id = input_data.session_id
+            input_data = asdict(input_data)
         ext_id = current_trace_id.get()
         kwargs = dict(name=name, input=input_data, session_id=session_id)
         if ext_id:
