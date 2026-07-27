@@ -44,8 +44,8 @@ async def llm_test(
         llm = ChatOpenAI(
             model=model_name,
             temperature=body.temperature,
-            api_key=svc.settings.DASHSCOPE_API_KEY,
-            base_url=svc.settings.DASHSCOPE_BASE_URL,
+            api_key=svc.settings.LLM_API_KEY,
+            base_url=svc.settings.LLM_BASE_URL,
         )
         result = llm.invoke(body.prompt)
         elapsed = round(time.time() - start, 2)
