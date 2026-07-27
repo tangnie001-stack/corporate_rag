@@ -13,18 +13,18 @@ from typing import AsyncGenerator
 from loguru import logger
 from langgraph.graph.state import CompiledStateGraph
 
-from src.utils.sse import sse_status, sse_token, sse_citation, sse_done, sse_error
+from src.utils.sse import (
+    SSEEvent, SSEStatusEvent, SSETokenEvent, SSECitationEvent, SSEErrorEvent, SSEDoneEvent,
+)
 from src.agents.graph.workflow import build_graph
 from src.agents.graph.state import AgentState
 from src.rag.context import RAGContext
 from src.infra.db.vector_store import VectorStore
 from src.infra.search.bm25_index import BM25Index
-from src.infra.llm.langfuse_tracing import LangfuseTracer
+from src.infra.llm.langfuse_tracing import LangfuseTracer, traced
 from src.infra.llm.prompt_manager import PromptManager
 from src.chat.manager import ChatManager
-from src.infra.llm.trace_context import current_trace_id
-from src.infra.llm.langfuse_tracing import TraceInput
-from src.config.const import LangGraph, SSE_STATUS
+from src.config.const import LangGraphEvent, LangGraphKey, LangGraphNode, LangGraph, SSE_STATUS
 
 
 class AgentService:
@@ -55,27 +55,22 @@ class AgentService:
             self._llm,
             self._reranker,
             self._prompt_manager,
-            self._tracer,
         )
         logger.info("AgentService initialized with compiled graph")
 
+    @traced("chat_stream_agent")
     async def stream_chat(
         self,
         kb_id: str,
         session_id: str,
         query: str,
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[SSEEvent, None]:
         """执行图并流式返回 SSE 事件。"""
-        trace_id = current_trace_id.get()
-        self._tracer.start_trace(
-            "chat_stream_agent",
-            TraceInput(kb_id=kb_id, session_id=session_id, query=query),
-        )
 
         history = await self._chat_manager.get_history_async(session_id) or []
         await self._chat_manager.add_message_async(session_id, "user", query)
 
-        initial_state = AgentState.make_initial_state(session_id, kb_id, query, trace_id, history)
+        initial_state = AgentState.make_initial_state(session_id, kb_id, query, history)
 
         full_answer = ""
 
@@ -89,31 +84,31 @@ class AgentService:
                 initial_state,
                 version=LangGraph.VERSION,
             ):
-                kind = event.get("event", "")
-                name = event.get("name", "")
+                kind = event.get(LangGraphKey.EVENT, "")
+                name = event.get(LangGraphKey.NAME, "")
 
                 match kind:
-                    case LangGraph.CHAIN_START:
+                    case LangGraphEvent.CHAIN_START:
                         for node, message in SSE_STATUS.items():
                             if node in name:
-                                yield sse_status(node, message)
+                                yield SSEStatusEvent(node, message)
                                 break
 
-                    case LangGraph.CHAT_MODEL_STREAM:
-                        chunk = event.get("data", {}).get("chunk", {})
-                        content = getattr(chunk, "content", "") or ""
+                    case LangGraphEvent.CHAT_MODEL_STREAM:
+                        chunk = event.get(LangGraphKey.DATA, {}).get(LangGraphKey.CHUNK)
+                        content = chunk.content if chunk is not None else ""
                         if content:
                             full_answer += content
-                            yield sse_token(content)
+                            yield SSETokenEvent(content)
 
-                    case LangGraph.CHAIN_END:
-                        output = event.get("data", {}).get("output", {})
-                        if LangGraph.NODE_RERANK in name and isinstance(output, dict):
-                            contexts = output.get("contexts", contexts)
-                        elif LangGraph.NODE_GRADER in name and isinstance(output, dict):
-                            if output.get("downgraded"):
+                    case LangGraphEvent.CHAIN_END:
+                        output = event.get(LangGraphKey.DATA, {}).get(LangGraphKey.OUTPUT)
+                        if LangGraphNode.Rerank.NAME in name and isinstance(output, dict):
+                            contexts = output.get(LangGraphNode.Rerank.CONTEXTS, contexts)
+                        elif LangGraphNode.Grader.NAME in name and isinstance(output, dict):
+                            if output.get(LangGraphNode.Grader.DOWNGRADED):
                                 downgraded = True
-                                downgrade_reason = output.get("downgrade_reason", "")
+                                downgrade_reason = output.get(LangGraphNode.Grader.DOWNGRADE_REASON, "")
 
             # 从流式事件中已收集了 contexts / downgraded，不再需要 ainvoke
             seen = set()
@@ -122,11 +117,11 @@ class AgentService:
                 if key in seen:
                     continue
                 seen.add(key)
-                yield sse_citation(
-                    ctx.source or "",
-                    ctx.page or 0,
-                    (ctx.content or "")[:200],
-                    ctx.score or 0,
+                yield SSECitationEvent(
+                    source=ctx.source or "",
+                    page=ctx.page or 0,
+                    snippet=(ctx.content or "")[:200],
+                    score=ctx.score or 0,
                 )
 
             if full_answer:
@@ -136,9 +131,8 @@ class AgentService:
 
             t1 = time.perf_counter()
             logger.info(
-                "[{}] AgentService stream_chat completed: total={:.1f}s "
+                "AgentService stream_chat completed: total={:.1f}s "
                 "downgraded={} reason={} contexts={}",
-                trace_id,
                 t1 - t0,
                 downgraded,
                 downgrade_reason,
@@ -146,8 +140,7 @@ class AgentService:
             )
 
         except Exception as e:
-            logger.exception("[{}] AgentService stream_chat failed: {}", trace_id, e)
-            yield sse_error(f"暂时无法回答：{str(e)[:100]}")
+            logger.exception("AgentService stream_chat failed: {}", e)
+            yield SSEErrorEvent(f"暂时无法回答：{str(e)[:100]}")
         finally:
-            self._tracer.end_trace()
-            yield sse_done()
+            yield SSEDoneEvent()

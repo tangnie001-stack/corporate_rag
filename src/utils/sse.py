@@ -5,6 +5,53 @@
 """
 
 import json
+from dataclasses import dataclass
+
+
+# ── 结构化事件 dataclass ─────────────────────────────────
+
+@dataclass
+class SSEStatusEvent:
+    """图节点状态变更事件。"""
+
+    stage: str   # 节点标识（classify / rewrite / retrieve / rerank / generate）
+    message: str  # 前端展示的状态描述文本
+
+
+@dataclass
+class SSETokenEvent:
+    """LLM 输出 token 事件。"""
+
+    token: str  # LLM 生成的文本片段
+
+
+@dataclass
+class SSECitationEvent:
+    """引用来源事件。"""
+
+    source: str  # 文档来源名称
+    page: int  # 页码
+    snippet: str  # 内容摘要（前 200 字）
+    score: float = 0.0  # Reranker 分数
+    highlighted_snippet: str | None = None  # 高亮 HTML 片段
+
+
+@dataclass
+class SSEErrorEvent:
+    """错误事件。"""
+
+    error: str  # 错误描述文本
+
+
+@dataclass
+class SSEDoneEvent:
+    """流结束事件。"""
+
+
+SSEEvent = SSEStatusEvent | SSETokenEvent | SSECitationEvent | SSEErrorEvent | SSEDoneEvent
+
+
+# ── SSE 格式化函数 ─────────────────────────────────
 
 
 def sse_status(stage: str, message: str, detail: str | None = None) -> str:
@@ -77,3 +124,27 @@ def sse_error(error: str) -> str:
         error: 错误描述文本
     """
     return f"event: error\ndata: {json.dumps({'error': error}, ensure_ascii=False)}\n\n"
+
+
+def to_sse(event: SSEEvent) -> str:
+    """将结构化事件转为 SSE 格式字符串。
+
+    统一调度入口，内部委托给具体的 sse_* 格式化函数。
+
+    Args:
+        event: SSEEvent 结构化事件
+
+    Returns:
+        SSE 格式的文本行
+    """
+    match event:
+        case SSETokenEvent(token=token):
+            return sse_token(token)
+        case SSECitationEvent(source=s, page=p, snippet=snippet, score=score, highlighted_snippet=hs):
+            return sse_citation(s, p, snippet, score, hs)
+        case SSEStatusEvent(stage=stage, message=message):
+            return sse_status(stage, message)
+        case SSEErrorEvent(error=error):
+            return sse_error(error)
+        case SSEDoneEvent():
+            return sse_done()

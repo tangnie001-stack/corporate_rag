@@ -86,6 +86,7 @@ trace_id 的格式 `trace_<uuid>`，生成优先级：请求头 `X-Trace-ID` →
 - 需求池文档在docs/requirements_pool.md
 - **接口契约**：API 参数、返回值、历史踩坑记录详见 docs/api_contract.md，修改公共方法签名时同步更新
 - **代码风格**：不用三元表达式（`a if cond else b`），写完整的 if/else 结构，保持可读性
+- **显式类型检查**：类型不确定的值不用 `getattr(x, "attr", default)` 隐式兜底，用 `x.attr if x is not None else default` 或 `isinstance` 显式判断
 
 
 ## 代码注释标准

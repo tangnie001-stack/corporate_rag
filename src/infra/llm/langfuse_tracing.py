@@ -6,13 +6,17 @@ start_generation / end_generation），使消费方（rag_chain.py）零改动�
 """
 
 from dataclasses import dataclass, asdict
-from typing import Optional
+import functools
+import inspect
+from typing import Optional, cast
 
 from loguru import logger
 
 from langfuse import Langfuse
+from langfuse.model import ModelUsage
 
-from src.infra.llm.trace_context import current_trace_id
+from src.infra.llm.trace_context import current_trace_id, current_tracer
+from src.infra.llm.token_usage import TokenUsage
 
 
 @dataclass(frozen=True)
@@ -25,6 +29,51 @@ class TraceInput:
     kb_id: str   # 知识库 ID（空字符串 = 跨库搜索）
     session_id: str  # 会话 ID（用于 Langfuse 会话聚合）
     query: str  # 用户查询文本
+
+
+def traced(name: str):
+    """装饰 async generator 方法，自动管理 trace 生命周期。
+
+    装饰器在编译期检查方法签名，自动提取 kb_id / session_id / query
+    参数构造 TraceInput。方法体只需关注业务逻辑，无需调用
+    start_trace / end_trace。
+
+    Args:
+        name: trace 名称（如 "chat_stream_agent"）
+
+    Usage:
+        @traced("chat_stream_agent")
+        async def stream_chat(self, kb_id, session_id, query):
+            ...  # 无需 start_trace / end_trace
+    """
+    TRACE_INPUT_FIELDS = ("kb_id", "session_id", "query")
+
+    def decorator(func):
+        sig = inspect.signature(func)
+        has_input = all(f in sig.parameters for f in TRACE_INPUT_FIELDS)
+
+        @functools.wraps(func)
+        async def wrapper(self, *args, **kwargs):
+            input_data = None
+            if has_input:
+                bound = sig.bind(self, *args, **kwargs)
+                bound.apply_defaults()
+                input_data = TraceInput(
+                    **{f: bound.arguments[f] for f in TRACE_INPUT_FIELDS}
+                )
+
+            self._tracer.start_trace(name, input_data)
+            token = current_tracer.set(self._tracer)
+            try:
+                async for item in func(self, *args, **kwargs):
+                    yield item
+            finally:
+                current_tracer.reset(token)
+                self._tracer.end_trace()
+
+        return wrapper
+
+    return decorator
 
 
 class LangfuseTracer:
@@ -82,8 +131,8 @@ class LangfuseTracer:
         name: str,
         input_data: TraceInput | dict | None = None,
         session_id: Optional[str] = None,
-    ) -> Optional[str]:
-        """创建新的 trace 并返回其 ID，失败时返回 None。
+    ) -> None:
+        """创建新的 trace，trace ID 从 current_trace_id contextvar 自动读取。
 
         支持两种输入方式：
         1. 传入 TraceInput dataclass — 自动提取 session_id 和 input dict
@@ -93,9 +142,6 @@ class LangfuseTracer:
             name: trace 名称（如 "chat_with_citations"）
             input_data: trace 的输入数据（TraceInput 或 dict，可选）
             session_id: 关联的会话 ID（可选，TraceInput 传值时自动提取）
-
-        Returns:
-            trace ID，未初始化时返回 None
         """
         if self._client is None:
             logger.warning("LangfuseTracer.start_trace: skipped (not initialized)")
@@ -104,11 +150,9 @@ class LangfuseTracer:
             if session_id is None:
                 session_id = input_data.session_id
             input_data = asdict(input_data)
-        ext_id = current_trace_id.get()
-        kwargs = dict(name=name, input=input_data, session_id=session_id)
-        if ext_id:
-            kwargs["id"] = ext_id  # Langfuse SDK 显式接受 id 参数
-        return self._client.trace(**kwargs).id
+        self._client.trace(
+            name=name, input=input_data, session_id=session_id, id=current_trace_id.get()
+        )
 
     def end_trace(self, output: str | None = None) -> None:
         """更新 trace 的完成输出。
@@ -118,12 +162,10 @@ class LangfuseTracer:
         Args:
             output: trace 的输出数据（可选）
         """
-        if not self._check_ready("end_trace"):
+        if self._client is None:
+            logger.warning("LangfuseTracer.end_trace: skipped (not initialized)")
             return
-        try:
-            self._client.trace(id=current_trace_id.get(), output=output)
-        except Exception as e:
-            logger.warning("end_trace failed: %s", e)
+        self._client.trace(id=current_trace_id.get(), output=output)
 
     def start_generation(
         self,
@@ -145,8 +187,9 @@ class LangfuseTracer:
         Returns:
             generation ID，未初始化时返回 None
         """
-        if not self._check_ready("start_generation"):
-            return None
+        if self._client is None:
+            logger.warning("LangfuseTracer.start_generation: skipped (not initialized)")
+            return
         return self._client.generation(
             name=name,
             trace_id=current_trace_id.get(),
@@ -159,7 +202,7 @@ class LangfuseTracer:
         self,
         gen_id: str,
         output: str | None = None,
-        usage: Optional[dict] = None,
+        usage: TokenUsage | None = None,
     ) -> None:
         """更新 generation 的输出和用量信息。
 
@@ -168,15 +211,29 @@ class LangfuseTracer:
         Args:
             gen_id: 要更新的 generation ID
             output: LLM 生成的输出文本（可选）
-            usage: token 用量统计（含 prompt_tokens / completion_tokens 等，可选）
+            usage: TokenUsage 用量统计（可选）
         """
-        if not self._check_ready("end_generation"):
+        if self._client is None:
+            logger.warning("LangfuseTracer.end_generation: skipped (not initialized)")
             return
         if not gen_id:
+            logger.warning("LangfuseTracer.end_generation: skipped (no gen_id)")
             return
-        try:
-            self._client.generation(
-                id=gen_id, trace_id=current_trace_id.get(), output=output, usage=usage
+        sdk_usage: ModelUsage | None
+        if usage:
+            sdk_usage = cast(
+                ModelUsage,
+                {
+                    "input": usage.prompt_tokens,
+                    "output": usage.completion_tokens,
+                    "total": usage.total_tokens,
+                },
             )
-        except Exception as e:
-            logger.warning("end_generation failed: %s", e)
+        else:
+            sdk_usage = None
+        self._client.generation(
+            id=gen_id,
+            trace_id=current_trace_id.get(),
+            output=output,
+            usage=sdk_usage,
+        )

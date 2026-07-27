@@ -1,21 +1,13 @@
 """流式生成 — LLM 流式回答生成 + Token 估算。"""
 
-from dataclasses import dataclass
 import time
 from typing import Generator, Optional
 
 from loguru import logger
 
 from src.config import RETRY_MAX_ATTEMPTS, RETRY_INITIAL_INTERVAL, RETRY_BACKOFF_FACTOR
-
-
-@dataclass
-class TokenUsage:
-    """Token 用量统一结构。"""
-
-    prompt_tokens: int = 0  # 提示 token 数（LLM 原生或估算）
-    completion_tokens: int = 0  # 补全 token 数（LLM 原生或估算）
-    total_tokens: int = 0  # 总 token 数（prompt + completion）
+from src.infra.llm.token_usage import TokenUsage
+from src.infra.llm.trace_context import current_tracer
 
 
 def estimate_usage(messages: list, output: str) -> TokenUsage:
@@ -35,21 +27,25 @@ def estimate_usage(messages: list, output: str) -> TokenUsage:
 def stream_answer(
     messages: list,
     llm,
-    tracer,
     trace_id: Optional[str] = None,
 ) -> Generator[str, None, None]:
-    """流式生成 LLM 回答，支持指数退避重试。"""
+    """流式生成 LLM 回答，支持指数退避重试。
+
+    trace 通过 current_tracer ContextVar 自动读取（由 traced 装饰器设值）。
+    """
+    tracer = current_tracer.get()
     gen_id = None
-    messages_snapshot = [
-        {"role": getattr(m, "type", "unknown"), "content": m.content}
-        for m in messages
-        if hasattr(m, "type") or hasattr(m, "content")
-    ]
-    gen_id = tracer.start_generation(
-        "llm_stream",
-        input_data=messages_snapshot,
-        model=getattr(llm, "model", None),
-    )
+    if tracer:
+        messages_snapshot = [
+            {"role": getattr(m, "type", "unknown"), "content": m.content}
+            for m in messages
+            if hasattr(m, "type") or hasattr(m, "content")
+        ]
+        gen_id = tracer.start_generation(
+            "llm_stream",
+            input_data=messages_snapshot,
+            model=getattr(llm, "model", None),
+        )
 
     last_error: Optional[Exception] = None
     full_output = ""
@@ -81,15 +77,12 @@ def stream_answer(
                 and not last_token_usage.completion_tokens
             ):
                 last_token_usage = estimate_usage(messages, full_output)
-            tracer.end_generation(
-                gen_id,
-                output=full_output,
-                usage={
-                    "prompt_tokens": last_token_usage.prompt_tokens,
-                    "completion_tokens": last_token_usage.completion_tokens,
-                    "total_tokens": last_token_usage.total_tokens,
-                },
-            )
+            if tracer:
+                tracer.end_generation(
+                    gen_id,
+                    output=full_output,
+                    usage=last_token_usage,
+                )
             _gen_latency = (time.monotonic() - _stream_start) * 1000
             logger.info(
                 "Generation completed: chars={} latency={:.0f}ms "
@@ -117,5 +110,6 @@ def stream_answer(
     logger.error("LLM stream failed after {} attempts", RETRY_MAX_ATTEMPTS)
     error_msg = f"生成回答失败: {last_error}"
     full_output = error_msg
-    tracer.end_generation(gen_id, output=error_msg)
+    if tracer:
+        tracer.end_generation(gen_id, output=error_msg)
     yield error_msg

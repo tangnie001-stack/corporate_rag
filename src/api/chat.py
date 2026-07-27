@@ -1,7 +1,6 @@
 """流式聊天 SSE 端点 — 支持分阶段状态推送和引用高亮。"""
 
 import asyncio
-import json
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, Query
@@ -10,7 +9,9 @@ from loguru import logger
 
 import jieba
 
-from src.utils.sse import sse_done, sse_error
+from src.utils.sse import (
+    to_sse, SSETokenEvent, SSECitationEvent, SSEErrorEvent, SSEDoneEvent,
+)
 from src.api.dependencies import get_app_service
 from src.services.app_service import AppService
 
@@ -155,29 +156,16 @@ async def _stream_rag_response(
     sources: list[str] = []
     try:
         async for event in svc.agent_service.stream_chat(kb_id, session_id, query):
-            # 从 token 事件中收集完整回答
-            if event.startswith("event: token"):
-                try:
-                    data_str = event.split("\n")[1].replace("data: ", "", 1)
-                    payload = json.loads(data_str)
-                    full_answer += payload.get("token", "")
-                except Exception:
-                    pass
-            # 从 citation 事件中收集来源
-            elif event.startswith("event: citation"):
-                try:
-                    data_str = event.split("\n")[1].replace("data: ", "", 1)
-                    payload = json.loads(data_str)
-                    src = payload.get("source", "")
-                    page = payload.get("page", 0)
+            match event:
+                case SSETokenEvent(token=token):
+                    full_answer += token
+                case SSECitationEvent(source=src, page=page):
                     sources.append(f"{src} (第{page}页)")
-                except Exception:
-                    pass
-            yield event
+            yield to_sse(event)
     except Exception as e:
         logger.exception("Chat stream unhandled error: {}", str(e))
-        yield sse_error(str(e))
-        yield sse_done()
+        yield to_sse(SSEErrorEvent(str(e)))
+        yield to_sse(SSEDoneEvent())
         return
 
     # 流结束后持久化对话

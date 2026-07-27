@@ -110,7 +110,7 @@ def test_start_trace_with_trace_input():
         )
         result = tracer.start_trace("chat_stream_agent", trace_input)
 
-        assert result == "trace-id-123"
+        assert result is None
         mock_client.trace.assert_called_once_with(
             name="chat_stream_agent",
             input={
@@ -184,8 +184,7 @@ def test_methods_succeed_when_initialized(method, kwargs):
     tracer._client.generation.return_value = mock_result
 
     if method == "start_trace":
-        result = tracer.start_trace(**kwargs)
-        assert result == "mock-id"
+        tracer.start_trace(**kwargs)
     elif method == "end_trace":
         tracer.end_trace(**kwargs)
     elif method == "start_generation":

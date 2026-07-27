@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 from src.infra.db.entities import ChunkResult
 from src.infra.llm.chat_message import ChatMessage
+from src.infra.llm.trace_context import current_trace_id
 from src.rag.context import RAGContext
 
 
@@ -21,7 +22,7 @@ class AgentState:
     session_id: str = ""  # 会话 ID（多轮对话用，作为 Redis key 取历史）
     kb_id: str = ""  # 知识库 ID（空字符串 = 跨库搜索）
     query: str = ""  # 用户原始查询文本
-    trace_id: str = "unknown"  # 全链路追踪 ID（来自中间件 / CLI 自生成）
+    trace_id: str = field(default_factory=lambda: current_trace_id.get() or "unknown")  # 全链路追踪 ID（自动从 contextvar 读取）
     # ── 中间态 ──
     intent: RAGQueryIntent = field(default_factory=RAGQueryIntent)  # classify_node 输出
     rewritten_query: str = ""  # rewrite_node 改写后的查询
@@ -41,7 +42,7 @@ class AgentState:
     timings: dict = field(default_factory=dict)  # 各节点耗时统计
 
     @classmethod
-    def make_initial_state(cls, session_id, kb_id, query, trace_id, history):
+    def make_initial_state(cls, session_id, kb_id, query, history):
         """创建图初始状态，只设输入字段，中间态/输出由各节点填充。"""
         return cls(session_id=session_id, kb_id=kb_id, query=query,
-                   trace_id=trace_id, _history=history)
+                   _history=history)
