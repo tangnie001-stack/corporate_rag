@@ -143,11 +143,11 @@ SELECT name FROM knowledge_base WHERE id = %s
 
 # 列出某用户的所有知识库（最近创建的在前）。参数：[user_id]。
 SELECT_ALL_KNOWLEDGE_BASES: str = """\
-SELECT k.id, k.user_id, k.name, COUNT(d.id) AS doc_count
+SELECT k.id, k.user_id, k.name, k.description, COUNT(d.id) AS doc_count
 FROM knowledge_base k
 LEFT JOIN document d ON d.kb_id = k.id AND d.status != 'deleted'
 WHERE k.user_id = %s AND k.status != 'deleted'
-GROUP BY k.id, k.user_id, k.name
+GROUP BY k.id, k.user_id, k.name, k.description
 ORDER BY k.created_at DESC
 """
 

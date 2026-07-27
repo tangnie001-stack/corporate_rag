@@ -116,6 +116,7 @@ class KbRepo:
                         id=row["id"],
                         user_id=row["user_id"],
                         name=row["name"],
+                        description=row.get("description"),
                         doc_count=row["doc_count"],
                     )
                     for row in await cursor.fetchall()

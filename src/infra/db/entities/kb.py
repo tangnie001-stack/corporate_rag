@@ -52,5 +52,7 @@ class KbListItem:
     """所属用户 ID。"""
     name: str
     """知识库名称。"""
+    description: str | None = None
+    """知识库描述。"""
     doc_count: int = 0
     """该知识库下的文档数量（LEFT JOIN document 计数）。"""
