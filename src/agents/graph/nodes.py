@@ -14,10 +14,46 @@ from src.rag.prompt import build_prompt, build_simple_prompt, format_context
 from src.agents.grader import RetrievalGrader
 from src.agents.graph.state import AgentState, RAGQueryIntent
 from src.config.const import LangGraphNode
+from src.config import TOP_K_RETRIEVAL
 
 
 def _tid(state: AgentState) -> str:
     return state.trace_id
+
+
+def make_kb_router_node(embed_fn, llm) -> Callable:
+    """创建 KB 路由节点工厂函数。
+
+    当 kb_id 为空（"所有知识库"）时，使用 KBRouter 智能匹配 KB。
+    当 kb_id 非空时直接穿透。
+    """
+    from src.rag.kb_router import KBRouter
+
+    router = KBRouter(embed_fn, llm)
+
+    async def kb_router_node(state: AgentState) -> dict:
+        # kb_id 非空 → 穿透
+        if state.kb_id:
+            return {"_resolved_kb_ids": [state.kb_id]}
+
+        # kb_id 为空 → 路由
+        from src.infra.llm.trace_context import current_user_id
+        from src.infra.db.mysql_db import KbRepo, MySQLDB
+
+        uid = current_user_id.get()
+        if not uid:
+            logger.info("kb_router_node: no user_id, fallback to all")
+            return {"_resolved_kb_ids": None}
+
+        kbs = await KbRepo(MySQLDB()).get_all_kb(uid)
+        kb_ids = router.route(state.query, kbs)
+        logger.info(
+            "kb_router_node: query={} kb_count={} routed={}",
+            state.query[:40], len(kbs), kb_ids,
+        )
+        return {"_resolved_kb_ids": kb_ids if kb_ids else None}
+
+    return kb_router_node
 
 
 def classify_node(state: AgentState) -> dict:
@@ -65,12 +101,22 @@ def make_retrieve_node(vector_store, bm25) -> Callable:
 
     async def retrieve_node(state: AgentState) -> dict:
         q = state.rewritten_query or state.query
-        kb_id = state.kb_id
-        logger.info("retrieve_node start: query={} kb_id={}", q[:50], kb_id)
-        results = await search(q, kb_id, vector_store, bm25)
+        resolved_ids = state._resolved_kb_ids or state.kb_id
+        # resolved_ids 可以是 str | list[str] | None
+        # None → retrieval.py 中 get_all_kb 全量搜索
+        logger.info("retrieve_node start: query={} kb_ids={}", q[:50], resolved_ids)
+
+        # 多 KB 路由时跳过 Hybrid Search（BM25 不支持 list[str]）
+        if isinstance(resolved_ids, list) and len(resolved_ids) > 1:
+            import asyncio
+            results = await asyncio.to_thread(
+                vector_store.similarity_search, resolved_ids, q, k=TOP_K_RETRIEVAL
+            )
+        else:
+            results = await search(q, resolved_ids, vector_store, bm25)
+
         if results is None:
             results = []
-            logger.warning("retrieve_node: search returned None, using empty list")
         logger.info("retrieve_node done: results={}", len(results))
         return {"retrieval_results": results}
 

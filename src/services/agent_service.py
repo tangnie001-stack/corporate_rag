@@ -39,7 +39,7 @@ class AgentService:
         reranker=None,
         prompt_manager: PromptManager | None = None,
     ):
-        from src.models import get_llm, get_rerank
+        from src.models import get_llm, get_rerank, get_embeddings
 
         self._vector_store = vector_store
         self._bm25 = bm25
@@ -54,6 +54,7 @@ class AgentService:
             bm25,
             self._llm,
             self._reranker,
+            get_embeddings(),
             self._prompt_manager,
         )
         logger.info("AgentService initialized with compiled graph")

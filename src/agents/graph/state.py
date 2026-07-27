@@ -36,6 +36,9 @@ class AgentState:
     # ── 降级控制 ──
     downgraded: bool = False  # 是否降级
     downgrade_reason: str = ""  # 降级原因
+    # ── 路由控制 ──
+    _resolved_kb_ids: list[str] | None = None
+    # None = 未路由 / 降级全量；[...] = 路由选中的 KB ID 列表
     # ── 内部 ──
     _history: list[ChatMessage] = field(default_factory=list)  # 对话历史（注入 prompt 用）
     _token_usage: dict = field(default_factory=dict)  # token 用量统计

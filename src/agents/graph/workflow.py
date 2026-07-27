@@ -11,6 +11,7 @@ from src.agents.graph.nodes import (
     rewrite_node,
     grader_node,
     format_node,
+    make_kb_router_node,
     make_retrieve_node,
     make_rerank_node,
     make_generate_node,
@@ -53,12 +54,14 @@ def build_graph(
     bm25: BM25Index | None,
     llm,
     reranker,
+    embed_fn,
     prompt_manager,
 ) -> CompiledStateGraph:
     """构建并编译 StateGraph。"""
     builder = StateGraph(AgentState)
 
     # ── 用工厂函数创建带依赖的节点 ────────────────
+    builder.add_node("kb_router", make_kb_router_node(embed_fn, llm))
     builder.add_node(LangGraphNode.Classify.NAME, classify_node)
     builder.add_node(LangGraphNode.Rewrite.NAME, rewrite_node)
     builder.add_node(LangGraphNode.Retrieve.NAME, make_retrieve_node(vector_store, bm25))
@@ -67,8 +70,11 @@ def build_graph(
     builder.add_node(LangGraphNode.Generate.NAME, make_generate_node(llm, prompt_manager))
     builder.add_node(LangGraphNode.Format.NAME, format_node)
 
-    # ── 条件边：三级路由 ──────────────────────────
-    builder.set_entry_point(LangGraphNode.Classify.NAME)
+    # ── 设置入口点和边：kb_router → classify → ... ──
+    builder.set_entry_point("kb_router")
+    builder.add_edge("kb_router", LangGraphNode.Classify.NAME)
+
+    # ── 条件边：三级路由（与 classify 的输出直连，不变） ──
     builder.add_conditional_edges(
         LangGraphNode.Classify.NAME,
         route_by_intent,
@@ -100,5 +106,5 @@ def build_graph(
     builder.add_edge(LangGraphNode.Format.NAME, END)
 
     graph = builder.compile()
-    logger.info("LangGraph StateGraph compiled: 7 nodes, 3-tier routing")
+    logger.info("LangGraph StateGraph compiled: 8 nodes, KB router + 3-tier routing")
     return graph
