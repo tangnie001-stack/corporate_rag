@@ -32,7 +32,6 @@ class LangfuseTracer:
         LANGFUSE_HOST。初始化失败仅记警告，不抛出异常。
         """
         self._client: Optional[Langfuse] = None
-        self._initialized = False
         try:
             from src.config import (
                 LANGFUSE_HOST,
@@ -50,11 +49,20 @@ class LangfuseTracer:
                 secret_key=LANGFUSE_SECRET_KEY,
                 host=LANGFUSE_HOST.rstrip("/"),
             )
-            self._initialized = True
             logger.info("LangfuseTracer initialized with official SDK")
         except Exception as e:
-            self._initialized = False
             logger.warning("LangfuseTracer init failed: %s", e)
+
+    def _check_ready(self, method: str) -> bool:
+        """检查客户端是否可用，不可用时记警告并返回 False。
+
+        Args:
+            method: 调用方方法名（用于日志标识）
+        """
+        if self._client is None:
+            logger.warning("LangfuseTracer.{}: skipped (not initialized)", method)
+            return False
+        return True
 
     def start_trace(
         self,
@@ -72,7 +80,7 @@ class LangfuseTracer:
         Returns:
             trace ID，未初始化时返回 None
         """
-        if not self._initialized:
+        if not self._check_ready("start_trace"):
             return None
         ext_id = current_trace_id.get()
         kwargs = dict(name=name, input=input_data, session_id=session_id)
@@ -80,23 +88,23 @@ class LangfuseTracer:
             kwargs["id"] = ext_id  # Langfuse SDK 显式接受 id 参数
         return self._client.trace(**kwargs).id
 
-    def end_trace(self, trace_id: str, output: str | None = None) -> None:
+    def end_trace(self, output: str | None = None) -> None:
         """更新 trace 的完成输出。
 
+        trace_id 从 current_trace_id contextvar 自动读取（中间件兜底）。
+
         Args:
-            trace_id: 要更新的 trace ID
             output: trace 的输出数据（可选）
         """
-        if not self._initialized or not trace_id:
+        if not self._check_ready("end_trace"):
             return
         try:
-            self._client.trace(id=trace_id, output=output)
+            self._client.trace(id=current_trace_id.get(), output=output)
         except Exception as e:
             logger.warning("end_trace failed: %s", e)
 
     def start_generation(
         self,
-        trace_id: str,
         name: str,
         input_data: list[dict] | None = None,
         model: Optional[str] = None,
@@ -104,8 +112,9 @@ class LangfuseTracer:
     ) -> Optional[str]:
         """创建新的 generation（LLM 调用记录）并返回其 ID。
 
+        trace_id 从 current_trace_id contextvar 自动读取（中间件兜底）。
+
         Args:
-            trace_id: 所属 trace 的 ID
             name: generation 名称（如 "llm_stream"）
             input_data: LLM 调用的输入数据（可选）
             model: 使用的模型名称（可选）
@@ -114,11 +123,11 @@ class LangfuseTracer:
         Returns:
             generation ID，未初始化时返回 None
         """
-        if not self._initialized:
+        if not self._check_ready("start_generation"):
             return None
         return self._client.generation(
             name=name,
-            trace_id=trace_id,
+            trace_id=current_trace_id.get(),
             input=input_data,
             model=model,
             model_parameters=model_parameters,
@@ -127,23 +136,25 @@ class LangfuseTracer:
     def end_generation(
         self,
         gen_id: str,
-        trace_id: str,
         output: str | None = None,
         usage: Optional[dict] = None,
     ) -> None:
         """更新 generation 的输出和用量信息。
 
+        trace_id 从 current_trace_id contextvar 自动读取（中间件兜底）。
+
         Args:
             gen_id: 要更新的 generation ID
-            trace_id: 所属 trace 的 ID
             output: LLM 生成的输出文本（可选）
             usage: token 用量统计（含 prompt_tokens / completion_tokens 等，可选）
         """
-        if not self._initialized or not gen_id or not trace_id:
+        if not self._check_ready("end_generation"):
+            return
+        if not gen_id:
             return
         try:
             self._client.generation(
-                id=gen_id, trace_id=trace_id, output=output, usage=usage
+                id=gen_id, trace_id=current_trace_id.get(), output=output, usage=usage
             )
         except Exception as e:
             logger.warning("end_generation failed: %s", e)

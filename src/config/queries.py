@@ -278,6 +278,7 @@ SELECT s.id, s.title, s.kb_id, s.created_at, s.updated_at,
 FROM sessions s
 LEFT JOIN knowledge_base kb ON s.kb_id = kb.id AND s.kb_id != ''
 LEFT JOIN conversation_history ch ON ch.session_id = s.id
+WHERE s.user_id = %s
 GROUP BY s.id
 ORDER BY s.updated_at DESC
 LIMIT 50
@@ -285,7 +286,7 @@ LIMIT 50
 
 # 按 ID 查询单条会话。用于验证会话是否存在。
 SELECT_SESSION_BY_ID: str = """\
-SELECT id, title, kb_id, created_at, updated_at FROM sessions WHERE id = %s
+SELECT id, title, kb_id, user_id, created_at, updated_at FROM sessions WHERE id = %s
 """
 
 # 查询某会话的所有消息，按创建时间正序排列。

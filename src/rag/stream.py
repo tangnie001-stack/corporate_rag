@@ -13,9 +13,9 @@ from src.config import RETRY_MAX_ATTEMPTS, RETRY_INITIAL_INTERVAL, RETRY_BACKOFF
 class TokenUsage:
     """Token 用量统一结构。"""
 
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    total_tokens: int = 0
+    prompt_tokens: int = 0  # 提示 token 数（LLM 原生或估算）
+    completion_tokens: int = 0  # 补全 token 数（LLM 原生或估算）
+    total_tokens: int = 0  # 总 token 数（prompt + completion）
 
 
 def estimate_usage(messages: list, output: str) -> TokenUsage:
@@ -46,7 +46,6 @@ def stream_answer(
         if hasattr(m, "type") or hasattr(m, "content")
     ]
     gen_id = tracer.start_generation(
-        trace_id,
         "llm_stream",
         input_data=messages_snapshot,
         model=getattr(llm, "model", None),
@@ -84,7 +83,6 @@ def stream_answer(
                 last_token_usage = estimate_usage(messages, full_output)
             tracer.end_generation(
                 gen_id,
-                trace_id,
                 output=full_output,
                 usage={
                     "prompt_tokens": last_token_usage.prompt_tokens,
@@ -119,5 +117,5 @@ def stream_answer(
     logger.error("LLM stream failed after {} attempts", RETRY_MAX_ATTEMPTS)
     error_msg = f"生成回答失败: {last_error}"
     full_output = error_msg
-    tracer.end_generation(gen_id, trace_id, output=error_msg)
+    tracer.end_generation(gen_id, output=error_msg)
     yield error_msg

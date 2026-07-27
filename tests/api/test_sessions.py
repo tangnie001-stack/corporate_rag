@@ -64,6 +64,9 @@ def test_session_messages_not_found(auth_client, mock_app_service):
 
 def test_delete_session(auth_client, mock_app_service):
     """POST /api/sessions/delete 删除成功。"""
+    mock_app_service.get_session_by_id = AsyncMock(
+        return_value=make_session("s1", user_id="test-user-id")
+    )
     mock_app_service.delete_session_and_messages = AsyncMock(return_value=True)
 
     response = auth_client.post("/api/sessions/delete", json={"session_id": "s1"})
@@ -75,6 +78,7 @@ def test_delete_session(auth_client, mock_app_service):
 
 def test_delete_session_not_found(auth_client, mock_app_service):
     """POST /api/sessions/delete session 不存在返回 404。"""
+    mock_app_service.get_session_by_id = AsyncMock(return_value=None)
     mock_app_service.delete_session_and_messages = AsyncMock(return_value=False)
 
     response = auth_client.post("/api/sessions/delete", json={"session_id": "missing"})

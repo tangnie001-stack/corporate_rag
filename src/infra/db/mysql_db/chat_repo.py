@@ -44,12 +44,16 @@ class ChatRepo:
                 )
             await conn.commit()
 
-    async def get_sessions(self) -> list[SessionListItem]:
-        """获取所有对话列表（含知识库名称和消息数）。"""
+    async def get_sessions(self, user_id: str = "") -> list[SessionListItem]:
+        """获取指定用户的对话列表（含知识库名称和消息数）。
+
+        Args:
+            user_id: 用户 ID，空字符串返回所有会话（仅供内部使用）
+        """
         pool = await self._pool_getter()
         async with pool.acquire() as conn:
             async with conn.cursor() as cursor:
-                await cursor.execute(SELECT_SESSIONS)
+                await cursor.execute(SELECT_SESSIONS, (user_id,))
                 rows = await cursor.fetchall()
         return [
             SessionListItem(

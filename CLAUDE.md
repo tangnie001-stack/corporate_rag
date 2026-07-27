@@ -8,6 +8,7 @@
 2. **最小改动** — 写达成目标的最小代码，不做未请求的抽象或预判性扩展
 3. **手术刀修改** — 只动必须改的，匹配已有风格，不碰周围代码和文件
 4. **验证闭环** — 明确完成标准，循环：改 → 验证通过 → 修复 → 直到达标
+5. **规则对照** — 改代码前先扫描 claude.md 的「代码注释标准」和「规则」章节，确保改动符合规范
 
 ## 技术栈
 Python 3.11+ / FastAPI / ChromaDB / LangChain / DashScope / MySQL 8.0 / Redis 7 / Langfuse / Nginx
@@ -90,6 +91,8 @@ trace_id 的格式 `trace_<uuid>`，生成优先级：请求头 `X-Trace-ID` →
 ## 代码注释标准
 
 所有函数必须写 docstring，详细标准见 docs/agents/rules.md 的"代码注释标准"章节。
+所有 dataclass 的每个字段必须加行内注释，说明来源、范围和用途。
+结构化数据优先使用 dataclass 而非 dict，避免 `.get("key")` 散落各处。
 
 ## 经验总结
 分块问题排查和修复记录详见 docs/agents/chunking-issues.md，遇到分块相关问题时优先查阅。

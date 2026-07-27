@@ -7,35 +7,41 @@ from src.rag.context import RAGContext
 
 @dataclass
 class RAGQueryIntent:
-    route: str = ""
-    rewritten: bool = False
+    """查询意图分类结果。"""
+
+    route: str = ""  # "simple" | "medium" | "complex" | ""
+    rewritten: bool = False  # 是否已被 rewrite_node 改写
 
 
 @dataclass
 class AgentState:
-    session_id: str = ""
-    kb_id: str = ""
-    query: str = ""
-    trace_id: str = "unknown"
-    intent: RAGQueryIntent = field(default_factory=RAGQueryIntent)
-    rewritten_query: str = ""
-    retrieval_results: list[ChunkResult] = field(default_factory=list)
-    contexts: list[RAGContext] = field(default_factory=list)
-    grader_score: Optional[float] = None
-    retrieval_retries: int = 0
-    answer: str = ""
-    citations: list[dict] = field(default_factory=list)
-    downgraded: bool = False
-    downgrade_reason: str = ""
-    _history: list[ChatMessage] = field(default_factory=list)
-    _token_usage: dict = field(default_factory=dict)
-    timings: dict = field(default_factory=dict)
+    """LangGraph 图执行状态。"""
+
+    # ── 输入 ──
+    session_id: str = ""  # 会话 ID（多轮对话用，作为 Redis key 取历史）
+    kb_id: str = ""  # 知识库 ID（空字符串 = 跨库搜索）
+    query: str = ""  # 用户原始查询文本
+    trace_id: str = "unknown"  # 全链路追踪 ID（来自中间件 / CLI 自生成）
+    # ── 中间态 ──
+    intent: RAGQueryIntent = field(default_factory=RAGQueryIntent)  # classify_node 输出
+    rewritten_query: str = ""  # rewrite_node 改写后的查询
+    retrieval_results: list[ChunkResult] = field(default_factory=list)  # 向量/BM25 检索结果
+    contexts: list[RAGContext] = field(default_factory=list)  # rerank 精排后的上下文
+    grader_score: Optional[float] = None  # grader 关键词覆盖度评分（0~1）
+    retrieval_retries: int = 0  # 检索重试次数
+    # ── 输出 ──
+    answer: str = ""  # LLM 生成的完整回答
+    citations: list[dict] = field(default_factory=list)  # 去重引用列表
+    # ── 降级控制 ──
+    downgraded: bool = False  # 是否降级
+    downgrade_reason: str = ""  # 降级原因
+    # ── 内部 ──
+    _history: list[ChatMessage] = field(default_factory=list)  # 对话历史（注入 prompt 用）
+    _token_usage: dict = field(default_factory=dict)  # token 用量统计
+    timings: dict = field(default_factory=dict)  # 各节点耗时统计
 
     @classmethod
     def make_initial_state(cls, session_id, kb_id, query, trace_id, history):
+        """创建图初始状态，只设输入字段，中间态/输出由各节点填充。"""
         return cls(session_id=session_id, kb_id=kb_id, query=query,
                    trace_id=trace_id, _history=history)
-
-
-# 模块级别名，兼容 from ... import make_initial_state 的已有调用方
-make_initial_state = AgentState.make_initial_state

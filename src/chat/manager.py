@@ -156,11 +156,16 @@ class ChatManager:
         """异步验证 Redis 连接存活，断开时自动降级为 InMemory。
 
         InMemory 期间尝试恢复 Redis，成功则自动切回 Redis 模式。
+        双检锁避免协程切换期间重复创建 Redis 连接。
         """
         if self._in_memory:
             try:
                 c = redis_async.from_url(self._redis_url, decode_responses=True)
                 await c.ping()
+                # 双检：await 期间可能另一个协程已恢复
+                if not self._in_memory:
+                    await c.close()
+                    return
                 self._redis = c
                 self._in_memory = False
             except Exception:
@@ -169,6 +174,9 @@ class ChatManager:
         try:
             await self._redis.ping()
         except Exception:
+            # 双检：await 期间可能另一个协程已降级
+            if self._in_memory:
+                return
             self._redis = None
             self._in_memory = True
 

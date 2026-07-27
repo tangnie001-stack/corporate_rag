@@ -7,5 +7,5 @@ from dataclasses import dataclass
 class ChatMessage:
     """单条对话消息。"""
 
-    role: str  # "user" | "assistant"
-    content: str
+    role: str  # "user" | "assistant" — 消息角色
+    content: str  # 消息文本内容

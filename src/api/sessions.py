@@ -4,7 +4,7 @@
 会话持久化在 MySQL 中，并缓存于 Redis。
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from loguru import logger
 
 from src.api.model.request import SessionMessagesRequest, SessionDeleteRequest
@@ -19,19 +19,22 @@ router = APIRouter()
 
 @router.post("/sessions/list")
 async def list_sessions(
+    request: Request,
     svc: AppService = Depends(get_app_service),
 ) -> list[SessionItem]:
-    """列出最近 50 个会话。
+    """列出最近 50 个会话（仅当前用户的）。
 
     始终返回 200 + 数组，无会话时返回 []。
 
     Args:
+        request: FastAPI 请求（从中提取 user_id）
         svc: 应用服务实例（由 FastAPI 注入）
 
     Returns:
         list[SessionItem]: 会话列表
     """
-    sessions = await svc.get_sessions()
+    user_id = getattr(request.state, "user_id", "")
+    sessions = await svc.get_sessions(user_id)
     result = []
     for row in sessions:
         result.append(
@@ -54,15 +57,17 @@ async def list_sessions(
 
 @router.post("/sessions/messages")
 async def get_session_messages(
+    request: Request,
     body: SessionMessagesRequest,
     svc: AppService = Depends(get_app_service),
 ) -> list[MessageItem]:
     """获取会话消息历史。
 
-    先验证会话存在，再返回消息列表。
-    不存在的 session_id 返回 404。
+    先验证会话存在且属于当前用户，再返回消息列表。
+    不存在的 session_id 或无权访问返回 404。
 
     Args:
+        request: FastAPI 请求（从中提取 user_id）
         body: 会话消息请求体，含 session_id
         svc: 应用服务实例（由 FastAPI 注入）
 
@@ -70,11 +75,14 @@ async def get_session_messages(
         list[MessageItem]: 消息列表
 
     Raises:
-        BusinessError: 会话不存在时返回 404
+        BusinessError: 会话不存在或无权访问时返回 404
     """
+    user_id = getattr(request.state, "user_id", "")
     session_id = body.session_id
     session = await svc.get_session_by_id(session_id)
     if not session:
+        raise BusinessError(Code.SESSION_NOT_FOUND, Code.SESSION_NOT_FOUND_MSG, 404)
+    if session.get("user_id") and session["user_id"] != user_id:
         raise BusinessError(Code.SESSION_NOT_FOUND, Code.SESSION_NOT_FOUND_MSG, 404)
 
     messages = await svc.get_messages(session_id)
@@ -95,6 +103,7 @@ async def get_session_messages(
 
 @router.post("/sessions/delete")
 async def delete_session(
+    request: Request,
     body: SessionDeleteRequest,
     svc: AppService = Depends(get_app_service),
 ) -> SessionDeleteResponse:
@@ -107,6 +116,7 @@ async def delete_session(
     事务保证 MySQL 操作的原子性。
 
     Args:
+        request: FastAPI 请求（从中提取 user_id）
         body: 会话删除请求体，含 session_id
         svc: 应用服务实例（由 FastAPI 注入）
 
@@ -114,14 +124,22 @@ async def delete_session(
         SessionDeleteResponse: 删除结果
 
     Raises:
-        BusinessError: 会话不存在时返回 404
+        BusinessError: 会话不存在或无权访问时返回 404
     """
+    user_id = getattr(request.state, "user_id", "")
     session_id = body.session_id
+
+    # 验证所有权
+    session = await svc.get_session_by_id(session_id)
+    if not session:
+        raise BusinessError(Code.SESSION_NOT_FOUND, Code.SESSION_NOT_FOUND_MSG, 404)
+    if session.get("user_id") and session["user_id"] != user_id:
+        raise BusinessError(Code.SESSION_NOT_FOUND, Code.SESSION_NOT_FOUND_MSG, 404)
 
     # 清理 Redis + 删除 MySQL 记录
     ok = await svc.delete_session_and_messages(session_id)
     if not ok:
         raise BusinessError(Code.SESSION_NOT_FOUND, Code.SESSION_NOT_FOUND_MSG, 404)
 
-    logger.info("Deleted session: {}", session_id)
+    logger.info("Deleted session: {} (user={})", session_id, user_id)
     return SessionDeleteResponse(success=True)

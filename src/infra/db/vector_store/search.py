@@ -21,6 +21,13 @@ def similarity_search(collection, embed_fn, kb_id, query, k=5) -> list[ChunkResu
     Returns:
         检索结果列表，按相关性降序排列（距离越小越相关）
     """
+    col_count = -1
+    try:
+        col_count = collection.count()
+        logger.info("[DIAG] similarity_search: kb_id={} collection_name={} collection_count={} k={}", kb_id, collection.name, col_count, min(k, 100))
+    except Exception:
+        pass
+
     query_vec = embed_fn.embed_query(query)
     results = collection.query(
         query_embeddings=[query_vec],
@@ -47,6 +54,8 @@ def similarity_search(collection, embed_fn, kb_id, query, k=5) -> list[ChunkResu
         len(formatted),
         EMBEDDING_MODEL,
     )
+    if not formatted:
+        logger.info("[DIAG] ChromaDB search returned 0 results! kb_id={} collection_count={} query_len={}", kb_id, col_count, len(query))
     logger.debug(
         "[CHROMA] method=similarity_search | kb_id={} | rows={} | data={}",
         kb_id,

@@ -11,16 +11,19 @@ import time
 from typing import AsyncGenerator
 
 from loguru import logger
+from langgraph.graph.state import CompiledStateGraph
 
 from src.utils.sse import sse_status, sse_token, sse_citation, sse_done, sse_error
 from src.agents.graph.workflow import build_graph
-from src.agents.graph.state import make_initial_state, AgentState
+from src.agents.graph.state import AgentState
+from src.rag.context import RAGContext
 from src.infra.db.vector_store import VectorStore
 from src.infra.search.bm25_index import BM25Index
 from src.infra.llm.langfuse_tracing import LangfuseTracer
 from src.infra.llm.prompt_manager import PromptManager
 from src.chat.manager import ChatManager
 from src.infra.llm.trace_context import current_trace_id
+from src.config.const import LangGraph, SSE_STATUS
 
 
 class AgentService:
@@ -45,7 +48,7 @@ class AgentService:
         self._prompt_manager = prompt_manager or PromptManager()
         self._tracer = LangfuseTracer()
 
-        self._graph = build_graph(
+        self._graph: CompiledStateGraph = build_graph(
             vector_store,
             bm25,
             self._llm,
@@ -63,7 +66,7 @@ class AgentService:
     ) -> AsyncGenerator[str, None]:
         """执行图并流式返回 SSE 事件。"""
         trace_id = current_trace_id.get()
-        tracer_trace_id = self._tracer.start_trace(
+        self._tracer.start_trace(
             "chat_stream_agent",
             {"kb_id": kb_id, "session_id": session_id, "query": query},
             session_id=session_id,
@@ -72,50 +75,45 @@ class AgentService:
         history = await self._chat_manager.get_history_async(session_id) or []
         await self._chat_manager.add_message_async(session_id, "user", query)
 
-        initial_state: AgentState = make_initial_state(session_id, kb_id, query, trace_id, history)
+        initial_state = AgentState.make_initial_state(session_id, kb_id, query, trace_id, history)
 
         full_answer = ""
 
         try:
             t0 = time.perf_counter()
-            contexts: list[dict] = []
+            contexts: list[RAGContext] = []
             downgraded = False
             downgrade_reason = ""
 
             async for event in self._graph.astream_events(
                 initial_state,
-                version="v2",
+                version=LangGraph.VERSION,
             ):
                 kind = event.get("event", "")
                 name = event.get("name", "")
 
-                if kind == "on_chain_start":
-                    if "classify" in name:
-                        yield sse_status("classifying", "正在分析查询类型...")
-                    elif "rewrite" in name:
-                        yield sse_status("rewriting", "正在优化查询...")
-                    elif "retrieve" in name or "retrieval" in name:
-                        yield sse_status("retrieving", "正在检索相关文档...")
-                    elif "rerank" in name:
-                        yield sse_status("reranking", "正在精排结果...")
-                    elif "generate" in name:
-                        yield sse_status("generating", "正在生成回答...")
+                match kind:
+                    case LangGraph.CHAIN_START:
+                        for node, message in SSE_STATUS.items():
+                            if node in name:
+                                yield sse_status(node, message)
+                                break
 
-                elif kind == "on_chat_model_stream":
-                    chunk = event.get("data", {}).get("chunk", {})
-                    content = getattr(chunk, "content", "") or ""
-                    if content:
-                        full_answer += content
-                        yield sse_token(content)
+                    case LangGraph.CHAT_MODEL_STREAM:
+                        chunk = event.get("data", {}).get("chunk", {})
+                        content = getattr(chunk, "content", "") or ""
+                        if content:
+                            full_answer += content
+                            yield sse_token(content)
 
-                elif kind == "on_chain_end":
-                    output = event.get("data", {}).get("output", {})
-                    if "rerank" in name and isinstance(output, dict):
-                        contexts = output.get("contexts", contexts)
-                    elif "grader" in name and isinstance(output, dict):
-                        if output.get("downgraded"):
-                            downgraded = True
-                            downgrade_reason = output.get("downgrade_reason", "")
+                    case LangGraph.CHAIN_END:
+                        output = event.get("data", {}).get("output", {})
+                        if LangGraph.NODE_RERANK in name and isinstance(output, dict):
+                            contexts = output.get("contexts", contexts)
+                        elif LangGraph.NODE_GRADER in name and isinstance(output, dict):
+                            if output.get("downgraded"):
+                                downgraded = True
+                                downgrade_reason = output.get("downgrade_reason", "")
 
             # 从流式事件中已收集了 contexts / downgraded，不再需要 ainvoke
             seen = set()
@@ -151,5 +149,5 @@ class AgentService:
             logger.exception("[{}] AgentService stream_chat failed: {}", trace_id, e)
             yield sse_error(f"暂时无法回答：{str(e)[:100]}")
         finally:
-            self._tracer.end_trace(tracer_trace_id)
+            self._tracer.end_trace()
             yield sse_done()
