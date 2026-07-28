@@ -7,7 +7,7 @@
 import numpy as np
 from loguru import logger
 
-from src.infra.db.entities.kb import KbListItem
+from src.infra.db.models.kb import KbModel as KbListItem
 
 
 # 语义路由相似度阈值：低于此值触发 LLM 兜底

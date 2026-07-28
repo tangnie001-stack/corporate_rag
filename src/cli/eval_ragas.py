@@ -508,7 +508,7 @@ def _save_eval_report(
     """
     try:
         from src.services.app_service import AppService
-        from src.infra.db.entities.eval_report import EvalReportEntity
+        from src.infra.db.models.eval_report import EvalReportModel as EvalReportEntity
 
         svc = AppService()
 

@@ -15,7 +15,7 @@ from src.infra.chunking.strategies.base import BaseChunker
 from src.infra.chunking.validator import ChunkData, validate_chunks
 from src.infra.db.file_store import FileStore
 from src.infra.db.mysql_db import DocumentRepo
-from src.infra.db.entities import DocEntity
+from src.infra.db.models.document import DocModel as DocEntity
 from src.infra.db.vector_store import VectorStore
 from src.parsers.router import DocRouter
 from src.utils.errors import BusinessError

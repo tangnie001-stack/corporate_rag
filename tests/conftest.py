@@ -1,13 +1,14 @@
 """测试共享 fixture 和配置。
 
 提供：
-  - AppService / MySQLDB / VectorStore 实例
+  - AppService / VectorStore 实例
   - 测试知识库生命周期（创建 / 销毁）
   - 测试文档路径和数据库验证辅助函数
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 from typing import Generator
@@ -16,7 +17,6 @@ import pytest
 from loguru import logger
 
 from src.services.app_service import AppService
-from src.infra.db.mysql_db import MySQLDB
 from src.infra.db.vector_store import VectorStore
 
 # ==================== 路径常量 ====================
@@ -35,10 +35,10 @@ def service() -> Generator[AppService, None, None]:
 
 
 @pytest.fixture(scope="session")
-def mysql_db() -> Generator[MySQLDB, None, None]:
-    """提供 MySQLDB 实例，用于直接查询 MySQL 验证数据一致性。"""
-    db = MySQLDB()
-    yield db
+def mysql_db():
+    """提供 AppService 实例，用于直接查询 MySQL 验证数据一致性。"""
+    svc = AppService()
+    yield svc._kb_repo
 
 
 @pytest.fixture(scope="session")
@@ -72,11 +72,17 @@ def _cleanup_kb(name: str) -> None:
     """根据知识库名称删除对应的数据库和向量数据。"""
     try:
         svc = AppService()
-        kb_id = svc.db.get_kb_by_name(name)
-        if kb_id:
-            svc.db.delete_kb(kb_id)
-            svc.vector_store.delete_collection(kb_id)
-            logger.info("Cleaned up test KB: {} ({})", name, kb_id)
+
+        async def _do_cleanup():
+            all_kbs = await svc._kb_repo.get_all_kb()
+            for kb in all_kbs:
+                if kb.name == name:
+                    await svc._kb_repo.delete_kb(kb.id)
+                    svc.vector_store.delete_collection(kb.id)
+                    logger.info("Cleaned up test KB: {} ({})", name, kb.id)
+                    return
+
+        asyncio.run(_do_cleanup())
     except Exception:
         logger.exception("Failed to cleanup test KB: {}", name)
 

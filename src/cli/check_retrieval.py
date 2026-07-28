@@ -16,19 +16,21 @@
 """
 
 import argparse
+import asyncio
 import sys
 
 from loguru import logger
 
 from src.core.logging import setup_logging
-from src.infra.db.mysql_db import MySQLDB
+from src.infra.db.engine import session_factory
+from src.infra.db.mysql_db import KbRepo
 from src.infra.db.vector_store import VectorStore
 from src.config import TOP_K_RERANK
 
 setup_logging(configure_trace_id=True)
 
 
-def main() -> None:
+async def main() -> None:
     """CLI 入口 — 解析参数、执行检索、打印结果。"""
     parser = argparse.ArgumentParser(description="Retrieval quality checker")
     parser.add_argument("--kb", required=True, help="Knowledge base name")
@@ -43,14 +45,19 @@ def main() -> None:
 
     # ====== Step 1: 通过知识库名称查找 kb_id ======
     logger.info("Looking up knowledge base: {}", args.kb)
-    with MySQLDB() as db:
-        kb_id = db.get_kb_by_name(args.kb)
-        if not kb_id:
-            logger.error("Error: Knowledge base '{}' not found.", args.kb)
-            print("Available KBs:")
-            for kid, name in db.get_all_kb():
-                print(f"  - {name} ({kid})")
-            sys.exit(1)
+    repo = KbRepo(session_factory)
+    all_kbs = await repo.get_all_kb()
+    kb_id = None
+    for kb in all_kbs:
+        if kb.name == args.kb:
+            kb_id = kb.id
+            break
+    if not kb_id:
+        logger.error("Error: Knowledge base '{}' not found.", args.kb)
+        print("Available KBs:")
+        for kb in all_kbs:
+            print(f"  - {kb.name} ({kb.id})")
+        sys.exit(1)
 
     # ====== Step 2: 在 ChromaDB 中执行语义检索 ======
     logger.info("Searching for: '{}' (top-k={})", args.query, args.top_k)
@@ -93,4 +100,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

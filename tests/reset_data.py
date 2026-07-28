@@ -19,26 +19,21 @@ from loguru import logger
 
 from src.services.app_service import AppService
 from src.config import CHROMA_PERSIST_DIR, REDIS_URL
-from src.infra.db.mysql_db import MySQLDB
+from src.infra.db.engine import engine
 
 
-def reset_mysql(db: MySQLDB) -> None:
+def reset_mysql() -> None:
     """清空 MySQL 所有业务表（knowledge_base、document、conversation_history）。
 
     使用 TRUNCATE + 临时关闭外键检查，避免 CASCADE 约束报错。
-
-    Args:
-        db: MySQLDB 实例（需已连接）
     """
-    with db._lock:  # noqa: SLF001
-        db._ensure_connection()
-        with db.conn.cursor() as cursor:
-            cursor.execute("SET FOREIGN_KEY_CHECKS = 0")
-            cursor.execute("TRUNCATE TABLE conversation_history")
-            cursor.execute("TRUNCATE TABLE document")
-            cursor.execute("TRUNCATE TABLE knowledge_base")
-            cursor.execute("SET FOREIGN_KEY_CHECKS = 1")
-        db.conn.commit()
+    with engine.connect() as conn:
+        conn.execute("SET FOREIGN_KEY_CHECKS = 0")
+        conn.execute("TRUNCATE TABLE conversation_history")
+        conn.execute("TRUNCATE TABLE document")
+        conn.execute("TRUNCATE TABLE knowledge_base")
+        conn.execute("SET FOREIGN_KEY_CHECKS = 1")
+        conn.commit()
     logger.info("MySQL: 已清空所有业务表")
 
 
@@ -74,31 +69,19 @@ def reset_redis() -> None:
 
 
 def reset_all(
-    db: Optional[MySQLDB] = None, service: Optional[AppService] = None
+    service: Optional[AppService] = None,
 ) -> None:
     """一键重置全部数据存储（MySQL + ChromaDB + Redis）。
 
-    优先使用传入的已有实例（避免重复创建连接）：
-    - 不传 db 时自动创建新的 MySQLDB（使用后关闭）
-    - 不传 service 时自动通过其 chat_manager 清 Redis
-    - db 和 service 都不传时，Redis 走独立连接（轻量）
-    传入实例时不会自动关闭，由调用方自行管理生命周期。
-
     Args:
-        db: 已有的 MySQLDB 实例（可选）
         service: 已有的 AppService 实例（可选，用于通过其 chat_manager 清 Redis）
+    Raises:
+        RuntimeError: MySQL 连接失败
     """
     logger.info("========== 开始重置所有数据 ==========")
 
     # MySQL
-    own_db = db is None
-    if own_db:
-        db = MySQLDB()
-    try:
-        reset_mysql(db)
-    finally:
-        if own_db:
-            db.close()  # type: ignore[union-attr]
+    reset_mysql()
 
     # ChromaDB（直接删目录，不和客户端交互）
     reset_vector_store()

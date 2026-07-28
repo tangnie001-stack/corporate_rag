@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import AsyncMock, patch
 
 from src.services.auth_service import AuthService
-from src.infra.db.entities import UserEntity
+from src.infra.db.models.user import UserModel as UserEntity
 from src.utils.errors import BusinessError
 
 

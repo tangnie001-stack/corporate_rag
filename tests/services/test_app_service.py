@@ -5,7 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.services.app_service import AppService
 from src.utils.errors import AppError
-from src.infra.db.entities import DocEntity, KbListItem
+from src.infra.db.models.document import DocModel as DocEntity
+from src.infra.db.models.kb import KbModel as KbListItem
 
 
 # ==================== Init ====================

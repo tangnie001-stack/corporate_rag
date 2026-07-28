@@ -39,14 +39,15 @@ def make_kb_router_node(embed_fn, llm) -> Callable:
 
         # kb_id 为空 → 路由
         from src.infra.llm.trace_context import current_user_id
-        from src.infra.db.mysql_db import KbRepo, MySQLDB
+        from src.infra.db.mysql_db import KbRepo
+        from src.infra.db.engine import session_factory
 
         uid = current_user_id.get()
         if not uid:
             logger.info("kb_router_node: no user_id, fallback to all")
             return {"_resolved_kb_ids": None}
 
-        kbs = await KbRepo(MySQLDB()).get_all_kb(uid)
+        kbs = await KbRepo(session_factory).get_all_kb(uid)
         kb_ids = router.route(state.query, kbs)
         logger.info(
             "kb_router_node: query={} kb_count={} routed={}",

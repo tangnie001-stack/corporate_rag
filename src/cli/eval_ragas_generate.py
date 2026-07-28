@@ -177,15 +177,17 @@ def run_generate(
     """
     _ensure_vertexai_stub()
 
-    from src.infra.db.mysql_db import MySQLDB
+    from src.infra.db.engine import session_factory
+    from src.infra.db.mysql_db import KbRepo, DocumentRepo
 
     # ---- 0. 从 MySQL 查询 kb_name 和 doc_names ----
     async def _query_meta() -> tuple[str, dict[str, str]]:
-        db = MySQLDB()
-        name = await db.get_kb_name_by_id(kb_id)
+        repo = KbRepo(session_factory)
+        name = await repo.get_kb_name_by_id(kb_id)
         if not name:
             raise ValueError(f"知识库 {kb_id} 不存在")
-        doc_names = await db.get_doc_names(RAGAS_DOC_WHITELIST)
+        doc_repo = DocumentRepo(session_factory)
+        doc_names = await doc_repo.get_doc_names(RAGAS_DOC_WHITELIST)
         return name, doc_names
 
     try:
