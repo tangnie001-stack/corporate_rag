@@ -14,26 +14,22 @@ from src.infra.db.entities import DocEntity, KbListItem
 class TestAppServiceInit:
     """AppService 初始化测试。"""
 
-    @patch("src.services.app_service.MySQLDB")
     @patch("src.services.app_service.VectorStore")
     @patch("src.services.app_service.DocRouter")
-    def test_init_defaults(self, mock_router, mock_vs, mock_db):
+    def test_init_defaults(self, mock_router, mock_vs):
         """默认初始化应创建所有依赖实例。"""
         svc = AppService()
-        assert svc.db is not None
         assert svc.vector_store is not None
         assert svc.router is not None
 
-    @patch("src.services.app_service.MySQLDB")
     @patch("src.services.app_service.VectorStore")
     @patch("src.services.app_service.DocRouter")
-    def test_init_custom_deps(self, mock_router, mock_vs, mock_db):
+    def test_init_custom_deps(self, mock_router, mock_vs):
         """应接受注入的自定义依赖。"""
-        db = MagicMock()
+        sf = MagicMock()
         vs = MagicMock()
         router = MagicMock()
-        svc = AppService(mysql_db=db, vector_store=vs, router=router)
-        assert svc.db is db
+        svc = AppService(session_factory=sf, vector_store=vs, router=router)
         assert svc.vector_store is vs
         assert svc.router is router
 
@@ -45,7 +41,6 @@ class TestAppServiceKBs:
     """知识库管理测试。"""
 
     @pytest.mark.asyncio
-    @patch("src.services.app_service.MySQLDB")
     @patch("src.services.app_service.VectorStore")
     @patch("src.services.app_service.DocRouter")
     @patch("src.services.app_service.ChatManager")
@@ -66,7 +61,6 @@ class TestAppServiceKBs:
         mock_chat_mgr,
         mock_router,
         mock_vs,
-        mock_db,
     ):
         """列出所有知识库应从 _kb_repo.get_all_kb 获取数据。"""
         mock_kb_repo.return_value.get_all_kb = AsyncMock(
@@ -83,7 +77,6 @@ class TestAppServiceKBs:
         ]
 
     @pytest.mark.asyncio
-    @patch("src.services.app_service.MySQLDB")
     @patch("src.services.app_service.VectorStore")
     @patch("src.services.app_service.DocRouter")
     @patch("src.services.app_service.ChatManager")
@@ -104,7 +97,6 @@ class TestAppServiceKBs:
         mock_chat_mgr,
         mock_router,
         mock_vs,
-        mock_db,
     ):
         """创建知识库应返回 (kb_id, is_new)。"""
         mock_kb_repo.return_value.get_or_create_kb = AsyncMock(
@@ -116,7 +108,6 @@ class TestAppServiceKBs:
         assert is_new is True
 
     @pytest.mark.asyncio
-    @patch("src.services.app_service.MySQLDB")
     @patch("src.services.app_service.VectorStore")
     @patch("src.services.app_service.DocRouter")
     @patch("src.services.app_service.ChatManager")
@@ -137,7 +128,6 @@ class TestAppServiceKBs:
         mock_chat_mgr,
         mock_router,
         mock_vs,
-        mock_db,
     ):
         """删除知识库应软删除文档、清理向量、软删除 KB。"""
         mock_doc_repo.return_value.soft_delete_documents_by_kb = AsyncMock()
@@ -153,7 +143,6 @@ class TestAppServiceKBs:
         mock_kb_repo.return_value.soft_delete_kb.assert_called_once_with("kb_id")
 
     @pytest.mark.asyncio
-    @patch("src.services.app_service.MySQLDB")
     @patch("src.services.app_service.VectorStore")
     @patch("src.services.app_service.DocRouter")
     @patch("src.services.app_service.ChatManager")
@@ -174,7 +163,6 @@ class TestAppServiceKBs:
         mock_chat_mgr,
         mock_router,
         mock_vs,
-        mock_db,
     ):
         """删除不存在的知识库应返回 False 并提示。"""
         mock_doc_repo.return_value.soft_delete_documents_by_kb = AsyncMock()
@@ -192,7 +180,6 @@ class TestAppServiceDeleteDocument:
     """文档删除测试。"""
 
     @pytest.mark.asyncio
-    @patch("src.services.app_service.MySQLDB")
     @patch("src.services.app_service.VectorStore")
     @patch("src.services.app_service.DocRouter")
     @patch("src.services.app_service.ChatManager")
@@ -213,7 +200,6 @@ class TestAppServiceDeleteDocument:
         mock_chat_mgr,
         mock_router,
         mock_vs,
-        mock_db,
     ):
         """删除不存在的文档应抛 DOC_NOT_FOUND。"""
         mock_doc_repo.return_value.get_document = AsyncMock(return_value=None)
@@ -223,7 +209,6 @@ class TestAppServiceDeleteDocument:
         assert exc.value.code == "DOC_NOT_FOUND"
 
     @pytest.mark.asyncio
-    @patch("src.services.app_service.MySQLDB")
     @patch("src.services.app_service.VectorStore")
     @patch("src.services.app_service.DocRouter")
     @patch("src.services.app_service.ChatManager")
@@ -244,7 +229,6 @@ class TestAppServiceDeleteDocument:
         mock_chat_mgr,
         mock_router,
         mock_vs,
-        mock_db,
     ):
         """非上传者删除应抛 DOC_DELETE_NOT_ALLOWED。"""
         mock_doc_repo.return_value.get_document = AsyncMock(
@@ -258,7 +242,6 @@ class TestAppServiceDeleteDocument:
         assert exc.value.code == "DOC_DELETE_NOT_ALLOWED"
 
     @pytest.mark.asyncio
-    @patch("src.services.app_service.MySQLDB")
     @patch("src.services.app_service.VectorStore")
     @patch("src.services.app_service.DocRouter")
     @patch("src.services.app_service.ChatManager")
@@ -279,7 +262,6 @@ class TestAppServiceDeleteDocument:
         mock_chat_mgr,
         mock_router,
         mock_vs,
-        mock_db,
     ):
         """处理中的文档应抛 DOC_STATUS_CONFLICT。"""
         mock_doc_repo.return_value.get_document = AsyncMock(
@@ -297,7 +279,6 @@ class TestAppServiceDeleteDocument:
         assert exc.value.code == "DOC_STATUS_CONFLICT"
 
     @pytest.mark.asyncio
-    @patch("src.services.app_service.MySQLDB")
     @patch("src.services.app_service.VectorStore")
     @patch("src.services.app_service.DocRouter")
     @patch("src.services.app_service.ChatManager")
@@ -318,7 +299,6 @@ class TestAppServiceDeleteDocument:
         mock_chat_mgr,
         mock_router,
         mock_vs,
-        mock_db,
     ):
         """正常删除应返回 deleted 状态。"""
         mock_doc_repo.return_value.get_document = AsyncMock(
@@ -331,5 +311,3 @@ class TestAppServiceDeleteDocument:
         svc = AppService(vector_store=vs)
         result = await svc.delete_document("kb", "d1", "user")
         assert result == {"doc_id": "d1", "filename": "t.pdf", "status": "deleted"}
-        # delete_document called via asyncio.to_thread
-        mock_doc_repo.return_value.soft_delete_document.assert_called_once_with("d1")

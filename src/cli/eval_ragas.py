@@ -584,7 +584,7 @@ async def _list_knowledge_bases() -> None:
     svc = AppService()
 
     # 获取所有知识库（含 doc_count）
-    kbs = await svc.db.get_all_kb(RAGAS_USER_ID)
+    kbs = await svc._kb_repo.get_all_kb(RAGAS_USER_ID)
     if not kbs:
         print("No knowledge bases found.")
         return

@@ -6,7 +6,6 @@ from typing import Optional
 from loguru import logger
 
 from src.infra.db.mysql_db import ChatRepo
-from src.infra.db.entities.chat import SessionEntity, MessageEntity
 
 
 class PersistenceService:
@@ -31,11 +30,10 @@ class PersistenceService:
             user_id: 所属用户 ID
         """
         try:
-            session = SessionEntity(
-                id=session_id,
-                user_id=user_id,
-                title=title,
-                kb_id=kb_id,
+            from src.infra.db.models.chat import SessionModel
+
+            session = SessionModel(
+                id=session_id, user_id=user_id, title=title, kb_id=kb_id
             )
             await self._chat_repo.create_session(session)
         except Exception as e:
@@ -51,17 +49,16 @@ class PersistenceService:
     ) -> None:
         """异步写入 user + assistant 消息。"""
         try:
+            from src.infra.db.models.chat import MessageModel
+
             await self._chat_repo.save_message(
-                MessageEntity(
-                    session_id=session_id,
-                    kb_id=kb_id,
-                    role="user",
-                    content=user_msg,
+                MessageModel(
+                    session_id=session_id, kb_id=kb_id, role="user", content=user_msg
                 )
             )
             sources_json = json.dumps(sources, ensure_ascii=False) if sources else None
             await self._chat_repo.save_message(
-                MessageEntity(
+                MessageModel(
                     session_id=session_id,
                     kb_id=kb_id,
                     role="assistant",

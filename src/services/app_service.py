@@ -10,15 +10,13 @@ from typing import Optional
 from loguru import logger
 
 from src.infra.db.mysql_db import (
-    MySQLDB,
     KbRepo,
     DocumentRepo,
     ChatRepo,
     UserRepo,
     EvalRepo,
 )
-from src.infra.db.entities import EvalReportEntity
-from src.infra.db.entities.search import ChunkQueryResult
+from src.infra.db.vector_store.types import ChunkQueryResult
 from src.infra.db.vector_store import VectorStore
 from src.parsers.router import DocRouter
 from src.chat.manager import ChatManager
@@ -35,13 +33,16 @@ class AppService:
 
     def __init__(
         self,
-        mysql_db: Optional[MySQLDB] = None,
+        session_factory=None,
         vector_store: Optional[VectorStore] = None,
         router: Optional[DocRouter] = None,
         chat_manager: Optional[ChatManager] = None,
         agent_service: Optional[AgentService] = None,
     ) -> None:
-        self.db = mysql_db or MySQLDB()
+        if session_factory is None:
+            from src.infra.db.engine import session_factory as _sf
+
+            session_factory = _sf
         self.vector_store = vector_store or VectorStore()
         self.router = router or DocRouter()
         self.chat_manager = chat_manager or ChatManager()
@@ -50,11 +51,11 @@ class AppService:
         )
 
         # Create repos from pool
-        self._kb_repo = KbRepo(self.db)
-        self._doc_repo = DocumentRepo(self.db)
-        self._chat_repo = ChatRepo(self.db)
-        self._user_repo = UserRepo(self.db)
-        self._eval_repo = EvalRepo(self.db)
+        self._kb_repo = KbRepo(session_factory)
+        self._doc_repo = DocumentRepo(session_factory)
+        self._chat_repo = ChatRepo(session_factory)
+        self._user_repo = UserRepo(session_factory)
+        self._eval_repo = EvalRepo(session_factory)
 
         self.agent_service = agent_service or AgentService(
             vector_store=self.vector_store,
@@ -246,7 +247,7 @@ class AppService:
             "eval_date": report.eval_date,
         }
 
-    async def insert_eval_report(self, report: EvalReportEntity) -> None:
+    async def insert_eval_report(self, report) -> None:
         """插入 RAGAS 评估报告。"""
         await self._eval_repo.insert_report(report)
 

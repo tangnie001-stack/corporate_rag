@@ -23,7 +23,6 @@ from src.config.response_codes import Code
 from src.middleware.auth import auth_middleware
 from src.middleware.response_processor import response_processor_middleware
 from src.middleware.trace_id import trace_id_middleware
-from src.infra.db.mysql_db import MySQLDB
 from src.utils.errors import AppError
 
 
@@ -31,17 +30,9 @@ from src.utils.errors import AppError
 async def lifespan(app: FastAPI):
     """应用生命周期处理器 — 启动/关闭。
 
-    在应用启动时初始化数据库表，关闭时记录日志。
-    使用 @asynccontextmanager 包装，FastAPI 会在启动和关闭时自动调用。
-
-    Yields:
-        None: 应用运行期间的上下文标记
+    数据库迁移通过 docker compose exec app alembic upgrade head 手动执行。
     """
     logger.info("财务问答 API 正在启动")
-    # 初始化数据库表（幂等操作，每次启动都可安全调用）
-    db = MySQLDB()
-    await db.init_db()
-    await db.close()
     yield
     logger.info("财务问答 API 正在关闭")
 
