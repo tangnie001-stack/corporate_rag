@@ -36,7 +36,7 @@ CONFIG_BAK = CONFIG_DIR / "config.yaml.bak"
 
 PROXY_URL = "http://localhost:4000"
 POLL_INTERVAL = 2
-PROXY_STARTUP_TIMEOUT = 30
+PROXY_STARTUP_TIMEOUT = 60
 REQUEST_TIMEOUT = 60
 
 # 运行时由 main() 赋值
@@ -86,7 +86,12 @@ def _wait_for_proxy(timeout: int = PROXY_STARTUP_TIMEOUT) -> None:
             if resp.status_code == 200:
                 print("   ✅ Proxy 就绪")
                 return
-        except (httpx.ConnectError, httpx.TimeoutException):
+        except (
+            httpx.ConnectError,
+            httpx.TimeoutException,
+            httpx.ReadError,
+            httpx.RemoteProtocolError,
+        ):
             pass
         time.sleep(POLL_INTERVAL)
     print(f"❌ Proxy 在 {timeout}s 内未就绪，退出")
@@ -138,6 +143,19 @@ def _check_env() -> None:
         _restart_proxy()
 
 
+def _get_model_id(resp: httpx.Response) -> str:
+    """从响应体获取实际使用的模型名称。
+
+    LiteLLM 在响应体的 model 字段中返回模型名称（如 qwen3.7-max），
+    响应头 x-litellm-model-id 返回的是部署 hash，不可用于判断。
+    """
+    try:
+        body = resp.json()
+        return body.get("model", "")
+    except Exception:
+        return ""
+
+
 def _run_case_normal(label: str) -> dict:
     """运行正常路径测试，返回结果字典。"""
     print(f"\n{'=' * 50}")
@@ -148,7 +166,7 @@ def _run_case_normal(label: str) -> dict:
     resp = _chat_completion("qwen3.7-max")
     elapsed = time.time() - t0
 
-    model_id = resp.headers.get("x-litellm-model-id", "")
+    model_id = _get_model_id(resp)
     status = resp.status_code
     passed = status == 200 and model_id == "qwen3.7-max"
 
@@ -180,7 +198,7 @@ def _run_case_fallback() -> dict:
     resp = _chat_completion("qwen3.7-max")
     elapsed = time.time() - t0
 
-    model_id = resp.headers.get("x-litellm-model-id", "")
+    model_id = _get_model_id(resp)
     status = resp.status_code
     passed = status == 200 and model_id == "deepseek-v4-flash"
 

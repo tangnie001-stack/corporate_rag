@@ -203,6 +203,8 @@ services:
 
   litellm-proxy:
     image: docker.litellm.ai/berriai/litellm:main-stable
+    mem_limit: 768m
+    mem_reservation: 512m
     ports:
       - "4000:4000"
     volumes:
@@ -212,6 +214,7 @@ services:
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:?err}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
       LITELLM_LOG: WARNING
+      LITELLM_LOCAL_MODEL_COST_MAP: "True"
     command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "1"]
     restart: unless-stopped
     networks:
