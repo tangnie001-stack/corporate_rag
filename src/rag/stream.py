@@ -32,6 +32,14 @@ def stream_answer(
     """流式生成 LLM 回答，支持指数退避重试。
 
     trace 通过 current_tracer ContextVar 自动读取（由 traced 装饰器设值）。
+
+    Args:
+        messages: 消息列表
+        llm: LangChain LLM 实例
+        trace_id: 追踪 ID
+
+    Yields:
+        LLM 生成的文本片段
     """
     tracer = current_tracer.get()
     gen_id = None

@@ -14,7 +14,13 @@ from loguru import logger
 from langgraph.graph.state import CompiledStateGraph
 
 from src.utils.sse import (
-    SSEEvent, SSEStatusEvent, SSETokenEvent, SSECitationEvent, SSEErrorEvent, SSEDoneEvent,
+    SSEEvent,
+    SSEStatusEvent,
+    SSETokenEvent,
+    SSECitationEvent,
+    SSEErrorEvent,
+    SSEDoneEvent,
+    SSEModelInfoEvent,
 )
 from src.agents.graph.workflow import build_graph
 from src.agents.graph.state import AgentState
@@ -24,7 +30,13 @@ from src.infra.search.bm25_index import BM25Index
 from src.infra.llm.langfuse_tracing import LangfuseTracer, traced
 from src.infra.llm.prompt_manager import PromptManager
 from src.chat.manager import ChatManager
-from src.config.const import LangGraphEvent, LangGraphKey, LangGraphNode, LangGraph, SSE_STATUS
+from src.config.const import (
+    LangGraphEvent,
+    LangGraphKey,
+    LangGraphNode,
+    LangGraph,
+    SSE_STATUS,
+)
 
 
 class AgentService:
@@ -74,6 +86,8 @@ class AgentService:
         initial_state = AgentState.make_initial_state(session_id, kb_id, query, history)
 
         full_answer = ""
+        model_used = ""
+        is_fallback = False
 
         try:
             t0 = time.perf_counter()
@@ -103,13 +117,23 @@ class AgentService:
                             yield SSETokenEvent(content)
 
                     case LangGraphEvent.CHAIN_END:
-                        output = event.get(LangGraphKey.DATA, {}).get(LangGraphKey.OUTPUT)
-                        if LangGraphNode.Rerank.NAME in name and isinstance(output, dict):
-                            contexts = output.get(LangGraphNode.Rerank.CONTEXTS, contexts)
-                        elif LangGraphNode.Grader.NAME in name and isinstance(output, dict):
-                            if output.get(LangGraphNode.Grader.DOWNGRADED):
-                                downgraded = True
-                                downgrade_reason = output.get(LangGraphNode.Grader.DOWNGRADE_REASON, "")
+                        output = event.get(LangGraphKey.DATA, {}).get(
+                            LangGraphKey.OUTPUT
+                        )
+                        if isinstance(output, dict):
+                            if LangGraphNode.Rerank.NAME in name:
+                                contexts = output.get(
+                                    LangGraphNode.Rerank.CONTEXTS, contexts
+                                )
+                            elif LangGraphNode.Grader.NAME in name:
+                                if output.get(LangGraphNode.Grader.DOWNGRADED):
+                                    downgraded = True
+                                    downgrade_reason = output.get(
+                                        LangGraphNode.Grader.DOWNGRADE_REASON, ""
+                                    )
+                            elif LangGraphNode.Generate.NAME in name:
+                                model_used = output.get("model_used", model_used)
+                                is_fallback = output.get("is_fallback", is_fallback)
 
             # 从流式事件中已收集了 contexts / downgraded，不再需要 ainvoke
             seen = set()
@@ -129,6 +153,12 @@ class AgentService:
                 await self._chat_manager.add_message_async(
                     session_id, "assistant", full_answer
                 )
+
+            # 模型信息（含 fallback 状态）
+            yield SSEModelInfoEvent(
+                model=model_used or "",
+                is_fallback=is_fallback,
+            )
 
             t1 = time.perf_counter()
             logger.info(

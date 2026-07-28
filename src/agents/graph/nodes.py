@@ -15,7 +15,7 @@ from src.rag.prompt import build_prompt, build_simple_prompt, format_context
 from src.agents.grader import RetrievalGrader
 from src.agents.graph.state import AgentState, RAGQueryIntent
 from src.config.const import LangGraphNode
-from src.config import TOP_K_RETRIEVAL
+from src.config import TOP_K_RETRIEVAL, LLM_MODEL
 
 
 def _tid(state: AgentState) -> str:
@@ -50,7 +50,9 @@ def make_kb_router_node(embed_fn, llm) -> Callable:
         kb_ids = router.route(state.query, kbs)
         logger.info(
             "kb_router_node: query={} kb_count={} routed={}",
-            state.query[:40], len(kbs), kb_ids,
+            state.query[:40],
+            len(kbs),
+            kb_ids,
         )
         return {"_resolved_kb_ids": kb_ids if kb_ids else None}
 
@@ -111,7 +113,9 @@ def make_retrieve_node(vector_store, bm25) -> Callable:
         if isinstance(resolved_ids, list) and len(resolved_ids) > 1:
             results = await asyncio.to_thread(
                 vector_store.similarity_search_multi,
-                resolved_ids, q, TOP_K_RETRIEVAL,
+                resolved_ids,
+                q,
+                TOP_K_RETRIEVAL,
             )
         else:
             results = await search(q, resolved_ids, vector_store, bm25)
@@ -135,9 +139,15 @@ def grader_node(state: AgentState) -> dict:
 
     retries = state.retrieval_retries  # noqa: PLW2901 — 从 state 刷新，后续逻辑用
     if score is not None and score >= 0.5:
-        return {LangGraphNode.Grader.SCORE: score, LangGraphNode.Grader.RETRIEVAL_RETRIES: 0}
+        return {
+            LangGraphNode.Grader.SCORE: score,
+            LangGraphNode.Grader.RETRIEVAL_RETRIES: 0,
+        }
     if retries < 2:
-        return {LangGraphNode.Grader.SCORE: score, LangGraphNode.Grader.RETRIEVAL_RETRIES: retries + 1}
+        return {
+            LangGraphNode.Grader.SCORE: score,
+            LangGraphNode.Grader.RETRIEVAL_RETRIES: retries + 1,
+        }
     # 重试用尽，降级到 Enhanced RAG
     return {
         LangGraphNode.Grader.SCORE: score,
@@ -188,7 +198,11 @@ def make_generate_node(llm, prompt_manager) -> Callable:
             full_text += token
         usage = estimate_usage(prompt, full_text)
 
-        result = {"answer": full_text, "_token_usage": usage}
+        result: dict = {"answer": full_text, "_token_usage": usage}
+        # 记录使用的模型名（从 llm 配置取，LiteLLM fallback 在代理层透明处理）
+        model_name = getattr(llm, "model", LLM_MODEL) or ""
+        if model_name:
+            result["model_used"] = model_name
         if not contexts:
             result["downgraded"] = True
             result["downgrade_reason"] = "rerank_empty"

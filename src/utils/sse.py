@@ -10,11 +10,12 @@ from dataclasses import dataclass
 
 # ── 结构化事件 dataclass ─────────────────────────────────
 
+
 @dataclass
 class SSEStatusEvent:
     """图节点状态变更事件。"""
 
-    stage: str   # 节点标识（classify / rewrite / retrieve / rerank / generate）
+    stage: str  # 节点标识（classify / rewrite / retrieve / rerank / generate）
     message: str  # 前端展示的状态描述文本
 
 
@@ -48,7 +49,22 @@ class SSEDoneEvent:
     """流结束事件。"""
 
 
-SSEEvent = SSEStatusEvent | SSETokenEvent | SSECitationEvent | SSEErrorEvent | SSEDoneEvent
+@dataclass
+class SSEModelInfoEvent:
+    """模型信息事件（含 fallback 状态）。"""
+
+    model: str  # 实际使用的模型名
+    is_fallback: bool  # 是否触发了 fallback
+
+
+SSEEvent = (
+    SSEStatusEvent
+    | SSETokenEvent
+    | SSECitationEvent
+    | SSEErrorEvent
+    | SSEDoneEvent
+    | SSEModelInfoEvent
+)
 
 
 # ── SSE 格式化函数 ─────────────────────────────────
@@ -126,6 +142,19 @@ def sse_error(error: str) -> str:
     return f"event: error\ndata: {json.dumps({'error': error}, ensure_ascii=False)}\n\n"
 
 
+def sse_model_info(model: str, is_fallback: bool) -> str:
+    """构建 SSE model_info 事件。
+
+    Args:
+        model: 实际使用的模型名
+        is_fallback: 是否触发了 fallback
+    """
+    return (
+        f"event: model_info\n"
+        f"data: {json.dumps({'model': model, 'is_fallback': is_fallback}, ensure_ascii=False)}\n\n"
+    )
+
+
 def to_sse(event: SSEEvent) -> str:
     """将结构化事件转为 SSE 格式字符串。
 
@@ -140,7 +169,9 @@ def to_sse(event: SSEEvent) -> str:
     match event:
         case SSETokenEvent(token=token):
             return sse_token(token)
-        case SSECitationEvent(source=s, page=p, snippet=snippet, score=score, highlighted_snippet=hs):
+        case SSECitationEvent(
+            source=s, page=p, snippet=snippet, score=score, highlighted_snippet=hs
+        ):
             return sse_citation(s, p, snippet, score, hs)
         case SSEStatusEvent(stage=stage, message=message):
             return sse_status(stage, message)
@@ -148,3 +179,5 @@ def to_sse(event: SSEEvent) -> str:
             return sse_error(error)
         case SSEDoneEvent():
             return sse_done()
+        case SSEModelInfoEvent(model=model, is_fallback=is_fallback):
+            return sse_model_info(model, is_fallback)
