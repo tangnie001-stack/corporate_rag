@@ -203,7 +203,6 @@ services:
 
   litellm-proxy:
     image: docker.litellm.ai/berriai/litellm:main-stable
-    mem_limit: 512m
     ports:
       - "4000:4000"
     volumes:
