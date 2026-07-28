@@ -3,7 +3,7 @@
 from loguru import logger
 from src.core.logging import LOG_MAX_BODY
 from src.config import TOP_K_RETRIEVAL, EMBEDDING_MODEL
-from src.infra.db.entities.search import ChunkResult, ChunkQueryResult
+from src.infra.db.vector_store.types import ChunkResult, ChunkQueryResult
 
 
 def similarity_search(collection, embed_fn, kb_id, query, k=5) -> list[ChunkResult]:

@@ -1,4 +1,4 @@
-"""检索结果实体 — ChromaDB 语义检索和 BM25 词法检索的统一输出类型。"""
+"""检索结果类型 — ChromaDB 语义检索和 BM25 词法检索的统一输出类型。"""
 
 from dataclasses import dataclass, field
 from typing import Optional

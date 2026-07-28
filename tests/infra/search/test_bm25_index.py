@@ -9,7 +9,7 @@ import tempfile
 
 
 from src.infra.search.bm25_index import BM25Index, rrf_fusion
-from src.infra.db.entities import ChunkResult
+from src.infra.db.vector_store.types import ChunkResult
 from src.parsers.base import ChunkData
 
 

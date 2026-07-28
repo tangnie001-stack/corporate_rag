@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Optional
-from src.infra.db.entities import ChunkResult
+from src.infra.db.vector_store.types import ChunkResult
 from src.infra.llm.chat_message import ChatMessage
 from src.infra.llm.trace_context import current_trace_id
 from src.rag.context import RAGContext

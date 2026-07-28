@@ -7,7 +7,7 @@ from loguru import logger
 from src.config import TOP_K_RETRIEVAL, TOP_K_RERANK, HYBRID_SEARCH_ENABLED
 from src.infra.search.bm25_index import BM25Index, rrf_fusion
 from src.infra.db.vector_store import VectorStore
-from src.infra.db.entities import ChunkResult
+from src.infra.db.vector_store.types import ChunkResult
 from src.infra.llm.chat_message import ChatMessage
 from src.models import with_retry
 from src.config import RETRY_MAX_ATTEMPTS, RETRY_INITIAL_INTERVAL, RETRY_BACKOFF_FACTOR

@@ -1,7 +1,7 @@
 """Tests for RetrievalGrader."""
 
 from src.agents.grader import RetrievalGrader
-from src.infra.db.entities import ChunkResult
+from src.infra.db.vector_store.types import ChunkResult
 
 
 def _cr(content: str) -> ChunkResult:

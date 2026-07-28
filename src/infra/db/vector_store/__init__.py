@@ -9,7 +9,7 @@ from src.config import CHROMA_COLLECTION_PREFIX
 from src.infra.db.vector_store.client import ChromaClient
 from src.infra.db.vector_store import store as _store
 from src.infra.db.vector_store import search as _search
-from src.infra.db.entities.search import ChunkResult, ChunkQueryResult
+from src.infra.db.vector_store.types import ChunkResult, ChunkQueryResult
 from src.parsers.base import ChunkData
 
 

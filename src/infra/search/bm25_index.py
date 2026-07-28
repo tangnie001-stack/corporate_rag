@@ -3,7 +3,7 @@
 import pickle
 from pathlib import Path
 from rank_bm25 import BM25Okapi
-from src.infra.db.entities import ChunkResult
+from src.infra.db.vector_store.types import ChunkResult
 from src.parsers.base import ChunkData
 
 
