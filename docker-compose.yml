@@ -69,8 +69,8 @@ services:
 
   clickhouse:
     image: clickhouse/clickhouse-server:24.12-alpine
-    mem_limit: 512m
-    mem_reservation: 256m
+    mem_limit: 256m
+    mem_reservation: 128m
     container_name: corporate-rag-clickhouse
     profiles: ["langfuse"]
     restart: unless-stopped
@@ -121,8 +121,8 @@ services:
 
   langfuse-worker:
     image: langfuse/langfuse-worker:3
-    mem_limit: 512m
-    mem_reservation: 256m
+    mem_limit: 256m
+    mem_reservation: 128m
     container_name: corporate-rag-langfuse-worker
     profiles: ["langfuse"]
     restart: unless-stopped
@@ -165,8 +165,8 @@ services:
 
   langfuse-web:
     image: langfuse/langfuse:3
-    mem_limit: 512m
-    mem_reservation: 256m
+    mem_limit: 256m
+    mem_reservation: 128m
     container_name: corporate-rag-langfuse-web
     profiles: ["langfuse"]
     restart: unless-stopped
