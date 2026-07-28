@@ -1,149 +1,102 @@
 """会话/消息 Repo — sessions 和 conversation_history 表 CRUD。"""
 
-from typing import Optional
 import json
-from src.config.queries import (
-    INSERT_SESSION,
-    SELECT_SESSIONS,
-    SELECT_SESSION_BY_ID,
-    SELECT_MESSAGES_BY_SESSION,
-    INSERT_MESSAGE,
-    DELETE_SESSION,
-    DELETE_MESSAGES_BY_SESSION,
-)
-from src.infra.db.entities import SessionEntity, SessionListItem, MessageEntity
+from typing import Optional
+from sqlalchemy import select, func, delete
+from src.infra.db.models.kb import KbModel
+from src.infra.db.models.chat import SessionModel, MessageModel
 
 
 class ChatRepo:
-    """会话/消息 CRUD 仓库。
+    """会话/消息 CRUD 仓库。"""
 
-    封装 sessions 和 conversation_history 表的查询操作，
-    返回 SessionEntity / SessionListItem / MessageEntity 类型对象。
-    """
+    def __init__(self, session_factory):
+        self._sf = session_factory
 
-    def __init__(self, mysql_db):
-        """初始化 ChatRepo。
-
-        Args:
-            mysql_db: MySQLDB 实例，用于获取连接池
-        """
-        self._pool_getter = mysql_db._get_pool
-
-    async def create_session(self, session: SessionEntity) -> None:
-        """创建一条新对话记录。
-
-        Args:
-            session: 待创建的对话实体
-        """
-        pool = await self._pool_getter()
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cursor:
-                await cursor.execute(
-                    INSERT_SESSION,
-                    (session.id, session.user_id, session.title, session.kb_id),
-                )
-            await conn.commit()
-
-    async def get_sessions(self, user_id: str = "") -> list[SessionListItem]:
-        """获取指定用户的对话列表（含知识库名称和消息数）。
-
-        Args:
-            user_id: 用户 ID，空字符串返回所有会话（仅供内部使用）
-        """
-        pool = await self._pool_getter()
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cursor:
-                await cursor.execute(SELECT_SESSIONS, (user_id,))
-                rows = await cursor.fetchall()
-        return [
-            SessionListItem(
-                id=r["id"],
-                title=r["title"],
-                kb_id=r["kb_id"],
-                kb_name=r["kb_name"],
-                message_count=r["message_count"],
-                created_at=r.get("created_at"),
-                updated_at=r.get("updated_at"),
+    async def create_session(self, session) -> None:
+        """session: 带 .id .user_id .title .kb_id 属性的对象。"""
+        async with self._sf() as s:
+            s_obj = SessionModel(
+                id=session.id,
+                user_id=session.user_id,
+                title=session.title,
+                kb_id=session.kb_id,
             )
-            for r in rows
-        ]
+            s.add(s_obj)
+            await s.commit()
 
-    async def get_session_by_id(self, session_id: str) -> Optional[SessionEntity]:
-        """按 ID 查询对话详情。
+    async def get_sessions(self, user_id: str = "") -> list:
+        """返回 Row 对象（支持 .id 属性访问，兼容旧 SessionListItem 用法）。"""
+        async with self._sf() as session:
+            stmt = select(
+                SessionModel.id,
+                SessionModel.title,
+                SessionModel.kb_id,
+                SessionModel.created_at,
+                SessionModel.updated_at,
+                func.coalesce(KbModel.name, "所有知识库").label("kb_name"),
+                func.count(MessageModel.id).label("message_count"),
+            ).outerjoin(
+                KbModel,
+                (SessionModel.kb_id == KbModel.id) & (SessionModel.kb_id != ""),
+            ).outerjoin(
+                MessageModel, MessageModel.session_id == SessionModel.id
+            ).where(SessionModel.is_deleted == 0)
 
-        Args:
-            session_id: 对话 UUID
+            if user_id:
+                stmt = stmt.where(SessionModel.user_id == user_id)
 
-        Returns:
-            对话实体，不存在时返回 None
-        """
-        pool = await self._pool_getter()
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cursor:
-                await cursor.execute(SELECT_SESSION_BY_ID, (session_id,))
-                row = await cursor.fetchone()
-        if not row:
-            return None
-        return SessionEntity(**row)
+            stmt = stmt.group_by(SessionModel.id).order_by(
+                SessionModel.updated_at.desc()
+            ).limit(50)
 
-    async def get_messages(self, session_id: str) -> list[MessageEntity]:
-        """查询指定对话的所有消息。
+            result = await session.execute(stmt)
+            return list(result.all())
 
-        Args:
-            session_id: 对话 UUID
+    async def get_session_by_id(self, session_id: str) -> Optional[SessionModel]:
+        async with self._sf() as session:
+            return await session.get(SessionModel, session_id)
 
-        Returns:
-            消息实体列表
-        """
-        pool = await self._pool_getter()
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cursor:
-                await cursor.execute(SELECT_MESSAGES_BY_SESSION, (session_id,))
-                rows = await cursor.fetchall()
-        return [MessageEntity(**r) for r in rows]
+    async def get_messages(self, session_id: str) -> list[MessageModel]:
+        async with self._sf() as session:
+            stmt = (
+                select(MessageModel)
+                .where(MessageModel.session_id == session_id)
+                .order_by(MessageModel.created_at.asc())
+            )
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
 
-    async def save_message(self, msg: MessageEntity) -> None:
-        """保存一条消息记录（含来源引用 JSON）。
-
-        Args:
-            msg: 待保存的消息实体
-        """
-        pool = await self._pool_getter()
-        sources_json = (
-            json.dumps(msg.sources, ensure_ascii=False) if msg.sources else None
-        )
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cursor:
-                await cursor.execute(
-                    INSERT_MESSAGE,
-                    (
-                        msg.session_id,
-                        msg.kb_id,
-                        msg.role,
-                        msg.content,
-                        sources_json,
-                        msg.prompt_tokens,
-                        msg.completion_tokens,
-                        msg.total_tokens,
-                        msg.model_name,
-                    ),
-                )
-            await conn.commit()
+    async def save_message(self, msg) -> None:
+        """msg: 带 .session_id .role .content .sources 等属性的对象。"""
+        async with self._sf() as session:
+            sources_json = (
+                json.dumps(msg.sources, ensure_ascii=False)
+                if getattr(msg, "sources", None)
+                else None
+            )
+            m = MessageModel(
+                session_id=msg.session_id,
+                kb_id=getattr(msg, "kb_id", ""),
+                role=msg.role,
+                content=msg.content,
+                sources=sources_json,
+                prompt_tokens=getattr(msg, "prompt_tokens", 0),
+                completion_tokens=getattr(msg, "completion_tokens", 0),
+                total_tokens=getattr(msg, "total_tokens", 0),
+                model_name=getattr(msg, "model_name", ""),
+            )
+            session.add(m)
+            await session.commit()
 
     async def delete_session_and_messages(self, session_id: str) -> bool:
-        """删除对话及其所有关联消息。
-
-        Args:
-            session_id: 对话 UUID
-
-        Returns:
-            是否成功删除了对话记录
-        """
-        pool = await self._pool_getter()
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cursor:
-                await cursor.execute(DELETE_MESSAGES_BY_SESSION, (session_id,))
-                await cursor.execute(DELETE_SESSION, (session_id,))
-                deleted = cursor.rowcount > 0
-            await conn.commit()
-        return deleted
+        async with self._sf() as session:
+            await session.execute(
+                delete(MessageModel).where(MessageModel.session_id == session_id)
+            )
+            session_obj = await session.get(SessionModel, session_id)
+            deleted = session_obj is not None
+            if session_obj:
+                await session.delete(session_obj)
+            await session.commit()
+            return deleted
