@@ -60,6 +60,12 @@ def stream_answer(
     last_token_usage = TokenUsage()
     _stream_start = time.monotonic()
     _first_token = True
+    # 记录认证上下文，首次失败时输出以辅助排查
+    _llm_model = getattr(llm, "model", "")
+    _llm_base_url = getattr(llm, "openai_api_base", "") or str(
+        getattr(llm, "base_url", "")
+    )
+    _key_prefix = (getattr(llm, "openai_api_key", "") or "")[:8]
 
     for attempt in range(1, RETRY_MAX_ATTEMPTS + 1):
         try:
@@ -104,6 +110,14 @@ def stream_answer(
             return
         except Exception as e:
             last_error = e
+            if attempt == 1:
+                logger.info(
+                    "LLM call failed (model={} base_url={} api_key={}...): {}",
+                    _llm_model,
+                    _llm_base_url,
+                    _key_prefix,
+                    e,
+                )
             if attempt < RETRY_MAX_ATTEMPTS:
                 wait = RETRY_INITIAL_INTERVAL * (RETRY_BACKOFF_FACTOR ** (attempt - 1))
                 logger.warning(
