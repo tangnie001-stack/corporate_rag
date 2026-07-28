@@ -35,13 +35,6 @@ def service() -> Generator[AppService, None, None]:
 
 
 @pytest.fixture(scope="session")
-def mysql_db():
-    """提供 AppService 实例，用于直接查询 MySQL 验证数据一致性。"""
-    svc = AppService()
-    yield svc._kb_repo
-
-
-@pytest.fixture(scope="session")
 def vector_store() -> Generator[VectorStore, None, None]:
     """提供 VectorStore 实例，用于验证 ChromaDB 状态。"""
     vs = VectorStore()

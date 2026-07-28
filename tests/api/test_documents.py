@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 from src.services.document_service import _merge_tiny_chunks
 from src.infra.chunking.validator import ChunkData
-from src.infra.db.models.document import DocModel as DocEntity
 from src.infra.db.vector_store.types import ChunkResult, ChunkQueryResult
 from tests.api.mock_data import make_doc
 
@@ -50,15 +49,17 @@ def test_document_status_processing(mock_app_service, auth_client):
     mock_svc._doc_repo = MagicMock()
     mock_svc._doc_repo.get_documents = AsyncMock(
         return_value=[
-            DocEntity(
-                id="doc-1",
-                kb_id="kb-1",
-                filename="test.pdf",
-                status="processing",
-                processing_progress=30,
-                processing_state="extracting",
-                processing_message="正在解析...",
-            ),
+            MagicMock(
+                    id="doc-1",
+                    kb_id="kb-1",
+                    filename="test.pdf",
+                    status="processing",
+                    chunk_count=0,
+                    processing_progress=30,
+                    processing_state="extracting",
+                    processing_message="正在解析...",
+                    error_msg=None,
+                ),
         ]
     )
 

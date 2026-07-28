@@ -1,10 +1,9 @@
 """测试认证服务层。"""
 
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.services.auth_service import AuthService
-from src.infra.db.models.user import UserModel as UserEntity
 from src.utils.errors import BusinessError
 
 
@@ -45,7 +44,7 @@ class TestRegister:
     @pytest.mark.asyncio
     async def test_register_duplicate_account(self, auth_service, mock_user_repo):
         """重复账号应抛出 BusinessError。"""
-        mock_user_repo.get_user_by_account.return_value = UserEntity(
+        mock_user_repo.get_user_by_account.return_value = MagicMock(
             id="existing", account="test_user", password="pwd"
         )
         with pytest.raises(BusinessError):
@@ -57,7 +56,7 @@ class TestLogin:
     async def test_login_success(self, auth_service, mock_user_repo, mock_redis):
         """登录成功应返回 token 和 user_id。"""
         password_hash = "$2b$12$..."
-        mock_user_repo.get_user_by_account.return_value = UserEntity(
+        mock_user_repo.get_user_by_account.return_value = MagicMock(
             id="user_1",
             account="test_user",
             password=password_hash,
@@ -75,7 +74,7 @@ class TestLogin:
     @pytest.mark.asyncio
     async def test_login_wrong_password(self, auth_service, mock_user_repo):
         """错误密码应抛出 BusinessError。"""
-        mock_user_repo.get_user_by_account.return_value = UserEntity(
+        mock_user_repo.get_user_by_account.return_value = MagicMock(
             id="user_1",
             account="test_user",
             password="hashed_pwd",

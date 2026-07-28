@@ -11,30 +11,41 @@
 
 from __future__ import annotations
 
+import asyncio
 import shutil
 from pathlib import Path
 from typing import Optional
 
 from loguru import logger
+from sqlalchemy import text
 
 from src.services.app_service import AppService
 from src.config import CHROMA_PERSIST_DIR, REDIS_URL
+from src.infra.db.base import Base
 from src.infra.db.engine import engine
+from src.infra.db.models import *  # noqa: F401, PLC0415 — 注册所有模型到 Base.metadata
 
 
-def reset_mysql() -> None:
-    """清空 MySQL 所有业务表（knowledge_base、document、conversation_history）。
+async def _reset_mysql_async() -> None:
+    """异步清空 MySQL 所有业务表。
 
     使用 TRUNCATE + 临时关闭外键检查，避免 CASCADE 约束报错。
     """
-    with engine.connect() as conn:
-        conn.execute("SET FOREIGN_KEY_CHECKS = 0")
-        conn.execute("TRUNCATE TABLE conversation_history")
-        conn.execute("TRUNCATE TABLE document")
-        conn.execute("TRUNCATE TABLE knowledge_base")
-        conn.execute("SET FOREIGN_KEY_CHECKS = 1")
-        conn.commit()
+    async with engine.begin() as conn:
+        await conn.execute(text("SET FOREIGN_KEY_CHECKS = 0"))
+        await conn.execute(text("TRUNCATE TABLE conversation_history"))
+        await conn.execute(text("TRUNCATE TABLE document"))
+        await conn.execute(text("TRUNCATE TABLE knowledge_base"))
+        await conn.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
     logger.info("MySQL: 已清空所有业务表")
+
+
+def reset_mysql() -> None:
+    """清空 MySQL 所有业务表。
+
+    使用 asyncio.run 包装异步实现。
+    """
+    asyncio.run(_reset_mysql_async())
 
 
 def reset_vector_store() -> None:
