@@ -41,7 +41,7 @@ class UTCDateTime(TypeDecorator[datetime]):
 
 
 class IDMixin:
-    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
 
 
 class TimestampMixin:

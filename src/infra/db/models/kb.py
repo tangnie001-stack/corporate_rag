@@ -10,7 +10,7 @@ from src.infra.db.base import Base, IDMixin, TimestampMixin
 class KbModel(Base, IDMixin, TimestampMixin):
     __tablename__ = "knowledge_base"
 
-    user_id: Mapped[str] = mapped_column(String(32), nullable=False, comment="所属用户")
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False, comment="所属用户")
     name: Mapped[str] = mapped_column(String(256), nullable=False, comment="知识库名称")
     description: Mapped[str] = mapped_column(String(1024), default="", comment="描述")
     doc_count: Mapped[int] = mapped_column(Integer, default=0, comment="关联文档数")
