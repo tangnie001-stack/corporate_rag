@@ -21,9 +21,8 @@ from sqlalchemy import text
 
 from src.services.app_service import AppService
 from src.config import CHROMA_PERSIST_DIR, REDIS_URL
-from src.infra.db.base import Base
 from src.infra.db.engine import engine
-from src.infra.db.models import *  # noqa: F401, PLC0415 — 注册所有模型到 Base.metadata
+from src.infra.db.models import *  # noqa: F401, F403 — 注册所有模型到 Base.metadata
 
 
 async def _reset_mysql_async() -> None:

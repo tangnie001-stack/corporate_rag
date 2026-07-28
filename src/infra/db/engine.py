@@ -1,7 +1,6 @@
 """SQLAlchemy 异步引擎与 Session 工厂。"""
 
 from sqlalchemy.ext.asyncio import (
-    AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )

@@ -1,11 +1,10 @@
 """知识库表 ORM 模型。"""
 
-from datetime import datetime
 
-from sqlalchemy import String, Integer, UniqueConstraint, func
+from sqlalchemy import String, Integer, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from src.infra.db.base import Base, IDMixin, TimestampMixin, UTCDateTime
+from src.infra.db.base import Base, IDMixin, TimestampMixin
 
 
 class KbModel(Base, IDMixin, TimestampMixin):

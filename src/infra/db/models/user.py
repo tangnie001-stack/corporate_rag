@@ -1,11 +1,10 @@
 """用户表 ORM 模型。"""
 
-from datetime import datetime
 
-from sqlalchemy import String, func
+from sqlalchemy import String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from src.infra.db.base import Base, IDMixin, TimestampMixin, UTCDateTime
+from src.infra.db.base import Base, IDMixin, TimestampMixin
 
 
 class UserModel(Base, IDMixin, TimestampMixin):

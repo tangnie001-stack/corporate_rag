@@ -1,11 +1,10 @@
 """文档表 ORM 模型。"""
 
-from datetime import datetime
 
-from sqlalchemy import String, Integer, Text, func
+from sqlalchemy import String, Integer, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from src.infra.db.base import Base, IDMixin, TimestampMixin, UTCDateTime
+from src.infra.db.base import Base, IDMixin, TimestampMixin
 
 
 class DocModel(Base, IDMixin, TimestampMixin):

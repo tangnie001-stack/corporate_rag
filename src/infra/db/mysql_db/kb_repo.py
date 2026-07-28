@@ -1,7 +1,7 @@
 """知识库 Repo — knowledge_base 表 CRUD。"""
 
 from typing import Optional
-from sqlalchemy import select, func
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from src.infra.db.models.kb import KbModel
 
