@@ -5,7 +5,6 @@
 """
 
 import numpy as np
-from typing import Optional
 from loguru import logger
 
 from src.infra.db.entities.kb import KbListItem
@@ -66,6 +65,7 @@ class KBRouter:
         query_vec = np.array(self._embed_fn.embed_query(query))
 
         # ── 3. 计算每个 KB 的 embedding（批量）──
+        # TODO: 当 KB 数量超过 100 时需引入 FAISS 索引缓存 KB 向量，避免实时计算延迟
         # 此处不缓存，每次实时计算（KB 数量少时可接受）
         kb_vecs = []
         for key in route_keys:

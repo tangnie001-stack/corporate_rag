@@ -35,7 +35,23 @@ class DashScopeEmbeddingFunction(EmbeddingFunction):
         )
 
     def __call__(self, input: Documents) -> Embeddings:
+        """将文档列表转为嵌入向量（ChromaDB 内部调用）。
+
+        Args:
+            input: 待编码的文档字符串列表
+
+        Returns:
+            嵌入向量列表
+        """
         return self._embedding.embed_documents(list(input))
 
     def embed_query(self, text: str) -> list[float]:
+        """将单条查询文本转为嵌入向量。
+
+        Args:
+            text: 查询文本
+
+        Returns:
+            查询文本的嵌入向量
+        """
         return self._embedding.embed_query(text)

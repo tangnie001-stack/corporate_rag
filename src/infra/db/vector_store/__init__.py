@@ -95,6 +95,40 @@ class VectorStore:
                 continue
         return _search.similarity_search_all(collections, self._embed_fn, query, k)
 
+    def similarity_search_multi(
+        self, kb_ids: list[str], query: str, k: int = 5
+    ) -> list[ChunkResult]:
+        """在指定多个知识库中并行执行语义检索，合并后排序取 top-k。
+
+        每个 KB 单独搜索 TOP_K_RETRIEVAL 条，合并后按距离升序取 top-k。
+        使用 ThreadPoolExecutor 并行加速。
+
+        Args:
+            kb_ids: 知识库 ID 列表
+            query: 查询文本
+            k: 返回结果数量上限，默认 5
+
+        Returns:
+            合并排序后的检索结果列表
+        """
+        import concurrent.futures
+
+        def _search_one(kb_id: str) -> list[ChunkResult]:
+            return self.similarity_search(kb_id, query, k)
+
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=len(kb_ids)
+        ) as pool:
+            futures = [pool.submit(_search_one, kb_id) for kb_id in kb_ids]
+            all_results: list[ChunkResult] = []
+            for future in concurrent.futures.as_completed(futures):
+                all_results.extend(future.result() or [])
+
+        all_results.sort(
+            key=lambda r: r.distance if r.distance is not None else float("inf")
+        )
+        return all_results[:k]
+
     def get_chunks_by_doc_id(self, doc_id: str, kb_id: str) -> list[ChunkResult]:
         """查询指定文档的所有分块。
 

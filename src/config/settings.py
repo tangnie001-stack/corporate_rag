@@ -55,7 +55,7 @@ EMBEDDING_BATCH_SIZE: int = int(os.getenv("EMBEDDING_BATCH_SIZE", "20"))
 # 重排序模型
 RERANK_MODEL: str = os.getenv("RERANK_MODEL", "qwen3-rerank")
 # Rerank API Key（fallback 到 DASHSCOPE_API_KEY，非 LLM_API_KEY）
-RERANK_API_KEY: str = os.getenv("RERANK_API_KEY") or os.getenv("DASHSCOPE_API_KEY") or os.getenv("LLM_API_KEY", "")
+RERANK_API_KEY: str = os.getenv("RERANK_API_KEY") or os.getenv("DASHSCOPE_API_KEY", "")
 # RAGAS 评估专用模型（独立于生产 LLM，temperature 固定为 0）
 # 不可使用推理模型（如 qwen3.7-max），RAGAS 内部会传 n>1 参数，
 # 推理模型要求 n=1 会导致 BadRequestError。必须显式配置非推理模型。

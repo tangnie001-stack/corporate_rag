@@ -5,6 +5,7 @@
 所有节点包含 trace_id 出入日志。
 """
 
+import asyncio
 from typing import Callable
 from loguru import logger
 from src.infra.search.query_router import QueryRouter
@@ -106,11 +107,11 @@ def make_retrieve_node(vector_store, bm25) -> Callable:
         # None → retrieval.py 中 get_all_kb 全量搜索
         logger.info("retrieve_node start: query={} kb_ids={}", q[:50], resolved_ids)
 
-        # 多 KB 路由时跳过 Hybrid Search（BM25 不支持 list[str]）
+        # 多 KB 路由时走多库并行检索
         if isinstance(resolved_ids, list) and len(resolved_ids) > 1:
-            import asyncio
             results = await asyncio.to_thread(
-                vector_store.similarity_search, resolved_ids, q, k=TOP_K_RETRIEVAL
+                vector_store.similarity_search_multi,
+                resolved_ids, q, TOP_K_RETRIEVAL,
             )
         else:
             results = await search(q, resolved_ids, vector_store, bm25)
