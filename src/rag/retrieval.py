@@ -1,7 +1,6 @@
 """检索与查询改写 — 向量检索、Reranker 精排、查询分类与改写。"""
 
 import asyncio
-import re
 from typing import Optional
 from loguru import logger
 from src.config import TOP_K_RETRIEVAL, TOP_K_RERANK, HYBRID_SEARCH_ENABLED
@@ -140,63 +139,6 @@ def rerank_results(
         )
     return contexts
 
-
-# ═══ 以下函数不变 ═══
-# classify_query, expand_query, condense_query, decompose_query, rewrite_query
-# （以上函数不涉及 dict 访问，不需要修改）
-
-# ═══════════════════ 查询改写 ═══════════════════
-
-
-def classify_query(query: str) -> str:
-    """对用户查询进行三级分类。
-
-    Returns:
-        "simple":  单事实查询（如数字、年份+指标），不走改写直接检索
-        "medium":  需要 2-3 个事实关联或分析，走 Enhanced RAG
-        "complex": 多跳推理、跨文档对比，走 Agentic RAG
-    """
-    cleaned = query.strip()
-    if not cleaned:
-        return "simple"
-
-    # 对比/比较类 → complex
-    if any(w in cleaned for w in ["对比", "比较", "差异", "versus", "vs"]):
-        return "complex"
-
-    # 分析/推理类 → medium (need retrieval but not complex enough for grader)
-    if any(w in cleaned for w in ["分析", "解释", "说明", "为什么", "原因"]):
-        return "medium"
-
-    # 模糊短查询 → medium (needs context expansion)
-    if len(cleaned) < 10:
-        return "medium"
-
-    # ── 守卫条件：以下情况虽然含年份/财务指标，但需要检索文档 ──
-
-    # 引用具体文档（"在...报告中"、"根据...报告"）
-    if re.search(r"[在根据][^。，]{1,30}(报告|文件|文档|数据)", cleaned):
-        return "medium"
-
-    # 长查询（>40字）包含财务指标 → 大概率是文档特定查询
-    if len(cleaned) > 40 and re.search(
-        r"(营收|利润|收入|成本|资产|负债|现金流|净利润)", cleaned
-    ):
-        return "medium"
-
-    # 多问句（"分别为多少"）
-    if re.search(r"(分别|各自).*(多少|如何|怎样)", cleaned):
-        return "medium"
-
-    # ── 单事实数字查询 → simple ──
-    if re.search(r"\d{4}年", cleaned) or re.search(
-        r"(营收|利润|收入|成本|资产|负债|现金流|净利润)", cleaned
-    ):
-        return "simple"
-
-    return "medium"  # default fallback
-
-
 def expand_query(query: str, history: list[ChatMessage]) -> str:
     """对模糊短查询进行扩展。"""
     if not history:
@@ -229,29 +171,28 @@ def decompose_query(query: str) -> list[str]:
 
 
 def rewrite_query(
-    query: str, history: list[ChatMessage], intent_route: str | None = None
+    query: str,
+    history: list[ChatMessage],
+    intent_route: str = "medium",
 ) -> str | list[str]:
     """根据三级分类执行相应的改写策略。
 
     Args:
         query: 用户原始查询
         history: 对话历史
-        intent_route: 可选的预分类路由，传入时跳过内部 classify_query
+        intent_route: 意图路由，由上游 classify_node 提供
 
     Returns:
         str:      simple / medium 路径返回改写后的单条查询
         list[str]: complex 路径返回分解后的多条子查询
     """
-    t = intent_route if intent_route else classify_query(query)
-    if t == "simple":
+    if intent_route == "simple":
         return query
-    if t == "medium":
-        # 模糊短查询 → 用历史上下文扩展；口语化查询 → 精简
-        if len(query.strip()) < 10:
-            return expand_query(query, history)
-        if any(w in query for w in ["分析", "解释", "说明", "为什么"]):
-            return condense_query(query)
-        return query
-    if t == "complex":
+    if intent_route == "complex":
         return decompose_query(query)
+    # medium
+    if len(query.strip()) < 10:
+        return expand_query(query, history)
+    if any(w in query for w in ["分析", "解释", "说明", "为什么"]):
+        return condense_query(query)
     return query
