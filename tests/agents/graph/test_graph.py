@@ -13,7 +13,7 @@ def test_make_classify_node_returns_callable():
     assert callable(node)
 
 
-def test_route_by_intent_returns_clarify():
+def test_route_by_intent_returns_clarify_when_missing_entities():
     """missing_entities 非空时返回 clarify。"""
     from src.agents.graph.workflow import route_by_intent
 
