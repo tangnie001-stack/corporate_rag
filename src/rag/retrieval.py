@@ -31,8 +31,13 @@ async def search(
     Returns:
         检索结果列表，按相关性降序排列；混合模式为 RRF 融合结果
     """
-    logger.info("[DIAG] search() called: kb_id={!r} kb_id_empty={} query_len={} hybrid={}",
-        kb_id, not kb_id, len(query), HYBRID_SEARCH_ENABLED and bool(bm25) and bool(kb_id))
+    logger.info(
+        "[DIAG] search() called: kb_id={!r} kb_id_empty={} query_len={} hybrid={}",
+        kb_id,
+        not kb_id,
+        len(query),
+        HYBRID_SEARCH_ENABLED and bool(bm25) and bool(kb_id),
+    )
 
     if HYBRID_SEARCH_ENABLED and bm25 and kb_id:
         logger.info("RAG search starting hybrid: kb_id={}", kb_id)
@@ -102,7 +107,10 @@ def rerank_results(
             e,
         )
         reranked = [
-            {"index": i, "relevance_score": 1 - r.distance if r.distance is not None else 0}
+            {
+                "index": i,
+                "relevance_score": 1 - r.distance if r.distance is not None else 0,
+            }
             for i, r in enumerate(results)
         ]
 
@@ -220,14 +228,21 @@ def decompose_query(query: str) -> list[str]:
     return [p for p in parts if p]
 
 
-def rewrite_query(query: str, history: list[ChatMessage]) -> str | list[str]:
+def rewrite_query(
+    query: str, history: list[ChatMessage], intent_route: str | None = None
+) -> str | list[str]:
     """根据三级分类执行相应的改写策略。
+
+    Args:
+        query: 用户原始查询
+        history: 对话历史
+        intent_route: 可选的预分类路由，传入时跳过内部 classify_query
 
     Returns:
         str:      simple / medium 路径返回改写后的单条查询
         list[str]: complex 路径返回分解后的多条子查询
     """
-    t = classify_query(query)
+    t = intent_route if intent_route else classify_query(query)
     if t == "simple":
         return query
     if t == "medium":

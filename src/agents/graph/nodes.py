@@ -59,30 +59,30 @@ def make_kb_router_node(embed_fn, llm) -> Callable:
     return kb_router_node
 
 
-def classify_node(state: AgentState) -> dict:
-    """查询分类节点：基于 QueryRouter 输出三级路由。"""
-    logger.info("classify_node start: query={}", state.query[:50])
+def make_classify_node(llm) -> Callable:
+    """创建 classify_node 工厂函数。"""
 
-    router = QueryRouter()
-    raw_route = router.route(state.query)
+    async def classify_node(state: AgentState) -> dict:
+        """查询分类节点：基于 QueryRouter 输出三级路由 + 缺失实体。"""
+        logger.info("classify_node start: query={}", state.query[:50])
+        router = QueryRouter(llm=llm)
+        result = router.route(state.query, state._history)
+        logger.info("classify_node done: route={}", result["intent"].route)
+        return {
+            "intent": result["intent"],
+            "extracted_entities": result["extracted_entities"],
+            "missing_entities": result["missing_entities"],
+            "classification_confidence": result["classification_confidence"],
+        }
 
-    # 映射 vague → medium
-    route_map = {
-        "simple": "simple",
-        "vague": "medium",
-        "medium": "medium",
-        "complex": "complex",
-    }
-    route = route_map.get(raw_route, "medium")
-
-    logger.info("classify_node done: raw={} mapped={}", raw_route, route)
-    return {"intent": RAGQueryIntent(route=route, rewritten=False)}
+    return classify_node
 
 
 def rewrite_node(state: AgentState) -> dict:
     """查询改写节点：对非 simple 路径的查询进行改写。"""
     query = state.query
-    rewritten = rewrite_query(query, state._history or [])
+    intent_route = state.intent.route or "medium"
+    rewritten = rewrite_query(query, state._history or [], intent_route=intent_route)
 
     if isinstance(rewritten, list):
         rewritten = " ".join(rewritten)
