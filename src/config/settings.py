@@ -40,6 +40,10 @@ LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "http://litellm-proxy:4000")
 LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.1"))
 # LLM 额外参数（JSON 格式，如 {"extra_body": {"enable_thinking": false}}）
 LLM_KWARGS: str = os.getenv("LLM_KWARGS", "{}")
+# 分类器温度参数：查询路由分类时使用，略高于 LLM 温度以允许少量分类灵活度
+CLASSIFIER_TEMPERATURE: float = float(os.getenv("CLASSIFIER_TEMPERATURE", "0.1"))
+# 查询澄清开关：true 时当分类器检测到缺失实体信息时，主动向用户追问澄清
+CLARIFICATION_ENABLED: bool = os.getenv("CLARIFICATION_ENABLED", "true").lower() in ("true", "1", "yes")
 
 # 向量化模型：将文本转为向量，用于 ChromaDB 语义检索
 EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "qwen3.7-text-embedding")
