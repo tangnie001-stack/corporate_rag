@@ -25,3 +25,25 @@ def test_agent_state_downgrade_fields():
 def test_agent_state_trace_id():
     state = AgentState(query="test", trace_id="trace_abc123")
     assert state.trace_id == "trace_abc123"
+
+
+def test_agent_state_intent_fields():
+    """验证新增的意图理解字段默认值。"""
+    state = AgentState()
+    assert state.extracted_entities == []
+    assert state.missing_entities == []
+    assert state.classification_confidence == 0.0
+
+
+def test_agent_state_intent_fields_with_values():
+    """验证 intent 字段可以正常赋值。"""
+    from src.agents.graph.state import RAGQueryIntent
+    state = AgentState(
+        intent=RAGQueryIntent(route="medium"),
+        extracted_entities=[{"type": "year", "value": "2024"}],
+        missing_entities=[{"type": "year"}],
+        classification_confidence=0.85,
+    )
+    assert len(state.extracted_entities) == 1
+    assert len(state.missing_entities) == 1
+    assert state.classification_confidence == 0.85
