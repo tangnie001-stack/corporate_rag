@@ -62,6 +62,9 @@ class LangGraphNode:
 
     class Classify:
         NAME: str = "classify"  # 查询分类
+        EXTRACTED_ENTITIES: str = "extracted_entities"  # 正则提取的实体列表
+        MISSING_ENTITIES: str = "missing_entities"  # LLM 标记的缺失实体
+        CLASSIFICATION_CONFIDENCE: str = "classification_confidence"  # LLM 置信度
 
     class Rewrite:
         NAME: str = "rewrite"  # 查询改写
