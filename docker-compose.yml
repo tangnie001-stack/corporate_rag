@@ -228,7 +228,7 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
-    command: uvicorn src.main:app --host 0.0.0.0 --port 8000
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --timeout-graceful-shutdown 30
     env_file:
       - .env
     environment:
