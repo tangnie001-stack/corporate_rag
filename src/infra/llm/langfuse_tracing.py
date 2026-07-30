@@ -26,7 +26,7 @@ class TraceInput:
     使用 dataclass 替代手动构造 dict，消除 key 名与变量名的重复维护。
     """
 
-    kb_id: str   # 知识库 ID（空字符串 = 跨库搜索）
+    kb_id: str  # 知识库 ID（空字符串 = 跨库搜索）
     session_id: str  # 会话 ID（用于 Langfuse 会话聚合）
     query: str  # 用户查询文本
 
@@ -151,7 +151,10 @@ class LangfuseTracer:
                 session_id = input_data.session_id
             input_data = asdict(input_data)
         self._client.trace(
-            name=name, input=input_data, session_id=session_id, id=current_trace_id.get()
+            name=name,
+            input=input_data,
+            session_id=session_id,
+            id=current_trace_id.get(),
         )
 
     def end_trace(self, output: str | None = None) -> None:

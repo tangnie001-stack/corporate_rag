@@ -1,31 +1,90 @@
-"""QueryRouter 意图路由模块的单元测试。
+"""QueryRouter — 三层意图路由模块的单元测试。"""
 
-测试范围:
-  - simple 规则匹配（财务数据查询）
-  - vague 规则匹配（模糊/短查询）
-  - medium 规则匹配（分析/对比类查询）
-  - LLM 兜底分类的 fallback 行为
-"""
+from unittest.mock import Mock
 
 from src.infra.search.query_router import QueryRouter
 
 
-def test_simple_rule_hit() -> None:
-    router = QueryRouter()
-    assert router.route("2024年营收多少") == "simple"
+def test_l0_greeting_returns_simple() -> None:
+    router = QueryRouter(llm=Mock())
+    router._llm_classify = Mock()
+    result = router.route("你好", history=[])
+    assert result["intent"].route == "simple"
+    router._llm_classify.assert_not_called()
 
 
-def test_vague_identified() -> None:
-    router = QueryRouter()
-    assert router.route("净利润") == "vague"
+def test_l0_short_query_returns_simple() -> None:
+    router = QueryRouter(llm=Mock())
+    router._llm_classify = Mock()
+    result = router.route("谢谢", history=[])
+    assert result["intent"].route == "simple"
+    router._llm_classify.assert_not_called()
 
 
-def test_medium_rule_hit() -> None:
-    router = QueryRouter()
-    assert router.route("分析营收增长原因") == "medium"
+def test_entity_extraction_included() -> None:
+    router = QueryRouter(llm=Mock())
+    router._llm_classify = Mock(
+        return_value={"route": "medium", "missing_entities": [], "confidence": 0.9}
+    )
+    result = router.route("2024年营收多少", history=[])
+    assert len(result["extracted_entities"]) > 0
 
 
-def test_llm_classify_fallback() -> None:
-    router = QueryRouter()
-    result = router.route("这个公司业绩如何")
-    assert result in ("simple", "vague", "medium", "complex")
+def test_missing_entity_triggers() -> None:
+    router = QueryRouter(llm=Mock())
+    router._llm_classify = Mock(
+        return_value={
+            "route": "medium",
+            "missing_entities": [{"type": "year", "question": "哪一年？"}],
+            "confidence": 0.85,
+        }
+    )
+    result = router.route("营收多少", history=[])
+    assert len(result["missing_entities"]) > 0
+
+
+def test_no_year_triggers_missing() -> None:
+    """不含年份的查询应触发 missing_entities。"""
+    router = QueryRouter(llm=Mock())
+    router._llm_classify = Mock(
+        return_value={
+            "route": "medium",
+            "missing_entities": [
+                {"type": "year", "question": "请问您想查询哪一年的数据？"}
+            ],
+            "confidence": 0.85,
+        }
+    )
+    result = router.route("营收多少", history=[])
+    assert len(result["missing_entities"]) == 1
+    assert result["missing_entities"][0]["type"] == "year"
+
+
+def test_history_resolves_entity() -> None:
+    """历史对话中的已提及实体不应再出现在 missing_entities。"""
+    from src.infra.llm.chat_message import ChatMessage
+
+    router = QueryRouter(llm=Mock())
+    router._llm_classify = Mock(
+        return_value={
+            "route": "medium",
+            "missing_entities": [],
+            "confidence": 0.92,
+        }
+    )
+    history = [
+        ChatMessage(role="user", content="2024年营收多少"),
+        ChatMessage(role="assistant", content="2024年营收为100亿"),
+    ]
+    result = router.route("利润率呢", history=history)
+    assert len(result["missing_entities"]) == 0
+
+
+def test_cache_hits() -> None:
+    router = QueryRouter(llm=Mock())
+    router._llm_classify = Mock(
+        return_value={"route": "medium", "missing_entities": [], "confidence": 0.9}
+    )
+    router.route("2024年营收", [])
+    router.route("2024年营收", [])
+    assert router._llm_classify.call_count == 1

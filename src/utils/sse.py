@@ -57,6 +57,16 @@ class SSEModelInfoEvent:
     is_fallback: bool  # 是否触发了 fallback
 
 
+@dataclass
+class SSEClarificationEvent:
+    """追问事件 — 当系统需要用户补充信息时触发。"""
+
+    type: str  # "entity_completion" | "intent_clarification"
+    question: str  # 追问文本
+    missing_entities: list[dict]  # [{"type": "year"}, ...]
+    suggestions: list[str]  # 快捷选项
+
+
 SSEEvent = (
     SSEStatusEvent
     | SSETokenEvent
@@ -64,6 +74,7 @@ SSEEvent = (
     | SSEErrorEvent
     | SSEDoneEvent
     | SSEModelInfoEvent
+    | SSEClarificationEvent  # 追问事件
 )
 
 
@@ -155,6 +166,27 @@ def sse_model_info(model: str, is_fallback: bool) -> str:
     )
 
 
+def sse_clarification(event: SSEClarificationEvent) -> str:
+    """构建 SSE clarification 事件。
+
+    Args:
+        event: 追问事件对象
+
+    Returns:
+        SSE 格式的文本行
+    """
+    data = json.dumps(
+        {
+            "type": event.type,
+            "question": event.question,
+            "missing_entities": event.missing_entities,
+            "suggestions": event.suggestions,
+        },
+        ensure_ascii=False,
+    )
+    return f"event: clarification\ndata: {data}\n\n"
+
+
 def to_sse(event: SSEEvent) -> str:
     """将结构化事件转为 SSE 格式字符串。
 
@@ -181,3 +213,7 @@ def to_sse(event: SSEEvent) -> str:
             return sse_done()
         case SSEModelInfoEvent(model=model, is_fallback=is_fallback):
             return sse_model_info(model, is_fallback)
+        case SSEClarificationEvent(
+            type=t, question=q, missing_entities=me, suggestions=s
+        ):
+            return sse_clarification(SSEClarificationEvent(t, q, me, s))

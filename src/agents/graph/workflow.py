@@ -7,7 +7,7 @@ from loguru import logger
 
 from src.agents.graph.state import AgentState
 from src.agents.graph.nodes import (
-    classify_node,
+    make_classify_node,
     rewrite_node,
     grader_node,
     format_node,
@@ -22,7 +22,10 @@ from src.config.const import LangGraphNode
 
 
 def route_by_intent(state: AgentState) -> str:
-    """根据意图路由到不同路径。"""
+    """根据意图路由到不同路径，缺失实体时返回 clarify。"""
+    if state.missing_entities:
+        logger.info("route_by_intent: missing_entities detected -> clarify")
+        return "clarify"
     return state.intent.route or "medium"
 
 
@@ -62,12 +65,16 @@ def build_graph(
 
     # ── 用工厂函数创建带依赖的节点 ────────────────
     builder.add_node("kb_router", make_kb_router_node(embed_fn, llm))
-    builder.add_node(LangGraphNode.Classify.NAME, classify_node)
+    builder.add_node(LangGraphNode.Classify.NAME, make_classify_node(llm))
     builder.add_node(LangGraphNode.Rewrite.NAME, rewrite_node)
-    builder.add_node(LangGraphNode.Retrieve.NAME, make_retrieve_node(vector_store, bm25))
+    builder.add_node(
+        LangGraphNode.Retrieve.NAME, make_retrieve_node(vector_store, bm25)
+    )
     builder.add_node(LangGraphNode.Grader.NAME, grader_node)
     builder.add_node(LangGraphNode.Rerank.NAME, make_rerank_node(reranker))
-    builder.add_node(LangGraphNode.Generate.NAME, make_generate_node(llm, prompt_manager))
+    builder.add_node(
+        LangGraphNode.Generate.NAME, make_generate_node(llm, prompt_manager)
+    )
     builder.add_node(LangGraphNode.Format.NAME, format_node)
 
     # ── 设置入口点和边：kb_router → classify → ... ──
@@ -82,6 +89,7 @@ def build_graph(
             "simple": LangGraphNode.Retrieve.NAME,  # 直接检索，不需要改写
             "medium": LangGraphNode.Rewrite.NAME,  # Enhanced RAG
             "complex": LangGraphNode.Rewrite.NAME,  # Agentic RAG
+            "clarify": END,  # 缺失实体 → 澄清
         },
     )
 

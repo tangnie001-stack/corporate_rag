@@ -14,7 +14,12 @@ from urllib.request import Request, urlopen
 
 from loguru import logger
 
-from src.config.prompts import FINANCIAL_SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
+from src.config.prompts import (
+    CLASSIFIER_SYSTEM_PROMPT,
+    CLASSIFIER_USER_TEMPLATE,
+    FINANCIAL_SYSTEM_PROMPT,
+    USER_PROMPT_TEMPLATE,
+)
 
 # 本地兜底的 prompt 常量（与 src/config/prompts.py 一致）
 _INLINE_CITATION_INSTRUCTION: str = (
@@ -38,6 +43,7 @@ class PromptManager:
     PROMPT_NAMES = {
         "system": "financial-system-prompt",
         "user": "user-prompt-template",
+        "classifier": "classifier-prompt",
     }
 
     def __init__(
@@ -150,6 +156,38 @@ class PromptManager:
         """
         template = self._get(self.PROMPT_NAMES["user"], _FALLBACK_USER_TEMPLATE)
         return template.format(context=context, query=query)
+
+    def get_classifier_prompt(
+        self,
+        query: str,
+        entities: str,
+        complexity_score: float,
+        history: str,
+    ) -> str:
+        """获取分类器 prompt，从 Langfuse 拉取或兜底本地模板。
+
+        拼接系统提示词和填充后的用户消息模板，返回完整的 prompt 文本。
+        由调用方自行封装为 SystemMessage / HumanMessage，本层不耦合 LangChain。
+
+        Args:
+            query: 用户原始查询文本
+            entities: 已提取实体列表（字符串）
+            complexity_score: 规则预判的复杂度评分
+            history: 最近对话历史文本
+
+        Returns:
+            完整的分类器 prompt 文本（系统提示 + 用户消息）
+        """
+        sys_prompt = self._get(
+            self.PROMPT_NAMES["classifier"], CLASSIFIER_SYSTEM_PROMPT
+        )
+        user_prompt = CLASSIFIER_USER_TEMPLATE.format(
+            query=query,
+            entities=entities or "无",
+            complexity_score=str(complexity_score),
+            history=history or "无",
+        )
+        return f"{sys_prompt}\n\n{user_prompt}"
 
     def invalidate_cache(self) -> None:
         """清空缓存，下次调用会重新拉取。

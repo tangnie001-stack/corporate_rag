@@ -116,9 +116,7 @@ class VectorStore:
         def _search_one(kb_id: str) -> list[ChunkResult]:
             return self.similarity_search(kb_id, query, k)
 
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=len(kb_ids)
-        ) as pool:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(kb_ids)) as pool:
             futures = [pool.submit(_search_one, kb_id) for kb_id in kb_ids]
             all_results: list[ChunkResult] = []
             for future in concurrent.futures.as_completed(futures):

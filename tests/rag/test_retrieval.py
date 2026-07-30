@@ -3,7 +3,6 @@
 测试目标：
 - search()：向量检索功能
 - rerank_results()：重排序功能
-- classify_query()：查询分类
 - expand_query() / condense_query() / decompose_query()：查询改写
 - rewrite_query()：集成改写入口
 
@@ -74,35 +73,6 @@ class TestRerank:
         assert contexts == []
 
 
-# ==================== 查询分类测试 ====================
-class TestClassifyQuery:
-    """测试 classify_query() 查询分类。"""
-
-    def test_simple_fact(self):
-        """单事实查询应分类为 simple。"""
-        assert retrieval.classify_query("2024年营业收入是多少？") == "simple"
-        assert retrieval.classify_query("贵州茅台2024年净利润") == "simple"
-
-    def test_short_query(self):
-        """短查询（<10字符）应分类为 medium。"""
-        assert retrieval.classify_query("营收") == "medium"
-        assert retrieval.classify_query("净利润") == "medium"
-
-    def test_medium_analysis(self):
-        """分析类查询应分类为 medium。"""
-        assert retrieval.classify_query("分析一下茅台2024年的业绩") == "medium"
-        assert retrieval.classify_query("为什么营收增长了") == "medium"
-
-    def test_complex_compare(self):
-        """对比查询应分类为 complex。"""
-        assert retrieval.classify_query("对比茅台和五粮液2024营收") == "complex"
-        assert retrieval.classify_query("比较2023和2024年净利润") == "complex"
-
-    def test_empty_query(self):
-        """空查询应分类为 simple（不报错）。"""
-        assert retrieval.classify_query("") == "simple"
-        assert retrieval.classify_query("   ") == "simple"
-
 
 # ==================== 查询改写测试 ====================
 class TestQueryRewrite:
@@ -127,7 +97,9 @@ class TestQueryRewrite:
 
     def test_complex_decomposes(self):
         """对比查询应触发 decompose_query 返回子查询列表。"""
-        result = retrieval.rewrite_query("对比茅台和五粮液营收", [])
+        result = retrieval.rewrite_query(
+            "对比茅台和五粮液营收", [], intent_route="complex"
+        )
         assert isinstance(result, list)
         assert len(result) > 1
 

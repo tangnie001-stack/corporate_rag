@@ -1,0 +1,893 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>企业知识库助手</title>
+<link href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600;700&family=Source+Sans+3:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --primary: #3B82F6;
+    --primary-hover: #2563EB;
+    --primary-light: #DBEAFE;
+    --accent: #F97316;
+    --accent-hover: #EA580C;
+    --bg: #F8FAFC;
+    --surface: #FFFFFF;
+    --text: #1E293B;
+    --text-secondary: #64748B;
+    --text-muted: #94A3B8;
+    --border: #E2E8F0;
+    --bubble-ai: #F8FAFC;
+    --bubble-user: #3B82F6;
+    --bubble-user-text: #FFFFFF;
+    --radius-lg: 12px;
+    --radius-sm: 8px;
+    --shadow: 0 1px 3px rgba(0,0,0,0.08);
+    --shadow-lg: 0 4px 12px rgba(0,0,0,0.04);
+    --transition: 150ms ease;
+    --max-width: 720px;
+    --font-display: 'Lexend', sans-serif;
+    --font-body: 'Source Sans 3', sans-serif;
+  }
+
+  html { font-size: 16px; }
+  body {
+    font-family: var(--font-body);
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── Layout ── */
+  .app-header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    box-shadow: var(--shadow);
+  }
+  .app-header-inner {
+    max-width: var(--max-width);
+    width: 100%;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .app-icon {
+    width: 36px; height: 36px;
+    background: var(--primary);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+  .app-title {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 15px;
+    color: var(--text);
+  }
+  .app-subtitle {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 1px;
+  }
+
+  .chat-container {
+    flex: 1;
+    max-width: var(--max-width);
+    width: 100%;
+    margin: 0 auto;
+    padding: 20px 16px 120px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  /* ── Bubbles ── */
+  .bubble-row {
+    display: flex;
+    gap: 10px;
+    max-width: 85%;
+    animation: fadeInUp 250ms ease-out;
+  }
+  .bubble-row.ai { align-self: flex-start; }
+  .bubble-row.user { align-self: flex-end; flex-direction: row-reverse; }
+
+  @keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .bubble-avatar {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    margin-top: 4px;
+    user-select: none;
+  }
+  .bubble-row.ai .bubble-avatar {
+    background: var(--primary-light);
+    color: var(--primary);
+  }
+  .bubble-row.user .bubble-avatar {
+    background: #FEF3C7;
+    color: #D97706;
+  }
+
+  .bubble-content {
+    border-radius: var(--radius-lg);
+    padding: 10px 14px;
+    font-size: 15px;
+    line-height: 1.6;
+    word-break: break-word;
+  }
+  .bubble-row.ai .bubble-content {
+    background: var(--bubble-ai);
+    border: 1px solid var(--border);
+    border-bottom-left-radius: 4px;
+  }
+  .bubble-row.user .bubble-content {
+    background: var(--bubble-user);
+    color: var(--bubble-user-text);
+    border-bottom-right-radius: 4px;
+  }
+
+  .bubble-meta {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  /* ── Status Indicators ── */
+  .status-dot {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--primary);
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 1; }
+  }
+
+  .status-tag {
+    align-self: flex-start;
+    font-size: 12px;
+    color: var(--text-secondary);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    padding: 4px 12px;
+    border-radius: 20px;
+    margin-left: 42px;
+    animation: fadeInUp 250ms ease-out;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  /* ── Clarification Bubble ── */
+  .clarification-card {
+    align-self: flex-start;
+    max-width: 85%;
+    animation: fadeInUp 300ms ease-out;
+  }
+  .clarification-inner {
+    background: var(--bubble-ai);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 16px;
+    border-bottom-left-radius: 4px;
+  }
+  .clarification-label {
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-weight: 500;
+    margin-bottom: 4px;
+    padding-left: 4px;
+  }
+  .clarification-question {
+    font-size: 15px;
+    line-height: 1.6;
+    color: var(--text);
+    margin-bottom: 14px;
+  }
+
+  /* ── Suggestion Chips ── */
+  .suggestion-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .chip {
+    padding: 6px 18px;
+    border-radius: 20px;
+    border: 1.5px solid var(--primary);
+    background: var(--surface);
+    color: var(--primary);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition);
+    font-family: var(--font-body);
+    line-height: 1.4;
+  }
+  .chip:hover {
+    background: var(--primary-light);
+    border-color: var(--primary-hover);
+  }
+  .chip:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+  }
+  .chip.other {
+    border-color: var(--text-muted);
+    color: var(--text-secondary);
+  }
+  .chip.other:hover {
+    background: #F1F5F9;
+    border-color: var(--text-secondary);
+  }
+
+  /* ── Clarification Input ── */
+  .clarification-input-row {
+    display: flex;
+    gap: 8px;
+  }
+  .clarification-input-row input {
+    flex: 1;
+    padding: 8px 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 14px;
+    outline: none;
+    transition: box-shadow 200ms, border-color 200ms;
+    font-family: var(--font-body);
+    color: var(--text);
+    background: var(--surface);
+  }
+  .clarification-input-row input::placeholder { color: var(--text-muted); }
+  .clarification-input-row input:focus {
+    box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
+    border-color: var(--primary);
+  }
+  .clarification-send {
+    width: 38px; height: 38px;
+    background: var(--accent);
+    border: none;
+    border-radius: 10px;
+    color: white;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background var(--transition);
+    flex-shrink: 0;
+  }
+  .clarification-send:hover { background: var(--accent-hover); }
+  .clarification-send:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .clarification-send svg { width: 18px; height: 18px; }
+
+  /* ── Highlighted Answer ── */
+  .answer-highlight {
+    background: #FEF3C7;
+    color: #92400E;
+    padding: 0 2px;
+    border-radius: 2px;
+  }
+
+  /* ── Citations ── */
+  .citation-list {
+    align-self: flex-start;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-left: 42px;
+    margin-top: -4px;
+    animation: fadeInUp 250ms ease-out;
+  }
+  .citation-item {
+    font-size: 12px;
+    color: var(--text-secondary);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 6px 12px;
+    border-radius: var(--radius-sm);
+    max-width: 100%;
+    line-height: 1.4;
+    cursor: default;
+  }
+  .citation-source {
+    font-weight: 600;
+    color: var(--primary);
+  }
+
+  /* ── Divider ── */
+  .divider-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--text-muted);
+    font-size: 11px;
+    margin: 4px 0;
+    align-self: stretch;
+  }
+  .divider-row::before,
+  .divider-row::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* ── Model Info ── */
+  .model-info {
+    align-self: flex-end;
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: -8px;
+  }
+  .model-info .fallback-badge {
+    color: var(--accent);
+    font-weight: 500;
+  }
+
+  /* ── Footer Input ── */
+  .chat-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    padding: 12px 16px;
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+    z-index: 10;
+  }
+  .chat-footer-inner {
+    max-width: var(--max-width);
+    margin: 0 auto;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+  .chat-footer input {
+    flex: 1;
+    padding: 10px 16px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 14px;
+    outline: none;
+    transition: box-shadow 200ms, border-color 200ms;
+    font-family: var(--font-body);
+    color: var(--text);
+    background: var(--surface);
+  }
+  .chat-footer input::placeholder { color: var(--text-muted); }
+  .chat-footer input:focus {
+    box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
+    border-color: var(--primary);
+  }
+  .chat-footer input:disabled {
+    background: var(--bg);
+    cursor: not-allowed;
+  }
+  .chat-send {
+    width: 40px; height: 40px;
+    background: var(--primary);
+    border: none;
+    border-radius: 10px;
+    color: white;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background var(--transition);
+    flex-shrink: 0;
+  }
+  .chat-send:hover { background: var(--primary-hover); }
+  .chat-send:disabled { background: var(--text-muted); cursor: not-allowed; }
+  .chat-send:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+  }
+  .chat-send svg { width: 20px; height: 20px; }
+
+  /* ── Empty State ── */
+  .empty-state {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    text-align: center;
+    padding: 40px 20px;
+    gap: 8px;
+  }
+  .empty-state-icon {
+    font-size: 48px;
+    opacity: 0.5;
+    margin-bottom: 8px;
+  }
+  .empty-state-title {
+    font-family: var(--font-display);
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-secondary);
+  }
+  .empty-state-desc {
+    font-size: 14px;
+    max-width: 300px;
+  }
+
+  /* ── Error Toast ── */
+  .error-toast {
+    position: fixed;
+    top: 72px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #FEF2F2;
+    border: 1px solid #FECACA;
+    color: #991B1B;
+    padding: 10px 20px;
+    border-radius: var(--radius-sm);
+    font-size: 14px;
+    z-index: 100;
+    box-shadow: var(--shadow-lg);
+    animation: fadeInUp 200ms ease-out;
+    max-width: 90%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .error-toast.hidden { display: none; }
+
+  /* ── Responsive ── */
+  @media (max-width: 480px) {
+    .bubble-row { max-width: 92%; }
+    .clarification-card { max-width: 92%; }
+    .clarification-inner { padding: 14px; }
+    .chat-container { padding: 16px 12px 110px; }
+    .status-tag { margin-left: 0; }
+    .citation-list { margin-left: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header class="app-header">
+  <div class="app-header-inner">
+    <div class="app-icon">K</div>
+    <div>
+      <div class="app-title">企业知识库助手</div>
+      <div class="app-subtitle">基于 RAG 的知识问答</div>
+    </div>
+  </div>
+</header>
+
+<!-- Error Toast -->
+<div id="errorToast" class="error-toast hidden">
+  <span>⚠️</span>
+  <span id="errorMessage"></span>
+</div>
+
+<!-- Chat Area -->
+<div class="chat-container" id="chatContainer" role="log" aria-live="polite" aria-label="对话消息">
+  <div class="empty-state" id="emptyState">
+    <div class="empty-state-icon">💬</div>
+    <div class="empty-state-title">有什么可以帮您？</div>
+    <div class="empty-state-desc">输入问题开始使用企业知识库查询</div>
+  </div>
+</div>
+
+<!-- Footer Input -->
+<div class="chat-footer" id="chatFooter">
+  <div class="chat-footer-inner">
+    <input type="text" id="chatInput" placeholder="输入问题..." autocomplete="off" aria-label="消息输入框">
+    <button class="chat-send" id="sendBtn" title="发送" aria-label="发送消息">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+    </button>
+  </div>
+</div>
+
+<script>
+// ── State ──
+const STATE = {
+  IDLE: 'idle',
+  STREAMING: 'streaming',
+  CLARIFYING: 'clarifying',
+};
+
+const state = {
+  current: STATE.IDLE,
+  sessionId: '',
+  kbId: '',        // 可配置
+  clarPending: null,  // 当前追问信息
+  abortController: null,
+};
+
+// ── Session ID ──
+function getOrCreateSessionId() {
+  let sid = localStorage.getItem('rag_session_id');
+  if (!sid) {
+    sid = 'sess_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+    localStorage.setItem('rag_session_id', sid);
+  }
+  return sid;
+}
+
+// ── DOM refs ──
+const $ = (id) => document.getElementById(id);
+const chatContainer = $('chatContainer');
+const emptyState = $('emptyState');
+const chatInput = $('chatInput');
+const sendBtn = $('sendBtn');
+const errorToast = $('errorToast');
+const errorMessage = $('errorMessage');
+
+// ── Helpers ──
+function scrollToBottom() {
+  requestAnimationFrame(() => {
+    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+  });
+}
+
+function showError(msg) {
+  errorMessage.textContent = msg;
+  errorToast.classList.remove('hidden');
+  setTimeout(() => errorToast.classList.add('hidden'), 6000);
+}
+
+function setInputState(enabled, placeholder) {
+  chatInput.disabled = !enabled;
+  chatInput.placeholder = placeholder || '输入问题...';
+  sendBtn.disabled = !enabled;
+  if (enabled) chatInput.focus();
+}
+
+function removeEmptyState() {
+  if (emptyState && emptyState.parentNode) {
+    emptyState.remove();
+  }
+}
+
+// ── Render Functions ──
+
+function renderUserBubble(text) {
+  const div = document.createElement('div');
+  div.className = 'bubble-row user';
+  div.innerHTML = `
+    <div class="bubble-avatar">👤</div>
+    <div class="bubble-content">${escapeHtml(text)}</div>
+  `;
+  chatContainer.appendChild(div);
+  scrollToBottom();
+}
+
+function renderStatusTag(stage, message) {
+  const div = document.createElement('div');
+  div.className = 'status-tag';
+  div.innerHTML = `<span class="status-dot"></span> ${escapeHtml(message)}`;
+  chatContainer.appendChild(div);
+  scrollToBottom();
+}
+
+function renderAiAnswer(text) {
+  const div = document.createElement('div');
+  div.className = 'bubble-row ai';
+  div.innerHTML = `
+    <div class="bubble-avatar">🤖</div>
+    <div class="bubble-content"><div class="bubble-meta">系统</div>${escapeHtml(text)}</div>
+  `;
+  chatContainer.appendChild(div);
+  scrollToBottom();
+}
+
+function renderAiAnswerStream(text) {
+  let bubble = chatContainer.querySelector('.bubble-row.ai:last-child .bubble-content');
+  if (!bubble) {
+    const div = document.createElement('div');
+    div.className = 'bubble-row ai';
+    div.innerHTML = `<div class="bubble-avatar">🤖</div><div class="bubble-content"><div class="bubble-meta">系统</div></div>`;
+    chatContainer.appendChild(div);
+    bubble = div.querySelector('.bubble-content');
+  }
+  const meta = bubble.querySelector('.bubble-meta');
+  const textNode = document.createTextNode(text);
+  if (meta.nextSibling) {
+    meta.nextSibling.textContent += text;
+  } else {
+    bubble.appendChild(textNode);
+  }
+  scrollToBottom();
+}
+
+function renderCitation(source, page, snippet) {
+  let list = chatContainer.querySelector('.citation-list');
+  if (!list) {
+    list = document.createElement('div');
+    list.className = 'citation-list';
+    chatContainer.appendChild(list);
+  }
+  const item = document.createElement('div');
+  item.className = 'citation-item';
+  item.innerHTML = `<span class="citation-source">📄 ${escapeHtml(source)}</span> · 第${page}页<br>${escapeHtml(snippet)}`;
+  list.appendChild(item);
+  scrollToBottom();
+}
+
+function renderModelInfo(model, isFallback) {
+  const div = document.createElement('div');
+  div.className = 'model-info';
+  div.textContent = `模型: ${model}`;
+  if (isFallback) {
+    div.innerHTML += ' <span class="fallback-badge">⚡ 已降级</span>';
+  }
+  chatContainer.appendChild(div);
+  scrollToBottom();
+}
+
+function renderClarification(clarEvent) {
+  state.clarPending = clarEvent;
+
+  const card = document.createElement('div');
+  card.className = 'clarification-card';
+
+  const chipsHtml = (clarEvent.suggestions || []).map(s => {
+    const isOther = s === '其他';
+    return `<button class="chip${isOther ? ' other' : ''}" data-value="${escapeHtml(s)}">${escapeHtml(s)}</button>`;
+  }).join('');
+
+  card.innerHTML = `
+    <div class="clarification-label">系统 · 缺少信息</div>
+    <div class="clarification-inner">
+      <div class="clarification-question">${escapeHtml(clarEvent.question)}</div>
+      <div class="suggestion-chips">${chipsHtml}</div>
+      <div class="clarification-input-row">
+        <input type="text" class="clarification-input" placeholder="输入补充信息…" autofocus>
+        <button class="clarification-send" title="发送">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+      </div>
+    </div>
+  `;
+
+  // Chip click handler
+  card.querySelectorAll('.chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const value = chip.dataset.value;
+      if (value === '其他') {
+        card.querySelector('.clarification-input')?.focus();
+        return;
+      }
+      submitClarification(value);
+    });
+  });
+
+  // Clarification input send
+  const clarInput = card.querySelector('.clarification-input');
+  const clarSend = card.querySelector('.clarification-send');
+  clarSend.addEventListener('click', () => {
+    const val = clarInput.value.trim();
+    if (val) submitClarification(val);
+  });
+  clarInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const val = clarInput.value.trim();
+      if (val) submitClarification(val);
+    }
+  });
+
+  chatContainer.appendChild(card);
+  scrollToBottom();
+  setTimeout(() => clarInput?.focus(), 100);
+}
+
+function submitClarification(value) {
+  removeClarification();
+
+  // Show user response
+  renderUserBubble(value);
+
+  // Remove any leftover status tags from the previous attempt
+  chatContainer.querySelectorAll('.status-tag').forEach(el => el.remove());
+
+  state.current = STATE.STREAMING;
+  setInputState(false, '正在检索...');
+  startSSE(value);
+}
+
+function removeClarification() {
+  const card = chatContainer.querySelector('.clarification-card');
+  if (card) card.remove();
+}
+
+function removeStreamingState() {
+  chatContainer.querySelectorAll('.status-tag').forEach(el => el.remove());
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// ── SSE ──
+function startSSE(query) {
+  if (state.abortController) {
+    state.abortController.abort();
+  }
+
+  const params = new URLSearchParams({
+    session_id: state.sessionId,
+    kb_id: state.kbId,
+    query: query,
+  });
+
+  const url = `/api/chat/stream?${params}`;
+  const source = new EventSource(url);
+  let currentBubble = null;
+  let fullAnswer = '';
+
+  source.addEventListener('status', (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      renderStatusTag(data.stage, data.message);
+    } catch (err) { /* ignore */ }
+  });
+
+  source.addEventListener('token', (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      fullAnswer += data.token || '';
+      renderAiAnswerStream(data.token || '');
+    } catch (err) { /* ignore */ }
+  });
+
+  source.addEventListener('citation', (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      renderCitation(data.source, data.page, data.snippet || '');
+    } catch (err) { /* ignore */ }
+  });
+
+  source.addEventListener('clarification', (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      // Clean up
+      source.close();
+      removeStreamingState();
+
+      state.current = STATE.CLARIFYING;
+      setInputState(true, '输入补充信息…');
+
+      renderClarification(data);
+    } catch (err) { /* ignore */ }
+  });
+
+  source.addEventListener('model_info', (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      renderModelInfo(data.model || '', !!data.is_fallback);
+    } catch (err) { /* ignore */ }
+  });
+
+  source.addEventListener('done', () => {
+    source.close();
+    state.current = STATE.IDLE;
+    if (state.clarPending) {
+      // clarification path - input already enabled
+      // state is now CLARIFYING, don't reset
+    } else {
+      setInputState(true, '输入问题...');
+    }
+    chatInput.focus();
+  });
+
+  source.addEventListener('error', (e) => {
+    source.close();
+    // Only show error if we're still streaming (not in clarification)
+    if (state.current === STATE.STREAMING) {
+      showError('连接异常，请重试');
+      state.current = STATE.IDLE;
+      setInputState(true, '输入问题...');
+    }
+  });
+
+  // Fallback error listener
+  source.onerror = () => {
+    if (state.current === STATE.STREAMING) {
+      source.close();
+      showError('连接断开，请重试');
+      state.current = STATE.IDLE;
+      setInputState(true, '输入问题...');
+    }
+  };
+}
+
+// ── Send Message ──
+function sendMessage() {
+  const query = chatInput.value.trim();
+  if (!query) return;
+  if (state.current === STATE.STREAMING) return;
+
+  chatInput.value = '';
+  removeEmptyState();
+  removeStreamingState();
+
+  renderUserBubble(query);
+
+  state.current = STATE.STREAMING;
+  state.clarPending = null;
+  setInputState(false, '正在检索...');
+  startSSE(query);
+}
+
+// ── Events ──
+sendBtn.addEventListener('click', sendMessage);
+chatInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    sendMessage();
+  }
+});
+
+// ── Init ──
+state.sessionId = getOrCreateSessionId();
+state.kbId = new URLSearchParams(window.location.search).get('kb_id') || '';
+if (!state.kbId) {
+  console.warn('未指定 kb_id，请在 URL 中添加 ?kb_id=xxx');
+}
+
+// Show session ID in header subtitle
+document.querySelector('.app-subtitle').textContent = `会话: ${state.sessionId.slice(-12)}`;
+
+console.log('RAG Chat initialized', {
+  sessionId: state.sessionId,
+  kbId: state.kbId,
+});
+</script>
+</body>
+</html>

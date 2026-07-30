@@ -13,4 +13,6 @@ if TYPE_CHECKING:
 
 current_trace_id: ContextVar[str | None] = ContextVar("current_trace_id", default=None)
 current_user_id: ContextVar[str] = ContextVar("current_user_id", default="")
-current_tracer: ContextVar["LangfuseTracer | None"] = ContextVar("current_tracer", default=None)
+current_tracer: ContextVar["LangfuseTracer | None"] = ContextVar(
+    "current_tracer", default=None
+)

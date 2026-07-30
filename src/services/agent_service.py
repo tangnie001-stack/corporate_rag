@@ -21,6 +21,7 @@ from src.utils.sse import (
     SSEErrorEvent,
     SSEDoneEvent,
     SSEModelInfoEvent,
+    SSEClarificationEvent,
 )
 from src.agents.graph.workflow import build_graph
 from src.agents.graph.state import AgentState
@@ -94,6 +95,7 @@ class AgentService:
             contexts: list[RAGContext] = []
             downgraded = False
             downgrade_reason = ""
+            _clarification_pending = None
 
             async for event in self._graph.astream_events(
                 initial_state,
@@ -121,7 +123,14 @@ class AgentService:
                             LangGraphKey.OUTPUT
                         )
                         if isinstance(output, dict):
-                            if LangGraphNode.Rerank.NAME in name:
+                            if LangGraphNode.Classify.NAME in name:
+                                missing = output.get("missing_entities", [])
+                                if missing:
+                                    _clarification_pending = {
+                                        "type": "entity_completion",
+                                        "missing_entities": missing,
+                                    }
+                            elif LangGraphNode.Rerank.NAME in name:
                                 contexts = output.get(
                                     LangGraphNode.Rerank.CONTEXTS, contexts
                                 )
@@ -134,6 +143,25 @@ class AgentService:
                             elif LangGraphNode.Generate.NAME in name:
                                 model_used = output.get("model_used", model_used)
                                 is_fallback = output.get("is_fallback", is_fallback)
+
+            # 追问处理：缺少实体时返回澄清事件
+            if _clarification_pending:
+                cp = _clarification_pending
+                first = cp["missing_entities"][0]
+                entity_type = first.get("type", "default")
+                from src.infra.search.query_router import SUGGESTIONS_MAP
+
+                suggestions = SUGGESTIONS_MAP.get(
+                    entity_type, SUGGESTIONS_MAP["default"]
+                )
+                yield SSEClarificationEvent(
+                    type=cp["type"],
+                    question=first.get("question", "请补充相关信息"),
+                    missing_entities=cp["missing_entities"],
+                    suggestions=suggestions,
+                )
+                yield SSEDoneEvent()
+                return
 
             # 从流式事件中已收集了 contexts / downgraded，不再需要 ainvoke
             seen = set()

@@ -2,13 +2,20 @@
  * chat.js — SSE 流式聊天控制器
  *
  * 管理会话生命周期，处理 SSE（Server-Sent Events）流式响应，
- * 负责 KB 选择器加载、消息渲染、引用展示等功能。
+ * 负责 KB 选择器加载、消息渲染、引用展示、追问对话等功能。
  */
 
 let currentSessionId = generateSessionId();
 let abortController = null;
 let activeEventSource = null;
 let sessions = [];  // 缓存的会话列表，供侧边栏渲染使用
+let clarificationPending = null;  // 追问状态：{ type, missing_entities, suggestions }
+
+/** 追问状态机 */
+const CLARIFY = {
+  IDLE: 'idle',
+  PENDING: 'pending',  // 正在等待用户补充
+};
 
 /**
  * 生成本地会话 ID（非持久化标识，在首次请求时由后端注册）。
@@ -343,6 +350,7 @@ function sendMessage() {
 
     let fullText = '';
     const citations = [];
+    let isClarificationFlow = false;  // 当前是否在追问路径中
 
     // 状态事件：更新处理阶段提示
     evtSource.addEventListener('status', (e) => {
@@ -384,13 +392,64 @@ function sendMessage() {
         }
     });
 
-    // done 事件：响应完成，渲染引用列表并刷新侧边栏
+    // clarification 事件：询问缺失实体，展示追问气泡
+    evtSource.addEventListener('clarification', (e) => {
+        try {
+            const data = JSON.parse(e.data);
+            isClarificationFlow = true;
+            clarificationPending = {
+                type: data.type || 'entity_completion',
+                missing_entities: data.missing_entities || [],
+                question: data.question || '请补充相关信息',
+                suggestions: data.suggestions || [],
+            };
+
+            // 移除"思考中"状态
+            if (statusDiv.parentNode) statusDiv.remove();
+
+            // 在 AI 气泡位置渲染追问卡片
+            renderClarificationBubble(clarificationPending, assistantDiv);
+        } catch (err) {
+            console.error('Clarification parse error:', err);
+        }
+    });
+
+    // model_info 事件：模型信息（含 fallback 状态）
+    evtSource.addEventListener('model_info', (e) => {
+        try {
+            const data = JSON.parse(e.data);
+            const info = document.createElement('div');
+            info.className = 'flex items-center gap-1.5 mt-1 mb-2 text-[11px] text-slate-400 ml-1';
+            info.innerHTML = `模型: ${escapeHtml(data.model || '')}`
+                + (data.is_fallback
+                    ? ' <span class="text-amber-500 font-medium">⚡ 已降级</span>'
+                    : '');
+            const container = document.getElementById('chat-messages');
+            container.appendChild(info);
+            container.scrollTop = container.scrollHeight;
+        } catch (err) {
+            console.error('ModelInfo parse error:', err);
+        }
+    });
+
+    // done 事件：响应完成
     evtSource.addEventListener('done', () => {
         evtSource.close();
         activeEventSource = null;
         abortController = null;
 
-        // 若有引用信息，追加到回复内容末尾
+        if (isClarificationFlow) {
+            // 追问路径 — 不渲染引用，不刷新侧边栏
+            // 气泡已由 clarification 事件渲染完成
+            const input = document.getElementById('chat-input');
+            input.placeholder = '输入补充信息…';
+            input.disabled = false;
+            input.focus();
+            isClarificationFlow = false;
+            return;
+        }
+
+        // 正常路径 — 若有引用信息，追加到回复内容末尾
         if (citations.length > 0) {
             const citationsHtml = citations.map((c, i) => {
                 const snippet = c.highlighted_snippet
@@ -504,6 +563,246 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// ====== 追问对话 (Clarification) ======
+
+/**
+ * 在 AI 气泡中渲染追问卡片（含快捷选项 + 输入框）。
+ *
+ * @param {object} clar - 追问数据：{ type, question, missing_entities, suggestions }
+ * @param {HTMLElement} assistantDiv - AI 回复气泡的容器元素
+ */
+function renderClarificationBubble(clar, assistantDiv) {
+    const contentDiv = assistantDiv.querySelector('.message-content');
+    if (!contentDiv) return;
+    contentDiv.innerHTML = '';
+
+    // 构建快捷选项按钮
+    const chipsHtml = (clar.suggestions || []).map(s => {
+        const isOther = s === '其他';
+        return `<button class="chip-btn ${isOther ? 'chip-other' : ''}" data-value="${escapeHtml(s)}">${escapeHtml(s)}</button>`;
+    }).join('');
+
+    contentDiv.innerHTML = `
+        <div class="clarification-card">
+            <div class="clarification-header">
+                <span class="clarification-icon">🔍</span>
+                <span class="clarification-label">需要补充信息</span>
+            </div>
+            <div class="clarification-question">${escapeHtml(clar.question)}</div>
+            <div class="clarification-chips">${chipsHtml}</div>
+            <div class="clarification-input-row">
+                <input type="text" class="clarification-input" placeholder="输入补充信息…" autofocus>
+                <button class="clarification-input-send" title="发送">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"/></svg>
+                </button>
+            </div>
+        </div>
+    `;
+
+    // 绑定 chip 点击事件
+    contentDiv.querySelectorAll('.chip-btn').forEach(chip => {
+        chip.addEventListener('click', () => {
+            const value = chip.dataset.value;
+            if (value === '其他') {
+                const input = contentDiv.querySelector('.clarification-input');
+                if (input) input.focus();
+                return;
+            }
+            submitClarification(value);
+        });
+    });
+
+    // 绑定输入框发送事件
+    const clarInput = contentDiv.querySelector('.clarification-input');
+    const clarSend = contentDiv.querySelector('.clarification-input-send');
+
+    clarSend.addEventListener('click', () => {
+        const val = clarInput.value.trim();
+        if (val) submitClarification(val);
+    });
+
+    clarInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            const val = clarInput.value.trim();
+            if (val) submitClarification(val);
+        }
+    });
+
+    // 滚动到追问气泡
+    const container = document.getElementById('chat-messages');
+    container.scrollTop = container.scrollHeight;
+    setTimeout(() => clarInput?.focus(), 150);
+}
+
+/**
+ * 提交追问的补充信息（复用 session_id 发送新请求）。
+ *
+ * @param {string} value - 用户选择的补充值
+ */
+function submitClarification(value) {
+    // 清空追问状态
+    clarificationPending = null;
+
+    // 清除上一个 SSE 连接（如果有）
+    if (activeEventSource) {
+        activeEventSource.close();
+        activeEventSource = null;
+    }
+
+    // 渲染用户补充信息的气泡
+    addMessage(value, 'user');
+
+    // 隐藏追问卡片
+    const lastBubble = document.querySelector('#chat-messages > .message-bubble:last-child');
+    if (lastBubble) {
+        const existingClar = lastBubble.querySelector('.clarification-card');
+        if (existingClar) {
+            lastBubble.style.display = 'none';
+        }
+    }
+
+    // 创建新的 AI 回复占位气泡
+    const assistantDiv = addMessage('', 'assistant');
+    const contentDiv = assistantDiv.querySelector('.message-content');
+    const statusDiv = document.createElement('div');
+    statusDiv.className = 'flex items-center gap-2 text-slate-400 text-sm';
+    statusDiv.innerHTML = '<span class="spinner"></span> 思考中...';
+    contentDiv.appendChild(statusDiv);
+
+    // 发起新 SSE 请求（复用 session_id）
+    const kbId = document.getElementById('kb-select').value;
+    const traceId = generateTraceId();
+    const params = new URLSearchParams({
+        session_id: currentSessionId,
+        kb_id: kbId,
+        query: value,
+        trace_id: traceId,
+    });
+
+    const evtSource = new EventSource(`/api/chat/stream?${params}`);
+    activeEventSource = evtSource;
+    abortController = new AbortController();
+
+    let fullText = '';
+    const citations = [];
+
+    evtSource.addEventListener('status', (e) => {
+        try {
+            const data = JSON.parse(e.data);
+            if (statusDiv.parentNode) {
+                statusDiv.innerHTML = `<span class="spinner"></span> ${escapeHtml(data.message)}`;
+            }
+        } catch (err) {}
+    });
+
+    evtSource.addEventListener('token', (e) => {
+        try {
+            const data = JSON.parse(e.data);
+            fullText += data.token;
+            if (statusDiv.parentNode) statusDiv.remove();
+            contentDiv.innerHTML = typeof marked !== 'undefined'
+                ? marked.parse(fullText)
+                : fullText;
+            document.getElementById('chat-messages').scrollTop =
+                document.getElementById('chat-messages').scrollHeight;
+        } catch (err) {}
+    });
+
+    evtSource.addEventListener('citation', (e) => {
+        try {
+            const data = JSON.parse(e.data);
+            citations.push(data);
+        } catch (err) {}
+    });
+
+    evtSource.addEventListener('model_info', (e) => {
+        try {
+            const data = JSON.parse(e.data);
+            const info = document.createElement('div');
+            info.className = 'flex items-center gap-1.5 mt-1 mb-2 text-[11px] text-slate-400 ml-1';
+            info.innerHTML = `模型: ${escapeHtml(data.model || '')}`
+                + (data.is_fallback
+                    ? ' <span class="text-amber-500 font-medium">⚡ 已降级</span>'
+                    : '');
+            document.getElementById('chat-messages').appendChild(info);
+            document.getElementById('chat-messages').scrollTop =
+                document.getElementById('chat-messages').scrollHeight;
+        } catch (err) {}
+    });
+
+    evtSource.addEventListener('done', () => {
+        evtSource.close();
+        activeEventSource = null;
+        abortController = null;
+
+        // 渲染引用
+        if (citations.length > 0) {
+            const citationsHtml = citations.map((c, i) => {
+                const snippet = c.highlighted_snippet
+                    ? c.highlighted_snippet
+                    : escapeHtml(c.snippet || '');
+                const scorePct = c.score ? Math.round(c.score * 100) + '%' : '';
+                return ''
+                    + '<div class="citation-item flex items-start gap-2 py-2 px-3 bg-slate-50 rounded-md text-xs text-slate-600 mb-1.5">'
+                    + '<span class="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-[10px] font-bold">'
+                    + (i + 1) + '</span>'
+                    + '<div class="flex-1 min-w-0">'
+                    + '<div class="flex items-center gap-2 mb-1">'
+                    + '<strong>' + escapeHtml(c.source) + '</strong>'
+                    + (c.page ? '<span class="text-slate-400">· 第' + c.page + '页</span>' : '')
+                    + (scorePct ? '<span class="citation-score">' + scorePct + '</span>' : '')
+                    + '</div>'
+                    + '<div class="text-slate-500 leading-relaxed">' + snippet + '</div>'
+                    + '</div></div>';
+            }).join('');
+
+            const rendered = typeof marked !== 'undefined' ? marked.parse(fullText) : fullText;
+            contentDiv.innerHTML = rendered
+                + '<div class="mt-4 pt-3 border-t border-slate-200">'
+                + '<div class="text-xs font-semibold text-slate-500 mb-2">📚 来源</div>'
+                + citationsHtml + '</div>';
+        }
+
+        document.getElementById('chat-messages').scrollTop =
+            document.getElementById('chat-messages').scrollHeight;
+
+        // 恢复输入框
+        const input = document.getElementById('chat-input');
+        input.placeholder = '输入您的金融问题...';
+        input.disabled = false;
+        input.focus();
+
+        loadSessions();
+    });
+
+    evtSource.addEventListener('error', (e) => {
+        evtSource.close();
+        activeEventSource = null;
+        abortController = null;
+
+        let displayText = '服务异常，请稍后重试';
+        try {
+            const data = JSON.parse(e.data);
+            const errorMsg = data.error || '';
+            if (errorMsg.includes('超时') || errorMsg.includes('timeout')) {
+                displayText = '模型响应超时，请稍后重试';
+            }
+        } catch (err) {}
+
+        if (statusDiv.parentNode) statusDiv.remove();
+        contentDiv.innerHTML = `<div class="error-banner">${displayText}</div>`;
+
+        const input = document.getElementById('chat-input');
+        input.placeholder = '输入您的金融问题...';
+        input.disabled = false;
+    });
+
+    // 滚动到底部
+    document.getElementById('chat-messages').scrollTop =
+        document.getElementById('chat-messages').scrollHeight;
 }
 
 /** 重置为新建会话。 */
