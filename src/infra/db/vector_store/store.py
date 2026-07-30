@@ -5,7 +5,16 @@ from loguru import logger
 from src.parsers.base import ChunkData
 
 
-def add_chunks(collection, kb_id: str, chunks: list[ChunkData], doc_id: str) -> int:
+from typing import Optional
+
+
+def add_chunks(
+    collection,
+    kb_id: str,
+    chunks: list[ChunkData],
+    doc_id: str,
+    embeddings: Optional[list[list[float]]] = None,
+) -> int:
     """批量写入分块到 collection。
 
     为每个分块生成唯一 ID（格式 {doc_id}:{index}），并在 metadata 中注入
@@ -16,6 +25,7 @@ def add_chunks(collection, kb_id: str, chunks: list[ChunkData], doc_id: str) -> 
         kb_id: 知识库 ID（仅用于日志）
         chunks: 分块数据列表
         doc_id: 文档 ID
+        embeddings: 可选的预计算 embedding 列表，传入后跳过 embedding 模型调用
 
     Returns:
         实际写入的分块数量
@@ -40,8 +50,12 @@ def add_chunks(collection, kb_id: str, chunks: list[ChunkData], doc_id: str) -> 
         meta.setdefault("page", 0)
         metadatas.append(meta)
 
+    kwargs = {"ids": ids, "documents": documents, "metadatas": metadatas}
+    if embeddings is not None:
+        kwargs["embeddings"] = embeddings
+
     try:
-        collection.add(ids=ids, documents=documents, metadatas=metadatas)
+        collection.add(**kwargs)
     except Exception as e:
         logger.exception(
             "ChromaDB add_chunks failed: kb_id={} doc_id={} error={}", kb_id, doc_id, e

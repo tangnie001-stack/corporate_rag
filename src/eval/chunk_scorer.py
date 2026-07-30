@@ -362,7 +362,11 @@ class ChunkQualityScorer:
     SBR_THRESHOLD = 0.35
 
     def evaluate(
-        self, chunks: list[ChunkData], source: str, strategy: str = ""
+        self,
+        chunks: list[ChunkData],
+        source: str,
+        strategy: str = "",
+        embeddings: list[list[float]] | None = None,
     ) -> dict:
         """运行全部 3 个指标并返回完整评估 JSON。
 
@@ -370,6 +374,7 @@ class ChunkQualityScorer:
             chunks: ChunkData 列表
             source: 源文件名，用于日志
             strategy: 分块策略（当前未使用，保留兼容）
+            embeddings: 可选的预计算 embedding 列表，传入后可跳过 SBR 的内部 embedding 调用
 
         Returns:
             dict: 包含 version, enabled, overall_score, passed 及各维度结果
@@ -383,7 +388,9 @@ class ChunkQualityScorer:
                 "structure_integrity": self._safe_call(
                     "structure_integrity", _check_structure_integrity, chunks
                 ),
-                "sbr": self._safe_call("sbr", self._calc_sbr, chunks),
+                "sbr": self._safe_call(
+                    "sbr", self._calc_sbr, chunks, embeddings=embeddings
+                ),
                 "granularity_cv": self._safe_call(
                     "granularity_cv", _calc_granularity_cv, chunks
                 ),
@@ -392,7 +399,9 @@ class ChunkQualityScorer:
         structure = self._safe_call(
             "structure_integrity", _check_structure_integrity, chunks
         )
-        sbr_result = self._safe_call("sbr", self._calc_sbr, chunks)
+        sbr_result = self._safe_call(
+            "sbr", self._calc_sbr, chunks, embeddings=embeddings
+        )
         cv_result = self._safe_call("granularity_cv", _calc_granularity_cv, chunks)
 
         # 从成功的指标计算综合得分
@@ -430,11 +439,16 @@ class ChunkQualityScorer:
             "granularity_cv": cv_result,
         }
 
-    def _calc_sbr(self, chunks: list[ChunkData]) -> dict:
+    def _calc_sbr(
+        self,
+        chunks: list[ChunkData],
+        embeddings: list[list[float]] | None = None,
+    ) -> dict:
         """对全部分块批量 embedding 后计算 SBR。
 
         Args:
             chunks: ChunkData 列表
+            embeddings: 可选的预计算 embedding，为 None 时内部调用 get_embeddings()
 
         Returns:
             dict: SBR 结果，broken_boundaries 含 preview 字段
@@ -443,8 +457,9 @@ class ChunkQualityScorer:
             return {"score": 1.0, "total_boundaries": 0, "broken_boundaries": []}
 
         texts = [c.content for c in chunks]
-        embedder = get_embeddings()
-        embeddings = embedder.embed_documents(texts)
+        if embeddings is None:
+            embedder = get_embeddings()
+            embeddings = embedder.embed_documents(texts)
 
         # 提取 block_types，用于跳过跨类型边界（如 table↔text）。
         # table 块有 "table"，text 块可能无此字段，统一归一化为 "text"

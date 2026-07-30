@@ -28,6 +28,7 @@ from src.config import (
     EMBEDDING_MODEL,
     EMBEDDING_API_KEY,
     EMBEDDING_BASE_URL,
+    EMBEDDING_BATCH_SIZE,
     RERANK_MODEL,
     RERANK_API_KEY,
     TOP_K_RERANK,
@@ -121,6 +122,8 @@ def get_embeddings(model: str = EMBEDDING_MODEL) -> OpenAIEmbeddings:
         model=model,
         api_key=EMBEDDING_API_KEY,
         base_url=EMBEDDING_BASE_URL,
+        check_embedding_ctx_length=False,
+        chunk_size=EMBEDDING_BATCH_SIZE,
     )
 
 

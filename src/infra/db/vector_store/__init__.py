@@ -43,19 +43,26 @@ class VectorStore:
         """
         return self._chroma.get_or_create_collection(kb_id)
 
-    def add_chunks(self, kb_id: str, chunks: list[ChunkData], doc_id: str) -> int:
+    def add_chunks(
+        self,
+        kb_id: str,
+        chunks: list[ChunkData],
+        doc_id: str,
+        embeddings: Optional[list[list[float]]] = None,
+    ) -> int:
         """批量写入分块到指定知识库的 collection。
 
         Args:
             kb_id: 知识库 ID
             chunks: 分块数据列表
             doc_id: 文档 ID
+            embeddings: 可选的预计算 embedding，传入后跳过 embedding 模型调用
 
         Returns:
             实际写入的分块数量
         """
         collection = self._chroma.get_or_create_collection(kb_id)
-        return _store.add_chunks(collection, kb_id, chunks, doc_id)
+        return _store.add_chunks(collection, kb_id, chunks, doc_id, embeddings)
 
     def similarity_search(
         self, kb_id: str, query: str, k: int = 5

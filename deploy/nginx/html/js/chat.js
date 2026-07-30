@@ -439,12 +439,7 @@ function sendMessage() {
         abortController = null;
 
         if (isClarificationFlow) {
-            // 追问路径 — 不渲染引用，不刷新侧边栏
-            // 气泡已由 clarification 事件渲染完成
-            const input = document.getElementById('chat-input');
-            input.placeholder = '输入补充信息…';
-            input.disabled = false;
-            input.focus();
+            // 追问路径 — 气泡已由 clarification 事件渲染完成
             isClarificationFlow = false;
             return;
         }
@@ -568,7 +563,7 @@ function escapeHtml(text) {
 // ====== 追问对话 (Clarification) ======
 
 /**
- * 在 AI 气泡中渲染追问卡片（含快捷选项 + 输入框）。
+ * 在 AI 气泡中渲染追问内容（Dify 风格：普通气泡 + 选项按钮）。
  *
  * @param {object} clar - 追问数据：{ type, question, missing_entities, suggestions }
  * @param {HTMLElement} assistantDiv - AI 回复气泡的容器元素
@@ -578,63 +573,29 @@ function renderClarificationBubble(clar, assistantDiv) {
     if (!contentDiv) return;
     contentDiv.innerHTML = '';
 
-    // 构建快捷选项按钮
-    const chipsHtml = (clar.suggestions || []).map(s => {
-        const isOther = s === '其他';
-        return `<button class="chip-btn ${isOther ? 'chip-other' : ''}" data-value="${escapeHtml(s)}">${escapeHtml(s)}</button>`;
-    }).join('');
+    // 追问文本作为普通回复内容
+    const questionHtml = typeof marked !== 'undefined'
+        ? marked.parse(clar.question)
+        : escapeHtml(clar.question);
 
-    contentDiv.innerHTML = `
-        <div class="clarification-card">
-            <div class="clarification-header">
-                <span class="clarification-icon">🔍</span>
-                <span class="clarification-label">需要补充信息</span>
-            </div>
-            <div class="clarification-question">${escapeHtml(clar.question)}</div>
-            <div class="clarification-chips">${chipsHtml}</div>
-            <div class="clarification-input-row">
-                <input type="text" class="clarification-input" placeholder="输入补充信息…" autofocus>
-                <button class="clarification-input-send" title="发送">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"/></svg>
-                </button>
-            </div>
-        </div>
-    `;
+    // 构建快捷选项按钮
+    const chipsHtml = (clar.suggestions || []).map(s =>
+        `<button class="chip-btn" data-value="${escapeHtml(s)}">${escapeHtml(s)}</button>`
+    ).join('');
+
+    contentDiv.innerHTML = questionHtml
+        + (chipsHtml ? `<div class="clarification-chips">${chipsHtml}</div>` : '');
 
     // 绑定 chip 点击事件
     contentDiv.querySelectorAll('.chip-btn').forEach(chip => {
         chip.addEventListener('click', () => {
-            const value = chip.dataset.value;
-            if (value === '其他') {
-                const input = contentDiv.querySelector('.clarification-input');
-                if (input) input.focus();
-                return;
-            }
-            submitClarification(value);
+            submitClarification(chip.dataset.value);
         });
-    });
-
-    // 绑定输入框发送事件
-    const clarInput = contentDiv.querySelector('.clarification-input');
-    const clarSend = contentDiv.querySelector('.clarification-input-send');
-
-    clarSend.addEventListener('click', () => {
-        const val = clarInput.value.trim();
-        if (val) submitClarification(val);
-    });
-
-    clarInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            const val = clarInput.value.trim();
-            if (val) submitClarification(val);
-        }
     });
 
     // 滚动到追问气泡
     const container = document.getElementById('chat-messages');
     container.scrollTop = container.scrollHeight;
-    setTimeout(() => clarInput?.focus(), 150);
 }
 
 /**
@@ -652,17 +613,8 @@ function submitClarification(value) {
         activeEventSource = null;
     }
 
-    // 渲染用户补充信息的气泡
+    // 渲染用户补充信息的气泡（追问消息自然留在对话中作为上下文）
     addMessage(value, 'user');
-
-    // 隐藏追问卡片
-    const lastBubble = document.querySelector('#chat-messages > .message-bubble:last-child');
-    if (lastBubble) {
-        const existingClar = lastBubble.querySelector('.clarification-card');
-        if (existingClar) {
-            lastBubble.style.display = 'none';
-        }
-    }
 
     // 创建新的 AI 回复占位气泡
     const assistantDiv = addMessage('', 'assistant');

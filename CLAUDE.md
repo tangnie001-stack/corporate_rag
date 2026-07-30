@@ -44,10 +44,10 @@ tests/            # 与 src/ 模块一一对应
 - 单函数超过 80 行 → 必须拆分子函数
 
 ## 数据流
-链路详解参考 docs/agents/data-flow.md（排查问题/理解系统流程时查阅）。
+- 链路详解参考 docs/agents/data-flow.md（排查问题/理解系统流程时查阅）。
 
 ## 依赖图
-查询代码关系时参考 docs/agents/codegraph-guide.md（比逐文件 grep 高效）。
+- 查询代码关系时参考 docs/agents/codegraph-guide.md（比逐文件 grep 高效）。
 
 ## 常用命令
 ```bash
@@ -61,8 +61,8 @@ docker compose build --no-cache app    # 改依赖后重建
 ```
 
 ## TraceID
-trace_id 的格式 `trace_<uuid>`，生成优先级：请求头 `X-Trace-ID` → 查询参数 `trace_id` → 自动生成。所有响应头均返回 `X-Trace-ID`（含 401/500）。
-容器日志内 `/data/logs/`，按天轮转，trace_id 在日志行第三个 `|` 分隔段：
+- trace_id 的格式 `trace_<uuid>`，生成优先级：请求头 `X-Trace-ID` → 查询参数 `trace_id` → 自动生成。所有响应头均返回 `X-Trace-ID`（含 401/500）。
+- 容器日志内 `/data/logs/`，按天轮转，trace_id 在日志行第三个 `|` 分隔段：
 
 ## 验证
 改完代码后自检以下清单：
@@ -75,7 +75,7 @@ trace_id 的格式 `trace_<uuid>`，生成优先级：请求头 `X-Trace-ID` →
 7. **import 检查**：有没有违反层间调用规则的 import（如 api/ 里 import infra/）？
 
 ## 设计流程
-改 UI 或新增组件时参考 docs/agents/ui-design-flow.md。
+- 改 UI 或新增组件时参考 docs/agents/ui-design-flow.md。
 
 ## 规则
 - 架构规约（异常处理 / 响应包装 / 日志约定 / 排查规范）详见 docs/agents/rules.md
@@ -91,15 +91,19 @@ trace_id 的格式 `trace_<uuid>`，生成优先级：请求头 `X-Trace-ID` →
 
 ## 代码注释标准
 
-所有函数必须写 docstring，详细标准见 docs/agents/rules.md 的"代码注释标准"章节。
-所有 dataclass 的每个字段必须加行内注释，说明来源、范围和用途。
-结构化数据优先使用 dataclass 而非 dict，避免 `.get("key")` 散落各处。
+- 所有函数必须写 docstring，详细标准见 docs/agents/rules.md 的"代码注释标准"章节。
+- 所有 dataclass 的每个字段必须加行内注释，说明来源、范围和用途。
+- 结构化数据优先使用 dataclass 而非 dict，避免 `.get("key")` 散落各处。
 
 ## 经验总结
-分块问题排查和修复记录详见 docs/agents/chunking-issues.md，遇到分块相关问题时优先查阅。
+- 分块问题排查和修复记录详见 docs/agents/chunking-issues.md，遇到分块相关问题时优先查阅。
 
 ## 参考项目
-FastAPI 相关设计与实现参考以下项目（不限于响应格式）：
-- https://github.com/fastapi/fastapi — FastAPI 官方 ⭐ 101k
-- https://github.com/fastapi/full-stack-fastapi-template — FastAPI 官方全栈模板 ⭐ 44.5k
-- https://github.com/fastapi-practices/fastapi-best-architecture — FastAPI 社区最佳实践 ⭐ 2.5k
+以下项目在对应场景下优先参考其实现模式：
+
+- https://github.com/fastapi/fastapi ⭐ 101k — FastAPI 官方。涉及 API 路由、中间件、依赖注入、异常处理时参考
+- https://github.com/fastapi/full-stack-fastapi-template ⭐ 44.5k — FastAPI 官方全栈模板。涉及响应模型设计、用户认证、项目分层时参考
+- https://github.com/fastapi-practices/fastapi-best-architecture ⭐ 2.5k — FastAPI 社区最佳实践。涉及统一响应格式、全局异常处理、RBAC 权限时参考
+- https://github.com/langchain-ai/langgraph ⭐ 38.5k — LangGraph 官方。涉及 StateGraph、流式事件、子图、Checkpoint、Human-in-the-loop 时参考
+- https://github.com/Shubhamsaboo/awesome-llm-apps ⭐ 128.9k — AI Agent/RAG 模板集。涉及 RAG 进阶、多 Agent 协作、记忆、成本优化时参考
+- https://github.com/wassim249/fastapi-langgraph-agent-production-ready-template ⭐ 2.5k — FastAPI+LangGraph 生产模板。涉及 LLM 容错、长期记忆、Rate Limiting、Eval 框架、生产监控时参考

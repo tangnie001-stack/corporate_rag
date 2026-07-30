@@ -399,55 +399,28 @@ mark {
     color: #1d4ed8;
 }
 
-/* ====== Clarification Bubble ====== */
-.clarification-card {
-    background: #ffffff;
-    border: 1px solid #e2e8f0;
-    border-radius: 12px;
-    padding: 16px;
-    animation: messageIn 0.3s ease-out;
-}
-
-.clarification-header {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-bottom: 10px;
-}
-
-.clarification-icon {
-    font-size: 14px;
-}
-
-.clarification-label {
-    font-size: 12px;
-    font-weight: 600;
-    color: #6366f1;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-}
-
+/* ====== Clarification Bubble (Dify 风格) ====== */
 .clarification-question {
     font-size: 15px;
     line-height: 1.6;
     color: #1e293b;
-    margin-bottom: 14px;
+    margin-bottom: 12px;
 }
 
-/* ── Suggestion Chips ── */
+/* ── Suggestion Pills ── */
 .clarification-chips {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-    margin-bottom: 14px;
+    margin-top: 4px;
 }
 
 .chip-btn {
-    padding: 6px 18px;
-    border-radius: 9999px;
-    border: 1.5px solid #3b82f6;
+    padding: 7px 16px;
+    border-radius: 8px;
+    border: 1px solid #d1d5db;
     background: #ffffff;
-    color: #3b82f6;
+    color: #374151;
     font-size: 13px;
     font-weight: 500;
     cursor: pointer;
@@ -458,8 +431,8 @@ mark {
 }
 
 .chip-btn:hover {
-    background: #eff6ff;
-    border-color: #2563eb;
+    background: #f9fafb;
+    border-color: #9ca3af;
 }
 
 .chip-btn:focus-visible {
@@ -467,73 +440,7 @@ mark {
     outline-offset: 2px;
 }
 
-.chip-btn.chip-other {
-    border-color: #94a3b8;
-    color: #64748b;
-}
-
-.chip-btn.chip-other:hover {
-    background: #f1f5f9;
-    border-color: #64748b;
-}
-
-/* ── Clarification Input ── */
-.clarification-input-row {
-    display: flex;
-    gap: 8px;
-}
-
-.clarification-input-row input {
-    flex: 1;
-    padding: 8px 14px;
-    border: 1px solid #e2e8f0;
-    border-radius: 10px;
-    font-size: 14px;
-    outline: none;
-    transition: box-shadow 0.2s, border-color 0.2s;
-    font-family: inherit;
-    color: #1e293b;
-    background: #f8fafc;
-}
-
-.clarification-input-row input::placeholder {
-    color: #94a3b8;
-}
-
-.clarification-input-row input:focus {
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
-    border-color: #3b82f6;
-    background: #ffffff;
-}
-
-.clarification-input-send {
-    width: 38px;
-    height: 38px;
-    background: #f97316;
-    border: none;
-    border-radius: 10px;
-    color: white;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: background 0.15s ease;
-    flex-shrink: 0;
-}
-
-.clarification-input-send:hover {
-    background: #ea580c;
-}
-
-.clarification-input-send:focus-visible {
-    outline: 2px solid #f97316;
-    outline-offset: 2px;
-}
-
 @media (prefers-reduced-motion: reduce) {
-    .clarification-card {
-        animation: none;
-    }
     .chip-btn {
         transition: none;
     }

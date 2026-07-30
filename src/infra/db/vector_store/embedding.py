@@ -5,7 +5,12 @@
 
 from chromadb.api.types import Documents, Embeddings, EmbeddingFunction
 from langchain_openai import OpenAIEmbeddings
-from src.config import EMBEDDING_MODEL, EMBEDDING_API_KEY, EMBEDDING_BASE_URL
+from src.config import (
+    EMBEDDING_MODEL,
+    EMBEDDING_API_KEY,
+    EMBEDDING_BASE_URL,
+    EMBEDDING_BATCH_SIZE,
+)
 
 
 class DashScopeEmbeddingFunction(EmbeddingFunction):
@@ -32,6 +37,8 @@ class DashScopeEmbeddingFunction(EmbeddingFunction):
             model=model,
             api_key=api_key or EMBEDDING_API_KEY,
             base_url=base_url or EMBEDDING_BASE_URL,
+            check_embedding_ctx_length=False,
+            chunk_size=EMBEDDING_BATCH_SIZE,
         )
 
     def __call__(self, input: Documents) -> Embeddings:

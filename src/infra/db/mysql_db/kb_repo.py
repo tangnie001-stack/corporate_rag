@@ -23,21 +23,37 @@ class KbRepo:
                 return kb.id, True
             except IntegrityError:
                 await session.rollback()
+                # 先找同名的活跃记录
+                stmt = select(KbModel).where(
+                    KbModel.user_id == user_id,
+                    KbModel.name == name,
+                    KbModel.is_deleted == 0,
+                )
+                result = await session.execute(stmt)
+                existing = result.scalar_one_or_none()
+                if existing is not None:
+                    return existing.id, False
+                # 同名但被软删了 → 恢复它
                 stmt = select(KbModel).where(
                     KbModel.user_id == user_id, KbModel.name == name
                 )
                 result = await session.execute(stmt)
-                existing = result.scalar_one_or_none()
-                if existing is None:
+                deleted = result.scalar_one_or_none()
+                if deleted is None:
                     raise RuntimeError(
                         f"IntegrityError on '{name}' but query returned None"
                     )
-                return existing.id, False
+                deleted.is_deleted = 0
+                deleted.description = description
+                await session.commit()
+                return deleted.id, True
 
     async def get_kb_by_name(self, user_id: str, name: str) -> Optional[str]:
         async with self._sf() as session:
             stmt = select(KbModel).where(
-                KbModel.user_id == user_id, KbModel.name == name
+                KbModel.user_id == user_id,
+                KbModel.name == name,
+                KbModel.is_deleted == 0,
             )
             result = await session.execute(stmt)
             kb = result.scalar_one_or_none()

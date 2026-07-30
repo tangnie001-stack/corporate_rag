@@ -55,13 +55,23 @@ class PromptManager:
         Args:
             cache_ttl: 缓存有效期（秒），默认 60 秒
         """
-        from src.config import LANGFUSE_SECRET_KEY, LANGFUSE_PUBLIC_KEY, LANGFUSE_HOST
+        from src.config import (
+            LANGFUSE_SECRET_KEY,
+            LANGFUSE_PUBLIC_KEY,
+            LANGFUSE_HOST,
+            LANGFUSE_ENABLE,
+        )
         import base64
 
-        self._auth = base64.b64encode(
-            f"{LANGFUSE_PUBLIC_KEY}:{LANGFUSE_SECRET_KEY}".encode()
-        ).decode()
-        self._host = LANGFUSE_HOST.rstrip("/")
+        self._enabled = LANGFUSE_ENABLE
+        if self._enabled:
+            self._auth = base64.b64encode(
+                f"{LANGFUSE_PUBLIC_KEY}:{LANGFUSE_SECRET_KEY}".encode()
+            ).decode()
+            self._host = LANGFUSE_HOST.rstrip("/")
+        else:
+            self._auth = ""
+            self._host = ""
         self._cache_ttl = cache_ttl
         self._cache: dict[str, tuple[str, float]] = {}
 
@@ -115,11 +125,12 @@ class PromptManager:
             if now < expiry:
                 return prompt_text
 
-        # 从 Langfuse 拉取
-        prompt_text = self._fetch_prompt(name)
-        if prompt_text:
-            self._cache[name] = (prompt_text, now + self._cache_ttl)
-            return prompt_text
+        # 从 Langfuse 拉取（关闭时跳过）
+        if self._enabled:
+            prompt_text = self._fetch_prompt(name)
+            if prompt_text:
+                self._cache[name] = (prompt_text, now + self._cache_ttl)
+                return prompt_text
 
         # 兜底到本地
         logger.info("Using fallback prompt for '{}'", name)

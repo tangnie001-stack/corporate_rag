@@ -17,6 +17,7 @@ from src.infra.db.file_store import FileStore
 from src.infra.db.mysql_db import DocumentRepo
 from src.infra.db.models.document import DocModel as DocEntity
 from src.infra.db.vector_store import VectorStore
+from src.models import get_embeddings
 from src.parsers.router import DocRouter
 from src.utils.errors import BusinessError
 
@@ -395,11 +396,21 @@ class DocumentService:
                     )
 
                 # 分块质量评估 — 开关控制，只记录不拦截
+                chunk_embeddings = None
                 if CHUNK_EVAL_ENABLED:
                     try:
+                        # 预计算 embedding，一次计算两处复用（评估 SBR + ChromaDB 入库）
+                        chunk_embeddings = await asyncio.to_thread(
+                            get_embeddings().embed_documents,
+                            [c.content for c in chunks],
+                        )
                         scorer = ChunkQualityScorer()
                         eval_result = await asyncio.to_thread(
-                            scorer.evaluate, chunks, filename, strategy
+                            scorer.evaluate,
+                            chunks,
+                            filename,
+                            strategy,
+                            chunk_embeddings,
                         )
                         await self._doc_repo.update_document_meta_info(
                             doc_id, {"eval": eval_result}
@@ -418,7 +429,11 @@ class DocumentService:
                 # ChromaDB — 同步库，to_thread
                 t2 = time.perf_counter()
                 count = await asyncio.to_thread(
-                    self.vector_store.add_chunks, kb_id, chunks, doc_id
+                    self.vector_store.add_chunks,
+                    kb_id,
+                    chunks,
+                    doc_id,
+                    chunk_embeddings,
                 )
 
                 # DB 更新 — 异步，直接 await
@@ -445,7 +460,7 @@ class DocumentService:
                 )
 
             except Exception as e:
-                error_msg = str(e)
+                error_msg = str(e)[:1024]
                 logger.exception(
                     "Document processing failed: {} - {}",
                     filename,

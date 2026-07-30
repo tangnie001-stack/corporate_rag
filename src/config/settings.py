@@ -51,11 +51,11 @@ CLARIFICATION_ENABLED: bool = os.getenv("CLARIFICATION_ENABLED", "true").lower()
 
 # 向量化模型：将文本转为向量，用于 ChromaDB 语义检索
 EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "qwen3.7-text-embedding")
-# Embedding API Key（fallback: LLM_API_KEY → DASHSCOPE_API_KEY）
+# Embedding API Key（fallback: DASHSCOPE_API_KEY → LLM_API_KEY）
 EMBEDDING_API_KEY: str = (
     os.getenv("EMBEDDING_API_KEY")
-    or os.getenv("LLM_API_KEY")
-    or os.getenv("DASHSCOPE_API_KEY", "")
+    or os.getenv("DASHSCOPE_API_KEY")
+    or os.getenv("LLM_API_KEY", "")
 )
 # Embedding API 地址（fallback: LLM_BASE_URL）
 EMBEDDING_BASE_URL: str = os.getenv("EMBEDDING_BASE_URL") or os.getenv(

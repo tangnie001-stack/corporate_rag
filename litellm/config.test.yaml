@@ -15,20 +15,6 @@ model_list:
       api_key: sk-bd05bb62e9254ce6b19f5a2879cffe6f
       api_base: https://api.deepseek.com
 
-  # DashScope Embedding（OpenAI 兼容模式）
-  - model_name: qwen3.7-text-embedding
-    litellm_params:
-      model: openai/qwen3.7-text-embedding
-      api_key: sk-1e8da9d336654dbba5e932143b6b1ecc
-      api_base: https://dashscope.aliyuncs.com/compatible-mode/v1
-
-  # DeepSeek Embedding（OpenAI 兼容模式）
-  - model_name: deepseek-embed-v4
-    litellm_params:
-      model: openai/deepseek-embed-v4
-      api_key: sk-bd05bb62e9254ce6b19f5a2879cffe6f
-      api_base: https://api.deepseek.com
-
 litellm_settings:
   fallbacks: [{"qwen3.7-max": ["deepseek-v4-flash"]}]
   num_retries: 3
