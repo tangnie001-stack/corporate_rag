@@ -1,6 +1,6 @@
 """API 响应体 Pydantic model。
 
-描述业务数据结构，不含 code/message 包装（由 ResponseEnvelopeMiddleware 统一包装）。
+描述业务数据结构（被 ResponseModel.data 引用）。
 """
 
 from typing import Optional
@@ -184,9 +184,3 @@ class SessionDeleteResponse(BaseModel):
     """会话删除响应。"""
 
     success: bool  # 是否删除成功
-
-
-class BaseResponse(BaseModel):
-    """通用响应包装体（仅含 data，code/message 由中间件统一包装）。"""
-
-    data: dict | None  # 响应数据

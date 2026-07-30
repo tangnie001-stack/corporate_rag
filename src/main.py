@@ -105,6 +105,13 @@ async def unknown_exception_handler(request: Request, exc: Exception):
     from starlette.responses import JSONResponse
 
     logger.exception("未处理的系统异常: {} {}", request.method, request.url)
+    # 打印异常链根因
+    c = exc
+    depth = 0
+    while (c.__cause__ or c.__context__) and depth < 5:
+        c = c.__cause__ or c.__context__
+        logger.error("  ├─ 嵌套第{}层: type={} msg={}", depth + 1, type(c).__name__, c)
+        depth += 1
     # TODO: ARMS Prometheus 接入后在此处打 exception_total.inc()
     return JSONResponse(
         {"code": Code.INTERNAL_ERROR, "message": Code.INTERNAL_ERROR_MSG, "data": None},

@@ -9,6 +9,7 @@ from loguru import logger
 
 from src.api.model.request import SessionMessagesRequest, SessionDeleteRequest
 from src.api.model.response import SessionItem, MessageItem, SessionDeleteResponse
+from src.api.schema import ResponseModel
 from src.api.dependencies import get_app_service
 from src.services.app_service import AppService
 from src.config.response_codes import Code
@@ -17,11 +18,11 @@ from src.utils.errors import BusinessError
 router = APIRouter()
 
 
-@router.post("/sessions/list")
+@router.post("/sessions/list", response_model=ResponseModel)
 async def list_sessions(
     request: Request,
     svc: AppService = Depends(get_app_service),
-) -> list[SessionItem]:
+):
     """列出最近 50 个会话（仅当前用户的）。
 
     始终返回 200 + 数组，无会话时返回 []。
@@ -31,7 +32,7 @@ async def list_sessions(
         svc: 应用服务实例（由 FastAPI 注入）
 
     Returns:
-        list[SessionItem]: 会话列表
+        ResponseModel: data 为 SessionItem 列表
     """
     user_id = getattr(request.state, "user_id", "")
     sessions = await svc.get_sessions(user_id)
@@ -52,15 +53,15 @@ async def list_sessions(
                 else None,
             )
         )
-    return result
+    return ResponseModel(data=result)
 
 
-@router.post("/sessions/messages")
+@router.post("/sessions/messages", response_model=ResponseModel)
 async def get_session_messages(
     request: Request,
     body: SessionMessagesRequest,
     svc: AppService = Depends(get_app_service),
-) -> list[MessageItem]:
+):
     """获取会话消息历史。
 
     先验证会话存在且属于当前用户，再返回消息列表。
@@ -72,7 +73,7 @@ async def get_session_messages(
         svc: 应用服务实例（由 FastAPI 注入）
 
     Returns:
-        list[MessageItem]: 消息列表
+        ResponseModel: data 为 MessageItem 列表
 
     Raises:
         BusinessError: 会话不存在或无权访问时返回 404
@@ -98,15 +99,15 @@ async def get_session_messages(
                 else None,
             )
         )
-    return result
+    return ResponseModel(data=result)
 
 
-@router.post("/sessions/delete")
+@router.post("/sessions/delete", response_model=ResponseModel)
 async def delete_session(
     request: Request,
     body: SessionDeleteRequest,
     svc: AppService = Depends(get_app_service),
-) -> SessionDeleteResponse:
+):
     """删除会话及其所有消息。
 
     执行顺序:
@@ -121,7 +122,7 @@ async def delete_session(
         svc: 应用服务实例（由 FastAPI 注入）
 
     Returns:
-        SessionDeleteResponse: 删除结果
+        ResponseModel: 删除结果
 
     Raises:
         BusinessError: 会话不存在或无权访问时返回 404
@@ -142,4 +143,4 @@ async def delete_session(
         raise BusinessError(Code.SESSION_NOT_FOUND, Code.SESSION_NOT_FOUND_MSG, 404)
 
     logger.info("Deleted session: {} (user={})", session_id, user_id)
-    return SessionDeleteResponse(success=True)
+    return ResponseModel(data=SessionDeleteResponse(success=True))

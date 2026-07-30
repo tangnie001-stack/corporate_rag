@@ -98,3 +98,8 @@ trace_id 的格式 `trace_<uuid>`，生成优先级：请求头 `X-Trace-ID` →
 ## 经验总结
 分块问题排查和修复记录详见 docs/agents/chunking-issues.md，遇到分块相关问题时优先查阅。
 
+## 参考项目
+FastAPI 相关设计与实现参考以下项目（不限于响应格式）：
+- https://github.com/fastapi/fastapi — FastAPI 官方 ⭐ 101k
+- https://github.com/fastapi/full-stack-fastapi-template — FastAPI 官方全栈模板 ⭐ 44.5k
+- https://github.com/fastapi-practices/fastapi-best-architecture — FastAPI 社区最佳实践 ⭐ 2.5k

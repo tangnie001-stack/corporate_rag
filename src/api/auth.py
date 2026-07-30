@@ -3,23 +3,23 @@
 import uuid
 
 from fastapi import APIRouter, Cookie, Depends, Response
-from fastapi.responses import JSONResponse
 from loguru import logger
 
 from src.api.model.request import LoginRequest
 from src.api.model.response import LoginResponse, VerifyResponse
+from src.api.schema import ResponseModel
 from src.services.app_service import AppService
 from src.api.dependencies import get_app_service
 
 router = APIRouter()
 
 
-@router.post("/auth/login")
+@router.post("/auth/login", response_model=ResponseModel)
 async def login(
     body: LoginRequest,
     response: Response,
     svc: AppService = Depends(get_app_service),
-) -> LoginResponse:
+):
     """用户登录或自动注册。
 
     若账号不存在则自动注册，再执行登录。
@@ -30,7 +30,7 @@ async def login(
         svc: AppService 依赖
 
     Returns:
-        LoginResponse: 登录后的 token 和用户 ID
+        ResponseModel: data 含 token 和 user_id
     """
     from src.utils.errors import BusinessError
 
@@ -51,14 +51,16 @@ async def login(
         path="/",
     )
     logger.info("Login success: user_id={}", result["user_id"])
-    return LoginResponse(token=result["token"], user_id=result["user_id"])
+    return ResponseModel(
+        data=LoginResponse(token=result["token"], user_id=result["user_id"])
+    )
 
 
-@router.post("/auth/verify")
+@router.post("/auth/verify", response_model=ResponseModel)
 async def verify_token(
     token: str = Cookie(None),
     svc: AppService = Depends(get_app_service),
-) -> VerifyResponse:
+):
     """校验登录 token 是否有效。
 
     Args:
@@ -66,22 +68,21 @@ async def verify_token(
         svc: AppService 依赖
 
     Returns:
-        VerifyResponse: valid 表示是否有效，user_id 为对应用户 ID
+        ResponseModel: data 含 valid 和 user_id
     """
     if not token:
-        return VerifyResponse(valid=False, user_id=None)
-
+        return ResponseModel(data=VerifyResponse(valid=False, user_id=None))
     user_id = await svc.auth_service.verify_token(token)
     if user_id:
-        return VerifyResponse(valid=True, user_id=user_id)
-    return VerifyResponse(valid=False, user_id=None)
+        return ResponseModel(data=VerifyResponse(valid=True, user_id=user_id))
+    return ResponseModel(data=VerifyResponse(valid=False, user_id=None))
 
 
-@router.post("/auth/logout")
+@router.post("/auth/logout", response_model=ResponseModel)
 async def logout(
     token: str = Cookie(None),
     svc: AppService = Depends(get_app_service),
-) -> JSONResponse:
+):
     """退出登录，清除 token。
 
     Args:
@@ -89,17 +90,17 @@ async def logout(
         svc: AppService 依赖
 
     Returns:
-        JSONResponse: 退出提示
+        ResponseModel: 退出提示
     """
     await svc.auth_service.logout(token)
-    return JSONResponse({"message": "已退出登录"})
+    return ResponseModel(data={"message": "已退出登录"})
 
 
-@router.post("/auth/anonymous")
+@router.post("/auth/anonymous", response_model=ResponseModel)
 async def get_anonymous_id(
     user_id: str = Cookie(None),
     response: Response = None,
-) -> JSONResponse:
+):
     """获取或生成匿名用户 ID。
 
     若 Cookie 中没有 user_id，则生成一个新的 UUID 并写入 Cookie。
@@ -109,7 +110,7 @@ async def get_anonymous_id(
         response: FastAPI Response（用于设置 Cookie）
 
     Returns:
-        JSONResponse: 包含 user_id，同时通过 Cookie 持久化
+        ResponseModel: data 含 user_id
     """
     if not user_id:
         user_id = str(uuid.uuid4())
@@ -120,4 +121,4 @@ async def get_anonymous_id(
             max_age=31536000,  # 1 年
             path="/",
         )
-    return JSONResponse({"user_id": user_id})
+    return ResponseModel(data={"user_id": user_id})

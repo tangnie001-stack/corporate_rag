@@ -24,25 +24,26 @@ from src.api.model.response import (
     ChunksResponse,
     DocumentDeleteResponse,
 )
+from src.api.schema import ResponseModel
 from src.services.app_service import AppService
 from src.api.dependencies import get_app_service
 
 router = APIRouter()
 
 
-@router.post("/kbs/documents/list")
+@router.post("/kbs/documents/list", response_model=ResponseModel)
 async def get_documents(
     body: DocumentListRequest,
     request: Request = None,
     svc: AppService = Depends(get_app_service),
-) -> list[DocumentListResponse]:
+):
     """列出知识库中的所有文档。
 
     Args:
         body: 文档列表请求体，含 kb_id
 
     Returns:
-        list[DocumentListResponse]: 文档列表
+        ResponseModel: data 为文档列表
     """
     docs = await svc.get_documents(body.kb_id)
     logger.info("Documents list: kb_id={} count={}", body.kb_id, len(docs))
@@ -82,16 +83,16 @@ async def get_documents(
                 eval_detail=eval_detail,
             )
         )
-    return result
+    return ResponseModel(data=result)
 
 
-@router.post("/kbs/documents/upload", status_code=202)
+@router.post("/kbs/documents/upload", status_code=202, response_model=ResponseModel)
 async def upload_document(
     file: UploadFile = File(...),
     kb_id: str = Form(...),
     request: Request = None,
     svc: AppService = Depends(get_app_service),
-) -> UploadDocumentResponse:
+):
     """上传文档到知识库。
 
     文档在后台经历：解析 → 分块 → 入库 → ready/failed。
@@ -104,7 +105,7 @@ async def upload_document(
         svc: 应用服务实例
 
     Returns:
-        UploadDocumentResponse: 含 doc_id、status、filename 的立即返回结果
+        ResponseModel: data 含 doc_id、status、filename
     """
     user_id = getattr(request.state, "user_id", "") if request else ""
     content = await file.read()
@@ -122,60 +123,66 @@ async def upload_document(
     )
 
     if result.get("dedup"):
-        return UploadDocumentResponse(
-            doc_id=result["doc_id"],
-            status=result.get("status", "ready"),
-            filename=result["filename"],
-            dedup=True,
+        return ResponseModel(
+            data=UploadDocumentResponse(
+                doc_id=result["doc_id"],
+                status=result.get("status", "ready"),
+                filename=result["filename"],
+                dedup=True,
+            )
         )
 
-    return UploadDocumentResponse(
-        doc_id=result["doc_id"],
-        status=result["status"],
-        filename=result["filename"],
+    return ResponseModel(
+        data=UploadDocumentResponse(
+            doc_id=result["doc_id"],
+            status=result["status"],
+            filename=result["filename"],
+        )
     )
 
 
-@router.post("/kbs/documents/status")
+@router.post("/kbs/documents/status", response_model=ResponseModel)
 async def get_document_status(
     body: DocumentStatusRequest,
     svc: AppService = Depends(get_app_service),
-) -> DocumentStatusResponse:
+):
     """获取文档的处理状态。
 
     Args:
         body: 文档状态请求体，含 kb_id 和 doc_id
 
     Returns:
-        DocumentStatusResponse: 含 status、chunk_count、progress、error         以及处理阶段详情
+        ResponseModel: data 含 status、chunk_count、progress 等
     """
     docs = await svc._doc_repo.get_documents(body.kb_id)
     doc = next((d for d in docs if d.id == body.doc_id), None)
     if not doc:
-        return DocumentStatusResponse(status="not_found")
-    return DocumentStatusResponse(
-        status=doc.status,
-        chunk_count=doc.chunk_count,
-        progress=doc.processing_progress,
-        error=doc.error_msg,
-        processing_state=doc.processing_state,
-        processing_progress=doc.processing_progress,
-        processing_message=doc.processing_message,
+        return ResponseModel(data=DocumentStatusResponse(status="not_found"))
+    return ResponseModel(
+        data=DocumentStatusResponse(
+            status=doc.status,
+            chunk_count=doc.chunk_count,
+            progress=doc.processing_progress,
+            error=doc.error_msg,
+            processing_state=doc.processing_state,
+            processing_progress=doc.processing_progress,
+            processing_message=doc.processing_message,
+        )
     )
 
 
-@router.post("/kbs/documents/chunks")
+@router.post("/kbs/documents/chunks", response_model=ResponseModel)
 async def get_document_chunks(
     body: DocumentChunksRequest,
     svc: AppService = Depends(get_app_service),
-) -> ChunksResponse:
+):
     """分页预览已处理文档的分块内容。
 
     Args:
         body: 分块预览请求体，含 kb_id、doc_id、page、page_size
 
     Returns:
-        ChunksResponse: 含 items（当前页分块列表）、total（总量）、page、page_size
+        ResponseModel: data 含 items、total、page、page_size、parent_map
     """
     result = await svc.get_chunks_paginated(
         body.doc_id,
@@ -210,30 +217,32 @@ async def get_document_chunks(
             item.parent_key = parent_keys[item.parent_content]
             item.parent_content = None
 
-    return ChunksResponse(
-        items=items,
-        total=result.total,
-        page=result.page,
-        page_size=result.page_size,
-        parent_map=parent_map,
+    return ResponseModel(
+        data=ChunksResponse(
+            items=items,
+            total=result.total,
+            page=result.page,
+            page_size=result.page_size,
+            parent_map=parent_map,
+        )
     )
 
 
-@router.post("/kbs/documents/delete")
+@router.post("/kbs/documents/delete", response_model=ResponseModel)
 async def delete_document(
     body: DocumentDeleteRequest,
     svc: AppService = Depends(get_app_service),
-) -> DocumentDeleteResponse:
+):
     """软删除文档（标记为 deleted），同时删除向量库中的分块。
 
     Args:
         body: 文档删除请求体，含 kb_id 和 doc_id
 
     Returns:
-        DocumentDeleteResponse: 含 success 布尔值
+        ResponseModel: data 含 success 布尔值
     """
     ok = await svc.document._doc_repo.soft_delete_document(body.doc_id)
     if ok:
         svc.vector_store.delete_document(body.kb_id, body.doc_id)
         logger.info("Document deleted: kb_id={} doc_id={}", body.kb_id, body.doc_id)
-    return DocumentDeleteResponse(success=ok)
+    return ResponseModel(data=DocumentDeleteResponse(success=ok))

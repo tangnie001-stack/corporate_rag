@@ -6,7 +6,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from src.api.dependencies import get_app_service
-from src.api.model.response import BaseResponse
+from src.api.schema import ResponseModel
 from src.services.app_service import AppService
 
 router = APIRouter()
@@ -20,10 +20,8 @@ class LlmTestRequest(BaseModel):
     temperature: float = 0  # 生成温度
 
 
-@router.post("/llm/test")
-async def llm_test(
-    body: LlmTestRequest, svc: AppService = Depends(get_app_service)
-) -> BaseResponse:
+@router.post("/llm/test", response_model=ResponseModel)
+async def llm_test(body: LlmTestRequest, svc: AppService = Depends(get_app_service)):
     """测试 LLM 连通性 — 发送一条简单请求验证模型可用性和响应耗时。
 
     Args:
@@ -32,7 +30,7 @@ async def llm_test(
         temperature: 生成温度
 
     Returns:
-        BaseResponse: data 包含 model, response, latency_seconds
+        ResponseModel: data 包含 model, response, latency_seconds
     """
     model_name = body.model or svc.settings.LLM_MODEL
     logger.info("LLM test requested: model={} prompt={}", model_name, body.prompt[:50])
@@ -50,7 +48,7 @@ async def llm_test(
         result = llm.invoke(body.prompt)
         elapsed = round(time.time() - start, 2)
         logger.info("LLM test OK: model={} latency={}s", model_name, elapsed)
-        return BaseResponse(
+        return ResponseModel(
             data={
                 "model": model_name,
                 "response": result.content,
@@ -62,8 +60,8 @@ async def llm_test(
         logger.error(
             "LLM test failed: model={} latency={}s error={}", model_name, elapsed, e
         )
-        return BaseResponse(
-            code=1,
+        return ResponseModel(
+            code="ERROR",
             message=f"LLM 调用失败: {e}",
             data={
                 "model": model_name,

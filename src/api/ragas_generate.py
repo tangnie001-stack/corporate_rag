@@ -7,7 +7,7 @@ from fastapi import APIRouter
 from loguru import logger
 from pydantic import BaseModel
 
-from src.api.model.response import BaseResponse
+from src.api.schema import ResponseModel
 from src.cli.eval_ragas_generate import _find_next_version, run_generate
 from src.services.app_service import AppService
 
@@ -21,8 +21,8 @@ class RagasGenerateRequest(BaseModel):
     size: int = 20  # 生成的 QA 对数
 
 
-@router.post("/ragas/generate")
-async def ragas_generate(body: RagasGenerateRequest) -> BaseResponse:
+@router.post("/ragas/generate", response_model=ResponseModel)
+async def ragas_generate(body: RagasGenerateRequest):
     """触发 RAGAS 测试集生成（同步，等待生成完成后返回）。
 
     Args:
@@ -30,7 +30,7 @@ async def ragas_generate(body: RagasGenerateRequest) -> BaseResponse:
         size: QA 对数（默认 20，从 settings.RAGAS_TEST_SIZE 读取）
 
     Returns:
-        BaseResponse: data 包含 version 和 testset_size
+        ResponseModel: data 包含 version 和 testset_size
     """
     logger.info("RAGAS generate requested: kb_name={} size={}", body.kb_name, body.size)
 
@@ -40,8 +40,8 @@ async def ragas_generate(body: RagasGenerateRequest) -> BaseResponse:
         kb_id = await svc.get_kb_by_name(svc.settings.RAGAS_USER_ID, body.kb_name)
         if not kb_id:
             logger.warning("Knowledge base '{}' not found", body.kb_name)
-            return BaseResponse(
-                code=1,
+            return ResponseModel(
+                code="ERROR",
                 message=f"知识库 '{body.kb_name}' 不存在",
                 data=None,
             )
@@ -66,7 +66,7 @@ async def ragas_generate(body: RagasGenerateRequest) -> BaseResponse:
                 version,
                 testset_size,
             )
-            return BaseResponse(
+            return ResponseModel(
                 data={
                     "version": version,
                     "testset_size": testset_size,
@@ -75,16 +75,16 @@ async def ragas_generate(body: RagasGenerateRequest) -> BaseResponse:
 
         # 理论上不应走到这里
         logger.warning("Testset file not found after generation: {}", output_path)
-        return BaseResponse(
-            code=1,
+        return ResponseModel(
+            code="ERROR",
             message="生成完成但未找到测试集文件",
             data=None,
         )
 
     except Exception as e:
         logger.exception("RAGAS generate failed: {}", e)
-        return BaseResponse(
-            code=1,
+        return ResponseModel(
+            code="ERROR",
             message=str(e),
             data=None,
         )
