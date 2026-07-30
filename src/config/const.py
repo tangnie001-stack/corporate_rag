@@ -11,16 +11,20 @@ class _Labels(dict):
 
 
 # ── 日志标签字典 ──
-ROUTE_LABELS = _Labels({
-    "simple": "skip_retrieval",
-    "medium": "go_to_rewrite",
-    "complex": "go_to_rewrite",
-})
+ROUTE_LABELS = _Labels(
+    {
+        "simple": "skip_retrieval",
+        "medium": "go_to_rewrite",
+        "complex": "go_to_rewrite",
+    }
+)
 
-GENERATE_LABELS = _Labels({
-    True: "fallback_to_naive_rag",
-    False: "enhanced_rag",
-})
+GENERATE_LABELS = _Labels(
+    {
+        True: "fallback_to_naive_rag",
+        False: "enhanced_rag",
+    }
+)
 
 # ── LangGraph 事件类型 ──
 

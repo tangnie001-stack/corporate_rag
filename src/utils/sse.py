@@ -175,12 +175,15 @@ def sse_clarification(event: SSEClarificationEvent) -> str:
     Returns:
         SSE 格式的文本行
     """
-    data = json.dumps({
-        "type": event.type,
-        "question": event.question,
-        "missing_entities": event.missing_entities,
-        "suggestions": event.suggestions,
-    }, ensure_ascii=False)
+    data = json.dumps(
+        {
+            "type": event.type,
+            "question": event.question,
+            "missing_entities": event.missing_entities,
+            "suggestions": event.suggestions,
+        },
+        ensure_ascii=False,
+    )
     return f"event: clarification\ndata: {data}\n\n"
 
 

@@ -24,7 +24,13 @@ def similarity_search(collection, embed_fn, kb_id, query, k=5) -> list[ChunkResu
     col_count = -1
     try:
         col_count = collection.count()
-        logger.info("[DIAG] similarity_search: kb_id={} collection_name={} collection_count={} k={}", kb_id, collection.name, col_count, min(k, 100))
+        logger.info(
+            "[DIAG] similarity_search: kb_id={} collection_name={} collection_count={} k={}",
+            kb_id,
+            collection.name,
+            col_count,
+            min(k, 100),
+        )
     except Exception:
         pass
 
@@ -55,7 +61,12 @@ def similarity_search(collection, embed_fn, kb_id, query, k=5) -> list[ChunkResu
         EMBEDDING_MODEL,
     )
     if not formatted:
-        logger.info("[DIAG] ChromaDB search returned 0 results! kb_id={} collection_count={} query_len={}", kb_id, col_count, len(query))
+        logger.info(
+            "[DIAG] ChromaDB search returned 0 results! kb_id={} collection_count={} query_len={}",
+            kb_id,
+            col_count,
+            len(query),
+        )
     logger.debug(
         "[CHROMA] method=similarity_search | kb_id={} | rows={} | data={}",
         kb_id,

@@ -1,0 +1,51 @@
+from loguru import logger
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from src.chunking.strategies.base import BaseChunker
+from src.chunking.validator import ChunkData
+
+
+class ParentChildChunker(BaseChunker):
+    chunk_strategy = "parent_child"
+    CHILD_SIZE = 256
+    PARENT_SIZE = 1024
+    OVERLAP = 25
+    SEPARATORS = ["\n\n", "\n", "。", ".", " "]
+
+    def chunk(self, text: str, metadata: dict) -> list[ChunkData]:
+        parent_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=self.PARENT_SIZE,
+            chunk_overlap=self.OVERLAP,
+            length_function=self.count_tokens,
+            separators=self.SEPARATORS,
+        )
+        parent_docs = parent_splitter.create_documents([text])
+        child_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=self.CHILD_SIZE,
+            chunk_overlap=self.OVERLAP,
+            length_function=self.count_tokens,
+            separators=self.SEPARATORS,
+        )
+        result = []
+        for pi, parent in enumerate(parent_docs):
+            child_docs = child_splitter.create_documents([parent.page_content])
+            for ci, child in enumerate(child_docs):
+                result.append(
+                    ChunkData(
+                        content=self.inject_heading_prefix(
+                            child.page_content, metadata.get("heading_path", "")
+                        ),
+                        metadata={
+                            **metadata,
+                            "parent_content": parent.page_content,
+                            "chunk_strategy": self.chunk_strategy,
+                        },
+                        tokens=self.count_tokens(child.page_content),
+                    )
+                )
+        logger.info(
+            "[parent_child] chunks={} parents={} tokens={}",
+            len(result),
+            len(parent_docs),
+            sum(c.tokens for c in result),
+        )
+        return result

@@ -1,0 +1,51 @@
+- generic [ref=e1]:
+  - complementary [ref=e2]:
+    - generic [ref=e3]:
+      - heading "FQ Corporate RAG" [level=1] [ref=e4]:
+        - generic [ref=e5]: FQ
+        - text: Corporate RAG
+      - paragraph [ref=e6]: 金融文档智能问答系统
+    - navigation [ref=e7]:
+      - link "💬 智能问答" [ref=e8] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e9]: 💬
+        - text: 智能问答
+      - link "📚 知识库管理" [ref=e10] [cursor=pointer]:
+        - /url: /Knowledgebase
+        - generic [ref=e11]: 📚
+        - text: 知识库管理
+    - generic [ref=e12]:
+      - generic [ref=e13]:
+        - generic [ref=e14]: 会话历史
+        - button "新建会话" [ref=e15] [cursor=pointer]:
+          - img [ref=e16]
+      - generic [ref=e51]:
+        - generic [ref=e52]: 暂无会话
+        - generic [ref=e53]: 发送消息将自动创建
+  - button [ref=e21] [cursor=pointer]:
+    - img [ref=e22]
+  - main [ref=e24]:
+    - generic [ref=e25]:
+      - heading "💬 智能问答" [level=2] [ref=e26]:
+        - generic [ref=e27]: 💬
+        - text: 智能问答
+      - generic [ref=e28]:
+        - combobox [ref=e29]:
+          - option "加载失败" [selected]
+        - button "新会话" [ref=e30] [cursor=pointer]:
+          - img [ref=e31]
+          - generic [ref=e33]: 新会话
+    - generic [ref=e35]:
+      - generic [ref=e36]: 💬
+      - paragraph [ref=e37]: 开始智能问答
+      - paragraph [ref=e38]: 选择知识库，输入您的金融文档相关问题
+      - generic [ref=e39]:
+        - button "本季度营收情况如何？" [ref=e40] [cursor=pointer]
+        - button "分析一下主要财务指标" [ref=e41] [cursor=pointer]
+        - button "净利润同比增长多少？" [ref=e42] [cursor=pointer]
+    - generic [ref=e43]:
+      - generic [ref=e44]:
+        - textbox "输入您的金融问题..." [active] [ref=e46]
+        - button [ref=e47] [cursor=pointer]:
+          - img [ref=e48]
+      - paragraph [ref=e50]: AI 基于知识库文档内容生成回答，仅供参考

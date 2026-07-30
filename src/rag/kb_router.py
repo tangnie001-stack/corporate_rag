@@ -97,7 +97,10 @@ class KBRouter:
         top_kb, top_score = ranked[0]
         logger.info(
             "KBRouter semantic: top={}({}) score={:.4f} threshold={}",
-            top_kb.name, top_kb.id[:8], top_score, SEMANTIC_THRESHOLD,
+            top_kb.name,
+            top_kb.id[:8],
+            top_score,
+            SEMANTIC_THRESHOLD,
         )
 
         if top_score >= SEMANTIC_THRESHOLD:
@@ -109,9 +112,7 @@ class KBRouter:
         # ── 6. 低置信度 → LLM 兜底 ──
         return self._llm_fallback(query, kb_list)
 
-    def _llm_fallback(
-        self, query: str, kb_list: list[KbListItem]
-    ) -> list[str]:
+    def _llm_fallback(self, query: str, kb_list: list[KbListItem]) -> list[str]:
         """使用 LLM 分类查询归属的知识库。
 
         Returns:
@@ -137,10 +138,15 @@ class KBRouter:
 
         try:
             from langchain_core.messages import HumanMessage, SystemMessage
-            response = self._llm.invoke([
-                SystemMessage(content="你是一个知识库路由专家。返回最相关的知识库 ID。"),
-                HumanMessage(content=prompt),
-            ])
+
+            response = self._llm.invoke(
+                [
+                    SystemMessage(
+                        content="你是一个知识库路由专家。返回最相关的知识库 ID。"
+                    ),
+                    HumanMessage(content=prompt),
+                ]
+            )
             raw = response.content.strip()
             ids = [id_str.strip() for id_str in raw.split(",") if id_str.strip()]
             valid_ids = {kb.id for kb in kb_list}

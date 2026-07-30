@@ -1,7 +1,5 @@
 """测试复杂度加权评分器。"""
 
-import pytest
-
 from src.infra.search.complexity_scorer import score_complexity
 from src.infra.search.entity_extractor import ExtractedEntity
 

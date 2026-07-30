@@ -178,7 +178,9 @@ class PromptManager:
         Returns:
             完整的分类器 prompt 文本（系统提示 + 用户消息）
         """
-        sys_prompt = self._get(self.PROMPT_NAMES["classifier"], CLASSIFIER_SYSTEM_PROMPT)
+        sys_prompt = self._get(
+            self.PROMPT_NAMES["classifier"], CLASSIFIER_SYSTEM_PROMPT
+        )
         user_prompt = CLASSIFIER_USER_TEMPLATE.format(
             query=query,
             entities=entities or "无",

@@ -9,9 +9,19 @@ def test_agent_state_defaults():
 
 
 def test_agent_state_with_contexts():
-    state = AgentState(query="净利润多少",
-        contexts=[RAGContext(content="净利润100亿", source="财报.pdf",
-                   page=5, doc_id="doc-1", chunk_id="chunk-1", score=0.95)])
+    state = AgentState(
+        query="净利润多少",
+        contexts=[
+            RAGContext(
+                content="净利润100亿",
+                source="财报.pdf",
+                page=5,
+                doc_id="doc-1",
+                chunk_id="chunk-1",
+                score=0.95,
+            )
+        ],
+    )
     assert len(state.contexts) == 1
     assert state.contexts[0].content == "净利润100亿"
 
@@ -38,6 +48,7 @@ def test_agent_state_intent_fields():
 def test_agent_state_intent_fields_with_values():
     """验证 intent 字段可以正常赋值。"""
     from src.agents.graph.state import RAGQueryIntent
+
     state = AgentState(
         intent=RAGQueryIntent(route="medium"),
         extracted_entities=[{"type": "year", "value": "2024"}],

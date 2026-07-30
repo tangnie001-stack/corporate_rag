@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>追问对话 - 效果预览</title>
+<link href="https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600;700&family=Source+Sans+3:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #F8FAFC;
+    font-family: 'Source Sans 3', -apple-system, sans-serif;
+    color: #1E293B;
+    display: flex;
+    justify-content: center;
+    padding: 32px 16px;
+    line-height: 1.5;
+  }
+
+  .container {
+    width: 100%;
+    max-width: 720px;
+    background: #FFFFFF;
+    border-radius: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.04);
+    overflow: hidden;
+  }
+
+  /* ── Header ── */
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 20px;
+    border-bottom: 1px solid #E2E8F0;
+  }
+  .header-avatar {
+    width: 36px; height: 36px;
+    background: #3B82F6;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 18px;
+    font-weight: 600;
+  }
+  .header-title { font-size: 15px; font-weight: 600; color: #1E293B; }
+  .header-subtitle { font-size: 12px; color: #64748B; margin-top: 1px; }
+
+  /* ── Chat Area ── */
+  .chat-area {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  /* ── Bubbles ── */
+  .bubble {
+    display: flex;
+    gap: 10px;
+    max-width: 85%;
+  }
+  .bubble.ai { align-self: flex-start; }
+  .bubble.user { align-self: flex-end; flex-direction: row-reverse; }
+
+  .bubble-avatar {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    margin-top: 4px;
+  }
+  .bubble.ai .bubble-avatar {
+    background: #DBEAFE;
+    color: #3B82F6;
+  }
+  .bubble.user .bubble-avatar {
+    background: #FEF3C7;
+    color: #D97706;
+  }
+
+  .bubble-content {
+    border-radius: 12px;
+    padding: 10px 14px;
+    font-size: 15px;
+    line-height: 1.6;
+  }
+  .bubble.ai .bubble-content {
+    background: #F8FAFC;
+    border: 1px solid #E2E8F0;
+  }
+  .bubble.user .bubble-content {
+    background: #3B82F6;
+    color: white;
+    border-bottom-right-radius: 4px;
+  }
+  .bubble.ai .bubble-content:first-child {
+    border-bottom-left-radius: 4px;
+  }
+
+  .bubble-label {
+    font-size: 11px;
+    color: #64748B;
+    margin-bottom: 4px;
+    font-weight: 500;
+  }
+
+  /* ── Clarification Bubble ── */
+  .clarification {
+    align-self: flex-start;
+    max-width: 85%;
+  }
+  .clarification-card {
+    background: #F8FAFC;
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
+    padding: 16px;
+    border-bottom-left-radius: 4px;
+  }
+  .clarification-question {
+    font-size: 15px;
+    line-height: 1.6;
+    color: #1E293B;
+    margin-bottom: 14px;
+  }
+
+  /* ── Suggestion Chips ── */
+  .suggestion-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .chip {
+    padding: 6px 16px;
+    border-radius: 20px;
+    border: 1px solid #3B82F6;
+    background: #FFFFFF;
+    color: #3B82F6;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 150ms ease;
+    font-family: 'Source Sans 3', sans-serif;
+  }
+  .chip:hover {
+    background: #EFF6FF;
+    border-color: #2563EB;
+  }
+  .chip.other {
+    border-color: #94A3B8;
+    color: #64748B;
+  }
+  .chip.other:hover {
+    background: #F1F5F9;
+    border-color: #64748B;
+  }
+
+  /* ── Clarification Input ── */
+  .clarification-input-row {
+    display: flex;
+    gap: 8px;
+  }
+  .clarification-input-row input {
+    flex: 1;
+    padding: 8px 14px;
+    border: 1px solid #E2E8F0;
+    border-radius: 10px;
+    font-size: 14px;
+    outline: none;
+    transition: box-shadow 200ms;
+    font-family: 'Source Sans 3', sans-serif;
+    color: #1E293B;
+  }
+  .clarification-input-row input::placeholder { color: #94A3B8; }
+  .clarification-input-row input:focus {
+    box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
+    border-color: #3B82F6;
+  }
+  .clarification-send {
+    width: 38px; height: 38px;
+    background: #F97316;
+    border: none;
+    border-radius: 10px;
+    color: white;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 150ms;
+    flex-shrink: 0;
+  }
+  .clarification-send:hover { background: #EA580C; }
+  .clarification-send svg { width: 18px; height: 18px; }
+
+  /* ── Answer text ── */
+  .answer-highlight {
+    background: #FEF3C7;
+    color: #92400E;
+    padding: 0 2px;
+    border-radius: 2px;
+  }
+
+  /* ── Footer Input (ChatInput) ── */
+  .chat-footer {
+    border-top: 1px solid #E2E8F0;
+    padding: 14px 20px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+  .chat-footer input {
+    flex: 1;
+    padding: 10px 16px;
+    border: 1px solid #E2E8F0;
+    border-radius: 10px;
+    font-size: 14px;
+    outline: none;
+    transition: box-shadow 200ms;
+    font-family: 'Source Sans 3', sans-serif;
+    color: #1E293B;
+  }
+  .chat-footer input::placeholder { color: #94A3B8; }
+  .chat-footer input:focus {
+    box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
+    border-color: #3B82F6;
+  }
+  .chat-footer input:disabled {
+    background: #F1F5F9;
+    cursor: not-allowed;
+  }
+  .chat-send {
+    width: 40px; height: 40px;
+    background: #3B82F6;
+    border: none;
+    border-radius: 10px;
+    color: white;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 150ms;
+  }
+  .chat-send:hover { background: #2563EB; }
+  .chat-send:disabled { background: #94A3B8; cursor: not-allowed; }
+  .chat-send svg { width: 20px; height: 20px; }
+
+  /* ── Divider ── */
+  .divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: #94A3B8;
+    font-size: 12px;
+    margin: 8px 0;
+  }
+  .divider::before,
+  .divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: #E2E8F0;
+  }
+
+  /* ── Status Tags ── */
+  .status-tag {
+    align-self: flex-start;
+    font-size: 12px;
+    color: #64748B;
+    background: #F1F5F9;
+    padding: 3px 10px;
+    border-radius: 10px;
+    margin: 0 0 4px 42px;
+  }
+
+  /* ── Animation ── */
+  @keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .animate-in {
+    animation: fadeInUp 250ms ease-out;
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-avatar">K</div>
+    <div>
+      <div class="header-title">企业知识库助手</div>
+      <div class="header-subtitle">基于 RAG 的知识问答</div>
+    </div>
+  </div>
+
+  <!-- Chat Area -->
+  <div class="chat-area">
+
+    <!-- Step 1: User asks -->
+    <div class="bubble user animate-in">
+      <div class="bubble-avatar">👤</div>
+      <div class="bubble-content">2024年公司的营收是多少？</div>
+    </div>
+
+    <!-- Step 2: Status -->
+    <div class="status-tag animate-in">正在分析查询类型…</div>
+    <div class="status-tag animate-in" style="animation-delay: 100ms;">正在检索相关文档…</div>
+
+    <!-- Step 3: Clarification Bubble -->
+    <div class="clarification animate-in" style="animation-delay: 200ms;">
+      <div class="bubble-label">系统 · 缺少信息</div>
+      <div class="clarification-card">
+        <div class="clarification-question">
+          请问您想查询哪一年的数据？
+        </div>
+
+        <!-- Suggestion Chips -->
+        <div class="suggestion-chips">
+          <button class="chip">2023年</button>
+          <button class="chip">2024年</button>
+          <button class="chip chip-other">其他</button>
+        </div>
+
+        <!-- Clarification Input -->
+        <div class="clarification-input-row">
+          <input type="text" placeholder="其他年份请输入…" autofocus>
+          <button class="clarification-send" title="发送">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Divider: simulation of user clicking 2024年 -->
+    <div class="divider">用户点击了 "2024年"</div>
+
+    <!-- Step 4: User selection bubble -->
+    <div class="bubble user animate-in">
+      <div class="bubble-avatar">👤</div>
+      <div class="bubble-content">2024年</div>
+    </div>
+
+    <!-- Step 5: Status -->
+    <div class="status-tag animate-in">正在检索相关文档…</div>
+    <div class="status-tag animate-in">正在生成回答…</div>
+
+    <!-- Step 6: Final answer -->
+    <div class="bubble ai animate-in" style="animation-delay: 100ms;">
+      <div class="bubble-avatar">🤖</div>
+      <div class="bubble-content">
+        <div class="bubble-label">系统</div>
+        2024年公司实现营业收入 <span class="answer-highlight">6,021.85 亿元</span>，同比增长 <span class="answer-highlight">12.3%</span>。其中主营业务收入占比 86%，新兴业务收入占比 14%。
+      </div>
+    </div>
+
+    <!-- Citation -->
+    <div class="status-tag animate-in" style="animation-delay: 200ms;">
+      📄 引用：2024年年度报告 · 第3页
+    </div>
+
+  </div>
+
+  <!-- Footer Input -->
+  <div class="chat-footer">
+    <input type="text" placeholder="输入问题..." />
+    <button class="chat-send" title="发送">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+    </button>
+  </div>
+
+</div>
+
+</body>
+</html>

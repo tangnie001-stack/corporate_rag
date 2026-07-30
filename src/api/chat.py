@@ -10,7 +10,11 @@ from loguru import logger
 import jieba
 
 from src.utils.sse import (
-    to_sse, SSETokenEvent, SSECitationEvent, SSEErrorEvent, SSEDoneEvent,
+    to_sse,
+    SSETokenEvent,
+    SSECitationEvent,
+    SSEErrorEvent,
+    SSEDoneEvent,
 )
 from src.api.dependencies import get_app_service
 from src.services.app_service import AppService

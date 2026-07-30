@@ -153,9 +153,12 @@ Content-Type: `text/event-stream`
 | `query` | 用户问题 |
 | `trace_id` | 链路追踪 ID（可选） |
 
-事件流（按推送顺序）：
+事件流（按推送顺序，不含追问路径）：
 
 ```json
+event: status
+data: {"stage": "classify", "message": "正在分析查询类型..."}
+
 event: status
 data: {"stage": "retrieving", "message": "正在检索相关文档..."}
 
@@ -171,6 +174,9 @@ data: {"token": "回答文本片段"}
 event: citation
 data: {"source": "文件名.pdf", "page": 15, "snippet": "内容摘要...", "score": 0.95, "highlighted_snippet": "<mark>高亮</mark>内容"}
 
+event: model_info
+data: {"model": "模型名", "is_fallback": false}
+
 event: done
 data: {}
 
@@ -178,13 +184,57 @@ event: error
 data: {"error": "错误消息"}
 ```
 
-| 事件 | 说明 |
-|------|------|
-| `status` | 三阶段状态（retrieving / reranking / generating） |
-| `token` | LLM 生成文本片段，前端逐段追加 |
-| `citation` | 引用来源，按 source+page 去重 |
-| `done` | 流结束标记 |
-| `error` | 异常时推送，无 retry 机制 |
+追问路径（当 classify 检测到缺失实体时）：
+
+```json
+event: status
+data: {"stage": "classify", "message": "正在分析查询类型..."}
+
+event: clarification
+data: {"type": "entity_completion", "question": "请问您想查询哪一年的数据？", "missing_entities": [{"type": "year", "question": "请问您想查询哪一年的数据？"}], "suggestions": ["2023年", "2024年", "其他"]}
+
+event: done
+data: {}
+```
+
+| 事件 | 触发条件 | 说明 |
+|------|---------|------|
+| `status` | 节点开始 | 四阶段状态（classify / retrieving / reranking / generating） |
+| `token` | LLM 生成中 | LLM 生成文本片段，前端逐段追加 |
+| `citation` | rerank 节点完成 | 引用来源，按 source+page 去重 |
+| **`clarification`** | **classify 检测到缺失实体** | **追问事件，前端展示追问气泡 + 快捷选项** |
+| `model_info` | generate 节点完成 | 实际使用的模型名和 fallback 状态 |
+| `done` | 流结束 | 流结束标记（追问路径也在 clarification 后立即发送） |
+| `error` | 异常 | 异常时推送，无 retry 机制 |
+
+### `clarification` 事件详情
+
+```python
+# 数据结构（src/utils/sse.py: SSEClarificationEvent）
+{
+  "type": "entity_completion" | "intent_clarification",
+  "question": str,              # 追问文本，如 "请问您想查询哪一年的数据？"
+  "missing_entities": [dict],   # [{"type": "year", "question": "请问您想查询哪一年的数据？"}]
+  "suggestions": [str]          # 快捷选项，如 ["2023年", "2024年", "其他"]
+}
+```
+
+`suggestions` 根据缺失实体类型从 `SUGGESTIONS_MAP` 映射：
+
+| 实体类型 | 快捷选项 |
+|---------|---------|
+| `year` | `["2023年", "2024年", "其他"]` |
+| `quarter` | `["一季度", "二季度", "三季度", "四季度"]` |
+| `month` | `["1月", "12月", "其他"]` |
+| `company` | `["腾讯", "阿里巴巴", "其他"]` |
+| `metric` | `["营收", "利润", "毛利率", "其他"]` |
+| `default` | `["请补充说明", "其他"]` |
+
+### 追问流程关键约束
+
+- 追问后用户回答**必须复用同一 `session_id`**，graph 通过 `_history` 获取上轮实体信息
+- 追问期间前端不应显示"回答结束"或"done"相关提示
+- 追问路径不产生 `token`、`citation` 事件
 
 ### 2.4 会话管理
 
@@ -407,36 +457,73 @@ name = f"kb_{kb_id.replace('-', '')}"
 
 ---
 
-## 5. 接口层：RAGChain 内部
+## 5. 接口层：LangGraph 图内部
 
-### 5.1 RAGChain 拆分后的三个方法
+### 5.1 节点定义与输出字段
 
-Phase 3 将旧 `chat_with_citations()` 拆分为三个独立方法：
+节点名称和输出字段常量定义在 `src/config/const.py` 的 `LangGraphNode` 类中。
 
-```python
-async def search(query, kb_id) → list[dict]
+| 节点 | 节点名 (NAME) | 输出字段 | 说明 |
+|------|--------------|---------|------|
+| **kb_router** | `"kb_router"` | `_resolved_kb_ids: list[str] \| None` | KB 路由穿透/智能匹配 |
+| **classify** | `"classify"` | `intent`, `extracted_entities`, `missing_entities`, `classification_confidence` | 三层意图路由 |
+| **rewrite** | `"rewrite"` | `rewritten_query: str` | 查询改写（仅 medium/complex） |
+| **retrieve** | `"retrieve"` | `retrieval_results: list[ChunkResult]` | 混合检索（Dense + BM25） |
+| **grader** | `"grader"` | `grader_score`, `retrieval_retries`, `downgraded`, `downgrade_reason` | 检索质量评分 |
+| **rerank** | `"rerank"` | `contexts: list[RAGContext]` | DashScope Reranker 精排 |
+| **generate** | `"generate"` | `answer: str`, `model_used: str` | LLM 流式生成 |
+| **format** | `"format"` | `citations: list[dict]` | 去重引用列表 |
+
+### 5.2 classify_node 三层路由架构
+
+`make_classify_node(llm)` 创建的 classify 节点内部使用 `QueryRouter` 的三层架构：
+
+```
+用户 query
+    │
+    ├── L0: 问候/长度检测
+    │   "你好/谢谢/≤2字符" → 直接返回 simple，不调用下游
+    │
+    ├── L1: EntityExtractor（正则实体提取，0 LLM 成本）
+    │   支持实体类型: year / quarter / month / metric / money / percentage / company
+    │   输出: list[ExtractedEntity]
+    │   源码: src/infra/search/entity_extractor.py
+    │
+    ├── L2: ComplexityScorer（关键词加权评分）
+    │   关键词按 LOW(1) / MEDIUM(2) / HIGH(3) / VERY_HIGH(4) 加权
+    │   实体数量 +0.5/个，多条件关键词 +2
+    │   输出: float 分数（仅作为 LLM hint，不做判决）
+    │   源码: src/infra/search/complexity_scorer.py
+    │
+    └── L3: LLM Classifier（一次 LLM 调用）
+       输入: query + entities + score + history
+       温度: CLASSIFIER_TEMPERATURE（默认 0.1）
+       输出 JSON:
+       {
+         "route": "simple|medium|complex",
+         "missing_entities": [{"type": "year", "question": "请问您想查询哪一年的数据？"}],
+         "confidence": 0.92
+       }
+       源码: src/infra/search/query_router.py
 ```
 
-检索阶段。集成 Hybrid Search（Dense + BM25 并行 + RRF 融合）+ 查询改写 + 意图路由。
+`route_by_intent` 条件边根据 state 决定下一步：
+- `missing_entities` 非空 → `"clarify"` → **END**（不走 rewrite/retrieve/generate）
+- `route == "simple"` → `LangGraphNode.Retrieve.NAME`
+- `route == "medium"` → `LangGraphNode.Rewrite.NAME`
+- `route == "complex"` → `LangGraphNode.Rewrite.NAME`
 
-| 参数 | 说明 |
-|------|------|
-| `kb_id == ""` | 调用 `similarity_search_all` 全量搜索 |
-| `kb_id != ""` | 调用 `similarity_search` 限定知识库 |
+### 5.3 AgentState 新增字段（意图理解）
 
-```python
-def rerank(query, results) → list[RAGContext]
-```
+自 Phase 4 意图路由升级后，`AgentState` 新增以下字段：
 
-精排阶段。调用 DashScope Reranker 对候选项重新排序。
+| 字段 | 类型 | 默认值 | 来源 | 说明 |
+|------|------|--------|------|------|
+| `extracted_entities` | `list[dict]` | `[]` | EntityExtractor L1 | 正则提取的实体列表 |
+| `missing_entities` | `list[dict]` | `[]` | LLM L3 | LLM 标记的缺失实体（如 `[{"type": "year", "question": "请问您想查询哪一年的数据？"}]` |
+| `classification_confidence` | `float` | `0.0` | LLM L3 | LLM 置信度（LLM 输出 key="confidence"） |
 
-```python
-def stream_answer(query, contexts, history) → Generator[str]
-```
-
-生成阶段。逐 token 流式生成回答文本。
-
-### 5.2 `RAGContext` 数据类
+### 5.4 `RAGContext` 数据类
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
@@ -451,29 +538,68 @@ def stream_answer(query, contexts, history) → Generator[str]
 
 ## 6. 数据流全貌
 
+### 6.1 正常回答路径（无追问）
+
 ```
-用户提问 "苹果营收" (query)
-  → GET /api/chat/stream?session_id=xxx&kb_id=yyy&query=苹果营收&trace_id=zzz
-    → AppService 调用 RAGChain.search()
-      → 查询改写 → 意图路由 → Hybrid Search (Dense + BM25 + RRF)
-    → RAGChain.rerank()
-      → DashScope Reranker 精排
-    → RAGChain.stream_answer()
-      → LLM 流式生成
+用户提问 "2024年公司营收多少" (query)
+  → GET /api/chat/stream?session_id=xxx&kb_id=yyy&query=...&trace_id=zzz
+    → kb_router: 穿透/跨库路由 → _resolved_kb_ids
+    → classify_node: QueryRouter 三层
+        L0: 问候拦截（跳过）
+        L1: EntityExtractor → [{year:2024, metric:营收}]
+        L2: ComplexityScorer → score=2.5 (medium)
+        L3: LLM → route=medium, missing=[], confidence=0.95
+    → route_by_intent: "medium" → rewrite
+    → rewrite_node: 查询改写
+    → retrieve_node: Hybrid Search (Dense + BM25 + RRF)
+    → grader_node: 检索质量评分 (score ≥ 0.5 → pass)
+    → rerank_node: DashScope Reranker 精排
+    → generate_node: LLM 流式生成
+    → format_node: 去重引用列表
     → SSE 事件流推送至前端:
+        event: status (classify)
         event: status (retrieving)
         event: status (reranking)
         event: status (generating)
         event: token (逐片推送)
         event: citation (去重)
+        event: model_info (模型名 + fallback 状态)
         event: done
     → 后台持久化对话到 MySQL（含重试）
       → chat_manager.save_session_async()
       → chat_manager.save_messages_async()
 ```
 
+### 6.2 追问路径（缺失实体）
+
 ```
-文档上传
+用户提问 "营收多少"（缺年份，无历史上下文）
+  → GET /api/chat/stream?session_id=xxx&kb_id=yyy&query=营收多少&trace_id=zzz
+    → kb_router → classify_node: QueryRouter 三层
+        L0: 问候拦截（跳过）
+        L1: EntityExtractor → [{metric:营收}]
+        L2: ComplexityScorer → score=1.5
+        L3: LLM → route=medium,
+                    missing=[{type:"year", question:"请问您想查询哪一年的数据？"}],
+                    confidence=0.85
+    → route_by_intent: missing_entities 非空 → "clarify" → END
+    → 图不执行 rewrite/retrieve/generate，直接结束
+    → agent_service.stream_chat 在 classify CHAIN_END 捕获 missing_entities
+    → 循环结束后发送 SSEClarificationEvent
+    → SSE 事件流:
+        event: status (classify)
+        event: clarification (追问事件 + 快捷选项)
+        event: done
+
+用户补充信息 "2024年"（同 session_id）
+  → GET /api/chat/stream?session_id=xxx&kb_id=yyy&query=2024年&trace_id=zzz
+    → _history 包含上轮对话
+    → classify_node: LLM 从 history 推断 year=2024，metric=营收
+        missing=[], route=medium
+    → 正常路径（同 6.1）
+```
+
+### 6.3 文档上传路径
   → POST /api/kbs/documents/upload (multipart)
     → 返回 202 {doc_id, status: "parsing"}
     → 后台 asyncio.create_task(_process_document):

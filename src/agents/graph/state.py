@@ -47,9 +47,7 @@ class AgentState:
     _resolved_kb_ids: list[str] | None = None
     # None = 未路由 / 降级全量；[...] = 路由选中的 KB ID 列表
     # ── 意图理解 ──
-    extracted_entities: list[dict] = field(
-        default_factory=list
-    )  # EntityExtractor 输出
+    extracted_entities: list[dict] = field(default_factory=list)  # EntityExtractor 输出
     missing_entities: list[dict] = field(
         default_factory=list
     )  # LLM 标记的缺失实体（如 [{"type": "year", "question": "哪一年？"}]
