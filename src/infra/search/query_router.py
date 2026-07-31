@@ -104,6 +104,24 @@ class QueryRouter:
             messages = [HumanMessage(content=prompt)]
             response = self._llm.invoke(messages, temperature=CLASSIFIER_TEMPERATURE)
             raw = response.content.strip()
+            metadata = getattr(response, "response_metadata", {}) or {}
+            usage = metadata.get("token_usage", {})
+            prompt_t = usage.get("prompt_tokens")
+            completion_t = usage.get("completion_tokens")
+            if prompt_t is None or completion_t is None:
+                usage_meta = getattr(response, "usage_metadata", None)
+                logger.info(
+                    "meta keys: {} token_usage keys: {} usage_metadata: {}",
+                    list(metadata.keys()), list(usage.keys()), usage_meta,
+                )
+                if usage_meta:
+                    prompt_t = usage_meta.get("input_tokens")
+                    completion_t = usage_meta.get("output_tokens")
+            logger.info(
+                "QueryRouter classify done: prompt_tokens={} completion_tokens={}",
+                prompt_t if prompt_t is not None else "?",
+                completion_t if completion_t is not None else "?",
+            )
             if raw.startswith("```"):
                 lines = raw.split("\n")
                 raw = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])

@@ -8,6 +8,7 @@
 import asyncio
 from typing import Callable
 from loguru import logger
+from src.infra.db.vector_store.types import ChunkResult
 from src.infra.search.query_router import QueryRouter
 from src.rag.retrieval import search, rerank_results, rewrite_query
 from src.rag.stream import stream_answer, estimate_usage
@@ -106,10 +107,9 @@ def make_retrieve_node(vector_store, bm25) -> Callable:
     async def retrieve_node(state: AgentState) -> dict:
         q = state.rewritten_query or state.query
         resolved_ids = state._resolved_kb_ids or state.kb_id
-        # resolved_ids 可以是 str | list[str] | None
-        # None → retrieval.py 中 get_all_kb 全量搜索
+        # resolved_ids 是非空 list（单/多库）或空值；空值时跳过搜索直接返回空结果
         logger.info("retrieve_node start: query={} kb_ids={}", q[:50], resolved_ids)
-
+        results: list[ChunkResult] = []
         # 多 KB 路由时走多库并行检索
         if isinstance(resolved_ids, list) and len(resolved_ids) > 1:
             results = await asyncio.to_thread(
@@ -118,11 +118,12 @@ def make_retrieve_node(vector_store, bm25) -> Callable:
                 q,
                 TOP_K_RETRIEVAL,
             )
-        else:
-            results = await search(q, resolved_ids, vector_store, bm25)
+        elif isinstance(resolved_ids, list) and len(resolved_ids) == 1:
+            # 单元素 list 需取出字符串，search() 的 kb_id 参数只接受 str | None
+            kb_id = resolved_ids[0]
+            results = await search(q, kb_id, vector_store, bm25)
+        # 无 else：resolved_ids 为空（未解析出知识库）时不发起搜索，保持空结果
 
-        if results is None:
-            results = []
         logger.info("retrieve_node done: results={}", len(results))
         return {"retrieval_results": results}
 

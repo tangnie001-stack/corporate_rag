@@ -56,6 +56,7 @@ def build_graph(
     vector_store: VectorStore,
     bm25: BM25Index | None,
     llm,
+    classify_llm,
     reranker,
     embed_fn,
     prompt_manager,
@@ -64,8 +65,10 @@ def build_graph(
     builder = StateGraph(AgentState)
 
     # ── 用工厂函数创建带依赖的节点 ────────────────
-    builder.add_node("kb_router", make_kb_router_node(embed_fn, llm))
-    builder.add_node(LangGraphNode.Classify.NAME, make_classify_node(llm))
+    # classify_llm 用于 KBRouter 和 classify 节点（小模型，无思考模式）
+    # llm 用于 generate 节点（全功能大模型）
+    builder.add_node("kb_router", make_kb_router_node(embed_fn, classify_llm))
+    builder.add_node(LangGraphNode.Classify.NAME, make_classify_node(classify_llm))
     builder.add_node(LangGraphNode.Rewrite.NAME, rewrite_node)
     builder.add_node(
         LangGraphNode.Retrieve.NAME, make_retrieve_node(vector_store, bm25)

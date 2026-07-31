@@ -98,7 +98,7 @@ def rerank_results(
             max_attempts=RETRY_MAX_ATTEMPTS,
             initial_interval=RETRY_INITIAL_INTERVAL,
             backoff=RETRY_BACKOFF_FACTOR,
-        )(query, docs)
+        )(docs, query)
     except Exception as e:
         logger.warning(
             "Rerank failed after {} attempts (using raw order): {}",

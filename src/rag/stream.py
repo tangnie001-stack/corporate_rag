@@ -65,7 +65,10 @@ def stream_answer(
     _llm_base_url = getattr(llm, "openai_api_base", "") or str(
         getattr(llm, "base_url", "")
     )
-    _key_prefix = (getattr(llm, "openai_api_key", "") or "")[:8]
+    _api_key = getattr(llm, "openai_api_key", "") or ""
+    if hasattr(_api_key, "get_secret_value"):  # langchain 新版 api_key 为 SecretStr
+        _api_key = _api_key.get_secret_value()
+    _key_prefix = str(_api_key)[:8]
 
     for attempt in range(1, RETRY_MAX_ATTEMPTS + 1):
         try:

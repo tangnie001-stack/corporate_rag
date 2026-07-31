@@ -25,6 +25,7 @@ from src.config import (
     LLM_BASE_URL,
     LLM_TEMPERATURE,
     LLM_KWARGS,
+    CLASSIFIER_TEMPERATURE,
     EMBEDDING_MODEL,
     EMBEDDING_API_KEY,
     EMBEDDING_BASE_URL,
@@ -156,11 +157,34 @@ def get_llm(
     )
 
 
+def get_classify_llm() -> ChatOpenAI:
+    """创建分类/路由专用 LLM 实例（小模型，关闭思考模式）。
+
+    KBRouter 和 classify 节点使用，与 generate 节点的大模型分离，
+    避免大模型在简单分类任务上浪费推理时间。
+
+    Returns:
+        关闭思考模式的 ChatOpenAI 实例
+    """
+    from src.config import CLASSIFY_MODEL
+
+    extra_kwargs: dict = json.loads(LLM_KWARGS)
+    extra_kwargs.update({"extra_body": {"enable_thinking": False}})
+    return ChatOpenAI(
+        model=CLASSIFY_MODEL,
+        temperature=CLASSIFIER_TEMPERATURE,
+        api_key=LLM_API_KEY,
+        base_url=LLM_BASE_URL,
+        **extra_kwargs,
+    )
+
+
 def get_rerank(model: str = RERANK_MODEL, top_n: int = TOP_K_RERANK) -> DashScopeRerank:
     """创建文本重排序模型实例（固定走 DashScope Rerank API）。
 
     Rerank 不走 LiteLLM Proxy，因为 LiteLLM 不支持 DashScope 的 rerank 端点。
     API Key 使用 RERANK_API_KEY（默认 fallback 到 DASHSCOPE_API_KEY）。
+    显式传入 client 以阻止 DashScopeRerank 的 model_validator 将 model 覆盖为 SDK 默认值。
 
     Args:
         model: 模型名称，默认 qwen3-rerank
@@ -169,8 +193,11 @@ def get_rerank(model: str = RERANK_MODEL, top_n: int = TOP_K_RERANK) -> DashScop
     Returns:
         DashScopeRerank 实例
     """
+    import dashscope
+
     return DashScopeRerank(
         model=model,
         top_n=top_n,
         dashscope_api_key=RERANK_API_KEY,
+        client=dashscope.TextReRank,
     )

@@ -87,6 +87,11 @@ docker compose build --no-cache app    # 改依赖后重建
 - **接口契约**：API 参数、返回值、历史踩坑记录详见 docs/api_contract.md，修改公共方法签名时同步更新
 - **代码风格**：不用三元表达式（`a if cond else b`），写完整的 if/else 结构，保持可读性
 - **显式类型检查**：类型不确定的值不用 `getattr(x, "attr", default)` 隐式兜底，用 `x.attr if x is not None else default` 或 `isinstance` 显式判断
+- **硬编码集中管理**：新增的常量/文案/阈值不得散落在业务代码中，统一放入 `src/config/`，按用途分工：
+  - `settings.py` — 环境变量/运行参数（需可配置的阈值、开关等，走 `os.getenv`）
+  - `prompts.py` — LLM 提示词、给用户的文案（如拒答语、abstention 文案）
+  - `const.py` — 事件/节点常量、状态映射、固定阈值
+  - 业务模块内如已存在模块级常量，迁移归位到 `src/config/`（存量清理可单独变更，不混入功能改造）
 
 
 ## 代码注释标准
@@ -101,9 +106,12 @@ docker compose build --no-cache app    # 改依赖后重建
 ## 参考项目
 以下项目在对应场景下优先参考其实现模式：
 
-- https://github.com/fastapi/fastapi ⭐ 101k — FastAPI 官方。涉及 API 路由、中间件、依赖注入、异常处理时参考
-- https://github.com/fastapi/full-stack-fastapi-template ⭐ 44.5k — FastAPI 官方全栈模板。涉及响应模型设计、用户认证、项目分层时参考
-- https://github.com/fastapi-practices/fastapi-best-architecture ⭐ 2.5k — FastAPI 社区最佳实践。涉及统一响应格式、全局异常处理、RBAC 权限时参考
-- https://github.com/langchain-ai/langgraph ⭐ 38.5k — LangGraph 官方。涉及 StateGraph、流式事件、子图、Checkpoint、Human-in-the-loop 时参考
-- https://github.com/Shubhamsaboo/awesome-llm-apps ⭐ 128.9k — AI Agent/RAG 模板集。涉及 RAG 进阶、多 Agent 协作、记忆、成本优化时参考
-- https://github.com/wassim249/fastapi-langgraph-agent-production-ready-template ⭐ 2.5k — FastAPI+LangGraph 生产模板。涉及 LLM 容错、长期记忆、Rate Limiting、Eval 框架、生产监控时参考
+- `../github/fastapi-0.141.1` — FastAPI 官方。涉及 API 路由、中间件、依赖注入、异常处理时参考
+- `../github/full-stack-fastapi-template-0.10.0` — FastAPI 官方全栈模板。涉及响应模型设计、用户认证、项目分层时参考
+- `../github/fastapi-best-architecture-1.15.0` — FastAPI 社区最佳实践。涉及统一响应格式、全局异常处理、RBAC 权限时参考
+- `../github/langgraph-1.2.10` — LangGraph 官方。涉及 StateGraph、流式事件、子图、Checkpoint、Human-in-the-loop 时参考
+- `../github/awesome-llm-apps-main` — AI Agent/RAG 模板集。涉及 RAG 进阶、多 Agent 协作、记忆、成本优化时参考
+- `../github/fastapi-langgraph-agent-production-ready-template-master` — FastAPI+LangGraph 生产模板。涉及 LLM 容错、长期记忆、Rate Limiting、Eval 框架、生产监控时参考
+- `../github/dify-1.16.1` — Dify 官方。涉及 LLMOps 平台、AI 应用编排、工作流引擎、RAG 管道、插件体系时参考
+- `../github/financial_rag-main` — 财税法务 RAG 知识库。涉及多智能体协作、LangGraph 状态机、知识图谱、混合检索、三层记忆体系时参考
+- `../github/ragflow-0.26.4` — RAGFlow 开源 RAG 引擎。涉及 DeepDoc 文档解析、模板化分块、知识编译器、引用溯源、Agent 沙箱时参考

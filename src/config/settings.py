@@ -42,6 +42,8 @@ LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.1"))
 LLM_KWARGS: str = os.getenv("LLM_KWARGS", "{}")
 # 分类器温度参数：查询路由分类时使用，略高于 LLM 温度以允许少量分类灵活度
 CLASSIFIER_TEMPERATURE: float = float(os.getenv("CLASSIFIER_TEMPERATURE", "0.1"))
+# 分类/路由专用模型：KBRouter 和 classify 节点使用的小模型（无思考模式）
+CLASSIFY_MODEL: str = os.getenv("CLASSIFY_MODEL", LLM_MODEL)
 # 查询澄清开关：true 时当分类器检测到缺失实体信息时，主动向用户追问澄清
 CLARIFICATION_ENABLED: bool = os.getenv("CLARIFICATION_ENABLED", "true").lower() in (
     "true",
