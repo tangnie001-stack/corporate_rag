@@ -51,7 +51,7 @@ class QueryRouter:
         if any(re.match(p, cleaned) for p in _GREETING_PATTERNS):
             return self._simple_result()
         if len(cleaned) <= _SHORT_QUERY_THRESHOLD:
-            return self._simple_result()
+            return self._simple_result(skip_retrieval=False)
         if cleaned in self._cache:
             return self._cache[cleaned]
         entities = self._entity_extractor.extract(cleaned)
@@ -76,13 +76,13 @@ class QueryRouter:
         self._cache[cleaned] = result
         return result
 
-    def _simple_result(self) -> dict[str, Any]:
+    def _simple_result(self, skip_retrieval: bool = True) -> dict[str, Any]:
         return {
             "intent": RAGQueryIntent(route="simple"),
             "extracted_entities": [],
             "missing_entities": [],
             "classification_confidence": 1.0,
-            "skip_retrieval": True,
+            "skip_retrieval": skip_retrieval,
         }
 
     def _llm_classify(

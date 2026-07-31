@@ -14,10 +14,12 @@ def test_l0_greeting_returns_simple() -> None:
 
 
 def test_l0_short_query_returns_simple() -> None:
+    """≤2 字符的业务查询（如"营收"）走 simple 路由，但不跳过检索。"""
     router = QueryRouter(llm=Mock())
     router._llm_classify = Mock()
-    result = router.route("谢谢", history=[])
+    result = router.route("营收", history=[])
     assert result["intent"].route == "simple"
+    assert result["skip_retrieval"] is False
     router._llm_classify.assert_not_called()
 
 
