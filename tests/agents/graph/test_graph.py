@@ -156,3 +156,47 @@ def test_format_node_empty_when_abstention():
     )
     result = format_node(state)
     assert result["citations"] == []
+
+
+def test_generate_node_abstention_when_no_contexts():
+    """无 contexts 且非 skip_retrieval 时，generate_node 应返回 abstention 静态文案。"""
+    from src.agents.graph.nodes import make_generate_node
+    from src.agents.graph.state import AgentState
+    from src.config.prompts import ABSTENTION_TEXT
+    from unittest.mock import Mock
+
+    node = make_generate_node(llm=Mock(), prompt_manager=Mock())
+    state = AgentState(
+        query="阿里巴巴",
+        rewritten_query="阿里巴巴",
+        contexts=[],
+        skip_retrieval=False,
+    )
+    result = node(state)
+    assert result["answer"] == ABSTENTION_TEXT
+    assert result["model_used"] == ""
+    assert result["is_fallback"] is False
+
+
+def test_generate_node_skip_retrieval_uses_simple_prompt():
+    """skip_retrieval=True 时即使有 contexts 也走 build_simple_prompt。"""
+    from src.agents.graph.nodes import make_generate_node
+    from src.agents.graph.state import AgentState
+    from src.rag.context import RAGContext
+    from unittest.mock import Mock, patch
+
+    node = make_generate_node(llm=Mock(), prompt_manager=Mock())
+    state = AgentState(
+        query="你好",
+        rewritten_query="你好",
+        contexts=[
+            RAGContext(content="随机内容", source="a.pdf", page=1,
+                       doc_id="d1", chunk_id="c1", score=0.8),
+        ],
+        skip_retrieval=True,
+    )
+    with patch("src.agents.graph.nodes.build_simple_prompt", return_value=[]) as m:
+        with patch("src.agents.graph.nodes.stream_answer", return_value=iter(["你好！"])):
+            result = node(state)
+    m.assert_called_once()
+    assert "你好" in result["answer"]

@@ -109,3 +109,6 @@ CLASSIFIER_USER_TEMPLATE: str = """用户问题：{query}
 
 # 拒答语检测关键词：回答命中任一关键词时，format_node 不输出引用
 ABSTENTION_MARKERS: tuple[str, ...] = ("未在文档中找到",)
+
+# abstention 出口的回答文案：检索无达标 context 时直接返回，不回 LLM
+ABSTENTION_TEXT: str = "未在文档中找到相关数据。请尝试更换问题表述或补充更多文档。"

@@ -14,7 +14,7 @@ from src.infra.search.query_router import QueryRouter
 from src.rag.retrieval import search, rerank_results, rewrite_query
 from src.rag.stream import stream_answer, estimate_usage
 from src.rag.prompt import build_prompt, build_simple_prompt, format_context
-from src.config.prompts import ABSTENTION_MARKERS
+from src.config.prompts import ABSTENTION_MARKERS, ABSTENTION_TEXT
 from src.agents.grader import RetrievalGrader
 from src.agents.graph.state import AgentState, RAGQueryIntent
 from src.config.const import LangGraphNode
@@ -186,35 +186,54 @@ def make_generate_node(llm, prompt_manager) -> Callable:
         query = state.rewritten_query or state.query
         contexts = state.contexts or []
 
-        if not contexts:
-            # 降级到 Naive RAG
-            logger.info("generate_node: empty contexts, Naive RAG fallback")
+        # ① 问候/闲聊：免检索直接回答（无视 contexts）
+        if state.skip_retrieval:
+            logger.info("generate_node: skip_retrieval, simple prompt")
             prompt = build_simple_prompt(query, state._history or [], prompt_manager)
-        else:
-            # contexts 已经是 list[RAGContext]，不需要转换
-            context_str = format_context(contexts)
-            prompt = build_prompt(
-                query, context_str, state._history or [], prompt_manager
+            full_text = ""
+            for token in stream_answer(prompt, llm, tid):
+                full_text += token
+            usage = estimate_usage(prompt, full_text)
+            result: dict = {"answer": full_text, "_token_usage": usage}
+            model_name = getattr(llm, "model", LLM_MODEL) or ""
+            if model_name:
+                result["model_used"] = model_name
+            logger.info(
+                "generate_node done (skip_retrieval): answer_len={} tokens={}",
+                len(full_text), usage.total_tokens,
             )
+            return result
 
-        # 收集所有 token，组装完整文本
+        # ② 检索无达标 context：abstention 静态文案，不回 LLM
+        if not contexts:
+            logger.info("generate_node: empty contexts, abstention")
+            usage = estimate_usage([], ABSTENTION_TEXT)
+            logger.info(
+                "generate_node done (abstention): answer_len={} tokens={}",
+                len(ABSTENTION_TEXT), usage.total_tokens,
+            )
+            return {
+                "answer": ABSTENTION_TEXT,
+                "_token_usage": usage,
+                "model_used": "",
+                "is_fallback": False,
+            }
+
+        # ③ 正常 RAG 生成
+        context_str = format_context(contexts)
+        prompt = build_prompt(query, context_str, state._history or [], prompt_manager)
         full_text = ""
         for token in stream_answer(prompt, llm, tid):
             full_text += token
         usage = estimate_usage(prompt, full_text)
 
-        result: dict = {"answer": full_text, "_token_usage": usage}
-        # 记录使用的模型名（从 llm 配置取，LiteLLM fallback 在代理层透明处理）
+        result = {"answer": full_text, "_token_usage": usage}
         model_name = getattr(llm, "model", LLM_MODEL) or ""
         if model_name:
             result["model_used"] = model_name
-        if not contexts:
-            result["downgraded"] = True
-            result["downgrade_reason"] = "rerank_empty"
         logger.info(
             "generate_node done: answer_len={} tokens={}",
-            len(full_text),
-            usage.total_tokens,
+            len(full_text), usage.total_tokens,
         )
         return result
 
