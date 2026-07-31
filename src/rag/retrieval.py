@@ -114,13 +114,13 @@ def rerank_results(
             e,
         )
         apply_threshold = False
-        reranked = [
-            {
-                "index": i,
-                "relevance_score": 1 - r.distance if r.distance is not None else 0,
-            }
-            for i, r in enumerate(results)
-        ]
+        reranked = []
+        for i, r in enumerate(results):
+            if r.distance is not None:
+                fallback_score = 1 - r.distance
+            else:
+                fallback_score = 0
+            reranked.append({"index": i, "relevance_score": fallback_score})
 
     contexts = []
     for item in reranked[:TOP_K_RERANK]:
@@ -136,9 +136,13 @@ def rerank_results(
             )
             continue
         pc = r.metadata.get("parent_content")
+        if pc:
+            content = pc
+        else:
+            content = r.content
         contexts.append(
             RAGContext(
-                content=pc if pc else r.content,
+                content=content,
                 source=r.metadata.get("source", ""),
                 page=r.metadata.get("page", 0),
                 doc_id=r.metadata.get("doc_id", ""),
