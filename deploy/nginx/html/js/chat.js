@@ -640,6 +640,7 @@ function submitClarification(value) {
 
     let fullText = '';
     const citations = [];
+    let isClarificationFlow = false;  // 当前是否在追问路径中
 
     evtSource.addEventListener('status', (e) => {
         try {
@@ -685,10 +686,37 @@ function submitClarification(value) {
         } catch (err) {}
     });
 
+    evtSource.addEventListener('clarification', (e) => {
+        try {
+            const data = JSON.parse(e.data);
+            isClarificationFlow = true;
+            clarificationPending = {
+                type: data.type || 'entity_completion',
+                missing_entities: data.missing_entities || [],
+                question: data.question || '请补充相关信息',
+                suggestions: data.suggestions || [],
+            };
+
+            // 移除"思考中"状态
+            if (statusDiv.parentNode) statusDiv.remove();
+
+            // 在 AI 气泡位置渲染追问卡片
+            renderClarificationBubble(clarificationPending, assistantDiv);
+        } catch (err) {
+            console.error('Clarification parse error:', err);
+        }
+    });
+
     evtSource.addEventListener('done', () => {
         evtSource.close();
         activeEventSource = null;
         abortController = null;
+
+        // 追问路径 — 气泡已由 clarification 事件渲染完成
+        if (isClarificationFlow) {
+            isClarificationFlow = false;
+            return;
+        }
 
         // 渲染引用
         if (citations.length > 0) {
