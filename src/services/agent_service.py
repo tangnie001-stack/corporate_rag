@@ -115,14 +115,15 @@ class AgentService:
                                 break
 
                     case LangGraphEvent.CHAT_MODEL_STREAM:
-                        name = event.get(LangGraphKey.NAME, "")
+                        metadata = event.get("metadata", {}) or {}
+                        node_name = metadata.get("langgraph_node", "")
                         chunk = event.get(LangGraphKey.DATA, {}).get(LangGraphKey.CHUNK)
                         content = chunk.content if chunk is not None else ""
-                        if LangGraphNode.Generate.NAME not in name:
+                        if LangGraphNode.Generate.NAME not in node_name:
                             if content:
                                 logger.info(
                                     "CHAT_MODEL_STREAM filtered: node={} content_prefix={!r:.50}",
-                                    name, content,
+                                    node_name, content,
                                 )
                             continue
                         if content:

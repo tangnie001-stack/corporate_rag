@@ -109,3 +109,39 @@ class TestStreamChatClarification:
             e for e in events if isinstance(e, SSEClarificationEvent)
         ]
         assert len(clarification_events) == 0
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_yields_generate_tokens_from_metadata():
+    """generate 节点的 CHAT_MODEL_STREAM token 应通过 metadata.langgraph_node 识别并流出。"""
+    from src.services.agent_service import AgentService
+    from src.config.const import LangGraphEvent, LangGraphKey, LangGraphNode
+    from src.utils.sse import SSETokenEvent
+    from langchain_core.messages import AIMessageChunk
+
+    service = AgentService.__new__(AgentService)
+    service._llm = Mock()
+    service._chat_manager = AsyncMock()
+    service._chat_manager.get_history_async.return_value = []
+    service._chat_manager.add_message_async = AsyncMock()
+    service._prompt_manager = Mock()
+    service._tracer = Mock()
+
+    async def fake_astream(*args, **kwargs):
+        yield {
+            LangGraphKey.EVENT: LangGraphEvent.CHAT_MODEL_STREAM,
+            LangGraphKey.NAME: "ChatOpenAI",  # 事件 name 是模型类名，不是节点名
+            "metadata": {"langgraph_node": LangGraphNode.Generate.NAME},
+            LangGraphKey.DATA: {"chunk": AIMessageChunk(content="你好")},
+        }
+
+    service._graph = Mock()
+    service._graph.astream_events = fake_astream
+
+    events = []
+    async for event in service.stream_chat("kb1", "session1", "阿里巴巴"):
+        events.append(event)
+
+    token_events = [e for e in events if isinstance(e, SSETokenEvent)]
+    assert len(token_events) == 1
+    assert token_events[0].token == "你好"
