@@ -72,6 +72,64 @@ class TestRerank:
         contexts = retrieval.rerank_results("query", [], MagicMock())
         assert contexts == []
 
+    def test_rerank_filters_below_threshold(self):
+        """低于 RERANK_MIN_SCORE 的 context 应被过滤。"""
+        reranker = MagicMock()
+        reranker.rerank.return_value = [
+            {"index": 0, "relevance_score": 0.9},
+            {"index": 1, "relevance_score": 0.1},
+        ]
+        results = [
+            ChunkResult(
+                id=f"d1:{i}",
+                content=f"content {i}",
+                metadata={"source": f"a{i}.pdf", "page": 1, "doc_id": "d1"},
+            )
+            for i in range(2)
+        ]
+        with patch("src.rag.retrieval.RERANK_MIN_SCORE", 0.3):
+            contexts = retrieval.rerank_results("query", results, reranker)
+        assert len(contexts) == 1
+        assert contexts[0].source == "a0.pdf"
+
+    def test_rerank_all_below_threshold_returns_empty(self):
+        """全部低于阈值应返回空列表。"""
+        reranker = MagicMock()
+        reranker.rerank.return_value = [
+            {"index": 0, "relevance_score": 0.1},
+            {"index": 1, "relevance_score": 0.05},
+        ]
+        results = [
+            ChunkResult(
+                id=f"d1:{i}",
+                content=f"content {i}",
+                metadata={"source": f"a{i}.pdf", "page": 1, "doc_id": "d1"},
+            )
+            for i in range(2)
+        ]
+        with patch("src.rag.retrieval.RERANK_MIN_SCORE", 0.3):
+            contexts = retrieval.rerank_results("query", results, reranker)
+        assert contexts == []
+
+    def test_rerank_fallback_skips_threshold(self):
+        """rerank 失败 fallback（1-distance 分数）不应用阈值。"""
+        reranker = MagicMock()
+        reranker.rerank.side_effect = RuntimeError("rerank down")
+        results = [
+            ChunkResult(
+                id=f"d1:{i}",
+                content=f"content {i}",
+                distance=0.5,  # 1-0.5=0.5，若应用阈值 0.3 会保留；用 0.9 距离=0.1 分验证不过滤
+                metadata={"source": f"a{i}.pdf", "page": 1, "doc_id": "d1"},
+            )
+            for i in range(1)
+        ]
+        # 距离 0.9 → fallback 分数 0.1 < 0.3，若应用阈值会被过滤；不应被过滤
+        results[0].distance = 0.9
+        with patch("src.rag.retrieval.RERANK_MIN_SCORE", 0.3):
+            with patch("src.rag.retrieval.with_retry", side_effect=lambda f, **kw: f):
+                contexts = retrieval.rerank_results("query", results, reranker)
+        assert len(contexts) == 1
 
 
 # ==================== 查询改写测试 ====================

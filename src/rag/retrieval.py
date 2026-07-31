@@ -3,7 +3,12 @@
 import asyncio
 from typing import Optional
 from loguru import logger
-from src.config import TOP_K_RETRIEVAL, TOP_K_RERANK, HYBRID_SEARCH_ENABLED
+from src.config import (
+    TOP_K_RETRIEVAL,
+    TOP_K_RERANK,
+    HYBRID_SEARCH_ENABLED,
+    RERANK_MIN_SCORE,
+)
 from src.infra.search.bm25_index import BM25Index, rrf_fusion
 from src.infra.db.vector_store import VectorStore
 from src.infra.db.vector_store.types import ChunkResult
@@ -85,13 +90,16 @@ def rerank_results(
         reranker: Reranker 模型实例
 
     Returns:
-        精排后的 RAGContext 列表，按相关性降序排列，长度不超过 TOP_K_RERANK
+        精排后的 RAGContext 列表，按相关性降序排列，长度不超过 TOP_K_RERANK；
+        rerank 成功时过滤掉分数低于 RERANK_MIN_SCORE 的 context，失败 fallback 不应用阈值
     """
     if not results:
         logger.info("[DIAG] rerank_results: input empty, returning []")
         return []
 
     docs = [r.content for r in results]
+    # rerank 成功与否影响是否应用阈值：失败 fallback 分数量纲不同（1-distance），不应用阈值
+    apply_threshold = True
     try:
         reranked = with_retry(
             reranker.rerank,
@@ -105,6 +113,7 @@ def rerank_results(
             RETRY_MAX_ATTEMPTS,
             e,
         )
+        apply_threshold = False
         reranked = [
             {
                 "index": i,
@@ -117,8 +126,16 @@ def rerank_results(
     for item in reranked[:TOP_K_RERANK]:
         idx = item["index"]
         r = results[idx]
-        pc = r.metadata.get("parent_content")
         score = item.get("relevance_score", 0)
+        if apply_threshold and score < RERANK_MIN_SCORE:
+            logger.info(
+                "Rerank filter: idx={} score={:.4f} < RERANK_MIN_SCORE={}",
+                idx,
+                score,
+                RERANK_MIN_SCORE,
+            )
+            continue
+        pc = r.metadata.get("parent_content")
         contexts.append(
             RAGContext(
                 content=pc if pc else r.content,
@@ -138,6 +155,7 @@ def rerank_results(
             contexts[0].score,
         )
     return contexts
+
 
 def expand_query(query: str, history: list[ChatMessage]) -> str:
     """对模糊短查询进行扩展。"""
