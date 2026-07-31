@@ -92,6 +92,7 @@ class LangGraphNode:
 
     class Format:
         NAME: str = "format"  # 引用格式化
+        CITATIONS: str = "citations"  # 引用列表输出字段
 
 
 class LangGraph:
@@ -109,3 +110,7 @@ SSE_STATUS: dict[str, str] = {
     LangGraphNode.Rerank.NAME: "正在精排结果...",
     LangGraphNode.Generate.NAME: "正在生成回答...",
 }
+
+# ── abstention 状态提示 ──
+# agent_service 在拒答（直接返回静态文案）时发送
+ABSTENTION_STATUS_MSG: str = "未找到相关文档，已直接答复"

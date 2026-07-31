@@ -37,7 +37,9 @@ from src.config.const import (
     LangGraphNode,
     LangGraph,
     SSE_STATUS,
+    ABSTENTION_STATUS_MSG,
 )
+from src.config.prompts import ABSTENTION_TEXT
 
 
 class AgentService:
@@ -90,6 +92,8 @@ class AgentService:
         initial_state = AgentState.make_initial_state(session_id, kb_id, query, history)
 
         full_answer = ""
+        answer = ""
+        formatted_citations = None  # None=Format 节点未捕获（兜底用）；[]=明确无引用
         model_used = ""
         is_fallback = False
 
@@ -123,7 +127,8 @@ class AgentService:
                             if content:
                                 logger.info(
                                     "CHAT_MODEL_STREAM filtered: node={} content_prefix={!r:.50}",
-                                    node_name, content,
+                                    node_name,
+                                    content,
                                 )
                             continue
                         if content:
@@ -156,8 +161,13 @@ class AgentService:
                                         LangGraphNode.Grader.DOWNGRADE_REASON, ""
                                     )
                             elif LangGraphNode.Generate.NAME in name:
+                                answer = output.get("answer", "") or answer
                                 model_used = output.get("model_used", model_used)
                                 is_fallback = output.get("is_fallback", is_fallback)
+                            elif LangGraphNode.Format.NAME in name:
+                                formatted_citations = (
+                                    output.get(LangGraphNode.Format.CITATIONS, []) or []
+                                )
 
             # 追问处理：缺少实体时返回澄清事件
             if _clarification_pending:
@@ -178,18 +188,42 @@ class AgentService:
                 yield SSEDoneEvent()
                 return
 
-            # 从流式事件中已收集了 contexts / downgraded，不再需要 ainvoke
-            seen = set()
-            for ctx in contexts:
-                key = (ctx.source, ctx.page or 0)
-                if key in seen:
-                    continue
-                seen.add(key)
+            # abstention 兜底：generate 返回静态 answer 且无流式 token 时，作为 token 送达
+            if not full_answer and answer:
+                full_answer = answer
+                if answer == ABSTENTION_TEXT:
+                    yield SSEStatusEvent("generate", ABSTENTION_STATUS_MSG)
+                yield SSETokenEvent(answer)
+
+            # 引用事件：优先用 format_node 过滤后的 citations
+            # formatted_citations 为 None 表示 Format 节点未捕获（异常路径），兜底遍历 contexts
+            # formatted_citations 为 [] 表示明确无引用（拒答/未引用任何文档），直接不发
+            if formatted_citations is None:
+                seen = set()
+                citations_to_send = []
+                for ctx in contexts:
+                    key = (ctx.source, ctx.page or 0)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    citations_to_send.append(
+                        {
+                            "source": ctx.source or "",
+                            "page": ctx.page or 0,
+                            "snippet": (ctx.content or "")[:200],
+                            "score": ctx.score or 0,
+                            "index": 0,
+                        }
+                    )
+            else:
+                citations_to_send = formatted_citations
+            for c in citations_to_send:
                 yield SSECitationEvent(
-                    source=ctx.source or "",
-                    page=ctx.page or 0,
-                    snippet=(ctx.content or "")[:200],
-                    score=ctx.score or 0,
+                    source=c.get("source", ""),
+                    page=c.get("page", 0),
+                    snippet=c.get("snippet", ""),
+                    score=c.get("score", 0.0),
+                    index=c.get("index", 0),
                 )
 
             if full_answer:
