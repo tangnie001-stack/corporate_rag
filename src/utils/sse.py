@@ -35,6 +35,7 @@ class SSECitationEvent:
     snippet: str  # 内容摘要（前 200 字）
     score: float = 0.0  # Reranker 分数
     highlighted_snippet: str | None = None  # 高亮 HTML 片段
+    index: int = 0  # 原文档编号（对应 format_context 的 [n]），0 表示兜底无编号
 
 
 @dataclass
@@ -116,6 +117,7 @@ def sse_citation(
     snippet: str,
     score: float = 0.0,
     highlighted_snippet: str | None = None,
+    index: int = 0,
 ) -> str:
     """构建 SSE citation 事件。
 
@@ -125,6 +127,7 @@ def sse_citation(
         snippet: 内容摘要
         score: Reranker 分数
         highlighted_snippet: 高亮 HTML 片段
+        index: 原文档编号（对应 format_context 的 [n]），0 表示无编号
 
     Returns:
         SSE 格式的文本行
@@ -135,6 +138,7 @@ def sse_citation(
         "snippet": snippet,
         "score": score,
         "highlighted_snippet": highlighted_snippet,
+        "index": index,
     }
     return f"event: citation\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
@@ -202,9 +206,14 @@ def to_sse(event: SSEEvent) -> str:
         case SSETokenEvent(token=token):
             return sse_token(token)
         case SSECitationEvent(
-            source=s, page=p, snippet=snippet, score=score, highlighted_snippet=hs
+            source=s,
+            page=p,
+            snippet=snippet,
+            score=score,
+            highlighted_snippet=hs,
+            index=idx,
         ):
-            return sse_citation(s, p, snippet, score, hs)
+            return sse_citation(s, p, snippet, score, hs, idx)
         case SSEStatusEvent(stage=stage, message=message):
             return sse_status(stage, message)
         case SSEErrorEvent(error=error):

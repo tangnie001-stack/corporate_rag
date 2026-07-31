@@ -32,3 +32,13 @@ def test_to_sse_handles_clarification():
     )
     output = to_sse(event)
     assert output.startswith("event: clarification")
+
+
+def test_sse_citation_with_index():
+    """sse_citation 应序列化 index 字段。"""
+    from src.utils.sse import SSECitationEvent, to_sse
+
+    event = SSECitationEvent(source="a.pdf", page=3, snippet="内容", index=2)
+    text = to_sse(event)
+    assert '"index": 2' in text
+    assert '"source": "a.pdf"' in text
