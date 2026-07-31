@@ -332,6 +332,16 @@
     font-weight: 600;
     color: var(--primary);
   }
+  .citation-index {
+    display: inline-block;
+    background: #e8f0fe;
+    border-radius: 4px;
+    color: #1a56db;
+    font-weight: 600;
+    margin-right: 4px;
+    padding: 1px 5px;
+    font-size: 12px;
+  }
 
   /* ── Divider ── */
   .divider-row {
@@ -642,7 +652,7 @@ function renderAiAnswerStream(text) {
   scrollToBottom();
 }
 
-function renderCitation(source, page, snippet) {
+function renderCitation(source, page, snippet, index) {
   let list = chatContainer.querySelector('.citation-list');
   if (!list) {
     list = document.createElement('div');
@@ -651,7 +661,11 @@ function renderCitation(source, page, snippet) {
   }
   const item = document.createElement('div');
   item.className = 'citation-item';
-  item.innerHTML = `<span class="citation-source">📄 ${escapeHtml(source)}</span> · 第${page}页<br>${escapeHtml(snippet)}`;
+  let badge = '';
+  if (index && index > 0) {
+    badge = `<span class="citation-index">[${index}]</span>`;
+  }
+  item.innerHTML = `${badge}<span class="citation-source">📄 ${escapeHtml(source)}</span> · 第${page}页<br>${escapeHtml(snippet)}`;
   list.appendChild(item);
   scrollToBottom();
 }
@@ -789,7 +803,7 @@ function startSSE(query) {
   source.addEventListener('citation', (e) => {
     try {
       const data = JSON.parse(e.data);
-      renderCitation(data.source, data.page, data.snippet || '');
+      renderCitation(data.source, data.page, data.snippet || '', data.index || 0);
     } catch (err) { /* ignore */ }
   });
 
