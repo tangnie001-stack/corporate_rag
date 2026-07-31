@@ -103,3 +103,9 @@ CLASSIFIER_USER_TEMPLATE: str = """用户问题：{query}
   "confidence": 0.0
 }}
 """
+
+
+# ====== Abstention / 拒答 ======
+
+# 拒答语检测关键词：回答命中任一关键词时，format_node 不输出引用
+ABSTENTION_MARKERS: tuple[str, ...] = ("未在文档中找到",)
