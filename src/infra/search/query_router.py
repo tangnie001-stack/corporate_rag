@@ -71,6 +71,7 @@ class QueryRouter:
             "extracted_entities": entities_dict,
             "missing_entities": llm_result.get("missing_entities", []),
             "classification_confidence": llm_result.get("confidence", 0.0),
+            "skip_retrieval": False,
         }
         self._cache[cleaned] = result
         return result
@@ -81,6 +82,7 @@ class QueryRouter:
             "extracted_entities": [],
             "missing_entities": [],
             "classification_confidence": 1.0,
+            "skip_retrieval": True,
         }
 
     def _llm_classify(

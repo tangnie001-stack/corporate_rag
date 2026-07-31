@@ -88,3 +88,22 @@ def test_cache_hits() -> None:
     router.route("2024年营收", [])
     router.route("2024年营收", [])
     assert router._llm_classify.call_count == 1
+
+
+def test_greeting_sets_skip_retrieval() -> None:
+    """问候查询应设置 skip_retrieval=True。"""
+    from src.infra.search.query_router import QueryRouter
+    from unittest.mock import Mock
+
+    router = QueryRouter(llm=Mock())
+    result = router.route("你好", [])
+    assert result["skip_retrieval"] is True
+
+
+def test_normal_query_not_skip_retrieval() -> None:
+    """普通查询应设置 skip_retrieval=False。"""
+    from src.infra.search.query_router import QueryRouter
+
+    router = QueryRouter(llm=None)
+    result = router.route("2024年营收多少", [])
+    assert result["skip_retrieval"] is False

@@ -58,3 +58,11 @@ def test_agent_state_intent_fields_with_values():
     assert len(state.extracted_entities) == 1
     assert len(state.missing_entities) == 1
     assert state.classification_confidence == 0.85
+
+
+def test_agent_state_skip_retrieval_default_false():
+    """skip_retrieval 默认应为 False。"""
+    from src.agents.graph.state import AgentState
+
+    state = AgentState.make_initial_state("s1", "kb1", "营收多少", [])
+    assert state.skip_retrieval is False

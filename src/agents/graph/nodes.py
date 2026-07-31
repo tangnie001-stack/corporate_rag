@@ -75,6 +75,7 @@ def make_classify_node(llm) -> Callable:
             "extracted_entities": result["extracted_entities"],
             "missing_entities": result["missing_entities"],
             "classification_confidence": result["classification_confidence"],
+            "skip_retrieval": result.get("skip_retrieval", False),
         }
 
     return classify_node

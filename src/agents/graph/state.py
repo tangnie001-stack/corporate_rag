@@ -52,6 +52,7 @@ class AgentState:
         default_factory=list
     )  # LLM 标记的缺失实体（如 [{"type": "year", "question": "哪一年？"}]
     classification_confidence: float = 0.0  # LLM 置信度（LLM 输出 key="confidence"）
+    skip_retrieval: bool = False  # 问候/闲聊标记：跳过检索直接回答（由 classify_node 设置）
     # ── 内部 ──
     _history: list[ChatMessage] = field(
         default_factory=list
