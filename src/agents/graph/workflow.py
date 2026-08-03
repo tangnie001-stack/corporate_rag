@@ -67,7 +67,9 @@ def build_graph(
     # ── 用工厂函数创建带依赖的节点 ────────────────
     # classify_llm 用于 KBRouter 和 classify 节点（小模型，无思考模式）
     # llm 用于 generate 节点（全功能大模型）
-    builder.add_node("kb_router", make_kb_router_node(embed_fn, classify_llm))
+    builder.add_node(
+        LangGraphNode.KbRouter.NAME, make_kb_router_node(embed_fn, classify_llm)
+    )
     builder.add_node(LangGraphNode.Classify.NAME, make_classify_node(classify_llm))
     builder.add_node(LangGraphNode.Rewrite.NAME, rewrite_node)
     builder.add_node(
@@ -81,8 +83,8 @@ def build_graph(
     builder.add_node(LangGraphNode.Format.NAME, format_node)
 
     # ── 设置入口点和边：kb_router → classify → ... ──
-    builder.set_entry_point("kb_router")
-    builder.add_edge("kb_router", LangGraphNode.Classify.NAME)
+    builder.set_entry_point(LangGraphNode.KbRouter.NAME)
+    builder.add_edge(LangGraphNode.KbRouter.NAME, LangGraphNode.Classify.NAME)
 
     # ── 条件边：三级路由（与 classify 的输出直连，不变） ──
     builder.add_conditional_edges(

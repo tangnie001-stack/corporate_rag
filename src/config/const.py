@@ -64,6 +64,9 @@ class LangGraphNode:
     每个节点一个嵌套类，NAME 为节点注册名，其余为该节点输出字段 key。
     """
 
+    class KbRouter:
+        NAME: str = "kb_router"  # 知识库路由（按 user_id 分发到对应知识库）
+
     class Classify:
         NAME: str = "classify"  # 查询分类
         EXTRACTED_ENTITIES: str = "extracted_entities"  # 正则提取的实体列表
@@ -82,6 +85,7 @@ class LangGraphNode:
         RETRIEVAL_RETRIES: str = "retrieval_retries"  # 检索重试次数
         DOWNGRADED: str = "downgraded"  # 是否降级
         DOWNGRADE_REASON: str = "downgrade_reason"  # 降级原因
+        PREV_REWRITTEN_QUERY: str = "_prev_rewritten_query"  # 上一轮改写查询（短路判断用）
 
     class Rerank:
         NAME: str = "rerank"  # 重排序
@@ -114,3 +118,8 @@ SSE_STATUS: dict[str, str] = {
 # ── abstention 状态提示 ──
 # agent_service 在拒答（直接返回静态文案）时发送
 ABSTENTION_STATUS_MSG: str = "未找到相关文档，已直接答复"
+
+# ── 降级原因（grader 短路 / 重试耗尽） ──
+DOWNGRADE_REASON_REWRITE_NO_INCREMENT: str = (
+    "rewrite_no_increment"  # rewrite 无信息增量，重试必复现失败，短路降级
+)
