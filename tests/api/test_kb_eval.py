@@ -12,7 +12,7 @@ def test_latest_eval_found(mock_app_service, auth_client):
     response = auth_client.post("/api/kbs/eval/latest", json={"kb_id": "kb-1"})
 
     assert response.status_code == 200
-    data = response.json()["data"]["data"]
+    data = response.json()["data"]
     assert data["overall_score"] == 0.84
     assert data["passed"] is True
     assert data["qa_count"] == 20
@@ -25,4 +25,4 @@ def test_latest_eval_not_found(mock_app_service, auth_client):
     response = auth_client.post("/api/kbs/eval/latest", json={"kb_id": "kb-no-eval"})
 
     assert response.status_code == 200
-    assert response.json()["data"]["data"] is None
+    assert response.json()["data"] is None

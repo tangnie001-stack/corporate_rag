@@ -11,7 +11,7 @@ def test_health_returns_200():
     """GET /api/health returns 200 with status ok."""
     response = client.get("/api/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert response.json()["data"] == {"status": "ok"}
 
 
 def test_app_config_returns_max_size(mock_app_service):

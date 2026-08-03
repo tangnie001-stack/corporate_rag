@@ -5,12 +5,21 @@
   - 有密钥时正常初始化（mock Langfuse 客户端）
   - 未初始化时所有方法返回 None / 不报错
   - TraceInput dataclass 传参
+
+当配置中 LANGFUSE_ENABLE 关闭时跳过本模块（不依赖 langfuse 服务的场景无需运行）。
 """
 
 from unittest.mock import MagicMock, patch
 
 import pytest
 from langfuse import Langfuse
+
+from src.config import LANGFUSE_ENABLE
+
+pytestmark = pytest.mark.skipif(
+    not LANGFUSE_ENABLE,
+    reason="LANGFUSE_ENABLE 未开启，跳过 langfuse 追踪器测试",
+)
 
 
 def test_init_without_keys():

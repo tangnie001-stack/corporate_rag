@@ -57,6 +57,7 @@ class AgentState:
     _history: list[ChatMessage] = field(
         default_factory=list
     )  # 对话历史（注入 prompt 用）
+    _prev_rewritten_query: str = ""  # 上一轮改写查询（grader 短路重试用，空串=首轮）
     _token_usage: dict = field(default_factory=dict)  # token 用量统计
     timings: dict = field(default_factory=dict)  # 各节点耗时统计
 

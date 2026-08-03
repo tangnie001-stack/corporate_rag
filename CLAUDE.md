@@ -80,7 +80,6 @@ docker compose build --no-cache app    # 改依赖后重建
 ## 规则
 - 架构规约（异常处理 / 响应包装 / 日志约定 / 排查规范）详见 docs/agents/rules.md
 - API 路由 handler 必须标注请求体和返回类型（请求用 Pydantic BaseModel，返回也用 Pydantic BaseModel 描述 data 结构，SSE 标注 StreamingResponse）
-- 改完代码并验证通过后，先 commit，再输出 `git diff HEAD~1` 供我 review
 - API Key 和 Token 通过 `.env` 加载，日志中脱敏；连接串不记录到日志
 - 测试 mock 外部依赖，不发起真实网络调用
 - 需求池文档在docs/requirements_pool.md

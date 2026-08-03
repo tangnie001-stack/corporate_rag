@@ -3,6 +3,7 @@
 import json
 from typing import Optional
 from sqlalchemy import select, func, delete
+from sqlalchemy.exc import IntegrityError
 from src.infra.db.models.kb import KbModel
 from src.infra.db.models.chat import SessionModel, MessageModel
 
@@ -14,16 +15,27 @@ class ChatRepo:
         self._sf = session_factory
 
     async def create_session(self, session) -> None:
-        """session: 带 .id .user_id .title .kb_id 属性的对象。"""
+        """session: 带 .id .user_id .title .kb_id 属性的对象。
+
+        幂等：同一 session_id 已存在（多轮对话重复持久化）时静默跳过，
+        不抛主键冲突异常。
+        """
         async with self._sf() as s:
-            s_obj = SessionModel(
-                id=session.id,
-                user_id=session.user_id,
-                title=session.title,
-                kb_id=session.kb_id,
-            )
-            s.add(s_obj)
-            await s.commit()
+            try:
+                s_obj = SessionModel(
+                    id=session.id,
+                    user_id=session.user_id,
+                    title=session.title,
+                    kb_id=session.kb_id,
+                )
+                s.add(s_obj)
+                await s.commit()
+            except IntegrityError:
+                await s.rollback()
+                existing = await s.get(SessionModel, session.id)
+                if existing is None:
+                    raise
+                # 已存在 → 幂等跳过（首轮已创建，多轮对话不重复插入）
 
     async def get_sessions(self, user_id: str = "") -> list:
         """返回 Row 对象（支持 .id 属性访问，兼容旧 SessionListItem 用法）。"""

@@ -116,3 +116,22 @@ async def test_get_doc_names():
     # 不存在的 ID 不包含在结果中
     result = await doc_repo.get_doc_names([str(uuid.uuid4())])
     assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_create_session_idempotent():
+    """同一 session_id 重复创建应幂等跳过，不抛主键冲突异常。"""
+    from src.infra.db.mysql_db import ChatRepo
+    from src.infra.db.models.chat import SessionModel
+
+    chat_repo = ChatRepo(session_factory)
+    session_id = f"session-{uuid.uuid4().hex[:8]}"
+    base = dict(user_id="test-user", title="测试会话", kb_id="")
+
+    await chat_repo.create_session(SessionModel(id=session_id, **base))
+    # 第二次创建同 id：应静默跳过而非抛 IntegrityError
+    await chat_repo.create_session(SessionModel(id=session_id, **base))
+
+    found = await chat_repo.get_session_by_id(session_id)
+    assert found is not None
+    assert found.title == "测试会话"

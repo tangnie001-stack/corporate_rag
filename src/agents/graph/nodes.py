@@ -17,7 +17,7 @@ from src.rag.prompt import build_prompt, build_simple_prompt, format_context
 from src.config.prompts import ABSTENTION_MARKERS, ABSTENTION_TEXT
 from src.agents.grader import RetrievalGrader
 from src.agents.graph.state import AgentState, RAGQueryIntent
-from src.config.const import LangGraphNode
+from src.config.const import LangGraphNode, DOWNGRADE_REASON_REWRITE_NO_INCREMENT
 from src.config import TOP_K_RETRIEVAL, LLM_MODEL
 
 
@@ -134,7 +134,12 @@ def make_retrieve_node(vector_store, bm25) -> Callable:
 
 
 def grader_node(state: AgentState) -> dict:
-    """质量评分节点：关键字覆盖度评分 + 重试计数管理。"""
+    """质量评分节点：关键字覆盖度评分 + 重试计数管理。
+
+    短路逻辑：rewrite 是纯规则函数，输入不变则改写结果必不变；
+    若本轮改写查询与上一轮相同，重试必然复现上一轮检索结果，
+    直接降级跳过无意义重试。
+    """
     query = state.rewritten_query or state.query
     results = state.retrieval_results or []
     grader = RetrievalGrader()
@@ -148,10 +153,22 @@ def grader_node(state: AgentState) -> dict:
             LangGraphNode.Grader.SCORE: score,
             LangGraphNode.Grader.RETRIEVAL_RETRIES: 0,
         }
+    # 短路：本轮改写查询与上一轮相同 → rewrite 无信息增量，重试必复现失败
+    if state._prev_rewritten_query and query == state._prev_rewritten_query:
+        logger.info(
+            "grader_node: rewrite no-increment (query unchanged), downgrade"
+        )
+        return {
+            LangGraphNode.Grader.SCORE: score,
+            LangGraphNode.Grader.RETRIEVAL_RETRIES: retries + 1,
+            LangGraphNode.Grader.DOWNGRADED: True,
+            LangGraphNode.Grader.DOWNGRADE_REASON: DOWNGRADE_REASON_REWRITE_NO_INCREMENT,
+        }
     if retries < 2:
         return {
             LangGraphNode.Grader.SCORE: score,
             LangGraphNode.Grader.RETRIEVAL_RETRIES: retries + 1,
+            LangGraphNode.Grader.PREV_REWRITTEN_QUERY: query,
         }
     # 重试用尽，降级到 Enhanced RAG
     return {
