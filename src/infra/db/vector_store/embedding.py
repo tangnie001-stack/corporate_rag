@@ -5,6 +5,7 @@
 
 from chromadb.api.types import Documents, Embeddings, EmbeddingFunction
 from langchain_openai import OpenAIEmbeddings
+from loguru import logger
 from src.config import (
     EMBEDDING_MODEL,
     EMBEDDING_API_KEY,
@@ -40,6 +41,7 @@ class DashScopeEmbeddingFunction(EmbeddingFunction):
             check_embedding_ctx_length=False,
             chunk_size=EMBEDDING_BATCH_SIZE,
         )
+        self._model = model
 
     def __call__(self, input: Documents) -> Embeddings:
         """将文档列表转为嵌入向量（ChromaDB 内部调用）。
@@ -50,6 +52,11 @@ class DashScopeEmbeddingFunction(EmbeddingFunction):
         Returns:
             嵌入向量列表
         """
+        logger.debug(
+            "Embedding call: model={} docs={}",
+            self._model,
+            len(input),
+        )
         return self._embedding.embed_documents(list(input))
 
     def embed_query(self, text: str) -> list[float]:
@@ -61,4 +68,9 @@ class DashScopeEmbeddingFunction(EmbeddingFunction):
         Returns:
             查询文本的嵌入向量
         """
+        logger.debug(
+            "Embedding embed_query: model={} query_len={}",
+            self._model,
+            len(text),
+        )
         return self._embedding.embed_query(text)

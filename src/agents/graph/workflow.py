@@ -5,7 +5,7 @@ from langgraph.graph import StateGraph, END
 from langgraph.graph.state import CompiledStateGraph
 from loguru import logger
 
-from src.agents.graph.state import AgentState
+from src.agents.graph.state import AgentState, LangGraphNode
 from src.agents.graph.nodes import (
     make_classify_node,
     rewrite_node,
@@ -18,7 +18,6 @@ from src.agents.graph.nodes import (
 )
 from src.infra.db.vector_store import VectorStore
 from src.infra.search.bm25_index import BM25Index
-from src.config.const import LangGraphNode
 
 
 def route_by_intent(state: AgentState) -> str:

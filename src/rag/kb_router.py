@@ -162,7 +162,8 @@ class KBRouter:
                     prompt_t = usage_meta.get("input_tokens")
                     completion_t = usage_meta.get("output_tokens")
             logger.info(
-                "KBRouter LLM: prompt_tokens={} completion_tokens={}",
+                "KBRouter LLM: model={} prompt_tokens={} completion_tokens={}",
+                getattr(self._llm, "model", ""),
                 prompt_t if prompt_t is not None else "?",
                 completion_t if completion_t is not None else "?",
             )

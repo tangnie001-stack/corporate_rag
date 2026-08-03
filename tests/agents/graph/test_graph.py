@@ -3,7 +3,7 @@
 from unittest.mock import Mock, patch
 import pytest
 
-from src.agents.graph.state import AgentState, RAGQueryIntent
+from src.agents.graph.state import AgentState, RAGQueryIntent, LangGraphNode
 from src.agents.graph.nodes import make_classify_node
 
 
@@ -42,10 +42,10 @@ async def test_make_classify_node_returns_expected_keys():
     """make_classify_node 返回的节点应包含所有预期 key。"""
     mock_llm = Mock()
     mock_route_result = {
-        "intent": RAGQueryIntent(route="simple"),
-        "extracted_entities": [],
-        "missing_entities": [],
-        "classification_confidence": 1.0,
+        LangGraphNode.Classify.INTENT: RAGQueryIntent(route="simple"),
+        LangGraphNode.Classify.EXTRACTED_ENTITIES: [],
+        LangGraphNode.Classify.MISSING_ENTITIES: [],
+        LangGraphNode.Classify.CLASSIFICATION_CONFIDENCE: 1.0,
     }
     with patch("src.agents.graph.nodes.QueryRouter") as mock_router_cls:
         mock_router = Mock()
@@ -54,10 +54,10 @@ async def test_make_classify_node_returns_expected_keys():
         node = make_classify_node(llm=mock_llm)
         state = AgentState(query="2024年营收多少")
         result = await node(state)
-        assert result["intent"].route == "simple"
-        assert result["extracted_entities"] == []
-        assert result["missing_entities"] == []
-        assert result["classification_confidence"] == 1.0
+        assert result[LangGraphNode.Classify.INTENT].route == "simple"
+        assert result[LangGraphNode.Classify.EXTRACTED_ENTITIES] == []
+        assert result[LangGraphNode.Classify.MISSING_ENTITIES] == []
+        assert result[LangGraphNode.Classify.CLASSIFICATION_CONFIDENCE] == 1.0
 
 
 def test_format_node_only_keeps_cited_sources():
@@ -174,8 +174,30 @@ def test_generate_node_abstention_when_no_contexts():
     )
     result = node(state)
     assert result["answer"] == ABSTENTION_TEXT
+    # Mock 无 model 属性时 getattr 返回 Mock 对象，被 or "" 归一为空串
     assert result["model_used"] == ""
     assert result["is_fallback"] is False
+
+
+def test_generate_node_abstention_uses_llm_model_attr():
+    """llm 实例带 model 属性时，abstention 分支应展示该模型名。"""
+    from src.agents.graph.nodes import make_generate_node
+    from src.agents.graph.state import AgentState
+    from src.config.prompts import ABSTENTION_TEXT
+    from unittest.mock import Mock
+
+    llm = Mock()
+    llm.model = "qwen-custom-model"
+    node = make_generate_node(llm=llm, prompt_manager=Mock())
+    state = AgentState(
+        query="阿里巴巴",
+        rewritten_query="阿里巴巴",
+        contexts=[],
+        skip_retrieval=False,
+    )
+    result = node(state)
+    assert result["answer"] == ABSTENTION_TEXT
+    assert result["model_used"] == "qwen-custom-model"
 
 
 def test_grader_node_short_circuit_on_first_fail():
@@ -191,9 +213,7 @@ def test_grader_node_short_circuit_on_first_fail():
         retrieval_results=results,
         retrieval_retries=0,
     )
-    with patch(
-        "src.agents.graph.nodes.RetrievalGrader.grade", return_value=0.0
-    ):
+    with patch("src.agents.graph.nodes.RetrievalGrader.grade", return_value=0.0):
         result = grader_node(state)
     assert result["retrieval_retries"] == 1
     assert result["_prev_rewritten_query"] == "本季度营收情况如何？ 阿里巴巴"
@@ -203,9 +223,11 @@ def test_grader_node_short_circuit_on_first_fail():
 def test_grader_node_short_circuit_when_rewrite_unchanged():
     """本轮改写查询与上一轮相同（rewrite 无信息增量）时直接降级，不再重试。"""
     from src.agents.graph.nodes import grader_node
-    from src.agents.graph.state import AgentState
+    from src.agents.graph.state import (
+        AgentState,
+        DOWNGRADE_REASON_REWRITE_NO_INCREMENT,
+    )
     from src.infra.db.vector_store.types import ChunkResult
-    from src.config.const import DOWNGRADE_REASON_REWRITE_NO_INCREMENT
 
     results = [ChunkResult(id="c1", content="无关内容", metadata={})]
     state = AgentState(
@@ -215,9 +237,7 @@ def test_grader_node_short_circuit_when_rewrite_unchanged():
         retrieval_retries=1,
         _prev_rewritten_query="本季度营收情况如何？ 阿里巴巴",
     )
-    with patch(
-        "src.agents.graph.nodes.RetrievalGrader.grade", return_value=0.0
-    ):
+    with patch("src.agents.graph.nodes.RetrievalGrader.grade", return_value=0.0):
         result = grader_node(state)
     assert result["downgraded"] is True
     assert result["downgrade_reason"] == DOWNGRADE_REASON_REWRITE_NO_INCREMENT
@@ -237,9 +257,7 @@ def test_grader_node_still_retries_when_rewrite_changed():
         retrieval_retries=1,
         _prev_rewritten_query="本季度营收情况如何？ 阿里巴巴",
     )
-    with patch(
-        "src.agents.graph.nodes.RetrievalGrader.grade", return_value=0.0
-    ):
+    with patch("src.agents.graph.nodes.RetrievalGrader.grade", return_value=0.0):
         result = grader_node(state)
     assert result["retrieval_retries"] == 2
     assert result["_prev_rewritten_query"] == "腾讯2024年营收"
@@ -258,13 +276,21 @@ def test_generate_node_skip_retrieval_uses_simple_prompt():
         query="你好",
         rewritten_query="你好",
         contexts=[
-            RAGContext(content="随机内容", source="a.pdf", page=1,
-                       doc_id="d1", chunk_id="c1", score=0.8),
+            RAGContext(
+                content="随机内容",
+                source="a.pdf",
+                page=1,
+                doc_id="d1",
+                chunk_id="c1",
+                score=0.8,
+            ),
         ],
         skip_retrieval=True,
     )
     with patch("src.agents.graph.nodes.build_simple_prompt", return_value=[]) as m:
-        with patch("src.agents.graph.nodes.stream_answer", return_value=iter(["你好！"])):
+        with patch(
+            "src.agents.graph.nodes.stream_answer", return_value=iter(["你好！"])
+        ):
             result = node(state)
     m.assert_called_once()
     assert "你好" in result["answer"]

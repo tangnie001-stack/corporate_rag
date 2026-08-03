@@ -31,10 +31,38 @@ async def lifespan(app: FastAPI):
     """应用生命周期处理器 — 启动/关闭。
 
     数据库迁移通过 docker compose exec app alembic upgrade head 手动执行。
+
+    启动阶段预热 ChromaDB：将首次打开持久化数据的初始化风险从
+    首个用户请求移到启动阶段，避免请求侧出现
+    'RustBindingsAPI' object has no attribute 'bindings' 冷启动异常。
     """
     logger.info("财务问答 API 正在启动")
+    _warmup_chromadb()
     yield
     logger.info("财务问答 API 正在关闭")
+
+
+def _warmup_chromadb() -> None:
+    """预热 ChromaDB PersistentClient，确保冷启动风险在启动阶段暴露。
+
+    ChromaDB 首次打开已有持久化数据时，Rust bindings 初始化存在时序竞态，
+    若由首个用户请求触发会在 retrieve 阶段报 AttributeError。
+    预热失败不阻塞启动：持久化数据可能尚未创建（全新部署），
+    首次写入时同样能正常初始化。
+    """
+    from src.infra.db.vector_store import VectorStore
+
+    try:
+        store = VectorStore()
+        # list_collections 会触发 PersistentClient 惰性创建 + 持久化校验
+        collections = store.list_collections()
+        logger.info(
+            "ChromaDB warmed up: collections={}", len(collections)
+        )
+    except Exception as e:
+        logger.warning(
+            "ChromaDB warmup failed (will retry lazily): {}", e
+        )
 
 
 app = FastAPI(

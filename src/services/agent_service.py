@@ -24,7 +24,14 @@ from src.utils.sse import (
     SSEClarificationEvent,
 )
 from src.agents.graph.workflow import build_graph
-from src.agents.graph.state import AgentState
+from src.agents.graph.state import (
+    AgentState,
+    LangGraph,
+    LangGraphEvent,
+    LangGraphKey,
+    LangGraphNode,
+    SSE_STATUS,
+)
 from src.rag.context import RAGContext
 from src.infra.db.vector_store import VectorStore
 from src.infra.search.bm25_index import BM25Index
@@ -32,11 +39,6 @@ from src.infra.llm.langfuse_tracing import LangfuseTracer, traced
 from src.infra.llm.prompt_manager import PromptManager
 from src.chat.manager import ChatManager
 from src.config.const import (
-    LangGraphEvent,
-    LangGraphKey,
-    LangGraphNode,
-    LangGraph,
-    SSE_STATUS,
     ABSTENTION_STATUS_MSG,
 )
 from src.config.prompts import ABSTENTION_TEXT
@@ -141,7 +143,9 @@ class AgentService:
                         )
                         if isinstance(output, dict):
                             if LangGraphNode.Classify.NAME in name:
-                                missing = output.get("missing_entities", [])
+                                missing = output.get(
+                                    LangGraphNode.Classify.MISSING_ENTITIES, []
+                                )
                                 if missing:
                                     logger.info(
                                         "classify detected missing_entities={}", missing

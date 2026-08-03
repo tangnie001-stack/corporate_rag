@@ -10,7 +10,7 @@ from langchain_core.messages import HumanMessage
 from src.infra.search.entity_extractor import EntityExtractor
 from src.infra.search.complexity_scorer import score_complexity
 from src.infra.llm.prompt_manager import PromptManager
-from src.agents.graph.state import RAGQueryIntent
+from src.agents.graph.state import RAGQueryIntent, LangGraphNode
 
 _GREETING_PATTERNS = [
     r"^(你好|您好|hi|hello|thanks|谢谢)$",
@@ -67,22 +67,26 @@ class QueryRouter:
         else:
             llm_result = self._fallback_route(complexity_score)
         result = {
-            "intent": RAGQueryIntent(route=llm_result["route"]),
-            "extracted_entities": entities_dict,
-            "missing_entities": llm_result.get("missing_entities", []),
-            "classification_confidence": llm_result.get("confidence", 0.0),
-            "skip_retrieval": False,
+            LangGraphNode.Classify.INTENT: RAGQueryIntent(route=llm_result["route"]),
+            LangGraphNode.Classify.EXTRACTED_ENTITIES: entities_dict,
+            LangGraphNode.Classify.MISSING_ENTITIES: llm_result.get(
+                "missing_entities", []
+            ),
+            LangGraphNode.Classify.CLASSIFICATION_CONFIDENCE: llm_result.get(
+                "confidence", 0.0
+            ),
+            LangGraphNode.Classify.SKIP_RETRIEVAL: False,
         }
         self._cache[cleaned] = result
         return result
 
     def _simple_result(self, skip_retrieval: bool = True) -> dict[str, Any]:
         return {
-            "intent": RAGQueryIntent(route="simple"),
-            "extracted_entities": [],
-            "missing_entities": [],
-            "classification_confidence": 1.0,
-            "skip_retrieval": skip_retrieval,
+            LangGraphNode.Classify.INTENT: RAGQueryIntent(route="simple"),
+            LangGraphNode.Classify.EXTRACTED_ENTITIES: [],
+            LangGraphNode.Classify.MISSING_ENTITIES: [],
+            LangGraphNode.Classify.CLASSIFICATION_CONFIDENCE: 1.0,
+            LangGraphNode.Classify.SKIP_RETRIEVAL: skip_retrieval,
         }
 
     def _llm_classify(
@@ -114,13 +118,16 @@ class QueryRouter:
                 usage_meta = getattr(response, "usage_metadata", None)
                 logger.info(
                     "meta keys: {} token_usage keys: {} usage_metadata: {}",
-                    list(metadata.keys()), list(usage.keys()), usage_meta,
+                    list(metadata.keys()),
+                    list(usage.keys()),
+                    usage_meta,
                 )
                 if usage_meta:
                     prompt_t = usage_meta.get("input_tokens")
                     completion_t = usage_meta.get("output_tokens")
             logger.info(
-                "QueryRouter classify done: prompt_tokens={} completion_tokens={}",
+                "QueryRouter classify done: model={} prompt_tokens={} completion_tokens={}",
+                getattr(self._llm, "model", ""),
                 prompt_t if prompt_t is not None else "?",
                 completion_t if completion_t is not None else "?",
             )

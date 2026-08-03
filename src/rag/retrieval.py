@@ -100,6 +100,12 @@ def rerank_results(
     docs = [r.content for r in results]
     # rerank 成功与否影响是否应用阈值：失败 fallback 分数量纲不同（1-distance），不应用阈值
     apply_threshold = True
+    logger.info(
+        "Rerank start: model={} docs={} query_len={}",
+        getattr(reranker, "model", ""),
+        len(docs),
+        len(query),
+    )
     try:
         reranked = with_retry(
             reranker.rerank,

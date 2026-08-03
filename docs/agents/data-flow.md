@@ -22,6 +22,27 @@
 入口: `GET /api/chat/stream?session_id=&kb_id=&query=`
 输出: SSE 事件流 `status → token → citation → done`
 
+### 字段级生产-消费矩阵（StateGraph）
+
+节点通过共享 `AgentState` 间接通信：每个节点消费若干字段、生产若干字段，均以
+`LangGraphNode.*` 常量（定义于 `src/agents/graph/state.py`）作为 key。字段名、
+生产侧（`nodes.py` / `query_router.py`）与消费侧（`agent_service.py`）必须一致，
+否则运行期报错或静默取空。
+
+| 节点 | 消费字段 | 生产字段 |
+|---|---|---|
+| `kb_router` | `kb_id`, `query` | `_resolved_kb_ids` |
+| `classify` | `query`, `_history` | `intent`, `extracted_entities`, `missing_entities`, `classification_confidence`, `skip_retrieval` |
+| `rewrite` | `query`, `intent` | `rewritten_query` |
+| `retrieve` | `rewritten_query`, `_resolved_kb_ids` | `retrieval_results` |
+| `grader` | `rewritten_query`, `retrieval_results` | `grader_score`, `retrieval_retries`, `downgraded`, `downgrade_reason` |
+| `rerank` | `rewritten_query`, `retrieval_results` | `contexts` |
+| `generate` | `query`, `contexts`, `_history` | `answer`, `model_used`, `is_fallback` |
+| `format` | `answer`, `contexts` | `citations` |
+
+SSE 消费侧另读 `LangGraphEvent.*`（事件类型）与 `LangGraphKey.*`（事件 dict key），
+用于 `astream_events` 流解析；`SSE_STATUS` 将节点名映射为前端状态提示文案。
+
 ## 链路 3：知识库管理
 
 ```

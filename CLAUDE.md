@@ -66,16 +66,12 @@ docker compose build --no-cache app    # 改依赖后重建
 
 ## 验证
 改完代码后自检以下清单：
-1. `pytest tests/ -v` 全部通过
-2. `ruff check .` 无错误
-3. 无遗留 `print()`、TODO 或调试代码
-4. 改前端时用 playwright-cli 验证交互
-5. **代码位置检查**：新增/修改的代码放在正确的目录了吗？
-6. **层次检查**：api/ 里是否只做了参数校验和路由转发，没有写业务逻辑？
-7. **import 检查**：有没有违反层间调用规则的 import（如 api/ 里 import infra/）？
+1. **质量门禁**：`pytest tests/ -v` 全部通过、`ruff check .` 无错误、无遗留 `print()`/TODO/调试代码
+2. **契约同步**：改了 API 响应结构 / 请求体 / 公共方法签名时，同步搜索并更新受影响测试的断言（`tests/` 中硬编码的结构如 `["data"]["x"]` 常因响应包装等全局变更而失联）
+3. **结构检查**：新增/修改的代码位置正确吗？api/ 是否只做参数校验和路由转发？有无违反层间调用规则的 import（如 api/ import infra/）？
 
 ## 设计流程
-- 改 UI 或新增组件时参考 docs/agents/ui-design-flow.md。
+- 改 UI 或新增组件时参考 docs/agents/ui-design-flow.md，改前端后用 playwright-cli 验证交互。
 
 ## 规则
 - 架构规约（异常处理 / 响应包装 / 日志约定 / 排查规范）详见 docs/agents/rules.md
@@ -83,7 +79,7 @@ docker compose build --no-cache app    # 改依赖后重建
 - API Key 和 Token 通过 `.env` 加载，日志中脱敏；连接串不记录到日志
 - 测试 mock 外部依赖，不发起真实网络调用
 - 需求池文档在docs/requirements_pool.md
-- **接口契约**：API 参数、返回值、历史踩坑记录详见 docs/api_contract.md，修改公共方法签名时同步更新
+- **接口契约**：API 参数、返回值、历史踩坑记录详见 docs/api_contract.md，修改公共方法签名**或响应结构**时，同步更新契约文档与受影响测试的断言
 - **代码风格**：不用三元表达式（`a if cond else b`），写完整的 if/else 结构，保持可读性
 - **显式类型检查**：类型不确定的值不用 `getattr(x, "attr", default)` 隐式兜底，用 `x.attr if x is not None else default` 或 `isinstance` 显式判断
 - **硬编码集中管理**：新增的常量/文案/阈值不得散落在业务代码中，统一放入 `src/config/`，按用途分工：

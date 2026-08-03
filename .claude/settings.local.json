@@ -136,7 +136,9 @@
       "WebFetch(domain:hackernoon.com)",
       "WebFetch(domain:pub.towardsai.net)",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "WebFetch(domain:ar5iv.labs.arxiv.org)"
+      "WebFetch(domain:ar5iv.labs.arxiv.org)",
+      "Bash(claude plugin *)",
+      "Bash(command -v rsync)"
     ]
   },
   "hooks": {

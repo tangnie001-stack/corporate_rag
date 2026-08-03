@@ -16,8 +16,12 @@ from src.rag.stream import stream_answer, estimate_usage
 from src.rag.prompt import build_prompt, build_simple_prompt, format_context
 from src.config.prompts import ABSTENTION_MARKERS, ABSTENTION_TEXT
 from src.agents.grader import RetrievalGrader
-from src.agents.graph.state import AgentState, RAGQueryIntent
-from src.config.const import LangGraphNode, DOWNGRADE_REASON_REWRITE_NO_INCREMENT
+from src.agents.graph.state import (
+    AgentState,
+    RAGQueryIntent,
+    LangGraphNode,
+    DOWNGRADE_REASON_REWRITE_NO_INCREMENT,
+)
 from src.config import TOP_K_RETRIEVAL, LLM_MODEL
 
 
@@ -71,13 +75,23 @@ def make_classify_node(llm) -> Callable:
         logger.info("classify_node start: query={}", state.query[:50])
         router = QueryRouter(llm=llm)
         result = router.route(state.query, state._history)
-        logger.info("classify_node done: route={}", result["intent"].route)
+        logger.info(
+            "classify_node done: route={}", result[LangGraphNode.Classify.INTENT].route
+        )
         return {
-            "intent": result["intent"],
-            "extracted_entities": result["extracted_entities"],
-            "missing_entities": result["missing_entities"],
-            "classification_confidence": result["classification_confidence"],
-            "skip_retrieval": result.get("skip_retrieval", False),
+            LangGraphNode.Classify.INTENT: result[LangGraphNode.Classify.INTENT],
+            LangGraphNode.Classify.EXTRACTED_ENTITIES: result[
+                LangGraphNode.Classify.EXTRACTED_ENTITIES
+            ],
+            LangGraphNode.Classify.MISSING_ENTITIES: result[
+                LangGraphNode.Classify.MISSING_ENTITIES
+            ],
+            LangGraphNode.Classify.CLASSIFICATION_CONFIDENCE: result[
+                LangGraphNode.Classify.CLASSIFICATION_CONFIDENCE
+            ],
+            LangGraphNode.Classify.SKIP_RETRIEVAL: result.get(
+                LangGraphNode.Classify.SKIP_RETRIEVAL, False
+            ),
         }
 
     return classify_node
@@ -94,7 +108,7 @@ def rewrite_node(state: AgentState) -> dict:
 
     result = {"rewritten_query": rewritten}
     if rewritten != query:
-        result["intent"] = RAGQueryIntent(
+        result[LangGraphNode.Classify.INTENT] = RAGQueryIntent(
             route=state.intent.route or "medium",
             rewritten=True,
         )
@@ -155,9 +169,7 @@ def grader_node(state: AgentState) -> dict:
         }
     # 短路：本轮改写查询与上一轮相同 → rewrite 无信息增量，重试必复现失败
     if state._prev_rewritten_query and query == state._prev_rewritten_query:
-        logger.info(
-            "grader_node: rewrite no-increment (query unchanged), downgrade"
-        )
+        logger.info("grader_node: rewrite no-increment (query unchanged), downgrade")
         return {
             LangGraphNode.Grader.SCORE: score,
             LangGraphNode.Grader.RETRIEVAL_RETRIES: retries + 1,
@@ -217,7 +229,8 @@ def make_generate_node(llm, prompt_manager) -> Callable:
                 result["model_used"] = model_name
             logger.info(
                 "generate_node done (skip_retrieval): answer_len={} tokens={}",
-                len(full_text), usage.total_tokens,
+                len(full_text),
+                usage.total_tokens,
             )
             return result
 
@@ -227,12 +240,17 @@ def make_generate_node(llm, prompt_manager) -> Callable:
             usage = estimate_usage([], ABSTENTION_TEXT)
             logger.info(
                 "generate_node done (abstention): answer_len={} tokens={}",
-                len(ABSTENTION_TEXT), usage.total_tokens,
+                len(ABSTENTION_TEXT),
+                usage.total_tokens,
             )
+            # abstention 未调用生成 LLM，但流程已用该模型实例，仍带出模型名供前端展示
+            model_name = getattr(llm, "model", LLM_MODEL)
+            if not isinstance(model_name, str):
+                model_name = ""
             return {
                 "answer": ABSTENTION_TEXT,
                 "_token_usage": usage,
-                "model_used": "",
+                "model_used": model_name,
                 "is_fallback": False,
             }
 
@@ -250,7 +268,8 @@ def make_generate_node(llm, prompt_manager) -> Callable:
             result["model_used"] = model_name
         logger.info(
             "generate_node done: answer_len={} tokens={}",
-            len(full_text), usage.total_tokens,
+            len(full_text),
+            usage.total_tokens,
         )
         return result
 
