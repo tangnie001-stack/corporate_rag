@@ -1,10 +1,10 @@
 """分块校验器模块的单元测试。"""
 
-from src.infra.chunking.validator import (
-    validate_chunks,
+from src.chunking.validator import (
     ChunkData,
     count_tokens,
     detect_garbled,
+    validate_chunks,
 )
 
 

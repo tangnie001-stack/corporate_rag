@@ -14,12 +14,12 @@
 import json
 from typing import Optional
 
-import redis.asyncio as redis_async
 import redis as redis_sync
+import redis.asyncio as redis_async
 from loguru import logger
 
-from src.config import REDIS_URL, REDIS_TTL
 from src.chat.persistence import PersistenceService
+from src.config import REDIS_TTL, REDIS_URL
 from src.infra.db.mysql_db import ChatRepo
 from src.infra.llm.chat_message import ChatMessage
 
@@ -50,7 +50,7 @@ class ChatManager:
         """
         self.ttl = ttl
         self._redis_url = redis_url or REDIS_URL
-        self._redis = None
+        self._redis: Optional[redis_async.Redis] = None
         self._in_memory: bool = False
         # 内存降级时的存储：session_id -> [msg_dict, ...]
         self._memory_store: dict[str, list[dict]] = {}
@@ -171,6 +171,7 @@ class ChatManager:
             except Exception:
                 pass
             return
+        assert self._redis is not None
         try:
             await self._redis.ping()
         except Exception:
@@ -203,6 +204,7 @@ class ChatManager:
             return
         msg = {"role": role, "content": content}
         key = self._session_key(session_id)
+        assert self._redis is not None
         try:
             await self._redis.rpush(key, json.dumps(msg, ensure_ascii=False))
             await self._redis.expire(key, self.ttl)
@@ -224,6 +226,7 @@ class ChatManager:
                 ChatMessage(**msg) for msg in self._memory_store.get(session_id, [])
             ]
         key = self._session_key(session_id)
+        assert self._redis is not None
         try:
             raw = await self._redis.lrange(key, 0, -1)
             return [ChatMessage(**json.loads(m)) for m in raw]
@@ -242,6 +245,7 @@ class ChatManager:
             self._memory_store.pop(session_id, None)
             return
         key = self._session_key(session_id)
+        assert self._redis is not None
         try:
             await self._redis.delete(key)
         except Exception as e:

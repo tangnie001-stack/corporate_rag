@@ -13,7 +13,7 @@ import statistics
 
 import numpy as np
 
-from src.infra.chunking.validator import ChunkData
+from src.chunking.validator import ChunkData
 from src.models import get_embeddings
 
 # 标题检测模式（面向金融文档）

@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends
 from langchain_openai import ChatOpenAI
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 
 from src.api.dependencies import get_app_service
 from src.api.schema import ResponseModel
@@ -42,7 +42,7 @@ async def llm_test(body: LlmTestRequest, svc: AppService = Depends(get_app_servi
         llm = ChatOpenAI(
             model=model_name,
             temperature=body.temperature,
-            api_key=svc.settings.LLM_API_KEY,
+            api_key=SecretStr(svc.settings.LLM_API_KEY),
             base_url=svc.settings.LLM_BASE_URL,
         )
         result = llm.invoke(body.prompt)

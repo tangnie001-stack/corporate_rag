@@ -41,13 +41,27 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest==9.0.2",
+    "pytest-asyncio==1.4.0",
     "pytest-cov==7.0.0",
     "ragas==0.4.3",
     "datasets==4.0.0",
+    "pyright==1.1.411",
+    "pre-commit==4.6.1",
+    "ruff==0.16.2",
+    "alembic==1.19.0",
 ]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.pytest.ini_options]
+# async 测试共享 session 级 event loop，避免 SQLAlchemy async 连接池
+# 跨 loop 复用导致 "Task got Future attached to a different loop"
+asyncio_default_test_loop_scope = "session"
+asyncio_default_fixture_loop_scope = "session"
+
 [tool.pyright]
 extraPaths = ["src"]
+# 显式指定 python 解释器来源的 venv，确保第三方依赖可解析
+venvPath = "."
+venv = ".venv"

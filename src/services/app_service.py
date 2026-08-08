@@ -9,19 +9,19 @@ from typing import Optional
 
 from loguru import logger
 
-from src.infra.db.mysql_db import (
-    KbRepo,
-    DocumentRepo,
-    ChatRepo,
-    UserRepo,
-    EvalRepo,
-)
-from src.infra.db.vector_store.types import ChunkQueryResult
-from src.infra.db.vector_store import VectorStore
-from src.parsers.router import DocRouter
 from src.chat.manager import ChatManager
 from src.config import BM25_INDEX_DIR, HYBRID_SEARCH_ENABLED
+from src.infra.db.mysql_db import (
+    ChatRepo,
+    DocumentRepo,
+    EvalRepo,
+    KbRepo,
+    UserRepo,
+)
+from src.infra.db.vector_store import VectorStore
+from src.infra.db.vector_store.types import ChunkQueryResult
 from src.infra.search.bm25_index import BM25Index
+from src.parsers.router import DocRouter
 from src.services.agent_service import AgentService
 from src.services.auth_service import AuthService
 from src.services.document_service import DocumentService
@@ -120,14 +120,6 @@ class AppService:
         user_id: str,
     ) -> dict:
         return await self.document.delete_document(kb_id, doc_id, user_id)
-
-    def upload_and_process(
-        self,
-        kb_id: str,
-        file_path: str,
-        filename: str,
-    ) -> dict:
-        return self.document.upload_and_process(kb_id, file_path, filename)
 
     # ==================== 问答 ====================
 

@@ -119,6 +119,36 @@ async def test_get_doc_names():
 
 
 @pytest.mark.asyncio
+async def test_get_all_kb_doc_count():
+    """get_all_kb 的 doc_count 应实时统计未删除的文档数，而非读取静态列。
+
+    回归场景：SQLAlchemy 异步迁移后 doc_count 直接读列值（恒为 0），
+    与文档列表的真实数量不一致。
+    """
+    kb_repo = KbRepo(session_factory)
+    doc_repo = DocumentRepo(session_factory)
+    user_id = "test-user"
+    kb_name = f"test-doc-count-{uuid.uuid4().hex[:8]}"
+    kb_id, _ = await kb_repo.get_or_create_kb(user_id, kb_name)
+
+    # 添加 2 个文档
+    for i in range(2):
+        await doc_repo.add_document(
+            DocEntity(
+                id=str(uuid.uuid4()),
+                kb_id=kb_id,
+                filename=f"doc-{i}.pdf",
+                file_type="pdf",
+                file_size=100,
+            )
+        )
+
+    kbs = await kb_repo.get_all_kb(user_id)
+    target = next(kb for kb in kbs if kb.id == kb_id)
+    assert target.doc_count == 2
+
+
+@pytest.mark.asyncio
 async def test_create_session_idempotent():
     """同一 session_id 重复创建应幂等跳过，不抛主键冲突异常。"""
     from src.infra.db.mysql_db import ChatRepo

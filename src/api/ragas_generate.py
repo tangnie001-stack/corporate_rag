@@ -50,7 +50,7 @@ async def ragas_generate(body: RagasGenerateRequest):
         version = _find_next_version(kb_id)
 
         # ---- 触发生成 ----
-        run_generate(body.kb_name, kb_id, body.size, model="")
+        run_generate(kb_id, body.size, model="")
 
         # ---- 从生成的 JSON 中读取测试集信息 ----
         output_path = os.path.join(

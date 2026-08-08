@@ -10,40 +10,38 @@
   - get_rerank：创建文本重排序模型实例
 """
 
+import functools
 import json
 import time
-import functools
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable
 
-from loguru import logger
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.document_compressors.dashscope_rerank import DashScopeRerank
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from loguru import logger
+from pydantic import SecretStr
 
 from src.config import (
-    LLM_MODEL,
-    LLM_API_KEY,
-    LLM_BASE_URL,
-    LLM_TEMPERATURE,
-    LLM_KWARGS,
     CLASSIFIER_TEMPERATURE,
-    EMBEDDING_MODEL,
     EMBEDDING_API_KEY,
     EMBEDDING_BASE_URL,
     EMBEDDING_BATCH_SIZE,
-    RERANK_MODEL,
+    EMBEDDING_MODEL,
+    LLM_API_KEY,
+    LLM_BASE_URL,
+    LLM_KWARGS,
+    LLM_MODEL,
+    LLM_TEMPERATURE,
     RERANK_API_KEY,
-    TOP_K_RERANK,
-    RETRY_MAX_ATTEMPTS,
-    RETRY_INITIAL_INTERVAL,
+    RERANK_MODEL,
     RETRY_BACKOFF_FACTOR,
+    RETRY_INITIAL_INTERVAL,
+    RETRY_MAX_ATTEMPTS,
+    TOP_K_RERANK,
 )
-
-# 泛型类型变量，用于装饰器保留原函数的类型签名
-F = TypeVar("F", bound=Callable)
 
 
 def with_retry(
-    func: F = None,
+    func: Callable | None = None,
     max_attempts: int = RETRY_MAX_ATTEMPTS,
     initial_interval: float = RETRY_INITIAL_INTERVAL,
     backoff: float = RETRY_BACKOFF_FACTOR,
@@ -103,7 +101,11 @@ def with_retry(
         logger.exception(
             "{} failed after {} attempts: {}", func.__name__, max_attempts, last_error
         )
-        raise last_error
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError(
+            "{} failed after {} attempts".format(func.__name__, max_attempts)
+        )
 
     return wrapper
 
@@ -121,7 +123,7 @@ def get_embeddings(model: str = EMBEDDING_MODEL) -> OpenAIEmbeddings:
     """
     return OpenAIEmbeddings(
         model=model,
-        api_key=EMBEDDING_API_KEY,
+        api_key=SecretStr(EMBEDDING_API_KEY),
         base_url=EMBEDDING_BASE_URL,
         check_embedding_ctx_length=False,
         chunk_size=EMBEDDING_BATCH_SIZE,
@@ -151,7 +153,7 @@ def get_llm(
     return ChatOpenAI(
         model=model,
         temperature=temperature,
-        api_key=LLM_API_KEY,
+        api_key=SecretStr(LLM_API_KEY),
         base_url=LLM_BASE_URL,
         **extra_kwargs,
     )
@@ -173,7 +175,7 @@ def get_classify_llm() -> ChatOpenAI:
     return ChatOpenAI(
         model=CLASSIFY_MODEL,
         temperature=CLASSIFIER_TEMPERATURE,
-        api_key=LLM_API_KEY,
+        api_key=SecretStr(LLM_API_KEY),
         base_url=LLM_BASE_URL,
         **extra_kwargs,
     )
@@ -198,6 +200,6 @@ def get_rerank(model: str = RERANK_MODEL, top_n: int = TOP_K_RERANK) -> DashScop
     return DashScopeRerank(
         model=model,
         top_n=top_n,
-        dashscope_api_key=RERANK_API_KEY,
+        api_key=RERANK_API_KEY,
         client=dashscope.TextReRank,
     )

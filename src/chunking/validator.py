@@ -5,7 +5,20 @@
 
 from dataclasses import dataclass, field
 
-from src.parsers.base import ChunkData
+
+@dataclass
+class ChunkData:
+    """文档分块数据结构。
+
+    Attributes:
+        content: 分块文本内容
+        metadata: 分块元数据（source / page / doc_id 等）
+        tokens: 分块 token 估算数
+    """
+
+    content: str
+    metadata: dict
+    tokens: int = 0
 
 
 @dataclass

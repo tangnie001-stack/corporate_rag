@@ -1,6 +1,6 @@
 """Prompt 构建 — 将上下文、历史和问题组装为 LLM 消息列表。"""
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from src.infra.llm.chat_message import ChatMessage
 from src.infra.llm.prompt_manager import PromptManager
@@ -24,7 +24,9 @@ def build_prompt(
     prompt_manager: PromptManager,
 ) -> list:
     """构建含系统指令和对话历史的完整 prompt。"""
-    messages = [SystemMessage(content=prompt_manager.get_system_prompt())]
+    messages: list[BaseMessage] = [
+        SystemMessage(content=prompt_manager.get_system_prompt())
+    ]
     for msg in history:
         if msg.role == "user":
             messages.append(HumanMessage(content=msg.content))
@@ -41,7 +43,9 @@ def build_simple_prompt(
     prompt_manager: PromptManager,
 ) -> list:
     """构建无检索上下文的简洁 prompt。"""
-    messages = [SystemMessage(content=prompt_manager.get_system_prompt())]
+    messages: list[BaseMessage] = [
+        SystemMessage(content=prompt_manager.get_system_prompt())
+    ]
     for msg in history:
         if msg.role == "user":
             messages.append(HumanMessage(content=msg.content))

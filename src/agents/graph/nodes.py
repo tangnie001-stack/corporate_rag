@@ -7,22 +7,24 @@
 
 import asyncio
 import re
-from typing import Callable
+from typing import Any, Callable
+
 from loguru import logger
-from src.infra.db.vector_store.types import ChunkResult
-from src.infra.search.query_router import QueryRouter
-from src.rag.retrieval import search, rerank_results, rewrite_query
-from src.rag.stream import stream_answer, estimate_usage
-from src.rag.prompt import build_prompt, build_simple_prompt, format_context
-from src.config.prompts import ABSTENTION_MARKERS, ABSTENTION_TEXT
+
 from src.agents.grader import RetrievalGrader
 from src.agents.graph.state import (
-    AgentState,
-    RAGQueryIntent,
-    LangGraphNode,
     DOWNGRADE_REASON_REWRITE_NO_INCREMENT,
+    AgentState,
+    LangGraphNode,
+    RAGQueryIntent,
 )
-from src.config import TOP_K_RETRIEVAL, LLM_MODEL
+from src.config import LLM_MODEL, TOP_K_RETRIEVAL
+from src.config.prompts import ABSTENTION_MARKERS, ABSTENTION_TEXT
+from src.infra.db.vector_store.types import ChunkResult
+from src.infra.search.query_router import QueryRouter
+from src.rag.prompt import build_prompt, build_simple_prompt, format_context
+from src.rag.retrieval import rerank_results, rewrite_query, search
+from src.rag.stream import estimate_usage, stream_answer
 
 
 def _tid(state: AgentState) -> str:
@@ -45,9 +47,9 @@ def make_kb_router_node(embed_fn, llm) -> Callable:
             return {"_resolved_kb_ids": [state.kb_id]}
 
         # kb_id 为空 → 路由
-        from src.infra.llm.trace_context import current_user_id
-        from src.infra.db.mysql_db import KbRepo
         from src.infra.db.engine import session_factory
+        from src.infra.db.mysql_db import KbRepo
+        from src.infra.llm.trace_context import current_user_id
 
         uid = current_user_id.get()
         if not uid:
@@ -106,7 +108,7 @@ def rewrite_node(state: AgentState) -> dict:
     if isinstance(rewritten, list):
         rewritten = " ".join(rewritten)
 
-    result = {"rewritten_query": rewritten}
+    result: dict[str, Any] = {"rewritten_query": rewritten}
     if rewritten != query:
         result[LangGraphNode.Classify.INTENT] = RAGQueryIntent(
             route=state.intent.route or "medium",

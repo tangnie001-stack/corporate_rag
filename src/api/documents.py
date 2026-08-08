@@ -10,23 +10,23 @@ import json
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from loguru import logger
 
+from src.api.dependencies import get_app_service
 from src.api.model.request import (
-    DocumentListRequest,
-    DocumentStatusRequest,
     DocumentChunksRequest,
     DocumentDeleteRequest,
+    DocumentListRequest,
+    DocumentStatusRequest,
 )
 from src.api.model.response import (
-    UploadDocumentResponse,
-    DocumentListResponse,
-    DocumentStatusResponse,
     ChunkItem,
     ChunksResponse,
     DocumentDeleteResponse,
+    DocumentListResponse,
+    DocumentStatusResponse,
+    UploadDocumentResponse,
 )
 from src.api.schema import ResponseModel
 from src.services.app_service import AppService
-from src.api.dependencies import get_app_service
 
 router = APIRouter()
 
@@ -34,7 +34,7 @@ router = APIRouter()
 @router.post("/kbs/documents/list", response_model=ResponseModel)
 async def get_documents(
     body: DocumentListRequest,
-    request: Request = None,
+    request: Request,
     svc: AppService = Depends(get_app_service),
 ):
     """列出知识库中的所有文档。
@@ -88,9 +88,9 @@ async def get_documents(
 
 @router.post("/kbs/documents/upload", status_code=202, response_model=ResponseModel)
 async def upload_document(
+    request: Request,
     file: UploadFile = File(...),
     kb_id: str = Form(...),
-    request: Request = None,
     svc: AppService = Depends(get_app_service),
 ):
     """上传文档到知识库。
@@ -109,14 +109,14 @@ async def upload_document(
     """
     user_id = getattr(request.state, "user_id", "") if request else ""
     content = await file.read()
-    ext = (
-        f".{file.filename.rsplit('.', 1)[-1].lower()}"
-        if "." in (file.filename or "")
-        else ""
-    )
+    filename = file.filename or ""
+    if "." in filename:
+        ext = f".{filename.rsplit('.', 1)[-1].lower()}"
+    else:
+        ext = ""
     result = await svc.document.store_and_process(
         kb_id=kb_id,
-        filename=file.filename,
+        filename=filename,
         content=content,
         ext=ext,
         user_id=user_id,
@@ -163,10 +163,10 @@ async def get_document_status(
             status=doc.status,
             chunk_count=doc.chunk_count,
             progress=doc.processing_progress,
-            error=doc.error_msg,
+            error=doc.error_msg or "",
             processing_state=doc.processing_state,
             processing_progress=doc.processing_progress,
-            processing_message=doc.processing_message,
+            processing_message=doc.processing_message or "",
         )
     )
 

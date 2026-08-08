@@ -4,8 +4,8 @@ from fastapi import APIRouter, Depends, Request
 from loguru import logger
 from pydantic import BaseModel
 
-from src.api.schema import ResponseModel
 from src.api.dependencies import get_app_service
+from src.api.schema import ResponseModel
 from src.services.app_service import AppService
 
 router = APIRouter()
@@ -20,8 +20,8 @@ class KbEvalRequest(BaseModel):
 @router.post("/kbs/eval/latest", response_model=ResponseModel)
 async def get_latest_kb_eval(
     body: KbEvalRequest,
+    request: Request,
     svc: AppService = Depends(get_app_service),
-    request: Request = None,
 ):
     """获取知识库最新的 RAGAS 评估结果。
 

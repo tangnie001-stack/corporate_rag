@@ -5,21 +5,21 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.exceptions import HTTPException as StarletteHTTPException
 from loguru import logger
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from src.core.logging import setup_logging
-from src.api import (
-    health_router,
-    kb_router,
-    doc_router,
-    chat_router,
-    sessions_router,
-    kb_eval_router,
-)
 from src.api import auth as auth_routes
+from src.api import (
+    chat_router,
+    doc_router,
+    health_router,
+    kb_eval_router,
+    kb_router,
+    sessions_router,
+)
 from src.api import ragas_generate as ragas_generate_routes
 from src.config.response_codes import Code
+from src.core.logging import setup_logging
 from src.middleware.auth import auth_middleware
 from src.middleware.response_processor import response_processor_middleware
 from src.middleware.trace_id import trace_id_middleware
@@ -56,13 +56,9 @@ def _warmup_chromadb() -> None:
         store = VectorStore()
         # list_collections 会触发 PersistentClient 惰性创建 + 持久化校验
         collections = store.list_collections()
-        logger.info(
-            "ChromaDB warmed up: collections={}", len(collections)
-        )
+        logger.info("ChromaDB warmed up: collections={}", len(collections))
     except Exception as e:
-        logger.warning(
-            "ChromaDB warmup failed (will retry lazily): {}", e
-        )
+        logger.warning("ChromaDB warmup failed (will retry lazily): {}", e)
 
 
 app = FastAPI(
@@ -136,8 +132,11 @@ async def unknown_exception_handler(request: Request, exc: Exception):
     # 打印异常链根因
     c = exc
     depth = 0
-    while (c.__cause__ or c.__context__) and depth < 5:
-        c = c.__cause__ or c.__context__
+    while depth < 5:
+        nxt = c.__cause__ or c.__context__
+        if nxt is None:
+            break
+        c = nxt
         logger.error("  ├─ 嵌套第{}层: type={} msg={}", depth + 1, type(c).__name__, c)
         depth += 1
     # TODO: ARMS Prometheus 接入后在此处打 exception_total.inc()

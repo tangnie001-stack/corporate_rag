@@ -3,21 +3,21 @@
 import asyncio
 from typing import AsyncGenerator
 
-from fastapi import APIRouter, Depends, Query
+import jieba
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
-import jieba
-
-from src.utils.sse import (
-    to_sse,
-    SSETokenEvent,
-    SSECitationEvent,
-    SSEErrorEvent,
-    SSEDoneEvent,
-)
 from src.api.dependencies import get_app_service
 from src.services.app_service import AppService
+from src.utils.sse import (
+    SSECitationEvent,
+    SSEClarificationEvent,
+    SSEDoneEvent,
+    SSEErrorEvent,
+    SSETokenEvent,
+    to_sse,
+)
 
 router = APIRouter()
 
@@ -151,13 +151,22 @@ async def _stream_rag_response(
     kb_id: str,
     session_id: str,
     query: str,
+    user_id: str = "",
 ) -> AsyncGenerator[str, None]:
     """以 SSE 事件流推送 RAG 响应 — 委托给 agent_service。
 
     流结束后异步持久化对话到 MySQL。
+
+    Args:
+        svc: AppService 实例
+        kb_id: 知识库 UUID（空字符串表示跨库搜索）
+        session_id: 会话 ID
+        query: 用户查询文本
+        user_id: 当前用户 ID（用于会话归属，空串表示匿名）
     """
     full_answer = ""
     sources: list[str] = []
+    clarification_requested = False
     try:
         async for event in svc.agent_service.stream_chat(kb_id, session_id, query):
             match event:
@@ -165,6 +174,9 @@ async def _stream_rag_response(
                     full_answer += token
                 case SSECitationEvent(source=src, page=page):
                     sources.append(f"{src} (第{page}页)")
+                case SSEClarificationEvent():
+                    # 追问：系统在向用户索要缺失信息，未产生问答，不持久化
+                    clarification_requested = True
             yield to_sse(event)
     except Exception as e:
         logger.exception("Chat stream unhandled error: {}", str(e))
@@ -172,10 +184,13 @@ async def _stream_rag_response(
         yield to_sse(SSEDoneEvent())
         return
 
-    # 流结束后持久化对话
-    asyncio.create_task(
-        _persist_conversation(svc, session_id, kb_id, query, full_answer, sources)
-    )
+    # 流结束后持久化对话（clarify 追问不持久化，避免写入空 assistant 消息）
+    if not clarification_requested:
+        asyncio.create_task(
+            _persist_conversation(
+                svc, session_id, kb_id, query, full_answer, sources, user_id
+            )
+        )
 
 
 async def _persist_conversation(
@@ -185,6 +200,7 @@ async def _persist_conversation(
     query: str,
     answer: str,
     sources: list[str],
+    user_id: str = "",
 ) -> None:
     """异步持久化对话到 MySQL，带重试。
 
@@ -199,6 +215,7 @@ async def _persist_conversation(
         query: 用户查询文本
         answer: LLM 生成的完整回答
         sources: 引用来源列表（去重后的 "文件名 (第x页)" 列表）
+        user_id: 当前用户 ID，写入会话记录用于按用户过滤
     """
     await svc.set_chat_repo()
 
@@ -220,7 +237,7 @@ async def _persist_conversation(
                         "Persist failed after {} retries: {}", max_retries, e
                     )
 
-    await retry(lambda: svc.save_session_async(session_id, title, kb_id))
+    await retry(lambda: svc.save_session_async(session_id, title, kb_id, user_id))
     await retry(
         lambda: svc.save_messages_async(session_id, kb_id, query, answer, sources)
     )
@@ -234,6 +251,7 @@ async def _persist_conversation(
 
 @router.get("/chat/stream")
 async def chat_stream(
+    request: Request,
     session_id: str = Query(..., description="Session ID for conversation history"),
     kb_id: str = Query(
         ..., description="Knowledge base ID (or empty for cross-KB search)"
@@ -248,6 +266,7 @@ async def chat_stream(
         kb_id: 知识库 UUID（空字符串表示跨库搜索）
         query: 用户问题文本
         svc: AppService 实例（通过 FastAPI Depends 注入）
+        request: FastAPI 请求对象（从中提取 user_id 用于会话归属）
 
     Returns:
         StreamingResponse: SSE 流式响应，包含
@@ -256,8 +275,9 @@ async def chat_stream(
     Raises:
         HTTPException 422: 参数校验失败（FastAPI 自动处理）
     """
+    user_id = getattr(request.state, "user_id", "") if request else ""
     return StreamingResponse(
-        _stream_rag_response(svc, kb_id, session_id, query),
+        _stream_rag_response(svc, kb_id, session_id, query, user_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

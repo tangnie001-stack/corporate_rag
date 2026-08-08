@@ -4,8 +4,9 @@ import time
 from typing import Generator, Optional
 
 from loguru import logger
+from pydantic import SecretStr
 
-from src.config import RETRY_MAX_ATTEMPTS, RETRY_INITIAL_INTERVAL, RETRY_BACKOFF_FACTOR
+from src.config import RETRY_BACKOFF_FACTOR, RETRY_INITIAL_INTERVAL, RETRY_MAX_ATTEMPTS
 from src.infra.llm.token_usage import TokenUsage
 from src.infra.llm.trace_context import current_tracer
 
@@ -66,7 +67,7 @@ def stream_answer(
         getattr(llm, "base_url", "")
     )
     _api_key = getattr(llm, "openai_api_key", "") or ""
-    if hasattr(_api_key, "get_secret_value"):  # langchain 新版 api_key 为 SecretStr
+    if isinstance(_api_key, SecretStr):  # langchain 新版 api_key 为 SecretStr
         _api_key = _api_key.get_secret_value()
     _key_prefix = str(_api_key)[:8]
 
@@ -95,6 +96,7 @@ def stream_answer(
             ):
                 last_token_usage = estimate_usage(messages, full_output)
             if tracer:
+                assert gen_id is not None
                 tracer.end_generation(
                     gen_id,
                     output=full_output,
@@ -136,5 +138,6 @@ def stream_answer(
     error_msg = f"生成回答失败: {last_error}"
     full_output = error_msg
     if tracer:
+        assert gen_id is not None
         tracer.end_generation(gen_id, output=error_msg)
     yield error_msg

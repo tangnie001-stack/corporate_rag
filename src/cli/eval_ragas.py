@@ -206,7 +206,8 @@ def run_evaluation(
     dataset = Dataset.from_dict(data)
 
     logger.info("Starting RAGAS evaluation with {} samples...", len(questions))
-    result = evaluate(
+    # ragas.evaluate 无类型标注（推断为 Executor），实际返回 EvaluationResult，显式标注 Any
+    result: Any = evaluate(
         dataset=dataset,
         llm=llm_wrapper,
         embeddings=embeddings_wrapper,
@@ -415,6 +416,10 @@ def main() -> None:
     logger.info("Evaluating KB '{}'", kb_id)
 
     # ---- 初始化 RAG 组件 ----
+    # ragas 0.4.3 + langchain-community>=0.4 兼容：先建 vertexai stub 再导入 ragas
+    from src.cli.eval_ragas_generate import _ensure_vertexai_stub
+
+    _ensure_vertexai_stub()
     from datasets import Dataset  # noqa: F401
     from ragas import evaluate  # noqa: F401
     from ragas.llms import LangchainLLMWrapper
@@ -425,11 +430,10 @@ def main() -> None:
         context_recall,
         context_precision,
     )
-    from src.models import get_llm, get_embeddings, get_rerank
+    from src.models import get_llm, get_classify_llm, get_embeddings, get_rerank
     from src.infra.db.vector_store import VectorStore
     from src.infra.search.bm25_index import BM25Index
     from src.infra.llm.prompt_manager import PromptManager
-    from src.infra.llm.langfuse_tracing import LangfuseTracer
     from src.agents.graph.workflow import build_graph
     from src.config import HYBRID_SEARCH_ENABLED, BM25_INDEX_DIR
 
@@ -450,6 +454,7 @@ def main() -> None:
     eval_model = settings.RAGAS_LLM_MODEL
     logger.info("Initializing RAGAS evaluator ({})...", eval_model)
     llm = get_llm(model=eval_model, temperature=0)
+    classify_llm = get_classify_llm()
     reranker = get_rerank()
     embeddings = get_embeddings()
     llm_wrapper = LangchainLLMWrapper(llm, bypass_n=True)
@@ -457,9 +462,10 @@ def main() -> None:
 
     # 构建 LangGraph
     prompt_manager = PromptManager()
-    tracer = LangfuseTracer()
     bm25 = BM25Index(index_dir=BM25_INDEX_DIR) if HYBRID_SEARCH_ENABLED else None
-    graph = build_graph(vector_store, bm25, llm, reranker, prompt_manager, tracer)
+    graph = build_graph(
+        vector_store, bm25, llm, classify_llm, reranker, embeddings, prompt_manager
+    )
 
     logger.info("Generating answers for {} questions...", len(questions))
     answers, contexts = asyncio.run(
@@ -592,7 +598,7 @@ async def _list_knowledge_bases() -> None:
     print("\nAvailable knowledge bases:")
     print("-" * 40)
     for kb in kbs:
-        print(f"  {kb['name']:<30} ({kb['doc_count']} documents)")
+        print(f"  {kb.name:<30} ({kb.doc_count} documents)")
     print()
 
 

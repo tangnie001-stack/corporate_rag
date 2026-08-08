@@ -11,16 +11,17 @@
   python -m src.cli.eval_ragas --kb-name "xxx" --generate --size 20
 """
 
+import asyncio
+import json
 import os
 import re
-import json
 import sys
-import asyncio
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, cast
 
 from loguru import logger
+from ragas.testset import Testset
 
 from src.config import RAGAS_DATA_DIR, RAGAS_TESTSET_DIR
 
@@ -178,7 +179,7 @@ def run_generate(
     _ensure_vertexai_stub()
 
     from src.infra.db.engine import session_factory
-    from src.infra.db.mysql_db import KbRepo, DocumentRepo
+    from src.infra.db.mysql_db import DocumentRepo, KbRepo
 
     # ---- 0. 从 MySQL 查询 kb_name 和 doc_names ----
     async def _query_meta() -> tuple[str, dict[str, str]]:
@@ -201,14 +202,15 @@ def run_generate(
         print(f"✗ 查询知识库元信息失败: {e}")
         sys.exit(1)
 
+    import ragas
     from langchain_core.documents import Document as LCDocument
     from ragas.testset.synthesizers.generate import TestsetGenerator
-    from src.models import get_embeddings
+
     from src.config import settings
-    from src.utils.desensitize import desensitize
     from src.config.settings import RAGAS_DOC_WHITELIST
     from src.infra.db.vector_store import VectorStore
-    import ragas
+    from src.models import get_embeddings
+    from src.utils.desensitize import desensitize
 
     # ---- 1. 从 ChromaDB 按白名单 doc_id 取 chunk ----
     logger.info(
@@ -268,8 +270,9 @@ def run_generate(
     )
 
     from ragas.cache import DiskCacheBackend
-    from ragas.llms.base import LangchainLLMWrapper as _LLMWrapper
     from ragas.embeddings import LangchainEmbeddingsWrapper as _EmbeddingsWrapper
+    from ragas.llms.base import LangchainLLMWrapper as _LLMWrapper
+
     from src.models import get_llm
 
     _cache = DiskCacheBackend(cache_dir=settings.RAGAS_LLM_CACHE_DIR)
@@ -282,15 +285,15 @@ def run_generate(
     # ---- 4. 构建 transforms ----
     # LLM 步骤: SummaryExtractor + NERExtractor = 2 次/节点
     # 非 LLM 步骤: CustomNodeFilter + EmbeddingExtractor + OverlapScoreBuilder
-    transforms = None
+    transforms: list | None = None
     if not use_filter:
         from ragas.testset.graph import NodeType
-        from ragas.testset.transforms.filters import CustomNodeFilter
         from ragas.testset.transforms.extractors import (
-            SummaryExtractor,
             EmbeddingExtractor,
+            SummaryExtractor,
         )
         from ragas.testset.transforms.extractors.llm_based import NERExtractor
+        from ragas.testset.transforms.filters import CustomNodeFilter
         from ragas.testset.transforms.relationship_builders import OverlapScoreBuilder
 
         def _filter_chunks(node):
@@ -313,9 +316,10 @@ def run_generate(
         )
 
     # ---- 5. 构建知识图谱（支持中断恢复） ----
-    from ragas.testset.graph import KnowledgeGraph, Node, NodeType as _NodeType
-    from ragas.testset.transforms import apply_transforms
     from ragas.run_config import RunConfig
+    from ragas.testset.graph import KnowledgeGraph, Node
+    from ragas.testset.graph import NodeType as _NodeType
+    from ragas.testset.transforms import apply_transforms
 
     kg_file = os.path.join(RAGAS_DATA_DIR, f"kg_{kb_id}.json")
 
@@ -343,8 +347,9 @@ def run_generate(
         kg = KnowledgeGraph(nodes=nodes)
 
         # 应用 transforms
-        print("  → 应用 transforms...")
-        apply_transforms(kg, transforms, run_config=RunConfig())
+        if transforms is not None:
+            print("  → 应用 transforms...")
+            apply_transforms(kg, transforms, run_config=RunConfig())
         generator.knowledge_graph = kg
 
         # 保存 KG 到磁盘
@@ -358,7 +363,7 @@ def run_generate(
     print(f"正在生成测试集 ({size} 条)...")
 
     try:
-        testset = generator.generate(testset_size=size)
+        testset = cast(Testset, generator.generate(testset_size=size))
     except Exception as e:
         logger.exception("TestsetGenerator 调用失败")
         print(f"✗ 测试集生成失败: {e}")

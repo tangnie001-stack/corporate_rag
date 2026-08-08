@@ -1,5 +1,7 @@
 import re
+
 from loguru import logger
+
 from src.chunking.strategies.base import BaseChunker
 from src.chunking.validator import ChunkData
 

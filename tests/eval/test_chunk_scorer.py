@@ -5,7 +5,7 @@ import os
 import pytest
 
 from src.eval.chunk_scorer import _check_structure_integrity
-from src.infra.chunking.validator import ChunkData
+from src.chunking.validator import ChunkData
 
 
 def test_table_fully_contained():

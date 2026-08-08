@@ -3,14 +3,18 @@
 使用配置驱动的 OpenAIEmbeddings 实例，支持通过 LiteLLM Proxy 或直连。
 """
 
-from chromadb.api.types import Documents, Embeddings, EmbeddingFunction
+from typing import cast
+
+from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 from langchain_openai import OpenAIEmbeddings
 from loguru import logger
+from pydantic import SecretStr
+
 from src.config import (
-    EMBEDDING_MODEL,
     EMBEDDING_API_KEY,
     EMBEDDING_BASE_URL,
     EMBEDDING_BATCH_SIZE,
+    EMBEDDING_MODEL,
 )
 
 
@@ -36,7 +40,7 @@ class DashScopeEmbeddingFunction(EmbeddingFunction):
         """
         self._embedding = OpenAIEmbeddings(
             model=model,
-            api_key=api_key or EMBEDDING_API_KEY,
+            api_key=SecretStr(api_key or EMBEDDING_API_KEY),
             base_url=base_url or EMBEDDING_BASE_URL,
             check_embedding_ctx_length=False,
             chunk_size=EMBEDDING_BATCH_SIZE,
@@ -57,10 +61,14 @@ class DashScopeEmbeddingFunction(EmbeddingFunction):
             self._model,
             len(input),
         )
-        return self._embedding.embed_documents(list(input))
+        return cast(Embeddings, self._embedding.embed_documents(list(input)))
 
-    def embed_query(self, text: str) -> list[float]:
+    def embed_query(self, text: str) -> list[float]:  # type: ignore[override]
         """将单条查询文本转为嵌入向量。
+
+        注意：这是项目自定义扩展（search / kb_router 依赖 单文本→单向量），
+        与 ChromaDB EmbeddingFunction 协议的 input: Documents → Embeddings
+        签名不同，属于有意偏离，故标注 ignore[override]。
 
         Args:
             text: 查询文本

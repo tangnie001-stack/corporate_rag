@@ -1,9 +1,9 @@
 # tests/test_chunking.py
-from src.infra.chunking.strategies.parent_child import ParentChildChunker
-from src.infra.chunking.strategies.qa import QAChunker
-from src.infra.chunking.strategies.table_preserving import TablePreservingChunker
-from src.infra.chunking.strategies.base import BaseChunker
-from src.infra.chunking.router import ChunkRouter
+from src.chunking.router import ChunkRouter
+from src.chunking.strategies.base import BaseChunker
+from src.chunking.strategies.parent_child import ParentChildChunker
+from src.chunking.strategies.qa import QAChunker
+from src.chunking.strategies.table_preserving import TablePreservingChunker
 
 
 def test_heading_injection():
@@ -41,7 +41,7 @@ def test_table_preserving_keeps_table():
 
 
 def test_chunk_router_qa():
-    from src.infra.chunking.validator import ChunkData
+    from src.chunking.validator import ChunkData
 
     text = "问：你好吗？\n答：我很好。\n问：吃了吗？\n答：吃了。"
     chunks = [
@@ -52,7 +52,7 @@ def test_chunk_router_qa():
 
 
 def test_chunk_router_table():
-    from src.infra.chunking.validator import ChunkData
+    from src.chunking.validator import ChunkData
 
     text = "普通文本。\n| 项目 |\n|--- |\n| 数据 |"
     chunks = [
@@ -63,7 +63,7 @@ def test_chunk_router_table():
 
 
 def test_chunk_router_default():
-    from src.infra.chunking.validator import ChunkData
+    from src.chunking.validator import ChunkData
 
     text = "这是一段普通的说明文字。" * 10
     chunks = [ChunkData(text, {"block_type": "text"}, "0")]

@@ -4,13 +4,13 @@ import json
 import re
 from typing import Any
 
-from loguru import logger
 from langchain_core.messages import HumanMessage
+from loguru import logger
 
-from src.infra.search.entity_extractor import EntityExtractor
-from src.infra.search.complexity_scorer import score_complexity
+from src.agents.graph.state import LangGraphNode, RAGQueryIntent
 from src.infra.llm.prompt_manager import PromptManager
-from src.agents.graph.state import RAGQueryIntent, LangGraphNode
+from src.infra.search.complexity_scorer import score_complexity
+from src.infra.search.entity_extractor import EntityExtractor
 
 _GREETING_PATTERNS = [
     r"^(你好|您好|hi|hello|thanks|谢谢)$",
@@ -37,7 +37,7 @@ def _format_history(history: list) -> str:
 
 
 class QueryRouter:
-    def __init__(self, llm=None, prompt_manager: PromptManager | None = None):
+    def __init__(self, llm: Any = None, prompt_manager: PromptManager | None = None):
         self._entity_extractor = EntityExtractor()
         self._llm = llm
         self._prompt_manager = prompt_manager or PromptManager()
@@ -108,6 +108,7 @@ class QueryRouter:
             from src.config import CLASSIFIER_TEMPERATURE
 
             messages = [HumanMessage(content=prompt)]
+            assert self._llm is not None
             response = self._llm.invoke(messages, temperature=CLASSIFIER_TEMPERATURE)
             raw = response.content.strip()
             metadata = getattr(response, "response_metadata", {}) or {}

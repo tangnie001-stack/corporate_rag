@@ -7,15 +7,15 @@ import time
 
 from loguru import logger
 
+from src.chunking.router import ChunkRouter
+from src.chunking.strategies.base import BaseChunker
+from src.chunking.validator import ChunkData, validate_chunks
 from src.config import CHUNK_EVAL_ENABLED
 from src.config.response_codes import Code
 from src.eval.chunk_scorer import ChunkQualityScorer
-from src.infra.chunking.router import ChunkRouter
-from src.infra.chunking.strategies.base import BaseChunker
-from src.infra.chunking.validator import ChunkData, validate_chunks
 from src.infra.db.file_store import FileStore
-from src.infra.db.mysql_db import DocumentRepo
 from src.infra.db.models.document import DocModel as DocEntity
+from src.infra.db.mysql_db import DocumentRepo
 from src.infra.db.vector_store import VectorStore
 from src.models import get_embeddings
 from src.parsers.router import DocRouter

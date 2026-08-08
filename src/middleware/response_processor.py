@@ -56,8 +56,11 @@ async def response_processor_middleware(
         # 打印异常链根因（穿透 BHMW 截断层）
         c = e
         depth = 0
-        while (c.__cause__ or c.__context__) and depth < 5:
-            c = c.__cause__ or c.__context__
+        while depth < 5:
+            nxt = c.__cause__ or c.__context__
+            if nxt is None:
+                break
+            c = nxt
             logger.error(
                 "  ├─ 嵌套第{}层: type={} msg={}",
                 depth + 1,

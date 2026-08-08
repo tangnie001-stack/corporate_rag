@@ -1,12 +1,14 @@
 """ChromaDB 连接管理和 collection 缓存。"""
 
 from typing import Optional
+
 import chromadb
+from chromadb.api import ClientAPI
 from chromadb.config import Settings
 from loguru import logger
-from src.config import CHROMA_COLLECTION_PREFIX, CHROMA_PERSIST_DIR
+
+from src.config import CHROMA_COLLECTION_PREFIX, CHROMA_PERSIST_DIR, EMBEDDING_MODEL
 from src.infra.db.vector_store.embedding import DashScopeEmbeddingFunction
-from src.config import EMBEDDING_MODEL
 
 
 class ChromaClient:
@@ -23,11 +25,11 @@ class ChromaClient:
             persist_dir: ChromaDB 持久化目录，None 时使用全局配置
         """
         self._persist_dir = persist_dir or CHROMA_PERSIST_DIR
-        self._client: Optional[chromadb.ClientAPI] = None
+        self._client: Optional[ClientAPI] = None
         self._collection_cache: dict[str, chromadb.Collection] = {}
         self._embed_fn = DashScopeEmbeddingFunction()
 
-    def _get_client(self) -> chromadb.ClientAPI:
+    def _get_client(self) -> ClientAPI:
         """获取或创建 PersistentClient 实例（惰性初始化）。
 
         Returns:

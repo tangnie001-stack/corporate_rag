@@ -1,11 +1,11 @@
 """ChromaDB 写入和删除操作。"""
 
+from typing import Optional
+
 from chromadb.errors import NotFoundError
 from loguru import logger
-from src.parsers.base import ChunkData
 
-
-from typing import Optional
+from src.chunking.validator import ChunkData
 
 
 def add_chunks(

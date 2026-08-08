@@ -18,9 +18,12 @@
 
 import os
 import re
+from typing import cast
+
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+from src.config import CHUNK_OVERLAP, CHUNK_SIZE, HEADER_FOOTER_MARGIN, MIN_TEXT_CHARS
 from src.parsers.base import BaseParser, ChunkData, ParseResult
-from src.config import CHUNK_SIZE, CHUNK_OVERLAP, MIN_TEXT_CHARS, HEADER_FOOTER_MARGIN
 
 # 匹配 Markdown 表格（以 | 开头和结尾的行组成的多行表格）
 TABLE_PATTERN = re.compile(r"^\|.+\|[\s\S]*?^\|.+\|", re.MULTILINE)
@@ -61,9 +64,13 @@ class PyMuPDFParser(BaseParser):
                 page_height = page.rect.height
 
                 # 先提取表格，按视觉顺序排序，过滤误检（不足 2 行的视为误检）
-                tables = sorted(
-                    page.find_tables(), key=lambda t: (t.bbox[1], t.bbox[0])
-                )
+                table_finder = page.find_tables()
+                if table_finder is None:
+                    tables = []
+                else:
+                    tables = sorted(
+                        cast(list, table_finder), key=lambda t: (t.bbox[1], t.bbox[0])
+                    )
                 tables = [t for t in tables if len(t.extract()) >= 2]
                 table_mds = self._extract_tables_from_page(page, tables)
                 table_bboxes = [t.bbox for t in tables]
@@ -75,6 +82,7 @@ class PyMuPDFParser(BaseParser):
                     # 收集非表格文本块
                     for b in blocks:
                         x0, y0, x1, y1, *_ = b
+                        x0, y0, x1, y1 = float(x0), float(y0), float(x1), float(y1)
                         if (
                             y1 < HEADER_FOOTER_MARGIN
                             or y0 > page_height - HEADER_FOOTER_MARGIN
@@ -117,8 +125,8 @@ class PyMuPDFParser(BaseParser):
                     blocks = page.get_text("blocks")
                     content_blocks = []
                     for b in blocks:
-                        y0 = b[1]
-                        y1 = b[3]
+                        y0 = float(b[1])
+                        y1 = float(b[3])
                         if (
                             y1 < HEADER_FOOTER_MARGIN
                             or y0 > page_height - HEADER_FOOTER_MARGIN

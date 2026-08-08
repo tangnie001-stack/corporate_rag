@@ -1,0 +1,44 @@
+# pre-commit 配置文件
+#
+# 安装（一次性，把 hook 注册到 .git/hooks/）：
+#   .venv/bin/pre-commit install
+# 手动运行全部检查（不提交也能跑）：
+#   .venv/bin/pre-commit run --all-files
+# 手动运行单个 hook：
+#   .venv/bin/pre-commit run <hook-id>
+#
+# 说明：
+#   - ruff hook 只检查本次提交改动的文件（pass_filenames 默认 true），
+#     可自动修复的直接修掉，剩余问题拦截提交
+#   - pyright 复用项目 venv（.venv/bin/pyright），因为 pre-commit 隔离环境
+#     缺少 langchain 等第三方包会误报 missing import；同样只检查改动文件，
+#     避免存量 error 阻塞所有提交
+repos:
+  # 基础文件规范
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: check-added-large-files
+
+  # 代码格式与 lint（与 claude.md 的 ruff format / ruff check 对齐）
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.10
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  # 类型检查（只查本次提交改动的 .py 文件）
+  - repo: local
+    hooks:
+      - id: pyright
+        name: pyright (staged files)
+        entry: .venv/bin/pyright
+        language: system
+        types: [python]

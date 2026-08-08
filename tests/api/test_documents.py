@@ -3,7 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock
 
 from src.services.document_service import _merge_tiny_chunks
-from src.infra.chunking.validator import ChunkData
+from src.chunking.validator import ChunkData
 from src.infra.db.vector_store.types import ChunkResult, ChunkQueryResult
 from tests.api.mock_data import make_doc
 

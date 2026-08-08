@@ -5,11 +5,11 @@ import uuid
 from fastapi import APIRouter, Cookie, Depends, Response
 from loguru import logger
 
+from src.api.dependencies import get_app_service
 from src.api.model.request import LoginRequest
 from src.api.model.response import LoginResponse, VerifyResponse
 from src.api.schema import ResponseModel
 from src.services.app_service import AppService
-from src.api.dependencies import get_app_service
 
 router = APIRouter()
 
@@ -98,8 +98,8 @@ async def logout(
 
 @router.post("/auth/anonymous", response_model=ResponseModel)
 async def get_anonymous_id(
+    response: Response,
     user_id: str = Cookie(None),
-    response: Response = None,
 ):
     """获取或生成匿名用户 ID。
 

@@ -1,8 +1,9 @@
 """知识库 Repo — knowledge_base 表 CRUD。"""
 
 from typing import Optional
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
+from src.infra.db.models.document import DocModel
 from src.infra.db.models.kb import KbModel
 
 
@@ -65,12 +66,44 @@ class KbRepo:
             return kb.name if kb else None
 
     async def get_all_kb(self, user_id: str = "") -> list[KbModel]:
+        """获取用户的所有知识库列表（doc_count 为实时统计）。
+
+        doc_count 不读取静态列（该列无任何维护逻辑），而是通过子查询
+        实时统计 document 表中未删除（is_deleted=0）的文档数。
+
+        Args:
+            user_id: 用户 UUID，为空时返回所有用户的知识库
+
+        Returns:
+            知识库列表，doc_count 为实时统计值
+        """
         async with self._sf() as session:
-            stmt = select(KbModel).where(KbModel.is_deleted == 0)
+            # 子查询：按 kb_id 统计未删除的文档数
+            doc_count_subq = (
+                select(
+                    DocModel.kb_id.label("kb_id"),
+                    func.count(DocModel.id).label("doc_count"),
+                )
+                .where(DocModel.is_deleted == 0)
+                .group_by(DocModel.kb_id)
+                .subquery()
+            )
+            stmt = (
+                select(
+                    KbModel,
+                    func.coalesce(doc_count_subq.c.doc_count, 0).label("doc_count"),
+                )
+                .outerjoin(doc_count_subq, doc_count_subq.c.kb_id == KbModel.id)
+                .where(KbModel.is_deleted == 0)
+            )
             if user_id:
                 stmt = stmt.where(KbModel.user_id == user_id)
             result = await session.execute(stmt.order_by(KbModel.created_at.desc()))
-            return list(result.scalars().all())
+            kbs = []
+            for kb, doc_count in result.all():
+                kb.doc_count = doc_count
+                kbs.append(kb)
+            return kbs
 
     async def delete_kb(self, kb_id: str) -> bool:
         async with self._sf() as session:

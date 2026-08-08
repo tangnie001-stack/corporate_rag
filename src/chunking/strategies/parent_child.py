@@ -1,5 +1,6 @@
-from loguru import logger
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from loguru import logger
+
 from src.chunking.strategies.base import BaseChunker
 from src.chunking.validator import ChunkData
 

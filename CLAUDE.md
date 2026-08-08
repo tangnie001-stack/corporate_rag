@@ -66,7 +66,7 @@ docker compose build --no-cache app    # 改依赖后重建
 
 ## 验证
 改完代码后自检以下清单：
-1. **质量门禁**：`pytest tests/ -v` 全部通过、`ruff check .` 无错误、无遗留 `print()`/TODO/调试代码
+1. **质量门禁**：`pytest tests/ -v` 全部通过、`ruff check .` 无错误、`pyright src/` 新增/修改的代码不引入新 error（存量错误多为第三方库误报，以不新增为准；python 解释器由 `[tool.pyright]` 的 `venvPath`/`venv` 指定，不需要 `--pythonpath`）、无遗留 `print()`/TODO/调试代码
 2. **契约同步**：改了 API 响应结构 / 请求体 / 公共方法签名时，同步搜索并更新受影响测试的断言（`tests/` 中硬编码的结构如 `["data"]["x"]` 常因响应包装等全局变更而失联）
 3. **结构检查**：新增/修改的代码位置正确吗？api/ 是否只做参数校验和路由转发？有无违反层间调用规则的 import（如 api/ import infra/）？
 

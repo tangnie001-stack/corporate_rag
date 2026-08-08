@@ -9,9 +9,11 @@ Create Date: 2026-07-29 03:18:10.816550
 # ruff: noqa: F821
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import mysql
+
+from alembic import op
+from src.infra.db.base import UTCDateTime
 
 # revision identifiers, used by Alembic.
 revision: str = "e6304ba3a9ef"
@@ -108,7 +110,7 @@ def upgrade() -> None:
         "document",
         sa.Column(
             "updated_at",
-            src.infra.db.base.UTCDateTime(timezone=True),
+            UTCDateTime(),
             server_default=sa.text("now()"),
             nullable=False,
         ),
@@ -241,7 +243,7 @@ def upgrade() -> None:
         "eval_report",
         sa.Column(
             "created_at",
-            src.infra.db.base.UTCDateTime(timezone=True),
+            UTCDateTime(),
             server_default=sa.text("now()"),
             nullable=False,
         ),
@@ -437,7 +439,7 @@ def upgrade() -> None:
         "users",
         sa.Column(
             "updated_at",
-            src.infra.db.base.UTCDateTime(timezone=True),
+            UTCDateTime(),
             server_default=sa.text("now()"),
             nullable=False,
         ),
