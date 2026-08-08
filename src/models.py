@@ -154,8 +154,24 @@ def get_llm(
         temperature=temperature,
         api_key=SecretStr(LLM_API_KEY),
         base_url=LLM_BASE_URL,
+        callbacks=_content_logging_callbacks(),
         **extra_kwargs,
     )
+
+
+def _content_logging_callbacks() -> list | None:
+    """按 LLM_LOG_CONTENT 开关返回内容记录 callback（默认 None）。
+
+    Returns:
+        LLM_LOG_CONTENT 开启时返回 [LlmContentLoggingHandler]，否则 None。
+    """
+    from src.config import LLM_LOG_CONTENT
+
+    if not LLM_LOG_CONTENT:
+        return None
+    from src.infra.llm.llm_content_logging import LlmContentLoggingHandler
+
+    return [LlmContentLoggingHandler()]
 
 
 def get_classify_llm() -> ChatOpenAI:
@@ -176,6 +192,7 @@ def get_classify_llm() -> ChatOpenAI:
         temperature=CLASSIFIER_TEMPERATURE,
         api_key=SecretStr(LLM_API_KEY),
         base_url=LLM_BASE_URL,
+        callbacks=_content_logging_callbacks(),
         **extra_kwargs,
     )
 

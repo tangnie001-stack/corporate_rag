@@ -32,7 +32,7 @@ DASHSCOPE_BASE_URL: str = os.getenv(
 
 # ====== 模型选择 ======
 # 大语言模型：用于生成最终回答
-LLM_MODEL: str = os.getenv("LLM_MODEL", "qwen3.7-max")
+LLM_MODEL: str = os.getenv("LLM_MODEL", "qwen3.7-max-2026-05-17")
 # LLM API Key（如未设置，自动 fallback 到 DASHSCOPE_API_KEY）
 LLM_API_KEY: str = os.getenv("LLM_API_KEY") or os.getenv("DASHSCOPE_API_KEY", "")
 # LLM API 地址（默认指向 LiteLLM Proxy，可改为直连地址）
@@ -45,6 +45,13 @@ LLM_KWARGS: str = os.getenv("LLM_KWARGS", "{}")
 CLASSIFIER_TEMPERATURE: float = float(os.getenv("CLASSIFIER_TEMPERATURE", "0.1"))
 # 分类/路由专用模型：KBRouter 和 classify 节点使用的小模型（无思考模式）
 CLASSIFY_MODEL: str = os.getenv("CLASSIFY_MODEL", LLM_MODEL)
+# LLM 输入/输出内容记录开关：开启后所有 LLM 调用（含 ragas 指标打分）会
+# 把 prompt 与响应写入日志。默认关闭（避免生产日志被内容刷屏），调试时开启
+LLM_LOG_CONTENT: bool = os.getenv("LLM_LOG_CONTENT", "0").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 # 查询澄清开关：true 时当分类器检测到缺失实体信息时，主动向用户追问澄清
 CLARIFICATION_ENABLED: bool = os.getenv("CLARIFICATION_ENABLED", "true").lower() in (
     "true",
@@ -74,9 +81,10 @@ RERANK_MODEL: str = os.getenv("RERANK_MODEL", "qwen3-rerank")
 # Rerank API Key（fallback 到 DASHSCOPE_API_KEY，非 LLM_API_KEY）
 RERANK_API_KEY: str = os.getenv("RERANK_API_KEY") or os.getenv("DASHSCOPE_API_KEY", "")
 # RAGAS 评估专用模型（独立于生产 LLM，temperature 固定为 0）
-# 不可使用推理模型（如 qwen3.7-max），RAGAS 内部会传 n>1 参数，
-# 推理模型要求 n=1 会导致 BadRequestError。必须显式配置非推理模型。
-RAGAS_LLM_MODEL: str = os.getenv("RAGAS_LLM_MODEL", "qwen3.7-max-2026-05-20")
+# 「无思考/非推理模型」的限制属于上方 CLASSIFY_MODEL（分类/路由小模型），
+# 与 RAGAS 评估模型无关。RAGAS_LLM_MODEL 经 LangchainLLMWrapper(bypass_n=True)
+# 包装后强制 n=1，推理模型（如 qwen3.7-max）可正常使用（已实测）。
+RAGAS_LLM_MODEL: str = os.getenv("RAGAS_LLM_MODEL", "qwen3.7-max-preview")
 # RAGAS 测试集生成条数
 RAGAS_TEST_SIZE: int = int(os.getenv("RAGAS_TEST_SIZE", "20"))
 # RAGAS 测试集存储目录

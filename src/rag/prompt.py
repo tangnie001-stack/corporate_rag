@@ -11,9 +11,7 @@ def format_context(contexts: list[RAGContext]) -> str:
     """将检索上下文格式化为参考文档字符串。"""
     blocks = []
     for i, ctx in enumerate(contexts):
-        blocks.append(
-            f"[{i + 1}] 来源: {ctx.source} (第{ctx.page}页)\n内容: {ctx.content}"
-        )
+        blocks.append(f"[{i + 1}] {ctx.to_prompt_text()}")
     return "\n\n".join(blocks)
 
 

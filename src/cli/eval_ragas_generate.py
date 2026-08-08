@@ -97,6 +97,69 @@ def _find_next_version(kb_id: str) -> int:
     return max_version + 1
 
 
+def _proofread_question(question: str, llm) -> str:
+    """用 LLM 校对单条问题，修正错别字，保持原意、数字与专名不变。
+
+    ragas synthesizer 生成问题时偶尔产出同音错别字（如「股漂」→「股票」、
+    「正券」→「证券」），导致检索命中率下降。生成后统一过一遍校对，
+    用纠错 prompt 清洗，输出失败时保留原文（best-effort）。
+
+    Args:
+        question: 原始问题文本
+        llm: langchain ChatOpenAI 实例（同步调用）
+
+    Returns:
+        校对后的问题文本；LLM 调用失败时返回原文
+    """
+    if not question or not question.strip():
+        return question
+    prompt = (
+        "你是一名中文校对专家。下面是一句可能含有错别字的中文问题，"
+        "请修正其中的错别字和不规范表达（例如「股漂」应为「股票」）。"
+        "必须保持原意、数字、专有名词（公司名/人名/股票代码）不变，"
+        "不要改写句式。只输出修正后的问题文本，不要任何解释或前缀。\n\n"
+        f"问题：{question}\n修正后："
+    )
+    try:
+        result = llm.invoke(prompt)
+        cleaned = result.content.strip()
+        # 防御：LLM 偶发返回空或整句反问，此时保留原文
+        if not cleaned:
+            return question
+        return cleaned
+    except Exception as e:  # noqa: BLE001
+        logger.warning("校对问题失败，保留原文: {} | {}", question[:30], e)
+        return question
+
+
+def _clean_garbled_questions(samples_list: list[dict], llm) -> list[dict]:
+    """批量校对测试集样本的问题文本，修正乱码/错别字。
+
+    Args:
+        samples_list: testset.to_list() 输出的样本 dict 列表
+        llm: langchain ChatOpenAI 实例（同步调用）
+
+    Returns:
+        校对后的样本 dict 列表（仅替换 user_input，其余字段不变）
+    """
+    cleaned_count = 0
+    for sample in samples_list:
+        original = sample.get("user_input", "")
+        if not original:
+            continue
+        corrected = _proofread_question(original, llm)
+        if corrected != original:
+            sample["user_input"] = corrected
+            cleaned_count += 1
+    if cleaned_count:
+        logger.info(
+            "测试集校对完成: {}/{} 条问题有错别字已修正",
+            cleaned_count,
+            len(samples_list),
+        )
+    return samples_list
+
+
 def _load_latest_testset(
     kb_id: str, version: int | None = None
 ) -> tuple[list[str], list[str]]:
@@ -373,6 +436,8 @@ def run_generate(
 
     # ---- 7. 序列化为 JSON ----
     samples_list = testset.to_list()
+    # 校对乱码/错别字问题（同音字导致检索命中率下降）
+    samples_list = _clean_garbled_questions(samples_list, _langchain_llm)
     version = _find_next_version(kb_id)
 
     output = {

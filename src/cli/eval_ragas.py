@@ -154,7 +154,9 @@ async def generate_answers_and_contexts(
             answers.append(full_answer)
 
             # 提取上下文字段列表（用于 context_recall / context_precision 评估）
-            ctx_list = [c.content for c in final_state.get("contexts", [])]
+            # 与生产 prompt（RAGContext.to_prompt_text）保持同一渲染格式，
+            # 让 RAGAS 的 NLI 看到与生成模型一致的上下文（含来源/页码锚点）
+            ctx_list = [c.to_prompt_text() for c in final_state.get("contexts", [])]
             contexts.append(ctx_list)
 
             logger.info(
@@ -210,6 +212,7 @@ def run_evaluation(
         context_recall,
         faithfulness,
     )
+    from ragas.run_config import RunConfig
 
     data = {
         "question": questions,
@@ -221,6 +224,8 @@ def run_evaluation(
 
     logger.info("Starting RAGAS evaluation with {} samples...", len(questions))
     # ragas.evaluate 无类型标注（推断为 Executor），实际返回 EvaluationResult，显式标注 Any
+    # 默认 RunConfig.timeout=180s，长答案的 faithfulness/answer_relevancy 会超时
+    # 返回 nan（raise_exceptions=False 吞掉 TimeoutError），故放宽到 10 分钟
     result: Any = evaluate(
         dataset=dataset,
         llm=llm_wrapper,
@@ -232,6 +237,7 @@ def run_evaluation(
             answer_relevancy,
         ],
         raise_exceptions=False,
+        run_config=RunConfig(timeout=600),
     )
 
     df = result.to_pandas()
@@ -244,6 +250,28 @@ def run_evaluation(
             "context_precision",
         ]:
             logger.info("  {}: {:.4f}", col, df[col].mean())
+
+    # 显式暴露被吞掉的指标失败：ragas executor 在 raise_exceptions=False 时
+    # 会把异常（如 API 额度耗尽 403 / 超时）转成 nan，并记入 "Exception raised
+    # in Job[...]" 日志。这里汇总提示，避免 nan 被静默带进报告。
+    metric_cols = [
+        "faithfulness",
+        "answer_relevancy",
+        "context_recall",
+        "context_precision",
+    ]
+    nan_counts = {
+        col: int(df[col].isna().sum())
+        for col in metric_cols
+        if col in df.columns and df[col].isna().any()
+    }
+    if nan_counts:
+        logger.warning(
+            "部分指标存在 nan（{}）——通常为 API 额度耗尽/限流或单指标超时，"
+            "详见上方 'Exception raised in Job' 日志。nan 计数值: {}",
+            list(nan_counts.keys()),
+            nan_counts,
+        )
 
     return result
 
@@ -478,13 +506,20 @@ def main() -> None:
             "RAGAS_LLM_MODEL 未配置，评估需要使用非推理模型（如 qwen-plus 系列）"
         )
         sys.exit(1)
-    eval_model = settings.RAGAS_LLM_MODEL
-    logger.info("Initializing RAGAS evaluator ({})...", eval_model)
-    llm = get_llm(model=eval_model, temperature=0)
+    # 选手/裁判分离：
+    # - 选手（被测系统）= 生产模型 get_llm()（LLM_MODEL），评估结果反映线上质量
+    # - 裁判（评估器）  = RAGAS_LLM_MODEL，独立于选手评分，避免自我评价偏置
+    logger.info(
+        "Initializing eval: SUT={} (LLM_MODEL), judge={} (RAGAS_LLM_MODEL)",
+        settings.LLM_MODEL,
+        settings.RAGAS_LLM_MODEL,
+    )
+    llm = get_llm()  # 选手：生产模型（含生产 temperature）
     classify_llm = get_classify_llm()
     reranker = get_rerank()
     embeddings = get_embeddings()
-    llm_wrapper = LangchainLLMWrapper(llm, bypass_n=True)
+    judge_llm = get_llm(model=settings.RAGAS_LLM_MODEL, temperature=0)
+    llm_wrapper = LangchainLLMWrapper(judge_llm, bypass_n=True)
     embeddings_wrapper = LangchainEmbeddingsWrapper(embeddings)
 
     # 构建 LangGraph
