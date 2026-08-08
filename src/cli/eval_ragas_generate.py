@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import Optional, cast
 
 from loguru import logger
-from ragas.testset import Testset
 
 from src.config import RAGAS_DATA_DIR, RAGAS_TESTSET_DIR
 
@@ -272,6 +271,7 @@ def run_generate(
     from ragas.cache import DiskCacheBackend
     from ragas.embeddings import LangchainEmbeddingsWrapper as _EmbeddingsWrapper
     from ragas.llms.base import LangchainLLMWrapper as _LLMWrapper
+    from ragas.testset import Testset
 
     from src.models import get_llm
 
