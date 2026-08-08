@@ -16,10 +16,10 @@
 """
 
 import os
-import sys
-import time
 import shutil
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 import httpx
@@ -152,7 +152,7 @@ def _get_model_id(resp: httpx.Response) -> str:
     try:
         body = resp.json()
         return body.get("model", "")
-    except Exception:
+    except Exception:  # noqa: BLE001
         return ""
 
 

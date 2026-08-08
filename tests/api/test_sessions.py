@@ -2,7 +2,7 @@
 
 from unittest.mock import AsyncMock
 
-from tests.api.mock_data import make_session, make_message
+from tests.api.mock_data import make_message, make_session
 
 
 def test_list_sessions(auth_client, mock_app_service):

@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import String, Integer, Text, Boolean, func
+from sqlalchemy import Boolean, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.infra.db.base import Base, UTCDateTime
@@ -11,7 +11,9 @@ from src.infra.db.base import Base, UTCDateTime
 class EvalReportModel(Base):
     __tablename__ = "eval_report"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: __import__("uuid").uuid4().hex)
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: __import__("uuid").uuid4().hex
+    )
     kb_id: Mapped[str] = mapped_column(String(36), nullable=False)
     run_type: Mapped[str] = mapped_column(String(64), default="")
     qa_count: Mapped[int] = mapped_column(Integer, default=0)

@@ -10,7 +10,9 @@
 """
 
 import uuid
+
 import pytest
+
 from src.infra.db.vector_store import VectorStore
 from src.parsers.base import ChunkData
 

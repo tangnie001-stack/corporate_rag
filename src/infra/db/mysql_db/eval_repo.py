@@ -2,8 +2,9 @@
 
 import json
 import uuid
-from typing import Optional
+
 from sqlalchemy import select
+
 from src.infra.db.models.eval_report import EvalReportModel
 
 
@@ -39,7 +40,7 @@ class EvalRepo:
             session.add(record)
             await session.commit()
 
-    async def get_latest_report(self, kb_id: str) -> Optional[EvalReportModel]:
+    async def get_latest_report(self, kb_id: str) -> EvalReportModel | None:
         async with self._sf() as session:
             stmt = (
                 select(EvalReportModel)

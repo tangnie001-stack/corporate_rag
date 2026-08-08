@@ -14,15 +14,14 @@ from __future__ import annotations
 import asyncio
 import shutil
 from pathlib import Path
-from typing import Optional
 
 from loguru import logger
 from sqlalchemy import text
 
-from src.services.app_service import AppService
 from src.config import CHROMA_PERSIST_DIR, REDIS_URL
 from src.infra.db.engine import engine
-from src.infra.db.models import *  # noqa: F401, F403 — 注册所有模型到 Base.metadata
+from src.infra.db.models import *
+from src.services.app_service import AppService
 
 
 async def _reset_mysql_async() -> None:
@@ -67,19 +66,19 @@ def reset_redis() -> None:
     避免引入 VectorStore / RAGChain 等重量级依赖的初始化。
     """
     try:
-        import redis  # noqa: PLC0415
+        import redis
 
         r = redis.from_url(REDIS_URL, decode_responses=True)
         r.ping()
         r.flushall()
         logger.info("Redis: 已 FLUSHALL")
         r.close()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning("Redis: 连接失败或 FLUSHALL 异常: {}，跳过", e)
 
 
 def reset_all(
-    service: Optional[AppService] = None,
+    service: AppService | None = None,
 ) -> None:
     """一键重置全部数据存储（MySQL + ChromaDB + Redis）。
 
@@ -99,14 +98,17 @@ def reset_all(
     # Redis
     if service is not None:
         cm = service.chat_manager
-        if cm._in_memory:  # noqa: SLF001
-            cm._memory_store.clear()  # noqa: SLF001
+        if cm._in_memory:
+            cm._memory_store.clear()
             logger.warning("Redis: 内存降级模式，已清空内存存储")
         else:
             try:
-                cm._redis.flushall()  # noqa: SLF001
-                logger.info("Redis: 已 FLUSHALL")
-            except Exception as e:
+                if cm._redis is None:
+                    logger.warning("Redis: 连接未初始化，跳过 FLUSHALL")
+                else:
+                    cm._redis.flushall()
+                    logger.info("Redis: 已 FLUSHALL")
+            except Exception as e:  # noqa: BLE001
                 logger.error("Redis: FLUSHALL 失败: {}", e)
     else:
         reset_redis()
@@ -116,8 +118,8 @@ def reset_all(
 
 if __name__ == "__main__":
     # 独立运行时直接通过 docker exec 操作（避开 Python 客户端锁竞争）
-    import subprocess  # noqa: PLC0415
-    import sys  # noqa: PLC0415
+    import subprocess
+    import sys
 
     logger.info("========== 开始重置所有数据 (docker exec 模式) ==========")
 
@@ -138,6 +140,7 @@ if __name__ == "__main__":
         capture_output=True,
         text=True,
         timeout=30,
+        check=False,  # returncode 在下方手动检查
     )
     if r.returncode == 0:
         logger.info("MySQL: 已清空所有业务表")
@@ -169,6 +172,7 @@ if __name__ == "__main__":
         capture_output=True,
         text=True,
         timeout=10,
+        check=False,  # returncode 在下方手动检查
     )
     if r2.returncode == 0:
         logger.info("Redis: 已 FLUSHALL")

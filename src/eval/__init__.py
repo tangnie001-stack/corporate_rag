@@ -1,1 +1,0 @@
-"""Chunk quality evaluation module."""

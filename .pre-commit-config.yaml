@@ -27,8 +27,9 @@ repos:
       - id: check-added-large-files
 
   # 代码格式与 lint（与 claude.md 的 ruff format / ruff check 对齐）
+  # rev 与 pyproject.toml 的 ruff==0.16.2 保持一致，避免两版本默认规则集差异导致误报
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.11.10
+    rev: v0.16.2
     hooks:
       - id: ruff
         args: [--fix]

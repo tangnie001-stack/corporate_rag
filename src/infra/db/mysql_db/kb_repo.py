@@ -1,8 +1,8 @@
 """知识库 Repo — knowledge_base 表 CRUD。"""
 
-from typing import Optional
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
+
 from src.infra.db.models.document import DocModel
 from src.infra.db.models.kb import KbModel
 
@@ -49,7 +49,7 @@ class KbRepo:
                 await session.commit()
                 return deleted.id, True
 
-    async def get_kb_by_name(self, user_id: str, name: str) -> Optional[str]:
+    async def get_kb_by_name(self, user_id: str, name: str) -> str | None:
         async with self._sf() as session:
             stmt = select(KbModel).where(
                 KbModel.user_id == user_id,
@@ -60,7 +60,7 @@ class KbRepo:
             kb = result.scalar_one_or_none()
             return kb.id if kb else None
 
-    async def get_kb_name_by_id(self, kb_id: str) -> Optional[str]:
+    async def get_kb_name_by_id(self, kb_id: str) -> str | None:
         async with self._sf() as session:
             kb = await session.get(KbModel, kb_id)
             return kb.name if kb else None

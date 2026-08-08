@@ -5,18 +5,17 @@ start_generation / end_generation），使消费方（rag_chain.py）零改动�
 延迟初始化，配置缺失或初始化失败时静默降级。
 """
 
-from dataclasses import dataclass, asdict
 import functools
 import inspect
-from typing import Optional, cast
-
-from loguru import logger
+from dataclasses import asdict, dataclass
+from typing import cast
 
 from langfuse import Langfuse
 from langfuse.model import ModelUsage
+from loguru import logger
 
-from src.infra.llm.trace_context import current_trace_id, current_tracer
 from src.infra.llm.token_usage import TokenUsage
+from src.infra.llm.trace_context import current_trace_id, current_tracer
 
 
 @dataclass(frozen=True)
@@ -93,7 +92,7 @@ class LangfuseTracer:
         从 src.config 读取 LANGFUSE_SECRET_KEY / LANGFUSE_PUBLIC_KEY /
         LANGFUSE_HOST。初始化失败仅记警告，不抛出异常。
         """
-        self._client: Optional[Langfuse] = None
+        self._client: Langfuse | None = None
         try:
             from src.config import (
                 LANGFUSE_HOST,
@@ -112,7 +111,7 @@ class LangfuseTracer:
                 host=LANGFUSE_HOST.rstrip("/"),
             )
             logger.info("LangfuseTracer initialized with official SDK")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("LangfuseTracer init failed: %s", e)
 
     def _check_ready(self, method: str) -> bool:
@@ -130,7 +129,7 @@ class LangfuseTracer:
         self,
         name: str,
         input_data: TraceInput | dict | None = None,
-        session_id: Optional[str] = None,
+        session_id: str | None = None,
     ) -> None:
         """创建新的 trace，trace ID 从 current_trace_id contextvar 自动读取。
 
@@ -174,9 +173,9 @@ class LangfuseTracer:
         self,
         name: str,
         input_data: list[dict] | None = None,
-        model: Optional[str] = None,
-        model_parameters: Optional[dict] = None,
-    ) -> Optional[str]:
+        model: str | None = None,
+        model_parameters: dict | None = None,
+    ) -> str | None:
         """创建新的 generation（LLM 调用记录）并返回其 ID。
 
         trace_id 从 current_trace_id contextvar 自动读取（中间件兜底）。

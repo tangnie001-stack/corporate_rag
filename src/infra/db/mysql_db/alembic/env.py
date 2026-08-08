@@ -13,7 +13,7 @@ from src.config import (
     MYSQL_USER,
 )
 from src.infra.db.base import Base
-from src.infra.db.mysql_db.models import *  # noqa: F403 — load all models
+from src.infra.db.mysql_db.models import *
 
 config = context.config
 

@@ -8,7 +8,7 @@
 
 import json
 import time
-from typing import Optional
+from typing import ClassVar
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
@@ -40,7 +40,7 @@ class PromptManager:
         cache_ttl: 缓存有效期（秒），默认 60
     """
 
-    PROMPT_NAMES = {
+    PROMPT_NAMES: ClassVar[dict[str, str]] = {
         "system": "financial-system-prompt",
         "user": "user-prompt-template",
         "classifier": "classifier-prompt",
@@ -55,13 +55,14 @@ class PromptManager:
         Args:
             cache_ttl: 缓存有效期（秒），默认 60 秒
         """
-        from src.config import (
-            LANGFUSE_SECRET_KEY,
-            LANGFUSE_PUBLIC_KEY,
-            LANGFUSE_HOST,
-            LANGFUSE_ENABLE,
-        )
         import base64
+
+        from src.config import (
+            LANGFUSE_ENABLE,
+            LANGFUSE_HOST,
+            LANGFUSE_PUBLIC_KEY,
+            LANGFUSE_SECRET_KEY,
+        )
 
         self._enabled = LANGFUSE_ENABLE
         if self._enabled:
@@ -75,7 +76,7 @@ class PromptManager:
         self._cache_ttl = cache_ttl
         self._cache: dict[str, tuple[str, float]] = {}
 
-    def _fetch_prompt(self, name: str) -> Optional[str]:
+    def _fetch_prompt(self, name: str) -> str | None:
         """从 Langfuse API 获取 prompt 文本，失败返回 None。
 
         使用 HTTP Basic Auth 认证，请求 /api/public/v2/prompts/{name} 端点。

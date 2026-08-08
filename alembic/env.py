@@ -5,9 +5,8 @@ from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from alembic import context
-
 from src.infra.db.base import Base
-from src.infra.db.models import *  # noqa: F403 — load all models
+from src.infra.db.models import *
 
 config = context.config
 if config.config_file_name is not None:
@@ -35,8 +34,11 @@ def do_run_migrations(connection):
 
 
 async def run_async_migrations() -> None:
+    db_url = config.get_main_option("sqlalchemy.url")
+    if db_url is None:
+        raise RuntimeError("alembic 配置缺少 sqlalchemy.url")
     connectable = create_async_engine(
-        config.get_main_option("sqlalchemy.url"),
+        db_url,
         poolclass=pool.NullPool,
     )
     async with connectable.connect() as connection:

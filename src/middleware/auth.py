@@ -53,7 +53,7 @@ async def auth_middleware(
         return await call_next(request)
 
     # Chat / Sessions：优先 token，fallback 匿名 user_id
-    if path.startswith("/api/chat/") or path.startswith("/api/sessions/"):
+    if path.startswith(("/api/chat/", "/api/sessions/")):
         token = request.cookies.get("token")
         if token:
             uid = await UserAuth.get_user_id_from_token_async(get_redis_client(), token)

@@ -15,6 +15,7 @@
 """
 
 import os
+
 from dotenv import load_dotenv
 
 # 加载项目根目录的 .env 文件（如存在），将键值对注入 os.environ
@@ -91,7 +92,7 @@ RAGAS_USER_ID: str = os.getenv("RAGAS_USER_ID", "24a93c0e-3c9b-4d8d-a371-2d8b360
 # RAGAS 文档白名单：只处理白名单中的文档 ID
 # 用于跳过不需要参与测试集生成的文档（如扫描件、不相关文档）
 RAGAS_DOC_WHITELIST: list[str] = [
-    "fa7d700e-f093-45be-a78f-73fbdfd1801d",  # neusoft_2025_q1.pdf
+    "d5d72d1a-2e47-4765-892e-b1d4787d61a8",  # neusoft_2025_q1.pdf
 ]
 
 # ====== MySQL ======

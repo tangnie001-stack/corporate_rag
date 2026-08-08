@@ -1,6 +1,7 @@
 # tests/test_auth.py
-from src.infra.auth.user_auth import UserAuth
 from unittest.mock import Mock
+
+from src.infra.auth.user_auth import UserAuth
 
 
 def test_hash_consistent():

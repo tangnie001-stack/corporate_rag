@@ -1,7 +1,7 @@
 """用户 Repo — users 表 CRUD。"""
 
-from typing import Optional
 from sqlalchemy import select
+
 from src.infra.db.models.user import UserModel
 
 
@@ -17,7 +17,7 @@ class UserRepo:
             session.add(user)
             await session.commit()
 
-    async def get_user_by_account(self, account: str) -> Optional[UserModel]:
+    async def get_user_by_account(self, account: str) -> UserModel | None:
         async with self._sf() as session:
             stmt = select(UserModel).where(UserModel.account == account)
             result = await session.execute(stmt)
@@ -30,7 +30,7 @@ class UserRepo:
                 user.token = token
                 await session.commit()
 
-    async def get_user_by_token(self, token: str) -> Optional[UserModel]:
+    async def get_user_by_token(self, token: str) -> UserModel | None:
         async with self._sf() as session:
             stmt = select(UserModel).where(UserModel.token == token)
             result = await session.execute(stmt)

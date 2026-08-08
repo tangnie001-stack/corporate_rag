@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from src.eval.chunk_scorer import _check_structure_integrity
+from src.chunking.scorer import _check_structure_integrity
 from src.chunking.validator import ChunkData
 
 
@@ -125,7 +125,7 @@ def test_no_clauses():
 
 def test_sbr_no_breakage():
     """Adjacent chunks with same content should have similarity >= 0.35."""
-    from src.eval.chunk_scorer import _calc_sbr
+    from src.chunking.scorer import _calc_sbr
 
     embeddings = [[0.1, 0.2, 0.3], [0.1, 0.21, 0.29]]
     result = _calc_sbr(embeddings)
@@ -136,7 +136,7 @@ def test_sbr_no_breakage():
 
 def test_sbr_with_breakage():
     """Very different embeddings should be flagged as broken."""
-    from src.eval.chunk_scorer import _calc_sbr
+    from src.chunking.scorer import _calc_sbr
 
     # Orthogonal vectors -> cosine similarity ~ 0
     embeddings = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]]
@@ -150,7 +150,7 @@ def test_sbr_with_breakage():
 
 def test_granularity_cv_uniform():
     """Equal-length chunks should have low CV."""
-    from src.eval.chunk_scorer import _calc_granularity_cv
+    from src.chunking.scorer import _calc_granularity_cv
 
     chunks = [
         ChunkData(content="A" * 200, metadata={}),
@@ -164,7 +164,7 @@ def test_granularity_cv_uniform():
 
 def test_granularity_cv_with_extremes():
     """A very tiny chunk should be flagged as extreme."""
-    from src.eval.chunk_scorer import _calc_granularity_cv
+    from src.chunking.scorer import _calc_granularity_cv
 
     chunks = [
         ChunkData(content="A" * 200, metadata={}),
@@ -184,7 +184,7 @@ def test_granularity_cv_with_extremes():
 )
 def test_evaluate_full_pipeline():
     """Full evaluate() should return the complete eval JSON."""
-    from src.eval.chunk_scorer import ChunkQualityScorer
+    from src.chunking.scorer import ChunkQualityScorer
 
     scorer = ChunkQualityScorer()
     chunks = [
@@ -202,11 +202,11 @@ def test_evaluate_full_pipeline():
 
 def test_evaluate_graceful_degradation():
     """If a metric fails, overall_score should use remaining metrics."""
-    from src.eval.chunk_scorer import ChunkQualityScorer
+    from src.chunking.scorer import ChunkQualityScorer
 
     # Simulate SBR failure by making embed_documents raise
     class FailingScorer(ChunkQualityScorer):
-        def _calc_sbr(self, chunks):
+        def _calc_sbr(self, chunks, embeddings=None):
             raise RuntimeError("Embedding API timeout")
 
     scorer = FailingScorer()
@@ -220,7 +220,7 @@ def test_evaluate_graceful_degradation():
 
 def test_empty_chunks():
     """Empty chunks list should return null scores, not crash."""
-    from src.eval.chunk_scorer import ChunkQualityScorer
+    from src.chunking.scorer import ChunkQualityScorer
 
     scorer = ChunkQualityScorer()
     result = scorer.evaluate([], "empty.pdf")

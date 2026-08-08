@@ -2,12 +2,12 @@
 
 from fastapi import APIRouter, Depends, Request
 
-from src.api.model.request import CreateKBRequest, KBDeleteRequest
-from src.api.model.response import CreateKBResponse, KBItem, KBDeleteResponse
-from src.api.schema import ResponseModel
-from src.services.app_service import AppService
 from src.api.dependencies import get_app_service
+from src.api.model.request import CreateKBRequest, KBDeleteRequest
+from src.api.model.response import CreateKBResponse, KBDeleteResponse, KBItem
+from src.api.schema import ResponseModel
 from src.config.response_codes import Code
+from src.services.app_service import AppService
 from src.utils.errors import BusinessError
 
 router = APIRouter()

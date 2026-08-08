@@ -9,7 +9,6 @@
 
 import re
 
-
 # 规则顺序：先替换长模式，后替换短模式，避免被短模式截胡
 _DESENSITIZE_RULES: list[tuple[str, str]] = [
     # ---- 高风险：违规/处罚/诉讼类 ----

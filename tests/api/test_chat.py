@@ -1,13 +1,13 @@
 """Tests for SSE streaming chat endpoint."""
 
 from unittest.mock import MagicMock, patch
-import pytest
 
+import pytest
 from fastapi.testclient import TestClient
-from tests.api.mock_data import make_chunk
 
 from src.api.dependencies import get_app_service
 from src.main import app
+from tests.api.mock_data import make_chunk
 
 client = TestClient(app)
 
@@ -100,7 +100,7 @@ async def test_clarify_not_persisted():
 async def test_normal_answer_persisted():
     """正常回答（有 token 无澄清）时应持久化对话。"""
     from src.api.chat import _stream_rag_response
-    from src.utils.sse import SSETokenEvent, SSEDoneEvent
+    from src.utils.sse import SSEDoneEvent, SSETokenEvent
 
     svc = MagicMock()
     events = [

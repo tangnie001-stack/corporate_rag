@@ -11,13 +11,13 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
-from typing import Generator
+from collections.abc import Generator
 
 import pytest
 from loguru import logger
 
-from src.services.app_service import AppService
 from src.infra.db.vector_store import VectorStore
+from src.services.app_service import AppService
 
 # ==================== 路径常量 ====================
 
@@ -76,7 +76,7 @@ def _cleanup_kb(name: str) -> None:
                     return
 
         asyncio.run(_do_cleanup())
-    except Exception:
+    except Exception:  # noqa: BLE001
         logger.exception("Failed to cleanup test KB: {}", name)
 
 

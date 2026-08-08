@@ -1,13 +1,13 @@
 """Tests for AppService business logic layer."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.services.app_service import AppService
-from src.utils.errors import AppError
+import pytest
+
 from src.infra.db.models.document import DocModel as DocEntity
 from src.infra.db.models.kb import KbModel as KbListItem
-
+from src.services.app_service import AppService
+from src.utils.errors import AppError
 
 # ==================== Init ====================
 
@@ -135,7 +135,7 @@ class TestAppServiceKBs:
         mock_kb_repo.return_value.soft_delete_kb = AsyncMock(return_value=True)
         vs = MagicMock()
         svc = AppService(vector_store=vs)
-        ok, msg = await svc.delete_knowledge_base("kb_id")
+        ok, _msg = await svc.delete_knowledge_base("kb_id")
         assert ok is True
         mock_doc_repo.return_value.soft_delete_documents_by_kb.assert_called_once_with(
             "kb_id"

@@ -7,8 +7,9 @@
 """
 
 import pytest
-from src.parsers.router import DocRouter
+
 from src.parsers.base import ParseResult
+from src.parsers.router import DocRouter
 
 
 class TestDocRouter:

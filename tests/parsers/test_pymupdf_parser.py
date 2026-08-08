@@ -8,7 +8,9 @@
 """
 
 import os
+
 import pytest
+
 from src.parsers.base import ParseResult
 from src.parsers.pymupdf_parser import PyMuPDFParser
 

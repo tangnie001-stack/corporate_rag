@@ -8,40 +8,40 @@
 """
 
 import time
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
-from loguru import logger
 from langgraph.graph.state import CompiledStateGraph
+from loguru import logger
 
-from src.utils.sse import (
-    SSEEvent,
-    SSEStatusEvent,
-    SSETokenEvent,
-    SSECitationEvent,
-    SSEErrorEvent,
-    SSEDoneEvent,
-    SSEModelInfoEvent,
-    SSEClarificationEvent,
-)
-from src.agents.graph.workflow import build_graph
 from src.agents.graph.state import (
+    SSE_STATUS,
     AgentState,
     LangGraph,
     LangGraphEvent,
     LangGraphKey,
     LangGraphNode,
-    SSE_STATUS,
 )
-from src.rag.context import RAGContext
-from src.infra.db.vector_store import VectorStore
-from src.infra.search.bm25_index import BM25Index
-from src.infra.llm.langfuse_tracing import LangfuseTracer, traced
-from src.infra.llm.prompt_manager import PromptManager
+from src.agents.graph.workflow import build_graph
 from src.chat.manager import ChatManager
 from src.config.const import (
     ABSTENTION_STATUS_MSG,
 )
 from src.config.prompts import ABSTENTION_TEXT
+from src.infra.db.vector_store import VectorStore
+from src.infra.llm.langfuse_tracing import LangfuseTracer, traced
+from src.infra.llm.prompt_manager import PromptManager
+from src.infra.search.bm25_index import BM25Index
+from src.rag.context import RAGContext
+from src.utils.sse import (
+    SSECitationEvent,
+    SSEClarificationEvent,
+    SSEDoneEvent,
+    SSEErrorEvent,
+    SSEEvent,
+    SSEModelInfoEvent,
+    SSEStatusEvent,
+    SSETokenEvent,
+)
 
 
 class AgentService:
@@ -57,7 +57,7 @@ class AgentService:
         reranker=None,
         prompt_manager: PromptManager | None = None,
     ):
-        from src.models import get_llm, get_classify_llm, get_rerank, get_embeddings
+        from src.models import get_classify_llm, get_embeddings, get_llm, get_rerank
 
         self._vector_store = vector_store
         self._bm25 = bm25
@@ -251,7 +251,7 @@ class AgentService:
                 len(contexts),
             )
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.exception("AgentService stream_chat failed: {}", e)
             yield SSEErrorEvent(f"暂时无法回答：{str(e)[:100]}")
         finally:

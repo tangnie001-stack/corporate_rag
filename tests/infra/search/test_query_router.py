@@ -95,8 +95,9 @@ def test_cache_hits() -> None:
 
 def test_greeting_sets_skip_retrieval() -> None:
     """问候查询应设置 skip_retrieval=True。"""
-    from src.infra.search.query_router import QueryRouter
     from unittest.mock import Mock
+
+    from src.infra.search.query_router import QueryRouter
 
     router = QueryRouter(llm=Mock())
     result = router.route("你好", [])

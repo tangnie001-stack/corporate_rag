@@ -1,7 +1,6 @@
 """对话历史持久化 — MySQL 异步写入。"""
 
 import json
-from typing import Optional
 
 from loguru import logger
 
@@ -36,7 +35,7 @@ class PersistenceService:
                 id=session_id, user_id=user_id, title=title, kb_id=kb_id
             )
             await self._chat_repo.create_session(session)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("Failed to save session async: {}", e)
 
     async def save_messages(
@@ -45,7 +44,7 @@ class PersistenceService:
         kb_id: str,
         user_msg: str,
         assistant_msg: str,
-        sources: Optional[list[str]] = None,
+        sources: list[str] | None = None,
     ) -> None:
         """异步写入 user + assistant 消息。"""
         try:
@@ -66,9 +65,8 @@ class PersistenceService:
                     sources=sources_json,
                 )
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("Failed to save messages async: {}", e)
 
     def cleanup_session(self, session_id: str) -> None:
         """清理会话相关数据。"""
-        pass

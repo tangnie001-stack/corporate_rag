@@ -7,8 +7,10 @@
 - 异常场景：文件不存在
 """
 
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
+
 from src.parsers.base import ParseResult
 from src.parsers.docx_parser import DocxParser
 

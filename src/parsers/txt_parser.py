@@ -13,11 +13,13 @@
 """
 
 import os
+
 import chardet
-from loguru import logger
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from loguru import logger
+
+from src.config import CHUNK_OVERLAP, CHUNK_SIZE
 from src.parsers.base import BaseParser, ChunkData, ParseResult
-from src.config import CHUNK_SIZE, CHUNK_OVERLAP
 
 
 class TxtParser(BaseParser):

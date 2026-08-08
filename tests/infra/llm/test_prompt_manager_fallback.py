@@ -1,11 +1,11 @@
 """测试 PromptManager 的兜底 prompt 从 src.config.prompts 正确导入。"""
 
+from src.config.prompts import FINANCIAL_SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
 from src.infra.llm.prompt_manager import (
     _FALLBACK_SYSTEM_PROMPT,
     _FALLBACK_USER_TEMPLATE,
     _INLINE_CITATION_INSTRUCTION,
 )
-from src.config.prompts import FINANCIAL_SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
 
 
 def test_fallback_system_imported_from_config():

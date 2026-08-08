@@ -9,10 +9,15 @@ Usage:
 """
 
 import argparse
+import asyncio
 import os
 import re
 import subprocess
+import sys
 from itertools import product
+
+from src.infra.db.engine import session_factory
+from src.infra.db.mysql_db import KbRepo
 
 # 检索 top-K 搜索网格
 RETRIEVAL_VALUES = [5, 10, 15]
@@ -20,7 +25,27 @@ RETRIEVAL_VALUES = [5, 10, 15]
 RERANK_VALUES = [3, 5, 8]
 
 
-def run_eval(retrieval_k: int, rerank_k: int, kb_name: str) -> dict:
+async def _resolve_kb_id(kb_name: str) -> str:
+    """将知识库名称解析为 UUID。
+
+    Args:
+        kb_name: 知识库名称。
+
+    Returns:
+        匹配的知识库 UUID。
+
+    Raises:
+        ValueError: 未找到同名知识库。
+    """
+    repo = KbRepo(session_factory)
+    all_kbs = await repo.get_all_kb()
+    for kb in all_kbs:
+        if kb.name == kb_name:
+            return kb.id
+    raise ValueError(f"Knowledge base '{kb_name}' not found")
+
+
+def run_eval(retrieval_k: int, rerank_k: int, kb_id: str) -> dict:
     """通过环境变量覆盖 TOP_K 值后运行 eval_ragas。
 
     在子进程环境中设置 TOP_K_RETRIEVAL 和 TOP_K_RERANK，
@@ -29,7 +54,7 @@ def run_eval(retrieval_k: int, rerank_k: int, kb_name: str) -> dict:
     Args:
         retrieval_k: TOP_K_RETRIEVAL 的值。
         rerank_k: TOP_K_RERANK 的值。
-        kb_name: 待评估的知识库名称。
+        kb_id: 待评估的知识库 UUID。
 
     Returns:
         包含 'retrieval_k', 'rerank_k', 'stdout',
@@ -39,10 +64,11 @@ def run_eval(retrieval_k: int, rerank_k: int, kb_name: str) -> dict:
     env["TOP_K_RETRIEVAL"] = str(retrieval_k)
     env["TOP_K_RERANK"] = str(rerank_k)
     result = subprocess.run(
-        ["python", "-m", "src.eval_ragas", "--kb-name", kb_name],
+        ["python", "-m", "src.cli.eval_ragas", "--kb-id", kb_id],
         capture_output=True,
         text=True,
         env=env,
+        check=False,
     )
     return {
         "retrieval_k": retrieval_k,
@@ -87,6 +113,13 @@ def main() -> None:
     parser.add_argument("--kb-name", default="rag_eval", help="知识库名称")
     args = parser.parse_args()
 
+    # 名称 → UUID（eval_ragas 只接受 --kb-id）
+    try:
+        kb_id = asyncio.run(_resolve_kb_id(args.kb_name))
+    except ValueError as e:
+        print(f"error: {e}")
+        sys.exit(1)
+
     # 打印表头
     print(
         f"{'RETRIEVE':>8} {'RERANK':>6} {'faithfulness':>14} {'answer_relevancy':>18} "
@@ -95,7 +128,7 @@ def main() -> None:
     print("-" * 85)
 
     for r_k, rp_k in product(RETRIEVAL_VALUES, RERANK_VALUES):
-        res = run_eval(r_k, rp_k, args.kb_name)
+        res = run_eval(r_k, rp_k, kb_id)
         m = parse_metrics(res["stdout"])
         print(
             f"{r_k:>8} {rp_k:>6} {m.get('faithfulness', 'N/A'):>14} "

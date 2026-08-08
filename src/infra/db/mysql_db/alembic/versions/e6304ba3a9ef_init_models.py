@@ -6,8 +6,7 @@ Create Date: 2026-07-29 03:18:10.816550
 
 """
 
-# ruff: noqa: F821
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 from sqlalchemy.dialects import mysql
@@ -17,9 +16,9 @@ from src.infra.db.base import UTCDateTime
 
 # revision identifiers, used by Alembic.
 revision: str = "e6304ba3a9ef"
-down_revision: Union[str, Sequence[str], None] = None
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

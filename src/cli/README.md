@@ -1,0 +1,239 @@
+# src/cli — 诊断与评估命令行工具
+
+本目录存放 RAG 系统的检索诊断与质量评估 CLI 工具，不参与线上服务。所有命令在项目根目录执行：
+
+```bash
+python -m src.cli.<模块名> --help
+```
+
+## 前提条件
+
+- 环境变量：`.env` 中配置有效的 `DASHSCOPE_API_KEY`（Embedding / LLM / Rerank 调用）
+- 基础设施：MySQL 与 ChromaDB 可用（文档处理、知识库查询依赖）
+- 数据就绪：目标知识库已创建且文档已入库
+
+## 命令一览
+
+| 命令 | 用途 |
+|---|---|
+| `eval_ragas` | RAGAS 评估主脚本：生成测试集 / 执行评估 / 质量门禁 |
+| `eval_ragas_generate` | 测试集生成模块（`eval_ragas --generate` 的内部实现，一般直接调 eval_ragas） |
+| `compare_retrieval` | 遍历「检索 top-K × 重排 top-K」参数网格，用 RAGAS 指标对比选参 |
+| `check_retrieval` | 对已有知识库执行语义检索，打印结果供人工检查 |
+
+---
+
+# RAGAS 工作流详解
+
+RAGAS 评估的核心是**先用文档自动生成 QA 测试集，再用测试集评估 RAG 系统的检索与生成质量**。完整链路：
+
+```
+① 生成测试集 ──> ② 执行评估 ──> ③ 质量门禁 ──> ④ 参数选优（可选）
+eval_ragas --generate   eval_ragas --kb-id   eval_ragas --gate   compare_retrieval
+```
+
+## 第一步：生成测试集（怎么生成）
+
+### 运行命令
+
+```bash
+# 先查出知识库的 UUID（评估与生成都只需要 kb-id）
+python -m src.cli.eval_ragas --list-kbs
+
+# 用文档自动生成 20 条 QA 测试集（size 默认取配置 RAGAS_TEST_SIZE）
+python -m src.cli.eval_ragas --kb-id <知识库UUID> --generate
+python -m src.cli.eval_ragas --kb-id <知识库UUID> --generate --size 30
+```
+
+### 内部流程
+
+1. 从 MySQL 查询知识库名称，按白名单（`RAGAS_DOC_WHITELIST`）取文档 ID
+2. 从 ChromaDB 取出这些文档已有的分块
+3. 分块脱敏后构建 KnowledgeGraph，应用 Summary / NER 抽取
+4. 生成 Personas（用户角色）→ Scenarios（场景）→ QA Samples（问答对）
+5. 写入测试集 JSON，版本号自动递增
+
+### 生成结果在哪里看
+
+生成结束时终端会打印产物路径，形如：
+
+```
+测试集已保存: data/ragas/testset/testset_<kb_id>_v1.json (v1, 20 条)
+```
+
+- **位置**：`data/ragas/testset/testset_<kb_id>_v<N>.json`（目录默认 `RAGAS_TESTSET_DIR`）
+- **版本管理**：同一知识库每生成一次版本号 +1（`v1` → `v2`），评估时可指定任意历史版本
+- **文件结构**：
+
+```json
+{
+  "metadata": {
+    "kb_name": "知识库名",
+    "version": 1,
+    "generated_at": "ISO 8601 时间",
+    "llm_model": "生成用模型",
+    "testset_size": 20,
+    "ragas_version": "0.4.x",
+    "doc_ids": ["文档UUID..."]
+  },
+  "samples": [
+    {
+      "user_input": "问题",
+      "reference": "参考答案",
+      "reference_contexts": ["依据文档片段..."],
+      "synthesizer_name": "生成器类型"
+    }
+  ]
+}
+```
+
+- **生成加速**：LLM 响应有磁盘缓存 `data/ragas/llm_cache/`（DiskCacheBackend），重复生成可复用，支持中断恢复
+
+## 第二步：执行评估（怎么测试）
+
+### 运行命令
+
+```bash
+# 用最新版测试集评估
+python -m src.cli.eval_ragas --kb-id <知识库UUID>
+
+# 指定测试集版本评估
+python -m src.cli.eval_ragas --kb-id <知识库UUID> --testset-version 4
+
+# 自定义报告输出路径
+python -m src.cli.eval_ragas --kb-id <知识库UUID> --output /path/report.csv
+```
+
+### 内部流程
+
+1. 加载测试集 JSON（取出 `questions` 与 `ground_truth`）
+2. 构建生产同款 LangGraph（检索 → rerank → 生成）
+3. 逐题让 RAG 系统生成回答 `answer` 与检索上下文 `contexts`
+4. 用 RAGAS 对四个指标打分
+
+> **评估模式跳过追问**：批量评估以 `skip_clarify=True` 运行图——即使 classify 判定问题缺实体（如缺年份），也不会停在「追问澄清」分支（生产交互链路会追问，评估不会），而是直接走检索+生成。这样单轮指标才有分数可算；追问分支的真实效果属于多轮/Agent 评估范畴，不在单轮评测内。
+
+> 注意：评估阶段每个指标内部会多次调用 LLM（faithfulness 把回答拆句逐句判断、answer_relevancy 反向生成候选问题等），所以**评估耗时明显长于回答生成**。若 ChromaDB 为空或 `RAGAS_LLM_MODEL` 未配置会直接报错退出。
+
+## 测试结果在哪里看
+
+评估完成后产出两个文件（默认在 `data/ragas/reports/`，可用 `--output` 自定义）：
+
+| 文件 | 内容 |
+|---|---|
+| `ragas_eval_<timestamp>.csv` | **逐条明细**：每行一条 QA 及其四项指标得分 |
+| `ragas_eval_<timestamp>.md` | **摘要报告**：评估日期、配置（TOP_K_RETRIEVAL / TOP_K_RERANK）、QA 对数、每行指标表、平均值 |
+
+CSV 每行结构（`question`、`ground_truth` 为原测试集内容，`trace_id` 为该问题链路追踪 ID，后四列是逐条得分）：
+
+```
+index, question, ground_truth, trace_id, faithfulness, answer_relevancy, context_recall, context_precision
+```
+
+MD 摘要表格同样带 `trace_id` 列。每个问题在评估时会生成独立的 `eval_<hex>` 格式 trace_id，并注入到该问题期间的所有日志行（loguru patcher 读取 `current_trace_id`），同时作为 Langfuse trace id —— 用 CSV 里的 trace_id 即可在日志 / Langfuse 中回溯这个问题的完整链路（分类 → 改写 → 检索 → 精排 → 生成），定位指标异常的根因。
+
+MD 摘要末尾会给出整体平均值，例如：
+
+```
+**Averages:** faithfulness=0.9020, answer_relevancy=0.8721, context_recall=0.8140, context_precision=0.7933
+```
+
+## 结果如何解读
+
+### 四个指标（0~1，越高越好）
+
+| 指标 | 门禁阈值 | 含义 | 得分低说明什么 |
+|---|---|---|---|
+| `faithfulness` 忠实度 | ≥ 0.85 | 回答是否忠于检索到的上下文（有无幻觉） | 模型脱离上下文编造内容 |
+| `answer_relevancy` 相关性 | ≥ 0.85 | 回答与问题的相关程度 | 答非所问、回答跑题 |
+| `context_recall` 召回率 | ≥ 0.70 | 检索上下文覆盖参考答案所需信息的比例 | 检索环节漏掉了关键内容 |
+| `context_precision` 精确率 | ≥ 0.80 | 检索上下文中真正有用的信息占比 | 检索混入大量无关噪音 |
+
+### 解读方法
+
+1. **看平均值**（MD 摘要底部）——判断系统整体处于什么水平，对照门禁阈值
+2. **看逐条明细**（CSV / MD 表格）——定位具体是哪些 QA 拖了后腿，阅读对应问题判断失败原因
+3. **按指标定位环节**：
+
+| 现象 | 排查方向 |
+|---|---|
+| recall 低 | 检索环节问题：调大 `TOP_K_RETRIEVAL`、检查分块质量 |
+| precision 低 | 检索/精排噪音：调大 `TOP_K_RERANK`、检查重排效果 |
+| faithfulness 低 | 生成环节幻觉：检查 prompt 约束、换模型 |
+| answer_relevancy 低 | 生成环节相关性：检查 prompt 与模型 |
+
+## 第三步：质量门禁（怎么判定达标）
+
+```bash
+python -m src.cli.eval_ragas --kb-id <知识库UUID> --gate
+```
+
+- 对四个指标逐项打印 `PASS / FAIL`（用全量 QA 的平均值对比阈值）
+- 任一指标不达标：退出码为 **1**，并列出未通过的具体问题
+- 全部达标：退出码为 **0**
+- 适合接入 CI / 发版前检查
+
+## 第四步：参数选优（可选）
+
+```bash
+python -m src.cli.compare_retrieval --kb-name <知识库名称>
+```
+
+遍历 `TOP_K_RETRIEVAL × TOP_K_RERANK` 的 3×3 网格（`[5, 10, 15] × [3, 5, 8]`），每组组合跑一次评估，打印各指标对比表，据此确定最优检索参数。运行前需先有测试集。
+
+---
+
+# 命令参考
+
+## eval_ragas — 参数一览
+
+| 参数 | 说明 |
+|---|---|
+| `--kb-id` | 知识库 UUID（与 `--list-kbs` 互斥） |
+| `--list-kbs` | 列出所有可用知识库后退出 |
+| `--generate` | 生成测试集模式 |
+| `--size` | 生成的 QA 对数，默认取配置 `RAGAS_TEST_SIZE` |
+| `--model` | 生成测试集用的 LLM 模型名 |
+| `--testset-version` | 指定测试集版本号（默认取最新） |
+| `--gate` | 评估后检查质量门禁，不达标退出码 1 |
+| `--output` | CSV 报告输出路径 |
+| `--session-id` | 评估用会话 ID，默认 `ragas_eval_session` |
+
+## eval_ragas_generate — 测试集生成模块
+
+`eval_ragas.py --generate` 的内部实现，一般无需直接运行。包含：从 ChromaDB 读取已有分块、构建知识图谱、`TestsetGenerator` 编排、版本管理与缓存恢复。
+
+## compare_retrieval — 检索参数对比实验
+
+```bash
+python -m src.cli.compare_retrieval --kb-name rag_eval
+```
+
+- 通过子进程调用 `eval_ragas` 并覆盖环境变量 `TOP_K_RETRIEVAL` / `TOP_K_RERANK`（不改 `.env`）
+- 指标列：`faithfulness`、`answer_relevancy`、`context_precision`、`context_recall`
+
+## check_retrieval — 检索质量检查
+
+```bash
+python -m src.cli.check_retrieval --kb <知识库名称> --query "<问题>" [--top-k 10]
+```
+
+对已有知识库执行一次语义检索，打印每条结果的距离分数、来源文件、页码与内容摘要。注意只走语义检索（ChromaDB），**不走** rerank 与生成环节。
+
+---
+
+## 数据目录速查（默认 `data/ragas/`）
+
+| 目录 | 内容 |
+|---|---|
+| `testset/` | 测试集 JSON：`testset_<kb_id>_v<N>.json`，按版本递增 |
+| `reports/` | 评估报告：`ragas_eval_<timestamp>.csv`（逐条）+ 同名 `.md`（摘要） |
+| `llm_cache/` | LLM 响应磁盘缓存（重复生成提速，支持中断恢复） |
+
+## 典型工作流
+
+1. **生成测试集**：`eval_ragas --kb-id <uuid> --generate --size 20`
+2. **执行评估**：`eval_ragas --kb-id <uuid>` → 查看 `data/ragas/reports/` 下的 CSV 与 MD
+3. **质量门禁**：`eval_ragas --kb-id <uuid> --gate`（CI / 提交前检查，不达标退出码 1）
+4. **参数选优**：`compare_retrieval --kb-name <名称>` → 按指标对比表确定 `TOP_K` 组合
+5. **人工抽检**：`check_retrieval --kb <名称> --query "<问题>"` 验证检索效果

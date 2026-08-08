@@ -19,9 +19,11 @@
 
 import os
 import re
+
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+from src.config import CHUNK_OVERLAP, CHUNK_SIZE
 from src.parsers.base import BaseParser, ChunkData, ParseResult
-from src.config import CHUNK_SIZE, CHUNK_OVERLAP
 
 # 匹配 Markdown 表格（以 | 开头和结尾的行组成的多行表格）
 TABLE_PATTERN = re.compile(r"^\|.+\|[\s\S]*?^\|.+\|", re.MULTILINE)

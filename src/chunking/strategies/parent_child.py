@@ -1,3 +1,5 @@
+from typing import ClassVar
+
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from loguru import logger
 
@@ -10,7 +12,7 @@ class ParentChildChunker(BaseChunker):
     CHILD_SIZE = 256
     PARENT_SIZE = 1024
     OVERLAP = 25
-    SEPARATORS = ["\n\n", "\n", "。", ".", " "]
+    SEPARATORS: ClassVar[list[str]] = ["\n\n", "\n", "。", ".", " "]
 
     def chunk(self, text: str, metadata: dict) -> list[ChunkData]:
         parent_splitter = RecursiveCharacterTextSplitter(

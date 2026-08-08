@@ -8,9 +8,9 @@
 """
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
 import os
 import tempfile
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -59,8 +59,10 @@ class TestGenerateAnswers:
         from src.cli.eval_ragas import generate_answers_and_contexts
 
         mock_graph = MagicMock()
+        captured_states: list[dict] = []
 
         async def mock_ainvoke(state: dict) -> dict:
+            captured_states.append(state)
             return {
                 "answer": f"Answer for: {state['query'][:10]}",
                 "contexts": [
@@ -71,7 +73,7 @@ class TestGenerateAnswers:
 
         mock_graph.ainvoke = AsyncMock(side_effect=mock_ainvoke)
 
-        answers, contexts = asyncio.run(
+        answers, contexts, trace_ids = asyncio.run(
             generate_answers_and_contexts(
                 mock_graph,
                 "test_kb",
@@ -82,8 +84,12 @@ class TestGenerateAnswers:
 
         assert len(answers) == 2
         assert len(contexts) == 2
+        assert len(trace_ids) == 2
+        assert trace_ids[0].startswith("eval_")
         assert "Answer for" in answers[0]
         assert len(contexts[0]) == 2
+        # 评估模式必须跳过 clarify 追问，否则批量评估会空答
+        assert all(st["skip_clarify"] is True for st in captured_states)
 
     def test_generate_partial_failure(self) -> None:
         """部分问题失败时应返回错误标记，不中断整体流程。"""
@@ -102,7 +108,7 @@ class TestGenerateAnswers:
 
         mock_graph.ainvoke = AsyncMock(side_effect=mock_ainvoke)
 
-        answers, contexts = asyncio.run(
+        answers, contexts, trace_ids = asyncio.run(
             generate_answers_and_contexts(
                 mock_graph,
                 "kb",
@@ -112,8 +118,11 @@ class TestGenerateAnswers:
         )
 
         assert len(answers) == 3
+        assert len(trace_ids) == 3
         assert "[ERROR]" in answers[1]
         assert contexts[1] == []
+        # 失败的问题也要有 trace_id，便于回溯
+        assert trace_ids[1].startswith("eval_")
 
 
 class TestRunEvaluation:
@@ -127,13 +136,14 @@ class TestRunEvaluation:
         mock_from_dict: MagicMock,
     ) -> None:
         """评估流程应正确调用 ragas.evaluate。"""
-        from src.cli.eval_ragas import run_evaluation
         from ragas.metrics import (
-            faithfulness,
             answer_relevancy,
-            context_recall,
             context_precision,
+            context_recall,
+            faithfulness,
         )
+
+        from src.cli.eval_ragas import run_evaluation
 
         mock_result = MagicMock()
         mock_result.to_pandas.return_value = MagicMock()
@@ -197,8 +207,9 @@ class TestSaveResults:
 
     def test_save_csv(self) -> None:
         """CSV 保存应包含所有必要列。"""
-        from src.cli.eval_ragas import save_results_csv
         import pandas as pd
+
+        from src.cli.eval_ragas import save_results_csv
 
         mock_df = pd.DataFrame(
             {
@@ -232,8 +243,9 @@ class TestSaveResults:
 
     def test_save_csv_with_chunk_size(self) -> None:
         """Benchmark 模式 CSV 应记录 chunk_size。"""
-        from src.cli.eval_ragas import save_results_csv
         import pandas as pd
+
+        from src.cli.eval_ragas import save_results_csv
 
         mock_df = pd.DataFrame(
             {
@@ -270,6 +282,7 @@ class TestSaveResults:
 def test_gate_passes_with_high_scores() -> None:
     """--gate exits 0 when all metrics meet thresholds."""
     import pandas as pd
+
     from src.cli.eval_ragas import check_gate
 
     mock_result = MagicMock()
@@ -291,6 +304,7 @@ def test_gate_passes_with_high_scores() -> None:
 def test_gate_fails_with_low_scores() -> None:
     """--gate exits 1 when a metric is below threshold."""
     import pandas as pd
+
     from src.cli.eval_ragas import check_gate
 
     mock_result = MagicMock()

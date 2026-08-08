@@ -1,13 +1,12 @@
 """认证服务层 — 封装用户注册、登录、令牌验证等业务逻辑。"""
 
 import uuid
-from typing import Optional
 
 from loguru import logger
 
 from src.infra.db.mysql_db import UserRepo
-from src.utils.errors import BusinessError
 from src.utils.auth_crypto import hash_password, verify_password
+from src.utils.errors import BusinessError
 
 
 class AuthService:
@@ -30,7 +29,7 @@ class AuthService:
         if not password or len(password) < self.PASSWORD_MIN_LENGTH:
             raise BusinessError(
                 "PASSWORD_TOO_SHORT",
-                "密码长度不能少于 {} 位".format(self.PASSWORD_MIN_LENGTH),
+                f"密码长度不能少于 {self.PASSWORD_MIN_LENGTH} 位",
             )
 
         existing = await self._user_repo.get_user_by_account(account)
@@ -56,13 +55,13 @@ class AuthService:
         user_id = user.id
 
         if self._redis:
-            await self._redis.setex("token:{}".format(token), 604800, user_id)
+            await self._redis.setex(f"token:{token}", 604800, user_id)
         await self._user_repo.update_user_token(user_id, token)
 
         logger.info("User logged in: user_id={} account={}", user_id, user.account)
         return {"token": token, "user_id": user_id}
 
-    async def verify_token(self, token: str) -> Optional[str]:
+    async def verify_token(self, token: str) -> str | None:
         """验证会话令牌有效性。"""
         if not token:
             return None
@@ -70,14 +69,14 @@ class AuthService:
         user_id = None
         if self._redis:
             try:
-                cached = await self._redis.get("token:{}".format(token))
+                cached = await self._redis.get(f"token:{token}")
                 if cached:
                     if isinstance(cached, bytes):
                         user_id = cached.decode("utf-8")
                     else:
                         user_id = cached
                     return user_id
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
 
         user = await self._user_repo.get_user_by_token(token)
@@ -85,8 +84,8 @@ class AuthService:
             user_id = user.id
             if self._redis and user_id:
                 try:
-                    await self._redis.setex("token:{}".format(token), 604800, user_id)
-                except Exception:
+                    await self._redis.setex(f"token:{token}", 604800, user_id)
+                except Exception:  # noqa: BLE001, S110
                     pass
             return user_id
 
@@ -96,6 +95,6 @@ class AuthService:
         """退出登录，清除 Redis 中的 token 缓存。"""
         if self._redis and token:
             try:
-                await self._redis.delete("token:{}".format(token))
-            except Exception:
+                await self._redis.delete(f"token:{token}")
+            except Exception:  # noqa: BLE001, S110
                 pass

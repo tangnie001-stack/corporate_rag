@@ -12,7 +12,6 @@
 """
 
 import json
-from typing import Optional
 
 import redis as redis_sync
 import redis.asyncio as redis_async
@@ -39,7 +38,7 @@ class ChatManager:
 
     def __init__(
         self,
-        redis_url: Optional[str] = None,
+        redis_url: str | None = None,
         ttl: int = REDIS_TTL,
     ) -> None:
         """初始化 ChatManager。
@@ -50,11 +49,11 @@ class ChatManager:
         """
         self.ttl = ttl
         self._redis_url = redis_url or REDIS_URL
-        self._redis: Optional[redis_async.Redis] = None
+        self._redis: redis_async.Redis | None = None
         self._in_memory: bool = False
         # 内存降级时的存储：session_id -> [msg_dict, ...]
         self._memory_store: dict[str, list[dict]] = {}
-        self._persistence: Optional[PersistenceService] = None
+        self._persistence: PersistenceService | None = None
         self._init_redis(self._redis_url)
 
     def set_chat_repo(self, chat_repo: ChatRepo) -> None:
@@ -94,7 +93,7 @@ class ChatManager:
         kb_id: str,
         user_msg: str,
         assistant_msg: str,
-        sources: Optional[list[str]] = None,
+        sources: list[str] | None = None,
     ) -> None:
         """异步写入 user + assistant 消息到 MySQL。
 
@@ -130,7 +129,7 @@ class ChatManager:
             conn.close()
             self._redis = redis_async.from_url(redis_url, decode_responses=True)
             logger.info("ChatManager: Redis async client created at {}", redis_url)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             # Redis 不可用：静默降级为内存存储，不影响程序运行
             self._redis = None
             self._in_memory = True
@@ -168,13 +167,13 @@ class ChatManager:
                     return
                 self._redis = c
                 self._in_memory = False
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
             return
         assert self._redis is not None
         try:
             await self._redis.ping()
-        except Exception:
+        except Exception:  # noqa: BLE001
             # 双检：await 期间可能另一个协程已降级
             if self._in_memory:
                 return
@@ -208,7 +207,7 @@ class ChatManager:
         try:
             await self._redis.rpush(key, json.dumps(msg, ensure_ascii=False))
             await self._redis.expire(key, self.ttl)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("add_message_async failed: {}", e)
 
     async def get_history_async(self, session_id: str) -> list[ChatMessage]:
@@ -230,7 +229,7 @@ class ChatManager:
         try:
             raw = await self._redis.lrange(key, 0, -1)
             return [ChatMessage(**json.loads(m)) for m in raw]
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("get_history_async failed: {}", e)
             return []
 
@@ -248,5 +247,5 @@ class ChatManager:
         assert self._redis is not None
         try:
             await self._redis.delete(key)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("clear_history_async failed: {}", e)

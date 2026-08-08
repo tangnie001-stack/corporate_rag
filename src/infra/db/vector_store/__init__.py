@@ -4,8 +4,6 @@
 list[ChunkResult] / ChunkQueryResult。
 """
 
-from typing import Optional
-
 from src.chunking.validator import ChunkData
 from src.config import CHROMA_COLLECTION_PREFIX
 from src.infra.db.vector_store import search as _search
@@ -20,7 +18,7 @@ class VectorStore:
     对外提供增删查的统一接口，内部委托给 store / search / client 子模块。
     """
 
-    def __init__(self, persist_dir: Optional[str] = None):
+    def __init__(self, persist_dir: str | None = None):
         """初始化向量存储实例。
 
         Args:
@@ -49,7 +47,7 @@ class VectorStore:
         kb_id: str,
         chunks: list[ChunkData],
         doc_id: str,
-        embeddings: Optional[list[list[float]]] = None,
+        embeddings: list[list[float]] | None = None,
     ) -> int:
         """批量写入分块到指定知识库的 collection。
 
@@ -99,7 +97,7 @@ class VectorStore:
             kb_id = name.removeprefix(CHROMA_COLLECTION_PREFIX)
             try:
                 collections[kb_id] = self._chroma.get_or_create_collection(kb_id)
-            except Exception:
+            except Exception:  # noqa: BLE001, S112
                 continue
         return _search.similarity_search_all(collections, self._embed_fn, query, k)
 
@@ -201,4 +199,4 @@ class VectorStore:
         return self._chroma.list_collection_names()
 
 
-__all__ = ["VectorStore", "ChunkResult", "ChunkQueryResult"]
+__all__ = ["ChunkQueryResult", "ChunkResult", "VectorStore"]

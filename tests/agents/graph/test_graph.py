@@ -1,10 +1,11 @@
 """Tests for LangGraph node functions."""
 
 from unittest.mock import Mock, patch
+
 import pytest
 
-from src.agents.graph.state import AgentState, RAGQueryIntent, LangGraphNode
 from src.agents.graph.nodes import make_classify_node
+from src.agents.graph.state import AgentState, LangGraphNode, RAGQueryIntent
 
 
 def test_make_classify_node_returns_callable():
@@ -33,6 +34,19 @@ def test_route_by_intent_returns_normal():
         query="2024年营收多少",
         intent=RAGQueryIntent(route="medium"),
         missing_entities=[],
+    )
+    assert route_by_intent(state) == "medium"
+
+
+def test_route_by_intent_skips_clarify_when_skip_clarify():
+    """skip_clarify=True 时即使有 missing_entities 也走正常路由（评估模式跳过追问）。"""
+    from src.agents.graph.workflow import route_by_intent
+
+    state = AgentState(
+        query="联营公司非经常性损益影响金额",
+        intent=RAGQueryIntent(route="medium"),
+        missing_entities=[{"type": "year", "question": "哪一年？"}],
+        skip_clarify=True,
     )
     assert route_by_intent(state) == "medium"
 
@@ -160,10 +174,11 @@ def test_format_node_empty_when_abstention():
 
 def test_generate_node_abstention_when_no_contexts():
     """无 contexts 且非 skip_retrieval 时，generate_node 应返回 abstention 静态文案。"""
+    from unittest.mock import Mock
+
     from src.agents.graph.nodes import make_generate_node
     from src.agents.graph.state import AgentState
     from src.config.prompts import ABSTENTION_TEXT
-    from unittest.mock import Mock
 
     node = make_generate_node(llm=Mock(), prompt_manager=Mock())
     state = AgentState(
@@ -181,10 +196,11 @@ def test_generate_node_abstention_when_no_contexts():
 
 def test_generate_node_abstention_uses_llm_model_attr():
     """llm 实例带 model 属性时，abstention 分支应展示该模型名。"""
+    from unittest.mock import Mock
+
     from src.agents.graph.nodes import make_generate_node
     from src.agents.graph.state import AgentState
     from src.config.prompts import ABSTENTION_TEXT
-    from unittest.mock import Mock
 
     llm = Mock()
     llm.model = "qwen-custom-model"
@@ -224,8 +240,8 @@ def test_grader_node_short_circuit_when_rewrite_unchanged():
     """本轮改写查询与上一轮相同（rewrite 无信息增量）时直接降级，不再重试。"""
     from src.agents.graph.nodes import grader_node
     from src.agents.graph.state import (
-        AgentState,
         DOWNGRADE_REASON_REWRITE_NO_INCREMENT,
+        AgentState,
     )
     from src.infra.db.vector_store.types import ChunkResult
 
@@ -266,10 +282,11 @@ def test_grader_node_still_retries_when_rewrite_changed():
 
 def test_generate_node_skip_retrieval_uses_simple_prompt():
     """skip_retrieval=True 时即使有 contexts 也走 build_simple_prompt。"""
+    from unittest.mock import Mock, patch
+
     from src.agents.graph.nodes import make_generate_node
     from src.agents.graph.state import AgentState
     from src.rag.context import RAGContext
-    from unittest.mock import Mock, patch
 
     node = make_generate_node(llm=Mock(), prompt_manager=Mock())
     state = AgentState(
@@ -287,10 +304,10 @@ def test_generate_node_skip_retrieval_uses_simple_prompt():
         ],
         skip_retrieval=True,
     )
-    with patch("src.agents.graph.nodes.build_simple_prompt", return_value=[]) as m:
-        with patch(
-            "src.agents.graph.nodes.stream_answer", return_value=iter(["你好！"])
-        ):
-            result = node(state)
+    with (
+        patch("src.agents.graph.nodes.build_simple_prompt", return_value=[]) as m,
+        patch("src.agents.graph.nodes.stream_answer", return_value=iter(["你好！"])),
+    ):
+        result = node(state)
     m.assert_called_once()
     assert "你好" in result["answer"]

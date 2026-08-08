@@ -1,5 +1,6 @@
 """RAGAS 测试集生成 API — 在 Docker 容器内触发生成流程。"""
 
+import asyncio
 import json
 import os
 
@@ -57,8 +58,13 @@ async def ragas_generate(body: RagasGenerateRequest):
             svc.settings.RAGAS_DATA_DIR, f"testset_{kb_id}_v{version}.json"
         )
         if os.path.exists(output_path):
-            with open(output_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+
+            def _read_testset(path: str) -> dict:
+                """同步读取测试集 JSON（在 to_thread 中执行，避免阻塞事件循环）。"""
+                with open(path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+
+            data = await asyncio.to_thread(_read_testset, output_path)
             testset_size = len(data.get("samples", []))
             logger.info(
                 "Testset generated: kb_name={} version={} size={}",
@@ -81,7 +87,7 @@ async def ragas_generate(body: RagasGenerateRequest):
             data=None,
         )
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.exception("RAGAS generate failed: {}", e)
         return ResponseModel(
             code="ERROR",

@@ -5,7 +5,6 @@
 """
 
 import asyncio
-from typing import Optional
 
 from loguru import logger
 
@@ -34,10 +33,10 @@ class AppService:
     def __init__(
         self,
         session_factory=None,
-        vector_store: Optional[VectorStore] = None,
-        router: Optional[DocRouter] = None,
-        chat_manager: Optional[ChatManager] = None,
-        agent_service: Optional[AgentService] = None,
+        vector_store: VectorStore | None = None,
+        router: DocRouter | None = None,
+        chat_manager: ChatManager | None = None,
+        agent_service: AgentService | None = None,
     ) -> None:
         if session_factory is None:
             from src.infra.db.engine import session_factory as _sf
@@ -64,7 +63,7 @@ class AppService:
         )
         self.kb = KBService(self._kb_repo)
         self.document = DocumentService(self._doc_repo, self.vector_store, self.router)
-        self._auth_service: Optional[AuthService] = None
+        self._auth_service: AuthService | None = None
 
     # ==================== 认证 ====================
 
@@ -99,7 +98,7 @@ class AppService:
         try:
             await asyncio.to_thread(self.vector_store.delete_collection, kb_id)
             logger.info("ChromaDB delete_collection: kb_id={}", kb_id)
-        except Exception:
+        except Exception:  # noqa: BLE001
             logger.warning("ChromaDB delete collection failed for kb={}", kb_id)
         ok = await self._kb_repo.soft_delete_kb(kb_id)
         if ok:
@@ -145,7 +144,7 @@ class AppService:
             for s in items
         ]
 
-    async def get_session_by_id(self, session_id: str) -> Optional[dict]:
+    async def get_session_by_id(self, session_id: str) -> dict | None:
         """按 ID 查询会话。"""
         session = await self._chat_repo.get_session_by_id(session_id)
         if session is None:
@@ -199,7 +198,7 @@ class AppService:
         kb_id: str,
         user_msg: str,
         assistant_msg: str,
-        sources: Optional[list[str]] = None,
+        sources: list[str] | None = None,
     ) -> None:
         """批量持久化保存消息。"""
         await self.chat_manager.save_messages_async(

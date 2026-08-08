@@ -1,6 +1,5 @@
 import hashlib
 import uuid
-from typing import Optional
 
 from src.config import settings
 
@@ -27,7 +26,7 @@ class UserAuth:
         redis_client.setex(f"token:{token}", ttl, user_id)
 
     @staticmethod
-    def get_user_id_from_token(redis_client, token: str) -> Optional[str]:
+    def get_user_id_from_token(redis_client, token: str) -> str | None:
         uid = redis_client.get(f"token:{token}")
         return uid.decode() if isinstance(uid, bytes) else uid
 
@@ -50,7 +49,7 @@ class UserAuth:
         await rc.setex(f"token:{token}", ttl, uid)
 
     @staticmethod
-    async def get_user_id_from_token_async(rc, token: str) -> Optional[str]:
+    async def get_user_id_from_token_async(rc, token: str) -> str | None:
         """异步从 token 获取用户 ID。
 
         Args:

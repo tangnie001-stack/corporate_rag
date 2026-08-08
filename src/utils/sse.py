@@ -7,7 +7,6 @@
 import json
 from dataclasses import dataclass
 
-
 # ── 结构化事件 dataclass ─────────────────────────────────
 
 

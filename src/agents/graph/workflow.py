@@ -1,28 +1,32 @@
 # src/agents/graph/workflow.py
 """StateGraph 组装 — 节点注册、条件边连接、图编译。"""
 
-from langgraph.graph import StateGraph, END
+from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from loguru import logger
 
-from src.agents.graph.state import AgentState, LangGraphNode
 from src.agents.graph.nodes import (
-    make_classify_node,
-    rewrite_node,
-    grader_node,
     format_node,
-    make_kb_router_node,
-    make_retrieve_node,
-    make_rerank_node,
+    grader_node,
+    make_classify_node,
     make_generate_node,
+    make_kb_router_node,
+    make_rerank_node,
+    make_retrieve_node,
+    rewrite_node,
 )
+from src.agents.graph.state import AgentState, LangGraphNode
 from src.infra.db.vector_store import VectorStore
 from src.infra.search.bm25_index import BM25Index
 
 
 def route_by_intent(state: AgentState) -> str:
-    """根据意图路由到不同路径，缺失实体时返回 clarify。"""
-    if state.missing_entities:
+    """根据意图路由到不同路径，缺失实体时返回 clarify。
+
+    评估模式（skip_clarify=True）下即使有缺失实体也跳过追问，
+    直接按正常路由走检索+生成，避免批量评估因追问而空答。
+    """
+    if state.missing_entities and not state.skip_clarify:
         logger.info("route_by_intent: missing_entities detected -> clarify")
         return "clarify"
     return state.intent.route or "medium"

@@ -1,7 +1,6 @@
 """检索结果类型 — ChromaDB 语义检索和 BM25 词法检索的统一输出类型。"""
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 @dataclass(slots=True)
@@ -18,9 +17,9 @@ class ChunkResult:
     """分块的文本内容，由文档解析器生成，可能包含 Markdown 格式。"""
     metadata: dict = field(default_factory=dict)
     """元数据字典，包含 source（文件名）、page（页码）、doc_id（文档ID）等。"""
-    distance: Optional[float] = None
+    distance: float | None = None
     """余弦距离，仅语义检索时有值（越小越相似），BM25 检索和分页查询时为 None。"""
-    bm25_score: Optional[float] = None
+    bm25_score: float | None = None
     """BM25 词法检索分数，仅 BM25 检索时有值，语义检索和分页查询时为 None。"""
 
 

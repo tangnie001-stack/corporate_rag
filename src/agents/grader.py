@@ -5,8 +5,8 @@
 分数范围 0~1，阈值 0.5。
 """
 
-from loguru import logger
 import jieba
+from loguru import logger
 
 from src.config import TOP_K_RERANK
 

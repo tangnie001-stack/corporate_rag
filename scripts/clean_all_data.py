@@ -4,12 +4,23 @@
 """
 
 import asyncio
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
+
 from src.config import (
-    MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE,
-    REDIS_URL, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY,
-    MINIO_DOC_BUCKET, CHROMA_COLLECTION_PREFIX, CHROMA_PERSIST_DIR,
+    CHROMA_COLLECTION_PREFIX,
+    CHROMA_PERSIST_DIR,
+    MINIO_ACCESS_KEY,
+    MINIO_DOC_BUCKET,
+    MINIO_ENDPOINT,
+    MINIO_SECRET_KEY,
+    MYSQL_DATABASE,
+    MYSQL_HOST,
+    MYSQL_PASSWORD,
+    MYSQL_PORT,
+    MYSQL_USER,
+    REDIS_URL,
 )
 
 
@@ -19,7 +30,9 @@ async def drop_mysql():
     async with engine.connect() as conn:
         await conn.execute(text(f"DROP DATABASE IF EXISTS `{MYSQL_DATABASE}`"))
         await conn.execute(
-            text(f"CREATE DATABASE `{MYSQL_DATABASE}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+            text(
+                f"CREATE DATABASE `{MYSQL_DATABASE}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+            )
         )
         await conn.commit()
         print(f"[MySQL] 已删除并重建 database: {MYSQL_DATABASE}")
@@ -28,6 +41,7 @@ async def drop_mysql():
 
 async def flush_redis():
     import redis.asyncio as redis_async
+
     client = redis_async.from_url(REDIS_URL, decode_responses=True)
     await client.flushdb()
     await client.aclose()
@@ -36,11 +50,17 @@ async def flush_redis():
 
 async def clean_minio():
     from minio import Minio
-    client = Minio(MINIO_ENDPOINT, access_key=MINIO_ACCESS_KEY,
-                   secret_key=MINIO_SECRET_KEY, secure=False)
+
+    client = Minio(
+        MINIO_ENDPOINT,
+        access_key=MINIO_ACCESS_KEY,
+        secret_key=MINIO_SECRET_KEY,
+        secure=False,
+    )
     if client.bucket_exists(MINIO_DOC_BUCKET):
         for obj in client.list_objects(MINIO_DOC_BUCKET, recursive=True):
-            client.remove_object(MINIO_DOC_BUCKET, obj.object_name)
+            if obj.object_name is not None:
+                client.remove_object(MINIO_DOC_BUCKET, obj.object_name)
         client.remove_bucket(MINIO_DOC_BUCKET)
         print(f"[MinIO] 已删除 bucket: {MINIO_DOC_BUCKET}")
     client.make_bucket(MINIO_DOC_BUCKET)
@@ -48,9 +68,11 @@ async def clean_minio():
 
 
 async def reset_chromadb():
+    from pathlib import Path
+
     import chromadb
     from chromadb.config import Settings
-    from pathlib import Path
+
     persist_path = Path(CHROMA_PERSIST_DIR)
     if not persist_path.exists():
         print(f"[ChromaDB] 持久化目录不存在，跳过: {CHROMA_PERSIST_DIR}")
@@ -59,8 +81,11 @@ async def reset_chromadb():
         path=str(persist_path),
         settings=Settings(anonymized_telemetry=False),
     )
-    names = [c.name for c in client.list_collections()
-             if c.name.startswith(CHROMA_COLLECTION_PREFIX)]
+    names = [
+        c.name
+        for c in client.list_collections()
+        if c.name.startswith(CHROMA_COLLECTION_PREFIX)
+    ]
     for name in names:
         client.delete_collection(name)
     print(f"[ChromaDB] 已删除 {len(names)} 个 collection")

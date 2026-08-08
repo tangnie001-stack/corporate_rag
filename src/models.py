@@ -13,7 +13,8 @@
 import functools
 import json
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from langchain_community.document_compressors.dashscope_rerank import DashScopeRerank
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
@@ -103,9 +104,7 @@ def with_retry(
         )
         if last_error is not None:
             raise last_error
-        raise RuntimeError(
-            "{} failed after {} attempts".format(func.__name__, max_attempts)
-        )
+        raise RuntimeError(f"{func.__name__} failed after {max_attempts} attempts")
 
     return wrapper
 

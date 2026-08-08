@@ -141,7 +141,7 @@ class QueryRouter:
                 "missing_entities": result.get("missing_entities", []),
                 "confidence": result.get("confidence", 0.5),
             }
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("QueryRouter LLM classify failed: {}", e)
             return self._fallback_route(complexity_score)
 

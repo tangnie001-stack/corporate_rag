@@ -5,8 +5,8 @@ import uuid
 import pytest
 
 from src.infra.db.engine import session_factory
-from src.infra.db.mysql_db import KbRepo, DocumentRepo
 from src.infra.db.models.document import DocModel as DocEntity
+from src.infra.db.mysql_db import DocumentRepo, KbRepo
 
 
 @pytest.fixture
@@ -151,12 +151,12 @@ async def test_get_all_kb_doc_count():
 @pytest.mark.asyncio
 async def test_create_session_idempotent():
     """同一 session_id 重复创建应幂等跳过，不抛主键冲突异常。"""
-    from src.infra.db.mysql_db import ChatRepo
     from src.infra.db.models.chat import SessionModel
+    from src.infra.db.mysql_db import ChatRepo
 
     chat_repo = ChatRepo(session_factory)
     session_id = f"session-{uuid.uuid4().hex[:8]}"
-    base = dict(user_id="test-user", title="测试会话", kb_id="")
+    base = {"user_id": "test-user", "title": "测试会话", "kb_id": ""}
 
     await chat_repo.create_session(SessionModel(id=session_id, **base))
     # 第二次创建同 id：应静默跳过而非抛 IntegrityError

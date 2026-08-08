@@ -1,7 +1,7 @@
 """流式聊天 SSE 端点 — 支持分阶段状态推送和引用高亮。"""
 
 import asyncio
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
 import jieba
 from fastapi import APIRouter, Depends, Query, Request
@@ -178,7 +178,7 @@ async def _stream_rag_response(
                     # 追问：系统在向用户索要缺失信息，未产生问答，不持久化
                     clarification_requested = True
             yield to_sse(event)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.exception("Chat stream unhandled error: {}", str(e))
         yield to_sse(SSEErrorEvent(str(e)))
         yield to_sse(SSEDoneEvent())
@@ -228,7 +228,7 @@ async def _persist_conversation(
             try:
                 await factory()
                 return
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 if i < max_retries - 1:
                     wait = initial_interval * (backoff**i)
                     await asyncio.sleep(wait)

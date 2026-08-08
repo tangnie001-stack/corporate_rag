@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
-from typing import Literal, Optional
+from typing import Literal
+
 from src.infra.db.vector_store.types import ChunkResult
 from src.infra.llm.chat_message import ChatMessage
 from src.infra.llm.trace_context import current_trace_id
@@ -32,7 +33,7 @@ class AgentState:
         default_factory=list
     )  # 向量/BM25 检索结果
     contexts: list[RAGContext] = field(default_factory=list)  # rerank 精排后的上下文
-    grader_score: Optional[float] = None  # grader 关键词覆盖度评分（0~1）
+    grader_score: float | None = None  # grader 关键词覆盖度评分（0~1）
     retrieval_retries: int = 0  # 检索重试次数
     # ── 输出 ──
     answer: str = ""  # LLM 生成的完整回答
@@ -52,7 +53,12 @@ class AgentState:
         default_factory=list
     )  # LLM 标记的缺失实体（如 [{"type": "year", "question": "哪一年？"}]
     classification_confidence: float = 0.0  # LLM 置信度（LLM 输出 key="confidence"）
-    skip_retrieval: bool = False  # 问候/闲聊标记：跳过检索直接回答（由 classify_node 设置）
+    skip_retrieval: bool = (
+        False  # 问候/闲聊标记：跳过检索直接回答（由 classify_node 设置）
+    )
+    skip_clarify: bool = (
+        False  # 评估模式标记：即使缺实体也不进 clarify 追问分支（由评估脚本设置）
+    )
     # ── 内部 ──
     _history: list[ChatMessage] = field(
         default_factory=list
@@ -98,7 +104,9 @@ class LangGraphNode:
         RETRIEVAL_RETRIES: str = "retrieval_retries"  # 检索重试次数
         DOWNGRADED: str = "downgraded"  # 是否降级
         DOWNGRADE_REASON: str = "downgrade_reason"  # 降级原因
-        PREV_REWRITTEN_QUERY: str = "_prev_rewritten_query"  # 上一轮改写查询（短路判断用）
+        PREV_REWRITTEN_QUERY: str = (
+            "_prev_rewritten_query"  # 上一轮改写查询（短路判断用）
+        )
 
     class Rerank:
         NAME: str = "rerank"  # 重排序

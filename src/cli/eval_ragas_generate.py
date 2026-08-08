@@ -16,13 +16,13 @@ import json
 import os
 import re
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional, cast
+from typing import cast
 
 from loguru import logger
 
-from src.config import RAGAS_DATA_DIR, RAGAS_TESTSET_DIR
+from src.config import RAGAS_DATA_DIR, RAGAS_DOC_WHITELIST, RAGAS_TESTSET_DIR
 
 
 def _ensure_vertexai_stub() -> None:
@@ -93,13 +93,12 @@ def _find_next_version(kb_id: str) -> int:
             m = pattern.match(f.name)
             if m:
                 ver = int(m.group(1))
-                if ver > max_version:
-                    max_version = ver
+                max_version = max(max_version, ver)
     return max_version + 1
 
 
 def _load_latest_testset(
-    kb_id: str, version: Optional[int] = None
+    kb_id: str, version: int | None = None
 ) -> tuple[list[str], list[str]]:
     """加载指定知识库的测试集，支持指定版本或自动取最新。
 
@@ -196,7 +195,7 @@ def run_generate(
         logger.error("{}", str(e))
         print(f"✗ {e}")
         sys.exit(1)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error("查询知识库元信息失败: {}", e)
         print(f"✗ 查询知识库元信息失败: {e}")
         sys.exit(1)
@@ -206,7 +205,6 @@ def run_generate(
     from ragas.testset.synthesizers.generate import TestsetGenerator
 
     from src.config import settings
-    from src.config.settings import RAGAS_DOC_WHITELIST
     from src.infra.db.vector_store import VectorStore
     from src.models import get_embeddings
     from src.utils.desensitize import desensitize
@@ -364,7 +362,7 @@ def run_generate(
 
     try:
         testset = cast(Testset, generator.generate(testset_size=size))
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.exception("TestsetGenerator 调用失败")
         print(f"✗ 测试集生成失败: {e}")
         print(f"✗ 异常类型: {type(e).__name__}")
@@ -383,7 +381,7 @@ def run_generate(
             "kb_name": kb_name,
             "doc_names": [doc_names_map.get(d, "") for d in doc_ids],
             "version": version,
-            "generated_at": datetime.now().isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
             "llm_model": eval_model,
             "testset_size": len(samples_list),
             "ragas_version": ragas.__version__,

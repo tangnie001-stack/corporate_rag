@@ -13,9 +13,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.rag import retrieval
 from src.infra.db.vector_store.types import ChunkResult
 from src.infra.llm.chat_message import ChatMessage
+from src.rag import retrieval
 
 
 # ==================== 检索测试 ====================
@@ -126,9 +126,11 @@ class TestRerank:
         ]
         # 距离 0.9 → fallback 分数 0.1 < 0.3，若应用阈值会被过滤；不应被过滤
         results[0].distance = 0.9
-        with patch("src.rag.retrieval.RERANK_MIN_SCORE", 0.3):
-            with patch("src.rag.retrieval.with_retry", side_effect=lambda f, **kw: f):
-                contexts = retrieval.rerank_results("query", results, reranker)
+        with (
+            patch("src.rag.retrieval.RERANK_MIN_SCORE", 0.3),
+            patch("src.rag.retrieval.with_retry", side_effect=lambda f, **kw: f),
+        ):
+            contexts = retrieval.rerank_results("query", results, reranker)
         assert len(contexts) == 1
 
 

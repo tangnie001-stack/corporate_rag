@@ -8,11 +8,11 @@ import time
 from loguru import logger
 
 from src.chunking.router import ChunkRouter
+from src.chunking.scorer import ChunkQualityScorer
 from src.chunking.strategies.base import BaseChunker
 from src.chunking.validator import ChunkData, validate_chunks
 from src.config import CHUNK_EVAL_ENABLED
 from src.config.response_codes import Code
-from src.eval.chunk_scorer import ChunkQualityScorer
 from src.infra.db.file_store import FileStore
 from src.infra.db.models.document import DocModel as DocEntity
 from src.infra.db.mysql_db import DocumentRepo
@@ -117,7 +117,7 @@ class DocumentService:
             )
         try:
             await asyncio.to_thread(self.vector_store.delete_document, kb_id, doc_id)
-        except Exception:
+        except Exception:  # noqa: BLE001
             logger.warning("ChromaDB delete failed for doc_id={}, will retry", doc_id)
         deleted = await self._doc_repo.soft_delete_document(doc_id)
         if not deleted:
@@ -421,7 +421,7 @@ class DocumentService:
                             eval_result.get("overall_score"),
                             eval_result.get("passed"),
                         )
-                    except Exception as eval_err:
+                    except Exception as eval_err:  # noqa: BLE001
                         logger.warning(
                             "Chunk eval failed for '{}': {}", filename, eval_err
                         )
@@ -459,7 +459,7 @@ class DocumentService:
                     t3 - t0,
                 )
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 error_msg = str(e)[:1024]
                 logger.exception(
                     "Document processing failed: {} - {}",

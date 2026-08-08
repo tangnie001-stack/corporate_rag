@@ -21,11 +21,11 @@ import sys
 
 from loguru import logger
 
+from src.config import TOP_K_RERANK
 from src.core.logging import setup_logging
 from src.infra.db.engine import session_factory
 from src.infra.db.mysql_db import KbRepo
 from src.infra.db.vector_store import VectorStore
-from src.config import TOP_K_RERANK
 
 setup_logging(configure_trace_id=True)
 
@@ -64,7 +64,7 @@ async def main() -> None:
     store = VectorStore()
     try:
         results = store.similarity_search(kb_id, args.query, k=args.top_k)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.exception("Search failed: {}", e)
         print("Hint: Ensure DASHSCOPE_API_KEY is set and documents have been added.")
         sys.exit(1)

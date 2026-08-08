@@ -4,7 +4,7 @@
 工厂函数支持 **kw 参数，按需覆盖默认字段。
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 
 
@@ -22,7 +22,7 @@ def make_doc(id="doc-1", filename="test.pdf", status="ready", **kw):
         "file_size": 1024,
         "status": status,
         "chunk_count": 10,
-        "created_at": datetime(2026, 7, 1),
+        "created_at": datetime(2026, 7, 1, tzinfo=UTC),
     }
     base.update(kw)
     return base
@@ -48,8 +48,8 @@ def make_session(id="s1", title="财报问答", **kw):
         "kb_id": "kb-1",
         "kb_name": "年报",
         "message_count": 3,
-        "created_at": datetime(2026, 1, 1),
-        "updated_at": datetime(2026, 1, 2),
+        "created_at": datetime(2026, 1, 1, tzinfo=UTC),
+        "updated_at": datetime(2026, 1, 2, tzinfo=UTC),
     }
     base.update(kw)
     return base
@@ -61,7 +61,7 @@ def make_message(role="user", content="hello", **kw):
         "role": role,
         "content": content,
         "sources": None,
-        "created_at": datetime(2026, 1, 1),
+        "created_at": datetime(2026, 1, 1, tzinfo=UTC),
     }
     base.update(kw)
     return base
@@ -70,7 +70,7 @@ def make_message(role="user", content="hello", **kw):
 def make_eval_report(overall_score=0.84, passed=True, **kw):
     """创建模拟评估报告数据。"""
     base = {
-        "eval_date": datetime(2026, 6, 15),
+        "eval_date": datetime(2026, 6, 15, tzinfo=UTC),
         "faithfulness": Decimal("0.85"),
         "answer_relevancy": Decimal("0.90"),
         "context_precision": Decimal("0.78"),

@@ -1,7 +1,5 @@
 """ChromaDB 连接管理和 collection 缓存。"""
 
-from typing import Optional
-
 import chromadb
 from chromadb.api import ClientAPI
 from chromadb.config import Settings
@@ -18,14 +16,14 @@ class ChromaClient:
     提供 collection 名称格式化、缓存清理和列表查询功能。
     """
 
-    def __init__(self, persist_dir: Optional[str] = None):
+    def __init__(self, persist_dir: str | None = None):
         """初始化 ChromaDB 客户端管理器。
 
         Args:
             persist_dir: ChromaDB 持久化目录，None 时使用全局配置
         """
         self._persist_dir = persist_dir or CHROMA_PERSIST_DIR
-        self._client: Optional[ClientAPI] = None
+        self._client: ClientAPI | None = None
         self._collection_cache: dict[str, chromadb.Collection] = {}
         self._embed_fn = DashScopeEmbeddingFunction()
 

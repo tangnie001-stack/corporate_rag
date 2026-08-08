@@ -1,12 +1,15 @@
 """API 测试公共基础 — TestClient + auth 辅助函数。"""
 
+from collections.abc import Iterator
+from unittest.mock import AsyncMock, patch
+
+import pytest
 import redis
 import redis.asyncio as redis_async
-import pytest
-from unittest.mock import patch, AsyncMock
 from fastapi.testclient import TestClient
-from src.main import app
+
 from src.config import REDIS_URL
+from src.main import app
 from tests.api.test_config import TEST_TOKEN, TEST_USER_ID
 
 # token 有效期（秒），足够覆盖单次测试执行
@@ -20,7 +23,7 @@ def client() -> TestClient:
 
 
 @pytest.fixture
-def auth_client(client: TestClient) -> TestClient:
+def auth_client(client: TestClient) -> Iterator[TestClient]:
     """返回带认证 Cookie 的 TestClient。
 
     将测试 token 预存入 Redis，使中间件能走通完整的 token 校验流程。

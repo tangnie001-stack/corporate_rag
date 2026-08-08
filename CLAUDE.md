@@ -25,9 +25,9 @@ src/
 ├── config/       # settings / response_codes / prompts / queries
 ├── parsers/      # pdf / docx / txt 解析
 ├── middleware/    # auth / trace_id / 统一响应包装
-├── infra/        # db / chunking / llm / search / auth / errors / redis
+├── infra/        # db / llm / search / auth / errors / redis
 ├── cli/          # RAGAS 评估 / 检索调试
-├── eval/         # 分块质量评估
+├── chunking/     # 分块策略 / 校验 validate_chunks / 质量评分 ChunkQualityScorer
 ├── models.py     # LLM/Embedding/Rerank 工厂
 └── main.py       # FastAPI 入口 + 异常处理器
 

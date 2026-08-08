@@ -1,7 +1,8 @@
 """测试认证服务层。"""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.services.auth_service import AuthService
 from src.utils.errors import BusinessError
@@ -61,11 +62,13 @@ class TestLogin:
             account="test_user",
             password=password_hash,
         )
-        with patch(
-            "src.services.auth_service.hash_password", return_value=password_hash
+        with (
+            patch(
+                "src.services.auth_service.hash_password", return_value=password_hash
+            ),
+            patch("src.services.auth_service.verify_password", return_value=True),
         ):
-            with patch("src.services.auth_service.verify_password", return_value=True):
-                result = await auth_service.login("test_user", "password123")
+            result = await auth_service.login("test_user", "password123")
         assert "token" in result
         assert result["user_id"] == "user_1"
         mock_redis.setex.assert_called_once()
@@ -79,9 +82,11 @@ class TestLogin:
             account="test_user",
             password="hashed_pwd",
         )
-        with patch("src.services.auth_service.verify_password", return_value=False):
-            with pytest.raises(BusinessError):
-                await auth_service.login("test_user", "wrong_password")
+        with (
+            patch("src.services.auth_service.verify_password", return_value=False),
+            pytest.raises(BusinessError),
+        ):
+            await auth_service.login("test_user", "wrong_password")
 
 
 class TestVerifyToken:

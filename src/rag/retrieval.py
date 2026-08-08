@@ -1,20 +1,23 @@
 """检索与查询改写 — 向量检索、Reranker 精排、查询分类与改写。"""
 
 import asyncio
-from typing import Optional
+
 from loguru import logger
+
 from src.config import (
-    TOP_K_RETRIEVAL,
-    TOP_K_RERANK,
     HYBRID_SEARCH_ENABLED,
     RERANK_MIN_SCORE,
+    RETRY_BACKOFF_FACTOR,
+    RETRY_INITIAL_INTERVAL,
+    RETRY_MAX_ATTEMPTS,
+    TOP_K_RERANK,
+    TOP_K_RETRIEVAL,
 )
-from src.infra.search.bm25_index import BM25Index, rrf_fusion
 from src.infra.db.vector_store import VectorStore
 from src.infra.db.vector_store.types import ChunkResult
 from src.infra.llm.chat_message import ChatMessage
+from src.infra.search.bm25_index import BM25Index, rrf_fusion
 from src.models import with_retry
-from src.config import RETRY_MAX_ATTEMPTS, RETRY_INITIAL_INTERVAL, RETRY_BACKOFF_FACTOR
 from src.rag.context import RAGContext
 
 
@@ -22,7 +25,7 @@ async def search(
     query: str,
     kb_id: str,
     vector_store: VectorStore,
-    bm25: Optional[BM25Index] = None,
+    bm25: BM25Index | None = None,
 ) -> list[ChunkResult]:
     """执行语义检索（混合模式可选）。
 
@@ -113,7 +116,7 @@ def rerank_results(
             initial_interval=RETRY_INITIAL_INTERVAL,
             backoff=RETRY_BACKOFF_FACTOR,
         )(docs, query)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning(
             "Rerank failed after {} attempts (using raw order): {}",
             RETRY_MAX_ATTEMPTS,

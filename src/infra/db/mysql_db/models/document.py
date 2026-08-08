@@ -1,6 +1,6 @@
 """文档表 ORM 模型。"""
 
-from sqlalchemy import String, Integer, Text
+from sqlalchemy import Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.infra.db.base import Base, IDMixin, TimestampMixin

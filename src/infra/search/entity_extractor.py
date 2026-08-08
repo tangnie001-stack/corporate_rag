@@ -2,6 +2,7 @@
 
 import re
 from dataclasses import dataclass
+from typing import ClassVar
 
 
 @dataclass
@@ -17,7 +18,7 @@ class ExtractedEntity:
 class EntityExtractor:
     """正则实体提取器 — 从查询中提取预定义模式的实体。"""
 
-    PATTERNS: dict[str, str] = {
+    PATTERNS: ClassVar[dict[str, str]] = {
         "year": r"20\d{2}",
         "quarter": r"第?[1-4一二三四]季[度]?|Q[1-4]",
         "month": r"\d{1,2}月",

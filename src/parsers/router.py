@@ -22,9 +22,9 @@ from pathlib import Path
 
 # 各格式解析器导入 —— 按需引入，如果后续某格式依赖较重可改为延迟加载
 from src.parsers.base import ParseResult
-from src.parsers.txt_parser import TxtParser
 from src.parsers.docx_parser import DocxParser
 from src.parsers.pymupdf_parser import PyMuPDFParser
+from src.parsers.txt_parser import TxtParser
 
 
 class DocRouter:

@@ -1,11 +1,12 @@
 """会话/消息 Repo — sessions 和 conversation_history 表 CRUD。"""
 
 import json
-from typing import Optional
-from sqlalchemy import select, func, delete
+
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
+
+from src.infra.db.models.chat import MessageModel, SessionModel
 from src.infra.db.models.kb import KbModel
-from src.infra.db.models.chat import SessionModel, MessageModel
 
 
 class ChatRepo:
@@ -40,32 +41,37 @@ class ChatRepo:
     async def get_sessions(self, user_id: str = "") -> list:
         """返回 Row 对象（支持 .id 属性访问，兼容旧 SessionListItem 用法）。"""
         async with self._sf() as session:
-            stmt = select(
-                SessionModel.id,
-                SessionModel.title,
-                SessionModel.kb_id,
-                SessionModel.created_at,
-                SessionModel.updated_at,
-                func.coalesce(KbModel.name, "所有知识库").label("kb_name"),
-                func.count(MessageModel.id).label("message_count"),
-            ).outerjoin(
-                KbModel,
-                (SessionModel.kb_id == KbModel.id) & (SessionModel.kb_id != ""),
-            ).outerjoin(
-                MessageModel, MessageModel.session_id == SessionModel.id
-            ).where(SessionModel.is_deleted == 0)
+            stmt = (
+                select(
+                    SessionModel.id,
+                    SessionModel.title,
+                    SessionModel.kb_id,
+                    SessionModel.created_at,
+                    SessionModel.updated_at,
+                    func.coalesce(KbModel.name, "所有知识库").label("kb_name"),
+                    func.count(MessageModel.id).label("message_count"),
+                )
+                .outerjoin(
+                    KbModel,
+                    (SessionModel.kb_id == KbModel.id) & (SessionModel.kb_id != ""),
+                )
+                .outerjoin(MessageModel, MessageModel.session_id == SessionModel.id)
+                .where(SessionModel.is_deleted == 0)
+            )
 
             if user_id:
                 stmt = stmt.where(SessionModel.user_id == user_id)
 
-            stmt = stmt.group_by(SessionModel.id).order_by(
-                SessionModel.updated_at.desc()
-            ).limit(50)
+            stmt = (
+                stmt.group_by(SessionModel.id)
+                .order_by(SessionModel.updated_at.desc())
+                .limit(50)
+            )
 
             result = await session.execute(stmt)
             return list(result.all())
 
-    async def get_session_by_id(self, session_id: str) -> Optional[SessionModel]:
+    async def get_session_by_id(self, session_id: str) -> SessionModel | None:
         async with self._sf() as session:
             return await session.get(SessionModel, session_id)
 

@@ -20,14 +20,14 @@ import asyncio
 import os
 import sys
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from loguru import logger
 
-from src.core.logging import setup_logging
-
 from src.config import settings
+from src.core.logging import setup_logging
+from src.infra.llm.trace_context import current_trace_id
 
 setup_logging(configure_trace_id=True)
 
@@ -105,7 +105,7 @@ async def generate_answers_and_contexts(
     kb_id: str,
     session_id: str,
     questions: list[str],
-) -> tuple[list[str], list[list[str]]]:
+) -> tuple[list[str], list[list[str]], list[str]]:
     """对每个问题生成回答，并收集检索到的上下文.
 
     Args:
@@ -115,15 +115,24 @@ async def generate_answers_and_contexts(
         questions: 问题列表
 
     Returns:
-        (answers, contexts) 元组：
+        (answers, contexts, trace_ids) 元组：
         - answers: 每个问题的完整回答文本列表
         - contexts: 每个问题对应的检索上下文列表（每个元素是文档片段列表）
+        - trace_ids: 每个问题对应的 trace_id 列表（与 answers/contexts 一一对应，
+          可用于在日志 / Langfuse 中回溯该问题的完整链路）
     """
     answers: list[str] = []
     contexts: list[list[str]] = []
+    trace_ids: list[str] = []
 
     for i, q in enumerate(questions):
         logger.info("Generating answer for Q{}: {}...", i + 1, q[:40])
+
+        # 每个问题一个独立 trace_id，并写入 contextvar —— loguru patcher 会
+        # 把它注入到该问题期间的所有日志行，Langfuse trace 也以它为 id
+        trace_id = f"eval_{uuid.uuid4().hex[:12]}"
+        trace_ids.append(trace_id)
+        token = current_trace_id.set(trace_id)
 
         try:
             final_state = await graph.ainvoke(
@@ -131,11 +140,14 @@ async def generate_answers_and_contexts(
                     "kb_id": kb_id,
                     "session_id": session_id,
                     "query": q,
-                    "trace_id": f"trace_{uuid.uuid4().hex[:12]}",
+                    "trace_id": trace_id,
                     "retrieval_retries": 0,
                     "downgraded": False,
                     "downgrade_reason": "",
                     "_history": [],
+                    # 评估模式：即使 classify 判定缺实体也跳过 clarify 追问，
+                    # 直接走检索+生成，否则批量评估会因追问而空答（指标全 0）
+                    "skip_clarify": True,
                 }
             )
             full_answer = final_state.get("answer", "")
@@ -151,12 +163,14 @@ async def generate_answers_and_contexts(
                 len(ctx_list),
             )
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("Failed to generate answer for Q{}: {}", i + 1, e)
             answers.append(f"[ERROR] {e}")
             contexts.append([])
+        finally:
+            current_trace_id.reset(token)
 
-    return answers, contexts
+    return answers, contexts, trace_ids
 
 
 def run_evaluation(
@@ -191,10 +205,10 @@ def run_evaluation(
     from datasets import Dataset
     from ragas import evaluate
     from ragas.metrics import (
-        faithfulness,
         answer_relevancy,
-        context_recall,
         context_precision,
+        context_recall,
+        faithfulness,
     )
 
     data = {
@@ -239,6 +253,7 @@ def save_results_csv(
     questions: list[str],
     ground_truth: list[str],
     output_path: str,
+    trace_ids: list[str] | None = None,
 ) -> str:
     """将评估结果保存为 CSV 文件.
 
@@ -247,6 +262,8 @@ def save_results_csv(
         questions: 问题列表
         ground_truth: 参考答案列表
         output_path: 输出文件路径
+        trace_ids: 每个问题对应的 trace_id（与 questions 一一对应），
+            传入后在 CSV 中新增 trace_id 列，便于按 trace 回溯
 
     Returns:
         实际写入的文件路径
@@ -256,6 +273,8 @@ def save_results_csv(
     # 添加元信息列
     df.insert(0, "question", questions)
     df.insert(1, "ground_truth", ground_truth)
+    if trace_ids is not None:
+        df.insert(2, "trace_id", trace_ids)
 
     # 确保输出目录存在
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
@@ -269,6 +288,7 @@ def save_markdown_report(
     result: Any,
     questions: list[str],
     output_path: str,
+    trace_ids: list[str] | None = None,
 ) -> str:
     """将评估结果保存为 Markdown 摘要报告，与 CSV 同路径（.md 后缀）.
 
@@ -276,6 +296,8 @@ def save_markdown_report(
         result: RAGAS evaluate() 返回的结果对象
         questions: 问题列表
         output_path: CSV 输出路径（用于推导 .md 路径）
+        trace_ids: 每个问题对应的 trace_id（与 questions 一一对应），
+            传入后在表格中新增 trace_id 列
 
     Returns:
         实际写入的 .md 文件路径
@@ -297,7 +319,7 @@ def save_markdown_report(
     lines: list[str] = []
     lines.append("# RAGAS Evaluation Report")
     lines.append("")
-    lines.append(f"**Date:** {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    lines.append(f"**Date:** {datetime.now(UTC).strftime('%Y-%m-%d %H:%M')}")
     lines.append(
         f"**Configuration:** TOP_K_RETRIEVAL={cfg_topk}, TOP_K_RERANK={cfg_rerank}"
     )
@@ -306,12 +328,16 @@ def save_markdown_report(
 
     # 表头
     header = ["Question"] + actual_metrics
+    if trace_ids is not None:
+        header.append("trace_id")
     lines.append("| " + " | ".join(header) + " |")
     lines.append("|" + "|".join("---" for _ in header) + "|")
 
     # 每行数据
     for i in range(len(df)):
         row_vals = [f"Q{i + 1}"] + [f"{df[m].iloc[i]:.4f}" for m in actual_metrics]
+        if trace_ids is not None:
+            row_vals.append(trace_ids[i] if i < len(trace_ids) else "")
         lines.append("| " + " | ".join(row_vals) + " |")
 
     lines.append("")
@@ -396,7 +422,7 @@ def main() -> None:
 
     # ---- 评估模式（原有流程改造）----
     session_id = args.session_id
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     output_path = (
         args.output or f"{settings.RAGAS_REPORT_DIR}/ragas_eval_{timestamp}.csv"
     )
@@ -422,20 +448,21 @@ def main() -> None:
     _ensure_vertexai_stub()
     from datasets import Dataset  # noqa: F401
     from ragas import evaluate  # noqa: F401
-    from ragas.llms import LangchainLLMWrapper
     from ragas.embeddings import LangchainEmbeddingsWrapper
+    from ragas.llms import LangchainLLMWrapper
     from ragas.metrics import (  # noqa: F401
-        faithfulness,
         answer_relevancy,
-        context_recall,
         context_precision,
+        context_recall,
+        faithfulness,
     )
-    from src.models import get_llm, get_classify_llm, get_embeddings, get_rerank
-    from src.infra.db.vector_store import VectorStore
-    from src.infra.search.bm25_index import BM25Index
-    from src.infra.llm.prompt_manager import PromptManager
+
     from src.agents.graph.workflow import build_graph
-    from src.config import HYBRID_SEARCH_ENABLED, BM25_INDEX_DIR
+    from src.config import BM25_INDEX_DIR, HYBRID_SEARCH_ENABLED
+    from src.infra.db.vector_store import VectorStore
+    from src.infra.llm.prompt_manager import PromptManager
+    from src.infra.search.bm25_index import BM25Index
+    from src.models import get_classify_llm, get_embeddings, get_llm, get_rerank
 
     logger.info("Initializing RAG components...")
     vector_store = VectorStore()
@@ -468,7 +495,7 @@ def main() -> None:
     )
 
     logger.info("Generating answers for {} questions...", len(questions))
-    answers, contexts = asyncio.run(
+    answers, contexts, trace_ids = asyncio.run(
         generate_answers_and_contexts(
             graph,
             kb_id,
@@ -486,8 +513,10 @@ def main() -> None:
         embeddings_wrapper,
     )
 
-    output_path = save_results_csv(result, questions, ground_truth, output_path)
-    save_markdown_report(result, questions, output_path)
+    output_path = save_results_csv(
+        result, questions, ground_truth, output_path, trace_ids
+    )
+    save_markdown_report(result, questions, output_path, trace_ids)
 
     # _save_eval_report 需要 questions 长度
     _save_eval_report(kb_id, result, len(questions), output_path)
@@ -513,8 +542,8 @@ def _save_eval_report(
         output_path: CSV 报告文件路径
     """
     try:
-        from src.services.app_service import AppService
         from src.infra.db.models.eval_report import EvalReportModel as EvalReportEntity
+        from src.services.app_service import AppService
 
         svc = AppService()
 
@@ -578,14 +607,14 @@ def _save_eval_report(
 
         asyncio.run(_do_insert())
         logger.info("Eval report saved to eval_report table for KB '{}'", kb_id)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning("Failed to save eval report to database: {}", e)
 
 
 async def _list_knowledge_bases() -> None:
     """列出 MySQL 中所有知识库的名称和文档数."""
-    from src.services.app_service import AppService
     from src.config import RAGAS_USER_ID
+    from src.services.app_service import AppService
 
     svc = AppService()
 

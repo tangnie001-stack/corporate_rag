@@ -9,7 +9,6 @@ from loguru import logger
 
 from src.infra.db.models.kb import KbModel as KbListItem
 
-
 # 语义路由相似度阈值：低于此值触发 LLM 兜底
 SEMANTIC_THRESHOLD = 0.82
 
@@ -156,7 +155,9 @@ class KBRouter:
                 usage_meta = getattr(response, "usage_metadata", None)
                 logger.info(
                     "KBRouter meta: {} token_usage: {} usage_metadata: {}",
-                    list(metadata.keys()), list(usage.keys()), usage_meta,
+                    list(metadata.keys()),
+                    list(usage.keys()),
+                    usage_meta,
                 )
                 if usage_meta:
                     prompt_t = usage_meta.get("input_tokens")
@@ -172,6 +173,6 @@ class KBRouter:
             matched = [id_str for id_str in ids if id_str in valid_ids][:2]
             logger.info("KBRouter: LLM fallback -> {}", matched)
             return matched
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("KBRouter: LLM fallback failed: {}", e)
             return []

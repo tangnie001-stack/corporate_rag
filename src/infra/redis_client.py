@@ -8,7 +8,6 @@ import redis.asyncio as redis_async
 
 from src.config import REDIS_URL
 
-
 _client: redis_async.Redis | None = None
 
 

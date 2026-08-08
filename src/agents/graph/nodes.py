@@ -7,7 +7,8 @@
 
 import asyncio
 import re
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from loguru import logger
 
@@ -163,7 +164,7 @@ def grader_node(state: AgentState) -> dict:
     retries = state.retrieval_retries
     logger.info("grader_node: score={:.2f} retries={}", score, retries)
 
-    retries = state.retrieval_retries  # noqa: PLW2901 — 从 state 刷新，后续逻辑用
+    retries = state.retrieval_retries
     if score is not None and score >= 0.5:
         return {
             LangGraphNode.Grader.SCORE: score,

@@ -1,8 +1,8 @@
 from io import BytesIO
-from typing import Optional
+
+from loguru import logger
 from minio import Minio
 from minio.error import S3Error
-from loguru import logger
 
 from src.config import settings
 
@@ -41,7 +41,7 @@ class FileStore:
             logger.warning("MinIO upload failed: {} - {}", key, e)
             return False
 
-    def download(self, key: str) -> Optional[bytes]:
+    def download(self, key: str) -> bytes | None:
         try:
             resp = self._client.get_object(self._bucket, key)
             data = resp.read()

@@ -1,9 +1,10 @@
 """ChromaDB 查询操作，返回类型化的 ChunkResult/ChunkQueryResult。"""
 
 from loguru import logger
+
+from src.config import EMBEDDING_MODEL, TOP_K_RETRIEVAL
 from src.core.logging import LOG_MAX_BODY
-from src.config import TOP_K_RETRIEVAL, EMBEDDING_MODEL
-from src.infra.db.vector_store.types import ChunkResult, ChunkQueryResult
+from src.infra.db.vector_store.types import ChunkQueryResult, ChunkResult
 
 
 def similarity_search(collection, embed_fn, kb_id, query, k=5) -> list[ChunkResult]:
@@ -31,7 +32,7 @@ def similarity_search(collection, embed_fn, kb_id, query, k=5) -> list[ChunkResu
             col_count,
             min(k, 100),
         )
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
 
     query_vec = embed_fn.embed_query(query)
@@ -98,7 +99,7 @@ def similarity_search_all(
             col = collections_dict[kb_id]
             results = similarity_search(col, embed_fn, kb_id, query, k=k)
             all_results.extend(results)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("搜索 collection '{}' 失败: {}", kb_id, e)
             continue
 
@@ -146,7 +147,7 @@ def get_chunks_by_doc_id(collection, doc_id: str) -> list[ChunkResult]:
             len(chunks),
         )
         return chunks
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning("Failed to get chunks for doc_id={}: {}", doc_id, e)
         return []
 
@@ -198,6 +199,6 @@ def get_chunks_paginated(
         return ChunkQueryResult(
             items=items, total=total, page=page, page_size=page_size
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning("Failed to get paginated chunks for doc_id={}: {}", doc_id, e)
         return ChunkQueryResult(items=[], total=0, page=page, page_size=page_size)

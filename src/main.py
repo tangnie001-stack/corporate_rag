@@ -57,7 +57,7 @@ def _warmup_chromadb() -> None:
         # list_collections 会触发 PersistentClient 惰性创建 + 持久化校验
         collections = store.list_collections()
         logger.info("ChromaDB warmed up: collections={}", len(collections))
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning("ChromaDB warmup failed (will retry lazily): {}", e)
 
 

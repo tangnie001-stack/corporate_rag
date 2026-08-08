@@ -1,7 +1,7 @@
 """流式生成 — LLM 流式回答生成 + Token 估算。"""
 
 import time
-from typing import Generator, Optional
+from collections.abc import Generator
 
 from loguru import logger
 from pydantic import SecretStr
@@ -28,7 +28,7 @@ def estimate_usage(messages: list, output: str) -> TokenUsage:
 def stream_answer(
     messages: list,
     llm,
-    trace_id: Optional[str] = None,
+    trace_id: str | None = None,
 ) -> Generator[str, None, None]:
     """流式生成 LLM 回答，支持指数退避重试。
 
@@ -56,7 +56,7 @@ def stream_answer(
             model=getattr(llm, "model", None),
         )
 
-    last_error: Optional[Exception] = None
+    last_error: Exception | None = None
     full_output = ""
     last_token_usage = TokenUsage()
     _stream_start = time.monotonic()
@@ -113,7 +113,7 @@ def stream_answer(
                 last_token_usage.total_tokens,
             )
             return
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             last_error = e
             if attempt == 1:
                 logger.info(

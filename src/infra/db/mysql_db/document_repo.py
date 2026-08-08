@@ -1,8 +1,9 @@
 """文档 Repo — document 表 CRUD。"""
 
 import json
-from typing import Optional
+
 from sqlalchemy import select, update
+
 from src.infra.db.models.document import DocModel
 
 
@@ -37,7 +38,7 @@ class DocumentRepo:
             result = await session.execute(stmt)
             return list(result.scalars().all())
 
-    async def get_document(self, doc_id: str) -> Optional[DocModel]:
+    async def get_document(self, doc_id: str) -> DocModel | None:
         async with self._sf() as session:
             return await session.get(DocModel, doc_id)
 
@@ -91,9 +92,8 @@ class DocumentRepo:
 
     async def get_documents_by_kb(self, kb_id: str) -> list[DocModel]:
         async with self._sf() as session:
-            stmt = (
-                select(DocModel)
-                .where(DocModel.kb_id == kb_id, DocModel.is_deleted == 0)
+            stmt = select(DocModel).where(
+                DocModel.kb_id == kb_id, DocModel.is_deleted == 0
             )
             result = await session.execute(stmt)
             return list(result.scalars().all())

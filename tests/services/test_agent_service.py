@@ -1,7 +1,8 @@
 """AgentService 单元测试。"""
 
-import pytest
 from unittest.mock import AsyncMock, Mock
+
+import pytest
 
 from src.utils.sse import SSEClarificationEvent, SSEDoneEvent
 
@@ -11,12 +12,12 @@ class TestStreamChatClarification:
 
     @pytest.mark.asyncio
     async def test_stream_chat_sends_clarification_when_missing_entities(self):
-        from src.services.agent_service import AgentService
         from src.agents.graph.state import (
             LangGraphEvent,
             LangGraphKey,
             LangGraphNode,
         )
+        from src.services.agent_service import AgentService
 
         service = AgentService.__new__(AgentService)
         service._llm = Mock()
@@ -63,12 +64,12 @@ class TestStreamChatClarification:
     @pytest.mark.asyncio
     async def test_stream_chat_no_clarification_when_no_missing_entities(self):
         """当 classify 节点不输出 missing_entities 时不应发送追问事件。"""
-        from src.services.agent_service import AgentService
         from src.agents.graph.state import (
             LangGraphEvent,
             LangGraphKey,
             LangGraphNode,
         )
+        from src.services.agent_service import AgentService
 
         service = AgentService.__new__(AgentService)
         service._llm = Mock()
@@ -122,14 +123,15 @@ class TestStreamChatClarification:
 @pytest.mark.asyncio
 async def test_stream_chat_yields_generate_tokens_from_metadata():
     """generate 节点的 CHAT_MODEL_STREAM token 应通过 metadata.langgraph_node 识别并流出。"""
-    from src.services.agent_service import AgentService
+    from langchain_core.messages import AIMessageChunk
+
     from src.agents.graph.state import (
         LangGraphEvent,
         LangGraphKey,
         LangGraphNode,
     )
+    from src.services.agent_service import AgentService
     from src.utils.sse import SSETokenEvent
-    from langchain_core.messages import AIMessageChunk
 
     service = AgentService.__new__(AgentService)
     service._llm = Mock()
@@ -162,14 +164,14 @@ async def test_stream_chat_yields_generate_tokens_from_metadata():
 @pytest.mark.asyncio
 async def test_stream_chat_yields_abstention_answer_as_token():
     """generate 返回静态 answer 时（abstention），应作为 token 送达且 citations 为空。"""
-    from src.services.agent_service import AgentService
     from src.agents.graph.state import (
         LangGraphEvent,
         LangGraphKey,
         LangGraphNode,
     )
-    from src.utils.sse import SSETokenEvent, SSECitationEvent, SSEStatusEvent
     from src.config.prompts import ABSTENTION_TEXT
+    from src.services.agent_service import AgentService
+    from src.utils.sse import SSECitationEvent, SSEStatusEvent, SSETokenEvent
 
     service = AgentService.__new__(AgentService)
     service._llm = Mock()

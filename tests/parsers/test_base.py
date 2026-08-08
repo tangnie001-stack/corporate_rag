@@ -7,7 +7,8 @@
 """
 
 import pytest
-from src.parsers.base import ChunkData, ParseResult, BaseParser
+
+from src.parsers.base import BaseParser, ChunkData, ParseResult
 
 
 # ==================== ChunkData 数据块测试 ====================
@@ -71,7 +72,7 @@ class TestBaseParser:
     def test_abstract_cannot_instantiate(self):
         """抽象基类不可直接实例化，必须子类实现 parse()。"""
         with pytest.raises(TypeError):
-            BaseParser()
+            BaseParser()  # type: ignore[abstract]  # 故意实例化抽象类以验证抛错
 
     def test_concrete_implementation(self):
         """子类实现 parse() 后可正常实例化并调用。"""

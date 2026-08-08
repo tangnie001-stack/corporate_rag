@@ -7,12 +7,12 @@
 from fastapi import APIRouter, Depends, Request
 from loguru import logger
 
-from src.api.model.request import SessionMessagesRequest, SessionDeleteRequest
-from src.api.model.response import SessionItem, MessageItem, SessionDeleteResponse
-from src.api.schema import ResponseModel
 from src.api.dependencies import get_app_service
-from src.services.app_service import AppService
+from src.api.model.request import SessionDeleteRequest, SessionMessagesRequest
+from src.api.model.response import MessageItem, SessionDeleteResponse, SessionItem
+from src.api.schema import ResponseModel
 from src.config.response_codes import Code
+from src.services.app_service import AppService
 from src.utils.errors import BusinessError
 
 router = APIRouter()

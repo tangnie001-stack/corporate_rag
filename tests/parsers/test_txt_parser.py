@@ -7,6 +7,7 @@
 """
 
 import pytest
+
 from src.parsers.base import ParseResult
 from src.parsers.txt_parser import TxtParser
 

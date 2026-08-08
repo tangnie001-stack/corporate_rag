@@ -6,11 +6,11 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from src.config import (
+    MYSQL_DATABASE,
     MYSQL_HOST,
+    MYSQL_PASSWORD,
     MYSQL_PORT,
     MYSQL_USER,
-    MYSQL_PASSWORD,
-    MYSQL_DATABASE,
 )
 
 DSN = (

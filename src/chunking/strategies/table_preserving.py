@@ -139,13 +139,14 @@ class TablePreservingChunker(BaseChunker):
             sep_idx = -1
             for i, line in enumerate(lines):
                 stripped = line.strip()
-                if stripped.startswith("|") and not stripped.startswith("|---"):
-                    if header_idx == -1:
-                        header_idx = i
-                if stripped.startswith("|---"):
-                    if sep_idx == -1:
-                        sep_idx = i
-
+                if (
+                    stripped.startswith("|")
+                    and not stripped.startswith("|---")
+                    and header_idx == -1
+                ):
+                    header_idx = i
+                if stripped.startswith("|---") and sep_idx == -1:
+                    sep_idx = i
             if header_idx == -1:
                 result.append(seg)
                 continue
@@ -171,25 +172,23 @@ class TablePreservingChunker(BaseChunker):
             current_chars = 0
             header_sep_chars = len(header) + len(separator) + 2  # 2 换行
 
-            def _flush():
-                if current_group:
+            def _flush(group: list[str], hdr: str, sep: str) -> None:
+                """把当前分组的行写入结果（表头 + 分隔行 + 数据行）。"""
+                if group:
                     result.append(
-                        header
-                        + ("\n" + separator if separator else "")
-                        + "\n"
-                        + "\n".join(current_group)
+                        hdr + ("\n" + sep if sep else "") + "\n" + "\n".join(group)
                     )
 
             for row in data_rows:
                 row_chars = len(row) + 1
                 limit = TABLE_ROW_CHUNK_CHARS - header_sep_chars
                 if current_chars + row_chars > limit and current_group:
-                    _flush()
+                    _flush(current_group, header, separator)
                     current_group = []
                     current_chars = 0
                 current_group.append(row)
                 current_chars += row_chars
-            _flush()
+            _flush(current_group, header, separator)
 
             logger.debug(
                 "[table_preserving] split large table: {} chars -> {} sub-tables",

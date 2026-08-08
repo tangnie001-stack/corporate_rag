@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from src.api.dependencies import get_app_service
-from src.api.model.response import HealthResponse, AppConfigResponse
+from src.api.model.response import AppConfigResponse, HealthResponse
 from src.api.schema import ResponseModel
 from src.services.app_service import AppService
 

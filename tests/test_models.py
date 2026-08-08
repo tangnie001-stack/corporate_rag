@@ -8,10 +8,12 @@
 因此需要在导入 src.models 之前先 mock 掉 dashscope 模块。
 """
 
-from unittest.mock import MagicMock
 import sys
-from config.settings import EMBEDDING_MODEL
+from unittest.mock import MagicMock
+
 import pytest
+
+from config.settings import EMBEDDING_MODEL
 
 # ---- Mock DashScope SDK ----
 # 原因：DashScopeEmbeddings 和 DashScopeRerank 在 Pydantic 模型验证时
@@ -23,7 +25,7 @@ mock_dashscope.TextReRank.Models = MagicMock()
 mock_dashscope.TextReRank.Models.gte_rerank = "gte-rerank"
 sys.modules["dashscope"] = mock_dashscope
 
-from src.models import get_embeddings, get_llm, get_rerank, with_retry  # noqa: E402
+from src.models import get_embeddings, get_llm, get_rerank, with_retry
 
 
 # ==================== with_retry 重试装饰器测试 ====================

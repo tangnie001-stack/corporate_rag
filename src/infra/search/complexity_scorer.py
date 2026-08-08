@@ -52,7 +52,7 @@ def score_complexity(query: str, entities: list[ExtractedEntity]) -> float:
         return 0.0
 
     score = 0.0
-    for level, patterns in COMPLEXITY_RULES.items():
+    for patterns in COMPLEXITY_RULES.values():
         for pattern, weight in patterns:
             if re.search(pattern, query):
                 score += weight

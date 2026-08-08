@@ -44,6 +44,7 @@ dev = [
     "pytest-asyncio==1.4.0",
     "pytest-cov==7.0.0",
     "ragas==0.4.3",
+    "rapidfuzz==3.14.5",
     "datasets==4.0.0",
     "pyright==1.1.411",
     "pre-commit==4.6.1",
@@ -65,3 +66,7 @@ extraPaths = ["src"]
 # 显式指定 python 解释器来源的 venv，确保第三方依赖可解析
 venvPath = "."
 venv = ".venv"
+
+[tool.ruff.lint.per-file-ignores]
+# FastAPI 路由的 Depends()/File() 默认参数是官方依赖注入的标准写法，B008 为误报
+"src/api/*.py" = ["B008"]

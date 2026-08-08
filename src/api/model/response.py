@@ -3,8 +3,6 @@
 描述业务数据结构（被 ResponseModel.data 引用）。
 """
 
-from typing import Optional
-
 from pydantic import BaseModel, field_validator
 
 
@@ -19,7 +17,7 @@ class VerifyResponse(BaseModel):
     """Token 校验响应。"""
 
     valid: bool  # token 是否有效
-    user_id: Optional[str] = None  # 对应用户 UUID，无效时为 None
+    user_id: str | None = None  # 对应用户 UUID，无效时为 None
 
 
 class HealthResponse(BaseModel):
@@ -167,8 +165,8 @@ class SessionItem(BaseModel):
     kb_id: str  # 关联知识库 UUID
     kb_name: str  # 知识库名称
     message_count: int  # 消息数量
-    created_at: Optional[str] = None  # 创建时间
-    updated_at: Optional[str] = None  # 最后更新时间
+    created_at: str | None = None  # 创建时间
+    updated_at: str | None = None  # 最后更新时间
 
 
 class MessageItem(BaseModel):
@@ -176,8 +174,8 @@ class MessageItem(BaseModel):
 
     role: str  # 角色（user / assistant）
     content: str  # 消息内容
-    sources: Optional[str] = None  # 引用来源（JSON 字符串）
-    created_at: Optional[str] = None  # 发送时间
+    sources: str | None = None  # 引用来源（JSON 字符串）
+    created_at: str | None = None  # 发送时间
 
 
 class SessionDeleteResponse(BaseModel):

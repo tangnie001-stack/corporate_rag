@@ -1,7 +1,5 @@
 """ChromaDB 写入和删除操作。"""
 
-from typing import Optional
-
 from chromadb.errors import NotFoundError
 from loguru import logger
 
@@ -13,7 +11,7 @@ def add_chunks(
     kb_id: str,
     chunks: list[ChunkData],
     doc_id: str,
-    embeddings: Optional[list[list[float]]] = None,
+    embeddings: list[list[float]] | None = None,
 ) -> int:
     """批量写入分块到 collection。
 

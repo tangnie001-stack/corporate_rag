@@ -55,7 +55,7 @@ async def llm_test(body: LlmTestRequest, svc: AppService = Depends(get_app_servi
                 "latency_seconds": elapsed,
             }
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         elapsed = round(time.time() - start, 2)
         logger.error(
             "LLM test failed: model={} latency={}s error={}", model_name, elapsed, e

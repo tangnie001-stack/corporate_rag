@@ -73,7 +73,7 @@ def log_sql_result(method: str, sql, rows, **extra) -> None:
                 count,
                 data_str,
             )
-        except Exception:
+        except Exception:  # noqa: BLE001
             logger.info(
                 "[SQL] method={} | sql={}| rows={} | data=<serialization_error>",
                 method,

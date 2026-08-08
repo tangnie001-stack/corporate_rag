@@ -1,6 +1,6 @@
 """知识库表 ORM 模型。"""
 
-from sqlalchemy import String, Integer, UniqueConstraint
+from sqlalchemy import Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.infra.db.base import Base, IDMixin, TimestampMixin

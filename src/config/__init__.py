@@ -5,4 +5,4 @@
   from src.config.prompts import FINANCIAL_SYSTEM_PROMPT  # 提示词模板（推荐显式路径）
 """
 
-from src.config.settings import *  # noqa: F403 — 重新导出所有配置常量
+from src.config.settings import *
