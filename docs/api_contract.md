@@ -533,6 +533,17 @@ name = f"kb_{kb_id.replace('-', '')}"
 | `doc_id` | str | 文档 UUID |
 | `chunk_id` | str | ChromaDB chunk ID |
 | `score` | float | Reranker 相关性分数（越高越相关） |
+| `entities` | dict | 业务实体（来自 chunk.metadata，如 `{"company": "xx", "report_period": "2024"}`） |
+
+`to_prompt_text()` 渲染喂给生成模型的上下文文本，格式：
+
+```
+来源: {source} (第{page}页)
+{实体标签}: {值} {实体标签}: {值}   ← 仅当实体非空时渲染，按 ENTITY_RENDER_ORDER 顺序
+内容: {content}
+```
+
+实体锚点（如文件名/期间）随上下文一并喂给生成模型，帮助对齐事实；生产 prompt 与 RAGAS 评估的 NLI 上下文共用此格式（见 `src/rag/context.py`），评估时保证与线上生成看到完全一致的上下文。
 
 ---
 

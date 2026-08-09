@@ -111,6 +111,8 @@ python -m src.cli.eval_ragas --kb-id <知识库UUID> --output /path/report.csv
 3. 逐题让 RAG 系统生成回答 `answer` 与检索上下文 `contexts`
 4. 用 RAGAS 对四个指标打分
 
+> **上下文含实体锚点**：评估收集的 `contexts` 与生产 prompt 共用 `RAGContext.to_prompt_text()` 渲染格式（`src/rag/context.py`）。当分块 metadata 带实体（`company`/`report_period`/`sec_code` 等，标签为 `公司`/`期间`/`代码`）时，上下文会多出一行 `实体标签: 值` 锚点，再跟 `内容:` 正文；无实体时保持 `来源 → 内容` 原格式。这保证 RAGAS 的 NLI 裁判看到的上下文与线上生成模型完全一致（实体锚点用于增强忠实度）。评估脚本入口见 `src/cli/eval_ragas.py:157`。
+
 > **评估模式跳过追问**：批量评估以 `skip_clarify=True` 运行图——即使 classify 判定问题缺实体（如缺年份），也不会停在「追问澄清」分支（生产交互链路会追问，评估不会），而是直接走检索+生成。这样单轮指标才有分数可算；追问分支的真实效果属于多轮/Agent 评估范畴，不在单轮评测内。
 
 > 注意：评估阶段每个指标内部会多次调用 LLM（faithfulness 把回答拆句逐句判断、answer_relevancy 反向生成候选问题等），所以**评估耗时明显长于回答生成**。若 ChromaDB 为空或 `RAGAS_LLM_MODEL` 未配置会直接报错退出。
