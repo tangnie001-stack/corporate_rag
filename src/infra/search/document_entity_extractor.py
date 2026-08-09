@@ -69,7 +69,11 @@ def extract_from_filename(filename: str) -> dict:
 
 
 def extract_from_headings(heading_tree: list[tuple[int, str]]) -> dict:
-    """标题栈规则层：遍历标题，父级继承、兄弟零泄漏。
+    """标题栈规则层：顶层（level 1）标题优先，子级（level > 1）仅补缺。
+
+    第一遍扫描 level 1 标题提取文档级实体（year/quarter/report_type/company/currency）；
+    第二遍扫描 level > 1 子标题，仅填充顶层未提取到的键。
+    防止子标题中的跨年引用（如"上年同期"）覆盖文档级 year。
 
     Args:
         heading_tree: 标题树，元素为 (级别, 标题文本)
@@ -78,17 +82,27 @@ def extract_from_headings(heading_tree: list[tuple[int, str]]) -> dict:
         从标题中提取的实体 dict
     """
     result: dict = {}
-    # 简化的上下文栈：只保留最后一级提取的键值，子级继承父级
-    for _level, title in heading_tree or []:
-        for pattern, key, transform in _HEADING_EXTRACTORS:
-            m = re.search(pattern, title)
-            if m:
-                if transform:
-                    value = transform(m)
-                else:
-                    value = m.group(1)
-                result[key] = value
+    # 第一遍：level 1 为文档级标题，优先级最高
+    for level, title in heading_tree or []:
+        if level == 1:
+            _apply_heading_rules(title, result)
+    # 第二遍：level > 1 子标题仅补缺，不覆盖顶层结果
+    for level, title in heading_tree or []:
+        if level > 1:
+            _apply_heading_rules(title, result)
     return result
+
+
+def _apply_heading_rules(title: str, result: dict) -> None:
+    """对单个标题应用标题提取规则，只写入未存在的键。"""
+    for pattern, key, transform in _HEADING_EXTRACTORS:
+        m = re.search(pattern, title)
+        if m:
+            if transform:
+                value = transform(m)
+            else:
+                value = m.group(1)
+            result.setdefault(key, value)
 
 
 def _extract_from_text(text: str) -> dict:
@@ -108,10 +122,12 @@ def _extract_from_text(text: str) -> dict:
     if m:
         year = m.group("year")
         q = m.group("quarter")
-        if q == "一":
-            entities["report_period"] = f"{year}年第一季度"
-        else:
+        if q.isdigit():
+            # 阿拉伯数字（1-4）：Q{num}，如 2025年Q2
             entities["report_period"] = f"{year}年Q{q}"
+        else:
+            # 中文数字（一二三四）：第X季度，如 2025年第二季度
+            entities["report_period"] = f"{year}年第{q}季度"
     return entities
 
 

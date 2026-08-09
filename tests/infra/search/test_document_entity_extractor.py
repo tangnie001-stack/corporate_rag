@@ -2,13 +2,15 @@
 
 覆盖：
   - 文件名正则提取（company/year/quarter）
-  - 标题栈规则层（year/quarter/report_type）
+  - 标题栈规则层（year/quarter/report_type，level 1 优先、子级仅补缺）
+  - 正文正则（sec_code / report_period，中文/阿拉伯数字季度映射）
   - LLM 兜底三态开关（on/off/auto）+ 非法值兜底
   - 可选实体不被过滤 + LLM 失败降级规则结果
 """
 
 from src.infra.search.document_entity_extractor import (
     DocumentEntityExtractor,
+    _extract_from_text,
     extract_from_filename,
     extract_from_headings,
 )
@@ -43,6 +45,35 @@ class TestExtractFromHeadings:
         entities = extract_from_headings(heading_tree)
         assert entities.get("report_type") == "资产负债表"
 
+    def test_child_year_does_not_override_document_year(self):
+        """子级标题的跨年引用不应覆盖顶层文档级 year。"""
+        heading_tree = [(1, "2025 年第一季度报告"), (2, "2024 年同期数据对比")]
+        entities = extract_from_headings(heading_tree)
+        assert entities.get("year") == "2025"
+
+    def test_child_fills_missing_document_entity(self):
+        """顶层无 year 时，子级标题可补缺 year。"""
+        heading_tree = [(1, "年度报告"), (2, "2024 年利润表")]
+        entities = extract_from_headings(heading_tree)
+        assert entities.get("year") == "2024"
+
+
+class TestExtractFromText:
+    def test_chinese_quarters(self):
+        """中文数字季度应映射为 第X季度。"""
+        assert _extract_from_text("2025 年第一季度").get("report_period") == "2025年第一季度"
+        assert _extract_from_text("2025 年第二季度").get("report_period") == "2025年第二季度"
+        assert _extract_from_text("2025 年第三季度").get("report_period") == "2025年第三季度"
+        assert _extract_from_text("2025 年第四季度").get("report_period") == "2025年第四季度"
+
+    def test_arabic_quarters(self):
+        """阿拉伯数字季度应映射为 Q{num}。"""
+        assert _extract_from_text("2025 年第1季度").get("report_period") == "2025年Q1"
+        assert _extract_from_text("2025 年第2季度").get("report_period") == "2025年Q2"
+
+    def test_sec_code(self):
+        assert _extract_from_text("证券代码：600718").get("sec_code") == "600718"
+
 
 class TestLLMFallback:
     class _FakeLLM:
@@ -66,16 +97,33 @@ class TestLLMFallback:
             raise RuntimeError("llm unavailable")
 
     def test_auto_mode_skips_when_rules_complete(self, monkeypatch):
-        """规则层已抽齐核心实体时，auto 模式不调 LLM，结果即规则结果。"""
+        """规则层已抽齐核心实体时，auto 模式不调 LLM，LLM 结果不生效。"""
         from src.config import settings
 
         monkeypatch.setattr(settings, "ENTITY_LLM_FALLBACK", "auto")
-        extractor = DocumentEntityExtractor(llm=self._FakeLLM('{"entities": {}}'))
+        # 若 auto 误调 LLM，company 会被覆盖为 HACKED → 断言仍为规则值 neusoft
+        extractor = DocumentEntityExtractor(
+            llm=self._FakeLLM('{"entities": {"company": "HACKED"}}')
+        )
         # neusoft 文件名给出 company/year，正文给出 sec_code/report_period
         text = "证券代码：600718\n2025 年第一季度"
         heading_tree = [(1, "2025 年第一季度报告")]
         entities = extractor.extract("neusoft_2025_q1.pdf", heading_tree, text, "pdf")
         assert entities.get("company") == "neusoft"
+
+    def test_on_mode_calls_llm_even_when_rules_complete(self, monkeypatch):
+        """on 模式规则已齐时仍调 LLM，LLM 结果覆盖规则值。"""
+        from src.config import settings
+
+        monkeypatch.setattr(settings, "ENTITY_LLM_FALLBACK", "on")
+        extractor = DocumentEntityExtractor(
+            llm=self._FakeLLM('{"entities": {"company": "HACKED"}}')
+        )
+        # 规则层 company=neusoft 已齐，on 模式仍调 LLM → company 被覆盖为 HACKED
+        text = "证券代码：600718\n2025 年第一季度"
+        heading_tree = [(1, "2025 年第一季度报告")]
+        entities = extractor.extract("neusoft_2025_q1.pdf", heading_tree, text, "pdf")
+        assert entities.get("company") == "HACKED"
 
     def test_auto_mode_triggers_when_missing_core(self, monkeypatch):
         """auto 模式规则缺核心实体时触发 LLM，由 LLM 补全。"""
