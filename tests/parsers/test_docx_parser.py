@@ -4,6 +4,7 @@
 - DOCX 文件解析（段落 + 表格提取）
 - 分块内容完整性
 - 元数据包含 page 字段
+- 标题树提取（Heading 样式）
 - 异常场景：文件不存在
 """
 
@@ -44,6 +45,14 @@ class TestDocxParser:
         result = self.parser.parse(self.sample_path)
         for chunk in result.chunks:
             assert "page" in chunk.metadata  # 支持“第X页”引用
+
+    def test_docx_heading_tree_extracted(self):
+        """标题树提取：Heading 样式的段落写入 heading_tree。"""
+        result = self.parser.parse(self.sample_path)
+        assert isinstance(result, ParseResult)
+        assert hasattr(result, "heading_tree")
+        # sample.docx 的 "财务报告摘要" 段落使用 Heading 1 样式
+        assert result.heading_tree == [(1, "财务报告摘要")]
 
     def test_parse_nonexistent_file_raises(self):
         """文件不存在时抛出 FileNotFoundError。"""
