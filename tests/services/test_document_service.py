@@ -84,6 +84,43 @@ class TestEntityInjection:
         assert chunks[0].metadata == {"page": 1}
         doc_repo.update_document_meta_info.assert_not_awaited()
 
+    @pytest.mark.asyncio
+    async def test_non_scalar_entities_filtered(self):
+        """null/list/nan 等非标量实体值被过滤，仅标量 str 注入 chunk.metadata。"""
+        svc, doc_repo = _make_service()
+        chunks = [ChunkData(content="内容A", metadata={"page": 1})]
+        entities = {
+            "company": None,
+            "sec_code": ["600718"],
+            "report_period": "2025年第一季度",
+            "score": float("nan"),
+        }
+        with (
+            patch(
+                "src.infra.search.document_entity_extractor."
+                "DocumentEntityExtractor.extract",
+                return_value=entities,
+            ),
+            patch("src.services.document_service.get_classify_llm"),
+        ):
+            await svc._inject_document_entities(
+                doc_id="doc-1",
+                filename="neusoft_2025_q1.pdf",
+                file_type="pdf",
+                heading_tree=[(1, "主要财务数据")],
+                full_text="内容A",
+                chunks=chunks,
+            )
+
+        # 仅标量 str 被注入；company(None)/sec_code(list)/score(nan) 被过滤
+        assert chunks[0].metadata["report_period"] == "2025年第一季度"
+        assert "company" not in chunks[0].metadata
+        assert "sec_code" not in chunks[0].metadata
+        assert "score" not in chunks[0].metadata
+        doc_repo.update_document_meta_info.assert_awaited_once_with(
+            "doc-1", {"entities": {"report_period": "2025年第一季度"}}
+        )
+
 
 class TestEntityInjectionFailure:
     @pytest.mark.asyncio

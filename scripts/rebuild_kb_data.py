@@ -17,6 +17,7 @@ status=pending，重新触发 process_document 跑新链路（pymupdf4llm + 实�
 import argparse
 import asyncio
 import os
+from collections import Counter
 
 from src.infra.db.engine import session_factory
 from src.infra.db.mysql_db import DocumentRepo, KbRepo
@@ -66,9 +67,18 @@ async def _rebuild_kb(
     except Exception as e:  # noqa: BLE001
         print(f"ChromaDB: clear failed for kb_{kb_id}: {e}")
 
-    # 2. 重置 status=pending（保留 document 记录与 MinIO 文件，不丢数据）
+    # 2. 重置 status=pending（保留 document 记录与 MinIO 文件，不丢数据），
+    #    顺带清空上次处理的错误/进度/分块数，避免旧状态残留误导
     for d in docs:
-        await repo.update_document_status(d.id, "pending")
+        await repo.update_document_status(
+            d.id,
+            "pending",
+            processing_state=None,
+            processing_progress=0,
+            processing_message=None,
+            error_msg=None,
+            chunk_count=0,
+        )
     print(f"MySQL: reset {len(docs)} documents to pending for kb {kb_id}")
 
     # 3. 重新触发入库：直接调 process_document，minio_key = d.file_path
@@ -92,7 +102,14 @@ async def _rebuild_kb(
         for d in ingestible
     ]
     await asyncio.gather(*tasks, return_exceptions=True)
-    print(f"KB {kb_id}: re-ingest finished for {len(ingestible)} documents")
+    # process_document 内部捕获异常并标 failed，按重跑后最终 status 汇总打印
+    ingestible_ids = {d.id for d in ingestible}
+    fresh_docs = await repo.get_documents(kb_id)
+    status_counts = Counter(d.status for d in fresh_docs if d.id in ingestible_ids)
+    print(
+        f"KB {kb_id}: re-ingest finished for {len(ingestible)} documents, "
+        f"status={dict(status_counts)}"
+    )
 
 
 async def main() -> None:

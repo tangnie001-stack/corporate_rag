@@ -1,6 +1,7 @@
 """文档处理服务 — 文档的查询、删除、上传处理流水线。"""
 
 import asyncio
+import math
 import os
 import tempfile
 import time
@@ -339,12 +340,15 @@ class DocumentService:
         doc_entities = await asyncio.to_thread(
             extractor.extract, filename, heading_tree, full_text, file_type
         )
-        # LLM 兜底可能返回 null/非标量值，ChromaDB metadata 只接受标量，
-        # 过滤后避免 add_chunks 报 Cannot convert to MetadataValue
+        # LLM 兜底可能返回 null/非标量值，ChromaDB metadata 只接受标量
+        # （str/int/float/bool），过滤后避免 add_chunks 报 Cannot convert to
+        # MetadataValue；float 需为有限值（nan/inf 同样不可序列化）
         doc_entities = {
             k: v
             for k, v in doc_entities.items()
-            if v is not None and isinstance(v, (str, int, float, bool))
+            if v is not None
+            and isinstance(v, (str, int, float, bool))
+            and (not isinstance(v, float) or math.isfinite(v))
         }
         if not doc_entities:
             return
