@@ -17,7 +17,7 @@ from src.infra.db.file_store import FileStore
 from src.infra.db.models.document import DocModel as DocEntity
 from src.infra.db.mysql_db import DocumentRepo
 from src.infra.db.vector_store import VectorStore
-from src.models import get_embeddings
+from src.models import get_classify_llm, get_embeddings
 from src.parsers.router import DocRouter
 from src.rag.heading_locator import build_heading_segments, locate_heading_path
 from src.utils.errors import BusinessError
@@ -310,6 +310,47 @@ class DocumentService:
                 merged.append(c)
         return merged
 
+    async def _inject_document_entities(
+        self,
+        doc_id: str,
+        filename: str,
+        file_type: str,
+        heading_tree: list[tuple[int, str]],
+        full_text: str,
+        chunks: list[ChunkData],
+    ) -> None:
+        """抽取文档级实体并注入每个 chunk.metadata + meta_info 聚合。
+
+        实体抽取一次，扁平键注入每个 chunk.metadata（ChromaDB 兼容），
+        并聚合到 document.meta_info["entities"]
+        （update_document_meta_info 是合并更新，不覆盖 eval）。
+
+        Args:
+            doc_id: 文档 UUID
+            filename: 文档文件名
+            file_type: "pdf"/"docx"/"txt"
+            heading_tree: ParseResult.heading_tree
+            full_text: 文档全文（用于实体抽取的正文前缀）
+            chunks: 待入库的 chunk 列表（就地修改 metadata）
+        """
+        from src.infra.search.document_entity_extractor import DocumentEntityExtractor
+
+        extractor = DocumentEntityExtractor(llm=get_classify_llm())
+        doc_entities = await asyncio.to_thread(
+            extractor.extract, filename, heading_tree, full_text, file_type
+        )
+        if not doc_entities:
+            return
+        for c in chunks:
+            for k, v in doc_entities.items():
+                c.metadata[k] = v
+        await self._doc_repo.update_document_meta_info(
+            doc_id, {"entities": doc_entities}
+        )
+        logger.info(
+            "Entity extraction for '{}': {}", filename, list(doc_entities.keys())
+        )
+
     async def process_document(
         self,
         kb_id: str,
@@ -397,6 +438,16 @@ class DocumentService:
 
                 # 合并 tiny chunk — 将 < 50 tokens 的碎片合并到前一个 chunk
                 chunks = self._merge_tiny_chunks(chunks, strategy)
+
+                # 文档级实体抽取并注入 chunk.metadata + meta_info 聚合
+                await self._inject_document_entities(
+                    doc_id,
+                    filename,
+                    parse_result.file_type,
+                    parse_result.heading_tree,
+                    full_text,
+                    chunks,
+                )
 
                 # 分块质量校验 — CPU，to_thread
                 quality = await asyncio.to_thread(validate_chunks, chunks)
