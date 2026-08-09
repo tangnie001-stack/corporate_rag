@@ -44,7 +44,7 @@ LLM_KWARGS: str = os.getenv("LLM_KWARGS", "{}")
 # 分类器温度参数：查询路由分类时使用，略高于 LLM 温度以允许少量分类灵活度
 CLASSIFIER_TEMPERATURE: float = float(os.getenv("CLASSIFIER_TEMPERATURE", "0.1"))
 # 分类/路由专用模型：KBRouter 和 classify 节点使用的小模型（无思考模式）
-CLASSIFY_MODEL: str = os.getenv("CLASSIFY_MODEL", LLM_MODEL)
+CLASSIFY_MODEL: str = os.getenv("CLASSIFY_MODEL", "qwen3.7-flash-2026-07-15")
 # LLM 输入/输出内容记录开关：开启后所有 LLM 调用（含 ragas 指标打分）会
 # 把 prompt 与响应写入日志。默认关闭（避免生产日志被内容刷屏），调试时开启
 LLM_LOG_CONTENT: bool = os.getenv("LLM_LOG_CONTENT", "0").lower() in (
