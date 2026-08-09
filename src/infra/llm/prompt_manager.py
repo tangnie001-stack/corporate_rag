@@ -8,10 +8,11 @@
 
 import json
 import time
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import ClassVar
 from urllib.error import URLError
 from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo
 
 from loguru import logger
 
@@ -30,12 +31,17 @@ _INLINE_CITATION_INSTRUCTION: str = (
 _FALLBACK_SYSTEM_PROMPT: str = FINANCIAL_SYSTEM_PROMPT + _INLINE_CITATION_INSTRUCTION
 _FALLBACK_USER_TEMPLATE: str = USER_PROMPT_TEMPLATE
 
+# 北京时区：金融场景锚定"本报告期/今年"需按北京时间取日期。
+# 若用 UTC，北京 00:00-07:59 之间日期落后一天，月初/年初清晨会锚定错"今年/去年"。
+_BEIJING_TZ = ZoneInfo("Asia/Shanghai")
+
 
 def _with_current_date(prompt: str) -> str:
     """在系统提示词末尾追加今日日期，锚定相对时间表达（本报告期/今年）。
 
     重复调用时若日期行已存在则直接返回，保证幂等。
     日期在 get_system_prompt 层追加而非存入缓存，避免 _get() 60s 缓存跨天返回旧日期。
+    日期按北京时间（Asia/Shanghai）计算，避免 UTC 在凌晨时段日期落后一天。
 
     Args:
         prompt: 原始系统提示词文本
@@ -43,7 +49,7 @@ def _with_current_date(prompt: str) -> str:
     Returns:
         追加今日日期行后的提示词文本
     """
-    today = datetime.now(UTC).date()
+    today = datetime.now(_BEIJING_TZ).date()
     date_line = f"\n今天是 {today.year}年{today.month}月{today.day}日。\n"
     if date_line.strip() in prompt:
         return prompt
