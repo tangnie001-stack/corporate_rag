@@ -67,6 +67,39 @@ class TestRerank:
         assert contexts[0].source == "a.pdf"
         assert contexts[0].doc_id == "d1"
 
+    def test_rerank_passthrough_entities(self):
+        """rerank 后 chunk metadata 中的实体键应透传到 RAGContext.entities。"""
+        reranker = MagicMock()
+        reranker.rerank.return_value = [
+            {"index": 0, "relevance_score": 0.9},
+        ]
+        results = [
+            ChunkResult(
+                id="d1:0",
+                content="营收增长",
+                metadata={
+                    "source": "neusoft_2025_q1.pdf",
+                    "page": 3,
+                    "doc_id": "d1",
+                    "company": "东软集团",
+                    "report_period": "2025年第一季度",
+                    "sec_code": "600718",
+                },
+            )
+        ]
+        contexts = retrieval.rerank_results("query", results, reranker)
+        assert len(contexts) == 1
+        assert contexts[0].entities == {
+            "company": "东软集团",
+            "report_period": "2025年第一季度",
+            "sec_code": "600718",
+        }
+        # to_prompt_text 渲染实体锚点
+        text = contexts[0].to_prompt_text()
+        assert "公司: 东软集团" in text
+        assert "期间: 2025年第一季度" in text
+        assert "代码: 600718" in text
+
     def test_rerank_empty_results(self):
         """空结果应返回空列表。"""
         contexts = retrieval.rerank_results("query", [], MagicMock())
