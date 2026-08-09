@@ -62,3 +62,18 @@ def test_langfuse_host_override_from_env():
     ):
         reloaded = reload(src.config.settings)
         assert reloaded.LANGFUSE_HOST == "http://localhost:3000"
+
+
+def test_entity_llm_fallback_default_auto():
+    """ENTITY_LLM_FALLBACK defaults to 'auto' (三态开关默认值)."""
+    from src.config.settings import ENTITY_LLM_FALLBACK
+
+    assert ENTITY_LLM_FALLBACK in ("off", "on", "auto")
+    assert ENTITY_LLM_FALLBACK == "auto"
+
+
+def test_entity_text_prefix_len_default():
+    """ENTITY_TEXT_PREFIX_LEN defaults to 600（正文前缀字符数）. """
+    from src.config.settings import ENTITY_TEXT_PREFIX_LEN
+
+    assert ENTITY_TEXT_PREFIX_LEN == 600

@@ -160,6 +160,10 @@ MAX_TABLE_TOKENS: int = int(os.getenv("MAX_TABLE_TOKENS", "2048"))
 TABLE_ROW_CHUNK_CHARS: int = int(os.getenv("TABLE_ROW_CHUNK_CHARS", "2000"))
 # 残差短文本合并阈值：小于此字符数的独立文本段，如果与表格相邻则粘到表格上
 ORPHAN_THRESHOLD_CHARS: int = int(os.getenv("ORPHAN_THRESHOLD_CHARS", "200"))
+# 实体抽取 LLM 兜底开关（三态）: off=纯规则 / on=每文档无条件走 LLM / auto=规则空或缺关键类型才走
+ENTITY_LLM_FALLBACK: str = os.getenv("ENTITY_LLM_FALLBACK", "auto")
+# 实体抽取 LLM 兜底输入的正文前缀长度（字符数）
+ENTITY_TEXT_PREFIX_LEN: int = int(os.getenv("ENTITY_TEXT_PREFIX_LEN", "600"))
 
 # ====== Hybrid Search ======
 # 是否启用 BM25 + Dense 混合检索（通过 RRF 融合）

@@ -112,3 +112,44 @@ ABSTENTION_MARKERS: tuple[str, ...] = ("未在文档中找到",)
 
 # abstention 出口的回答文案：检索无达标 context 时直接返回，不回 LLM
 ABSTENTION_TEXT: str = "未在文档中找到相关数据。请尝试更换问题表述或补充更多文档。"
+
+
+# ====== 实体抽取 ======
+
+# 实体抽取系统提示词 — 引导 LLM 校验规则候选并补全盲区。
+# 输入含文件名、标题树、正文前缀、规则候选；输出 JSON 三字段。
+# 关键约束：规则结果与原文一致时保留，仅当原文无依据或明显不是实体时才纠正。
+ENTITY_EXTRACTION_SYSTEM_PROMPT: str = """你是一个金融文档实体抽取专家。基于文件名、文档标题结构和正文片段，提取文档级实体。
+
+核心实体（必须尽力提取）：company（公司名）、report_period（报告期，如"2025年第一季度"）、sec_code（证券代码）。
+可选实体（顺带返回，不勉强）：person（人名）、currency（币种）、report_type（报表类型）。
+
+规则层已给出候选结果，可能正确也可能错误。你的任务：
+1. 校验规则候选：与原文一致则保留；原文无依据或明显不是实体（如描述性短语）则纠正
+2. 补全规则漏掉的核心实体
+3. 只返回 JSON，不要其他内容。"""
+
+# 实体抽取用户消息模板。
+# 占位符: {filename} 文件名; {heading_tree} 标题树; {text_prefix} 正文前缀; {rule_candidates} 规则候选
+ENTITY_EXTRACTION_USER_TEMPLATE: str = """文件名：{filename}
+
+文档标题结构：
+{heading_tree}
+
+正文开头：
+{text_prefix}
+
+规则层候选（可能正确也可能错误）：
+{rule_candidates}
+
+输出 JSON（严格按此格式）：
+{{
+  "rule_correct": true,
+  "reason": "简要说明校验依据",
+  "entities": {{
+    "company": "公司名",
+    "report_period": "报告期",
+    "sec_code": "证券代码"
+  }}
+}}
+"""
