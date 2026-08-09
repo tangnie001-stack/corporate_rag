@@ -181,7 +181,13 @@ class DocumentEntityExtractor:
         if file_type in ENTITY_FULL_PIPELINE_TYPES:
             heading_entities = extract_from_headings(heading_tree)
             for k, v in heading_entities.items():
-                rule_entities.setdefault(k, v)
+                if k == "company":
+                    # 文件名 company 仅作 fallback：标题层命中中文全称时覆盖文件名拉丁名
+                    # （标题正则只产出中文名，文件名正则只产出 ASCII 拉丁名）
+                    if rule_entities.get("company", "").isascii():
+                        rule_entities["company"] = v
+                else:
+                    rule_entities.setdefault(k, v)
 
         # 正文正则（sec_code / report_period）
         text_entities = _extract_from_text(text[:ENTITY_TEXT_PREFIX_LEN])

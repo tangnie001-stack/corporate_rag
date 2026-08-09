@@ -113,13 +113,37 @@ class TestLLMFallback:
         from src.config import settings
 
         monkeypatch.setattr(settings, "ENTITY_LLM_FALLBACK", "auto")
-        # 若 auto 误调 LLM，company 会被覆盖为 HACKED → 断言仍为规则值 neusoft
+        # 若 auto 误调 LLM，company 会被覆盖为 HACKED → 断言仍为规则值
         extractor = DocumentEntityExtractor(
             llm=self._FakeLLM('{"entities": {"company": "HACKED"}}')
         )
         # neusoft 文件名给出 company/year，正文给出 sec_code/report_period
         text = "证券代码：600718\n2025 年第一季度"
         heading_tree = [(1, "2025 年第一季度报告")]
+        entities = extractor.extract("neusoft_2025_q1.pdf", heading_tree, text, "pdf")
+        assert entities.get("company") == "neusoft"
+
+    def test_heading_chinese_company_overrides_filename_latin(self, monkeypatch):
+        """标题层 level-1 命中中文公司名时，应覆盖文件名层的拉丁名。"""
+        from src.config import settings
+
+        monkeypatch.setattr(settings, "ENTITY_LLM_FALLBACK", "off")
+        extractor = DocumentEntityExtractor(llm=None)
+        # 文件名 company=neusoft（拉丁名仅作 fallback），封面标题命中中文全称
+        text = "证券代码：600718\n2025 年第一季度"
+        heading_tree = [(1, "东软集团股份有限公司 2025 年第一季度报告")]
+        entities = extractor.extract("neusoft_2025_q1.pdf", heading_tree, text, "pdf")
+        assert entities.get("company") == "东软集团股份有限公司"
+
+    def test_heading_company_keeps_filename_latin_when_no_chinese(self, monkeypatch):
+        """标题层未命中中文公司名时，文件名拉丁名保持不变。"""
+        from src.config import settings
+
+        monkeypatch.setattr(settings, "ENTITY_LLM_FALLBACK", "off")
+        extractor = DocumentEntityExtractor(llm=None)
+        # 标题无中文公司名（仅报表名），company 保留文件名拉丁名
+        text = "证券代码：600718\n2025 年第一季度"
+        heading_tree = [(1, "2025 年第一季度报告"), (2, "（一）主要财务数据")]
         entities = extractor.extract("neusoft_2025_q1.pdf", heading_tree, text, "pdf")
         assert entities.get("company") == "neusoft"
 
