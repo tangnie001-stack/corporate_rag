@@ -440,14 +440,22 @@ class DocumentService:
                 chunks = self._merge_tiny_chunks(chunks, strategy)
 
                 # 文档级实体抽取并注入 chunk.metadata + meta_info 聚合
-                await self._inject_document_entities(
-                    doc_id,
-                    filename,
-                    parse_result.file_type,
-                    parse_result.heading_tree,
-                    full_text,
-                    chunks,
-                )
+                # 实体抽取为可选增强，失败降级为不注入，不中断入库流程
+                try:
+                    await self._inject_document_entities(
+                        doc_id,
+                        filename,
+                        parse_result.file_type,
+                        parse_result.heading_tree,
+                        full_text,
+                        chunks,
+                    )
+                except Exception as entity_err:  # noqa: BLE001
+                    logger.warning(
+                        "Entity extraction failed for '{}': {} (skip, continue ingest)",
+                        filename,
+                        entity_err,
+                    )
 
                 # 分块质量校验 — CPU，to_thread
                 quality = await asyncio.to_thread(validate_chunks, chunks)
