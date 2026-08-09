@@ -6,29 +6,28 @@ def build_heading_segments(
 ) -> list[dict]:
     """由标题树和全文建立标题段区间表。
 
+    标题定位以 heading_tree 为准（而不是扫描全文 # 行）：
+    docx 的标题是纯文本段落（无 # 前缀），PDF 的标题行带 # 前缀，
+    两种形态都先按标题文本 find 定位，再退化到逐行匹配。
+
     Args:
-        full_text: 文档全文（Markdown）
+        full_text: 文档全文（PDF 为 Markdown，docx 为纯文本段落拼接）
         heading_tree: (level, heading) 列表，来自 ParseResult.heading_tree
 
     Returns:
         标题段区间列表，每项 {"path", "start", "end"}；
         path 为父级拼接的标题路径，start/end 为全文中的字符偏移。
-        无标题树时返回空列表。
+        无标题树或全部标题均未命中时返回空列表。
     """
     if not heading_tree:
         return []
 
-    # 在 full_text 中定位每个标题行的偏移
+    # 逐标题定位行首偏移（heading_tree 本身按文档顺序排列）
     offsets = []
-    lines = full_text.split("\n")
-    pos = 0
-    for line in lines:
-        stripped = line.rstrip()
-        if stripped.startswith("#"):
-            level = len(stripped) - len(stripped.lstrip("#"))
-            title = stripped.lstrip("#").strip()
-            offsets.append((pos, level, title))
-        pos += len(line) + 1  # +1 换行符
+    for level, title in heading_tree:
+        off = _locate_heading_line(full_text, title)
+        if off >= 0:
+            offsets.append((off, level, title))
 
     segments = []
     stack: list[tuple[int, str]] = []  # (level, title)
@@ -42,6 +41,41 @@ def build_heading_segments(
         segments.append({"path": path, "start": off, "end": end})
 
     return segments
+
+
+def _locate_heading_line(full_text: str, title: str) -> int:
+    """定位标题文本在全文中的行首偏移。
+
+    先按标题文本直接 find（docx 标题是完整段落，可寻址；PDF 带 # 前缀时
+    title 是 "# title" 的子串），命中后校验所在行确为标题行并回退到行首——
+    这样含 # 前缀的 chunk 也能命中区间。找不到时退化逐行匹配标题文本。
+
+    Args:
+        full_text: 文档全文
+        title: 标题文本（heading_tree 中的值，已去 # 前缀）
+
+    Returns:
+        标题所在行的行首字符偏移；未命中返回 -1。
+    """
+    pos = full_text.find(title)
+    if pos >= 0:
+        line_start = full_text.rfind("\n", 0, pos) + 1
+        line_end = full_text.find("\n", pos)
+        if line_end < 0:
+            line_end = len(full_text)
+        line = full_text[line_start:line_end].strip()
+        # 该行是标题行（去 # 后与 title 一致）才算命中，避免匹配到正文里的同名文本
+        if line.lstrip("#").strip() == title:
+            return line_start
+
+    # 退化：逐行匹配标题文本（兼容 find 命中的是正文同名文本的场景）
+    line_start = 0
+    for line in full_text.split("\n"):
+        stripped = line.strip()
+        if stripped.lstrip("#").strip() == title:
+            return line_start
+        line_start += len(line) + 1
+    return -1
 
 
 def locate_heading_path(
