@@ -96,7 +96,7 @@ async def _rebuild_kb(
         svc.process_document(
             kb_id,
             d.id,
-            d.file_path,
+            d.file_path or "",
             d.filename,
             os.path.splitext(d.filename)[1].lower() or ".pdf",
         )
