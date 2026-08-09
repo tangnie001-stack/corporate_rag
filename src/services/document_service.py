@@ -19,6 +19,7 @@ from src.infra.db.mysql_db import DocumentRepo
 from src.infra.db.vector_store import VectorStore
 from src.models import get_embeddings
 from src.parsers.router import DocRouter
+from src.rag.heading_locator import build_heading_segments, locate_heading_path
 from src.utils.errors import BusinessError
 
 _process_semaphore = asyncio.Semaphore(3)
@@ -246,10 +247,17 @@ class DocumentService:
             pages = {p for s, e, p in page_map if s < end and e > pos}
             chunk.metadata["page"] = min(pages)
 
-    def _enrich_chunk_pages(
-        self, chunks: list[ChunkData], parse_chunks: list, full_text: str
+    def _enrich_chunk_metadata(
+        self,
+        chunks: list[ChunkData],
+        parse_chunks: list,
+        full_text: str,
+        heading_segments: list[dict],
     ) -> None:
-        """从解析器分块反推 chunk 页码（私有版本，供 process_document 调用）。"""
+        """从解析器分块反推 chunk 页码和标题段路径。
+
+        在 _merge_tiny_chunks 之前调用（content 未被合并改写时 find 有效）。
+        """
         offset = 0
         page_map = []
         for c in parse_chunks:
@@ -264,6 +272,11 @@ class DocumentService:
             end = pos + len(text)
             pages = {p for s, e, p in page_map if s < end and e > pos}
             chunk.metadata["page"] = min(pages)
+            # 标题段反推
+            if heading_segments:
+                chunk.metadata["heading_path"] = locate_heading_path(
+                    text, full_text, heading_segments
+                )
 
     def _merge_tiny_chunks(
         self,
@@ -374,8 +387,13 @@ class DocumentService:
                     chunker.chunk, full_text, {"source": filename, "doc_id": doc_id}
                 )
 
-                # 从解析器分块反补 chunk 页码
-                self._enrich_chunk_pages(chunks, parse_result.chunks, full_text)
+                # 从解析器分块反补 chunk 页码 + 标题段路径
+                heading_segments = build_heading_segments(
+                    full_text, parse_result.heading_tree
+                )
+                self._enrich_chunk_metadata(
+                    chunks, parse_result.chunks, full_text, heading_segments
+                )
 
                 # 合并 tiny chunk — 将 < 50 tokens 的碎片合并到前一个 chunk
                 chunks = self._merge_tiny_chunks(chunks, strategy)
