@@ -22,7 +22,12 @@ from src.agents.graph.state import (
 from src.config import LLM_MODEL, TOP_K_RETRIEVAL
 from src.config.prompts import ABSTENTION_MARKERS, ABSTENTION_TEXT
 from src.infra.db.vector_store.types import ChunkResult
-from src.infra.search.query_router import QueryRouter, aggregate_kb_entities
+from src.infra.search.query_router import (
+    KbEntityAggregate,
+    QueryRouter,
+    aggregate_kb_entities,
+    needs_kb_entities,
+)
 from src.rag.prompt import build_prompt, build_simple_prompt, format_context
 from src.rag.retrieval import rerank_results, rewrite_query, search
 from src.rag.stream import estimate_usage, stream_answer
@@ -76,12 +81,17 @@ def make_classify_node(llm) -> Callable:
     async def classify_node(state: AgentState) -> dict:
         """查询分类节点：基于 QueryRouter 输出三级路由 + 缺失实体。
 
-        先聚合 KB 候选实体（kb_router 节点已填充 _resolved_kb_ids），
-        注入 classifier prompt，并把聚合结果透传进 state 供 clarify 建议使用。
+        仅当查询可能走 LLM classify / clarify 时聚合 KB 候选实体
+        （kb_router 节点已填充 _resolved_kb_ids），注入 classifier prompt，
+        并把聚合结果透传进 state 供 clarify 建议使用。
         """
         logger.info("classify_node start: query={}", state.query[:50])
         router = QueryRouter(llm=llm)
-        kb_aggregate = await aggregate_kb_entities(state._resolved_kb_ids)
+        if needs_kb_entities(state.query):
+            kb_aggregate = await aggregate_kb_entities(state._resolved_kb_ids)
+        else:
+            # 问候/空/超短查询会在 route() 中短路，用不到 KB 候选，跳过聚合扫库
+            kb_aggregate = KbEntityAggregate.empty()
         result = router.route(
             state.query, state._history, kb_entities=kb_aggregate.text
         )

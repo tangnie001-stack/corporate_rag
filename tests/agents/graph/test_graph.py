@@ -1,6 +1,6 @@
 """Tests for LangGraph node functions."""
 
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -73,6 +73,75 @@ async def test_make_classify_node_returns_expected_keys():
         assert result[LangGraphNode.Classify.MISSING_ENTITIES] == []
         assert result[LangGraphNode.Classify.CLASSIFICATION_CONFIDENCE] == 1.0
         # 无 _resolved_kb_ids 时聚合为空，但 KB 透传字段仍需存在
+        assert result[LangGraphNode.Classify.KB_ENTITIES] == "无"
+        assert result[LangGraphNode.Classify.KB_SUGGESTIONS] == {}
+
+
+@pytest.mark.asyncio
+async def test_make_classify_node_passes_kb_aggregate_to_state():
+    """classify_node 应把聚合的 KB 候选透传进返回 dict（agent_service 从 CHAIN_END 读）。"""
+    from src.infra.search.query_router import KbEntityAggregate
+
+    mock_llm = Mock()
+    mock_aggregate = KbEntityAggregate(
+        text="公司: 腾讯", companies=["腾讯"], periods=[], codes=[]
+    )
+    mock_route_result = {
+        LangGraphNode.Classify.INTENT: RAGQueryIntent(route="medium"),
+        LangGraphNode.Classify.EXTRACTED_ENTITIES: [],
+        LangGraphNode.Classify.MISSING_ENTITIES: [
+            {"type": "company", "question": "您想查询哪家公司？"}
+        ],
+        LangGraphNode.Classify.CLASSIFICATION_CONFIDENCE: 0.8,
+    }
+    with (
+        patch("src.agents.graph.nodes.QueryRouter") as mock_router_cls,
+        patch(
+            "src.agents.graph.nodes.aggregate_kb_entities",
+            new=AsyncMock(return_value=mock_aggregate),
+        ),
+    ):
+        mock_router = Mock()
+        mock_router_cls.return_value = mock_router
+        mock_router.route.return_value = mock_route_result
+        node = make_classify_node(llm=mock_llm)
+        state = AgentState(query="营收多少", _resolved_kb_ids=["kb-1"])
+        result = await node(state)
+
+        mock_router.route.assert_called_once_with(
+            "营收多少", state._history, kb_entities="公司: 腾讯"
+        )
+        # 返回 dict 含 KB 透传字段（agent_service 从 classify CHAIN_END output 读取）
+        assert result[LangGraphNode.Classify.KB_ENTITIES] == "公司: 腾讯"
+        assert result[LangGraphNode.Classify.KB_SUGGESTIONS] == {
+            "company": ["腾讯", "其他"]
+        }
+
+
+@pytest.mark.asyncio
+async def test_make_classify_node_skips_aggregate_for_greeting():
+    """问候/短查询应跳过 KB 聚合（route 短路，无需候选），仍透传空聚合。"""
+    mock_llm = Mock()
+    mock_route_result = {
+        LangGraphNode.Classify.INTENT: RAGQueryIntent(route="simple"),
+        LangGraphNode.Classify.EXTRACTED_ENTITIES: [],
+        LangGraphNode.Classify.MISSING_ENTITIES: [],
+        LangGraphNode.Classify.CLASSIFICATION_CONFIDENCE: 1.0,
+    }
+    with (
+        patch("src.agents.graph.nodes.QueryRouter") as mock_router_cls,
+        patch(
+            "src.agents.graph.nodes.aggregate_kb_entities", new=AsyncMock()
+        ) as mock_agg,
+    ):
+        mock_router = Mock()
+        mock_router_cls.return_value = mock_router
+        mock_router.route.return_value = mock_route_result
+        node = make_classify_node(llm=mock_llm)
+        state = AgentState(query="你好", _resolved_kb_ids=["kb-1"])
+        result = await node(state)
+
+        mock_agg.assert_not_called()
         assert result[LangGraphNode.Classify.KB_ENTITIES] == "无"
         assert result[LangGraphNode.Classify.KB_SUGGESTIONS] == {}
 

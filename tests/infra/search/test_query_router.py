@@ -188,3 +188,59 @@ async def test_aggregate_kb_entities_collects_from_meta_info() -> None:
     assert "报告期: 2024年第四季度、2025年第一季度" in agg.text
     assert "代码: 00700" in agg.text
     assert repo.get_documents.call_count == 2
+
+
+def test_needs_kb_entities_short_circuits() -> None:
+    """needs_kb_entities 应与 route 的短路条件一致（空/问候/≤2 字符不需要候选）。"""
+    from src.infra.search.query_router import needs_kb_entities
+
+    assert needs_kb_entities("") is False
+    assert needs_kb_entities("你好") is False
+    assert needs_kb_entities("hi") is False
+    assert needs_kb_entities("营收") is False  # ≤2 字符
+    assert needs_kb_entities("2024年营收多少") is True
+
+
+@pytest.mark.asyncio
+async def test_aggregate_kb_entities_degrades_on_db_error() -> None:
+    """DB 查询失败时聚合应降级为空聚合，不向上抛异常。"""
+    repo = AsyncMock()
+    repo.get_documents.side_effect = RuntimeError("db down")
+
+    with (
+        patch("src.infra.db.engine.session_factory", MagicMock()),
+        patch("src.infra.db.mysql_db.DocumentRepo", return_value=repo),
+    ):
+        agg = await aggregate_kb_entities(["kb-1"])
+
+    assert agg.text == "无"
+    assert agg.companies == []
+    assert agg.periods == []
+    assert agg.codes == []
+    assert agg.to_suggestions() == {}
+
+
+@pytest.mark.asyncio
+async def test_aggregate_kb_entities_skips_bad_meta_info() -> None:
+    """meta_info 损坏/entities 非 dict 的文档应被跳过，其余文档照常聚合。"""
+    bad_doc = MagicMock()
+    bad_doc.meta_info = "{invalid json"
+    non_dict_doc = MagicMock()
+    non_dict_doc.meta_info = json.dumps({"entities": ["x"]})
+    list_doc = MagicMock()
+    list_doc.meta_info = json.dumps({"entities": {"company": ["腾讯", "腾讯音乐"]}})
+    good_doc = MagicMock()
+    good_doc.meta_info = json.dumps({"entities": {"company": "阿里巴巴"}})
+
+    repo = AsyncMock()
+    repo.get_documents.return_value = [bad_doc, non_dict_doc, list_doc, good_doc]
+
+    with (
+        patch("src.infra.db.engine.session_factory", MagicMock()),
+        patch("src.infra.db.mysql_db.DocumentRepo", return_value=repo),
+    ):
+        agg = await aggregate_kb_entities(["kb-1"])
+
+    assert agg.companies == ["腾讯、腾讯音乐", "阿里巴巴"]
+    assert "公司: 腾讯、腾讯音乐、阿里巴巴" in agg.text
+    assert repo.get_documents.call_count == 1

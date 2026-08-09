@@ -59,12 +59,75 @@ class KbEntityAggregate:
             result["sec_code"] = list(self.codes) + ["其他"]
         return result
 
+    @classmethod
+    def empty(cls) -> "KbEntityAggregate":
+        """返回空聚合（text="无"，无任何候选），供无 KB/跳过/降级场景使用。"""
+        return cls(text="无", companies=[], periods=[], codes=[])
+
+
+def needs_kb_entities(query: str) -> bool:
+    """预判当前查询是否需要 KB 候选实体（与 route 的短路条件一致）。
+
+    空查询/问候/超短查询（≤2 字符）会在 route() 中提前返回 simple，
+    用不到 kb_entities 注入，调用方可据此跳过聚合查库。
+
+    Args:
+        query: 用户原始查询文本
+
+    Returns:
+        True 表示需要聚合 KB 候选；False 表示 route 必然短路、无需候选
+    """
+    cleaned = query.strip()
+    if not cleaned:
+        return False
+    if any(re.match(p, cleaned) for p in _GREETING_PATTERNS):
+        return False
+    return len(cleaned) > _SHORT_QUERY_THRESHOLD
+
+
+def _normalize_entity_value(value: Any) -> str:
+    """将实体值归一为字符串。
+
+    meta_info 中实体值理论上是字符串，但防御性处理：
+    list 用顿号连接元素，其余类型直接 str（罕见脏数据不阻塞聚合）。
+
+    Args:
+        value: 实体字段原始值
+
+    Returns:
+        归一后的字符串
+    """
+    if isinstance(value, list):
+        return "、".join(str(v) for v in value)
+    return str(value)
+
+
+def _parse_meta_info(doc) -> Any:
+    """解析文档 meta_info JSON，损坏时返回 None 并告警跳过该文档。
+
+    Args:
+        doc: DocumentRepo 返回的文档对象
+
+    Returns:
+        解析后的 JSON 值；JSON 非法或类型错误时返回 None
+    """
+    try:
+        return json.loads(doc.meta_info or "{}")
+    except (json.JSONDecodeError, TypeError):
+        logger.warning(
+            "aggregate_kb_entities: skip doc with bad meta_info, doc_id={}",
+            getattr(doc, "id", "?"),
+        )
+        return None
+
 
 async def aggregate_kb_entities(kb_ids: list[str] | None) -> KbEntityAggregate:
     """从 KB 文档的 meta_info 聚合候选实体（公司/报告期/代码）。
 
     遍历每个 KB 下未删除文档的 meta_info["entities"]，去重后返回
     格式化文本（供 classifier prompt 注入）与分类候选（供 clarify 建议）。
+    任一文档 meta_info 损坏会被跳过；DB 查询/解析整体失败时降级为
+    空聚合（text="无"），保证 classify 路径不被 MySQL 故障击穿。
 
     Args:
         kb_ids: KB ID 列表；为空或 None 时返回空聚合（text="无"）
@@ -73,25 +136,33 @@ async def aggregate_kb_entities(kb_ids: list[str] | None) -> KbEntityAggregate:
         KbEntityAggregate：含格式化文本与三类候选实体列表
     """
     if not kb_ids:
-        return KbEntityAggregate(text="无", companies=[], periods=[], codes=[])
-    from src.infra.db.engine import session_factory
-    from src.infra.db.mysql_db import DocumentRepo
-
-    repo = DocumentRepo(session_factory)
+        return KbEntityAggregate.empty()
     companies: set[str] = set()
     periods: set[str] = set()
     codes: set[str] = set()
-    for kb_id in kb_ids:
-        docs = await repo.get_documents(kb_id)
-        for d in docs:
-            meta = json.loads(d.meta_info or "{}")
-            entities = meta.get("entities", {}) or {}
-            if entities.get("company"):
-                companies.add(str(entities["company"]))
-            if entities.get("report_period"):
-                periods.add(str(entities["report_period"]))
-            if entities.get("sec_code"):
-                codes.add(str(entities["sec_code"]))
+    try:
+        from src.infra.db.engine import session_factory
+        from src.infra.db.mysql_db import DocumentRepo
+
+        repo = DocumentRepo(session_factory)
+        for kb_id in kb_ids:
+            docs = await repo.get_documents(kb_id)
+            for d in docs:
+                meta = _parse_meta_info(d)
+                if not isinstance(meta, dict):
+                    continue
+                entities = meta.get("entities") or {}
+                if not isinstance(entities, dict):
+                    entities = {}
+                if entities.get("company"):
+                    companies.add(_normalize_entity_value(entities["company"]))
+                if entities.get("report_period"):
+                    periods.add(_normalize_entity_value(entities["report_period"]))
+                if entities.get("sec_code"):
+                    codes.add(_normalize_entity_value(entities["sec_code"]))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("aggregate_kb_entities failed, degrade to empty: {}", e)
+        return KbEntityAggregate.empty()
     parts = []
     if companies:
         parts.append("公司: " + "、".join(sorted(companies)))
@@ -142,6 +213,8 @@ class QueryRouter:
         if len(cleaned) <= _SHORT_QUERY_THRESHOLD:
             return self._simple_result(skip_retrieval=False)
         if cleaned in self._cache:
+            # 缓存 key 仅含 query，不含 kb_entities：实例必须按请求新建，
+            # 避免跨请求/跨 KB 的候选实体串扰（classify_node 每次新建 QueryRouter）
             return self._cache[cleaned]
         entities = self._entity_extractor.extract(cleaned)
         entities_dict = [
