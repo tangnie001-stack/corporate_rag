@@ -3,10 +3,11 @@
 处理流程：
   1. 用 pymupdf 打开 PDF
   2. 用 pymupdf4llm.to_markdown(page_chunks=True) 逐页转 Markdown
-     （内部自动识别标题层级 # 前缀、表格转 Markdown）
-  3. 检测扫描件（每页可提取文字少于 MIN_TEXT_CHARS 视为扫描页）
-  4. 从拼接全文提取标题树 (level, heading)
-  5. 按页分块（每页独立分块，保留页码元数据）
+     （内部自动识别标题层级 # 前缀、表格转 Markdown；header/footer 关闭去除页眉页脚）
+  3. 轻量清洗 Markdown/HTML 标记残留（强调标记、<sup>/<mark>/<u>/<br> 等）
+  4. 检测扫描件（每页可提取文字少于 MIN_TEXT_CHARS 视为扫描页）
+  5. 从拼接全文提取标题树 (level, heading)，过滤伪标题
+  6. 按页分块（每页独立分块，保留页码元数据）
 
 扫描件检测逻辑：
   如果所有页面的可提取文字都少于 MIN_TEXT_CHARS（200 字符），
@@ -32,10 +33,17 @@ from src.parsers.base import BaseParser, ChunkData, ParseResult
 # 匹配 Markdown 表格（以 | 开头和结尾的行组成的多行表格）
 TABLE_PATTERN = re.compile(r"^\|.+\|[\s\S]*?^\|.+\|", re.MULTILINE)
 
-# 匹配 pymupdf4llm 加粗/斜体残留（**_X_**、**X**、_X_）
-EMPHASIS_PATTERN = re.compile(r"\*{1,2}_([^*_]+)_\*{1,2}|\*\*([^*]+)\*\*|_([^_]+)_")
-# 匹配 HTML 上标标签残留（<sup>X</sup>）
-SUP_PATTERN = re.compile(r"<sup>([^<]*)</sup>")
+# 匹配 pymupdf4llm 强调残留（**_X_** 加粗+斜体、**X** 加粗），保留文本内容。
+# 注意：不含裸 _X_ 斜体规则——年报表格里邮箱等含下划线的真实内容会被误伤。
+EMPHASIS_PATTERN = re.compile(r"\*{1,2}_([^*_]+)_\*{1,2}|\*\*([^*]+)\*\*")
+# 匹配 <br> 换行残留（表格行内的换行会破坏 | 结构，统一替换为空格）
+BR_PATTERN = re.compile(r"<br\s*/?>")
+# 匹配其余内联 HTML 标签残留（<sup>、<mark>、<u> 等，保留标签内文本）
+HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
+# 匹配页脚页码行（如 "6 / 12"），layout 引擎 footer=False 偶有漏网，兜底剔除
+FOOTER_PAGE_NUM_PATTERN = re.compile(r"^\d+\s*/\s*\d+\s*$", re.MULTILINE)
+# 伪标题过滤：复选框行（√/□ 适用/不适用 等）、编制单位标注行
+PSEUDO_HEADING_PATTERN = re.compile(r"[√□]|^编制单位")
 
 
 class PyMuPDFParser(BaseParser):
@@ -97,7 +105,12 @@ class PyMuPDFParser(BaseParser):
               - scanned_pages: 文字量低于 MIN_TEXT_CHARS 的页数
         """
         md_pages = pymupdf4llm.to_markdown(
-            doc, page_chunks=True, show_progress=False, write_images=False
+            doc,
+            page_chunks=True,
+            show_progress=False,
+            write_images=False,
+            header=False,
+            footer=False,
         )
         # page_chunks=True 时始终返回 list[dict]，显式声明类型便于静态检查
         pages = cast(list[dict], md_pages)
@@ -105,10 +118,14 @@ class PyMuPDFParser(BaseParser):
         total_chars = 0
         scanned_pages = 0  # 扫描页计数器
 
-        # ====== 逐页提取 Markdown 文字 ======
+        # ====== 逐页提取 Markdown 文字并轻量清洗 ======
         for p in pages:
-            text = p["text"]
-            page_num = p["metadata"]["page_number"]  # 1-based
+            text = self._clean_markdown_noise(p["text"])
+            # 双兼容页码键：Layout 引擎用 page_number，legacy 路径用 page
+            metadata = p["metadata"]
+            page_num = metadata.get("page_number")
+            if page_num is None:
+                page_num = metadata["page"]
             char_count = len(text.strip())
             total_chars += char_count
             # 扫描页检测：文字极少说明该页可能是图片扫描件
@@ -161,7 +178,7 @@ class PyMuPDFParser(BaseParser):
         """从拼接后的全文提取标题树。
 
         pymupdf4llm 输出的 Markdown 标题以 # 前缀标记（# 数量表示层级），
-        逐行扫描提取 (level, heading) 元组，并清洗 Markdown 强调残留。
+        逐行扫描提取 (level, heading) 元组，并清洗标记残留、过滤伪标题。
 
         Args:
             full_text: 拼接后的全文 Markdown 文本
@@ -182,44 +199,44 @@ class PyMuPDFParser(BaseParser):
 
     @staticmethod
     def _clean_heading(text: str) -> str:
-        """清洗标题中的 pymupdf4llm Markdown 标记残留。
+        """清洗标题文本并过滤伪标题。
 
-        pymupdf4llm 会把强调文本渲染为 **_X_** / **X** / _X_，
-        上标渲染为 <sup>X</sup>，这些标记残留在标题树中，统一去除。
+        在 _clean_markdown_noise 基础上，过滤复选框行（√/□ 适用/不适用）、
+        编制单位标注行等非真实标题，返回空字符串表示应丢弃。
 
         Args:
             text: 含 Markdown 标记的原始标题文本
 
         Returns:
-            去除强调/上标标记后的标题文本
+            清洗后的标题文本；伪标题返回空字符串
         """
-        # 依次去掉 **_X_**（加粗+斜体混合）、**X**（加粗）、_X_（斜体）
-        cleaned = EMPHASIS_PATTERN.sub(r"\1\2\3", text)
-        # 去掉 <sup>X</sup> 上标标签
-        cleaned = SUP_PATTERN.sub(r"\1", cleaned)
-        return cleaned.strip()
+        cleaned = PyMuPDFParser._clean_markdown_noise(text)
+        if PSEUDO_HEADING_PATTERN.search(cleaned):
+            return ""
+        return cleaned
 
-    def _table_to_markdown(self, table) -> str:
-        """将 PyMuPDF 表格对象转换为 Markdown 格式字符串。
+    @staticmethod
+    def _clean_markdown_noise(text: str) -> str:
+        """清洗 pymupdf4llm 输出的 Markdown/HTML 标记残留（标题与正文通用）。
+
+        只做轻量清洗，保留文本内容与表格结构：
+          - 去掉强调标记 **_X_** / **X**，保留文本内容
+          - <br> 替换为空格（表格行内的换行会破坏 | 结构）
+          - 去掉其余内联 HTML 标签（<sup>、<mark>、<u> 等），保留标签内文本
+          - 去掉页脚页码行（如 "6 / 12"，footer=False 偶有漏网的兜底）
 
         Args:
-            table: PyMuPDF 表格对象（find_tables() 返回的条目）
+            text: 含 Markdown/HTML 标记的原始文本
 
         Returns:
-            Markdown 格式的表格字符串，空表格返回空字符串
-
-        Note:
-            extract() 在畸形表格结构下可能返回 None，
-            空单元格为 None，用 str(c or "") 保证输出空字符串。
-            单元格内换行符替换为空格，避免破坏 Markdown 表格行结构。
+            清洗后的文本
         """
-        rows = table.extract()
-        if not rows or len(rows) < 1:
-            return ""
-        lines = []
-        header = "| " + " | ".join(self.sanitize_cell(c) for c in rows[0]) + " |"
-        lines.append(header)
-        lines.append("| " + " | ".join(["---"] * len(rows[0])) + " |")
-        for row in rows[1:]:
-            lines.append("| " + " | ".join(self.sanitize_cell(c) for c in row) + " |")
-        return "\n".join(lines)
+        # 先替换 <br>（避免表格行内换行破坏 | 结构）
+        cleaned = BR_PATTERN.sub(" ", text)
+        # 去强调标记
+        cleaned = EMPHASIS_PATTERN.sub(r"\1\2", cleaned)
+        # 去其余内联 HTML 标签，保留标签内文本
+        cleaned = HTML_TAG_PATTERN.sub("", cleaned)
+        # 去页脚页码行
+        cleaned = FOOTER_PAGE_NUM_PATTERN.sub("", cleaned)
+        return cleaned.strip()

@@ -8,6 +8,7 @@
 """
 
 import os
+import re
 
 import pytest
 
@@ -80,31 +81,46 @@ class TestPyMuPDFParser:
         # 验证扫描件检测逻辑触发
         assert result.is_scanned is True
 
-    def test_table_to_markdown(self):
-        """_table_to_markdown：应输出有效 Markdown 表格。"""
+    def test_footer_removed(self):
+        """页眉页脚过滤：chunk 中不应出现页脚页码行（如 "1 / 10"）。"""
+        if not os.path.exists(self.sample_pdf):
+            pytest.skip("Test PDF not found")
+        result = self.parser.parse(self.sample_pdf)
+        # 页脚页码行是单独的 "N / M" 行（to_markdown 的 footer=False 应已剔除）
+        for chunk in result.chunks:
+            assert not re.search(r"^\d+\s*/\s*\d+\s*$", chunk.content, re.MULTILINE)
 
-        # Mock a table-like object with extract() method
-        class MockTable:
-            def extract(self):
-                return [
-                    ["Name", "Age", "City"],
-                    ["Alice", "30", "NY"],
-                    ["Bob", "25", "LA"],
-                ]
+    def test_body_markdown_noise_cleaned(self):
+        """正文噪音清洗：chunk 中不应残留强调标记或 HTML 标签。
 
-        md = self.parser._table_to_markdown(MockTable())
-        assert "| Name | Age | City |" in md
-        assert "| --- | --- | --- |" in md
-        assert "| Alice | 30 | NY |" in md
+        覆盖 Imp-3 修复：**X**、**_X_**、<br>、<sup>、<mark>、<u> 等
+        pymupdf4llm 标记在进 chunk 前应被去除。
+        """
+        path = "data/test_docs/tencent_2024_annual.pdf"
+        if not os.path.exists(path):
+            pytest.skip("Test PDF not found")
+        result = self.parser.parse(path)
+        assert len(result.chunks) > 0
+        for chunk in result.chunks:
+            assert "**" not in chunk.content
+            assert not re.search(r"<br\s*/?>|</?sup>|</?mark>|</?u>", chunk.content)
 
-    def test_table_to_markdown_empty(self):
-        """_table_to_markdown：空表格返回空字符串。"""
-
-        class MockTable:
-            def extract(self):
-                return []
-
-        assert self.parser._table_to_markdown(MockTable()) == ""
+    def test_clean_markdown_noise(self):
+        """_clean_markdown_noise：去除强调标记与 HTML 标签，保留文本与表格结构。"""
+        clean = PyMuPDFParser._clean_markdown_noise
+        # 强调标记（**_X_** / **X**）
+        assert clean("同比 **_8%_** 毛利") == "同比 8% 毛利"
+        assert clean("|**1,385**|1,343|") == "|1,385|1,343|"
+        # HTML 标签（保留标签内文本）
+        assert clean("按非国际财务报告准则<sup>1</sup>") == "按非国际财务报告准则1"
+        assert clean("<mark>、监事、</mark>") == "、监事、"
+        assert clean("<u>单位：万元</u>") == "单位：万元"
+        # <br> 替换为空格，不破坏表格 | 行结构
+        assert clean("经营业务<br>密切相关|8,981,032|") == "经营业务 密切相关|8,981,032|"
+        # 邮箱等含下划线的真实内容不被误伤（裸 _X_ 规则已移除）
+        assert clean("mm_sun@tkl.tsannkuen.com") == "mm_sun@tkl.tsannkuen.com"
+        # 页脚页码行（如 "6 / 12"）被兜底剔除
+        assert clean("页脚残留\n6 / 12") == "页脚残留"
 
 
 class TestHeadingTree:
@@ -135,3 +151,14 @@ class TestHeadingTree:
         pages = {c.metadata.get("page") for c in result.chunks}
         # isinstance 过滤空值并缩小类型，保证 page 为正整数（从 1 开始）
         assert pages and all(isinstance(p, int) and p >= 1 for p in pages)
+
+    def test_pseudo_headings_filtered(self):
+        """伪标题过滤：复选框行（√/□）与"编制单位"标注行不应进入标题树。"""
+        path = "data/test_docs/neusoft_2025_q1.pdf"
+        if not os.path.exists(path):
+            pytest.skip("Test PDF not found")
+        result = self.parser.parse(path)
+        titles = [h for _, h in result.heading_tree]
+        # 复选框行（√适用□不适用 等）与编制单位标注行应被过滤
+        assert not any("√" in t or "□" in t for t in titles)
+        assert not any(t.startswith("编制单位") for t in titles)
