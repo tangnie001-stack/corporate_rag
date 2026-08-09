@@ -339,6 +339,13 @@ class DocumentService:
         doc_entities = await asyncio.to_thread(
             extractor.extract, filename, heading_tree, full_text, file_type
         )
+        # LLM 兜底可能返回 null/非标量值，ChromaDB metadata 只接受标量，
+        # 过滤后避免 add_chunks 报 Cannot convert to MetadataValue
+        doc_entities = {
+            k: v
+            for k, v in doc_entities.items()
+            if v is not None and isinstance(v, (str, int, float, bool))
+        }
         if not doc_entities:
             return
         for c in chunks:
