@@ -8,6 +8,7 @@
 
 import json
 import time
+from datetime import UTC, datetime
 from typing import ClassVar
 from urllib.error import URLError
 from urllib.request import Request, urlopen
@@ -28,6 +29,25 @@ _INLINE_CITATION_INSTRUCTION: str = (
 
 _FALLBACK_SYSTEM_PROMPT: str = FINANCIAL_SYSTEM_PROMPT + _INLINE_CITATION_INSTRUCTION
 _FALLBACK_USER_TEMPLATE: str = USER_PROMPT_TEMPLATE
+
+
+def _with_current_date(prompt: str) -> str:
+    """在系统提示词末尾追加今日日期，锚定相对时间表达（本报告期/今年）。
+
+    重复调用时若日期行已存在则直接返回，保证幂等。
+    日期在 get_system_prompt 层追加而非存入缓存，避免 _get() 60s 缓存跨天返回旧日期。
+
+    Args:
+        prompt: 原始系统提示词文本
+
+    Returns:
+        追加今日日期行后的提示词文本
+    """
+    today = datetime.now(UTC).date()
+    date_line = f"\n今天是 {today.year}年{today.month}月{today.day}日。\n"
+    if date_line.strip() in prompt:
+        return prompt
+    return prompt + date_line
 
 
 class PromptManager:
@@ -139,10 +159,10 @@ class PromptManager:
         return fallback
 
     def get_system_prompt(self) -> str:
-        """获取系统指令 prompt，追加内联引用编号指令。
+        """获取系统指令 prompt，追加内联引用编号指令和今日日期。
 
         从 Langfuse 拉取或使用本地兜底的 financial-system-prompt，
-        确保末尾始终包含内联引用编号指令。
+        确保末尾始终包含内联引用编号指令，并追加今日日期锚定相对时间表达。
 
         Returns:
             完整的系统 prompt 文本
@@ -151,7 +171,7 @@ class PromptManager:
         # 确保内联引用指令始终存在（无论 prompt 来自 Langfuse 还是本地兜底）
         if _INLINE_CITATION_INSTRUCTION not in prompt:
             prompt += _INLINE_CITATION_INSTRUCTION
-        return prompt
+        return _with_current_date(prompt)
 
     def get_user_template(self, context: str = "", query: str = "") -> str:
         """获取用户消息模板并填充占位符。
