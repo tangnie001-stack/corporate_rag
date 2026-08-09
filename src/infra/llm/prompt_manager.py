@@ -201,6 +201,7 @@ class PromptManager:
         entities: str,
         complexity_score: float,
         history: str,
+        kb_entities: str = "",
     ) -> str:
         """获取分类器 prompt，从 Langfuse 拉取或兜底本地模板。
 
@@ -212,6 +213,7 @@ class PromptManager:
             entities: 已提取实体列表（字符串）
             complexity_score: 规则预判的复杂度评分
             history: 最近对话历史文本
+            kb_entities: KB 聚合的候选实体（公司/报告期/代码），默认空串兜底为"无"
 
         Returns:
             完整的分类器 prompt 文本（系统提示 + 用户消息）
@@ -222,6 +224,7 @@ class PromptManager:
         user_prompt = CLASSIFIER_USER_TEMPLATE.format(
             query=query,
             entities=entities or "无",
+            kb_entities=kb_entities or "无",
             complexity_score=str(complexity_score),
             history=history or "无",
         )

@@ -72,6 +72,9 @@ async def test_make_classify_node_returns_expected_keys():
         assert result[LangGraphNode.Classify.EXTRACTED_ENTITIES] == []
         assert result[LangGraphNode.Classify.MISSING_ENTITIES] == []
         assert result[LangGraphNode.Classify.CLASSIFICATION_CONFIDENCE] == 1.0
+        # 无 _resolved_kb_ids 时聚合为空，但 KB 透传字段仍需存在
+        assert result[LangGraphNode.Classify.KB_ENTITIES] == "无"
+        assert result[LangGraphNode.Classify.KB_SUGGESTIONS] == {}
 
 
 def test_format_node_only_keeps_cited_sources():

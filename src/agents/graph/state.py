@@ -59,6 +59,10 @@ class AgentState:
     skip_clarify: bool = (
         False  # 评估模式标记：即使缺实体也不进 clarify 追问分支（由评估脚本设置）
     )
+    _kb_entities: str = ""  # KB 聚合候选实体文本（classify_node 注入 classifier prompt）
+    _kb_suggestions: dict = field(
+        default_factory=dict
+    )  # KB 聚合候选生成的澄清建议映射（agent_service 消费）
     # ── 内部 ──
     _history: list[ChatMessage] = field(
         default_factory=list
@@ -91,6 +95,8 @@ class LangGraphNode:
         MISSING_ENTITIES: str = "missing_entities"  # LLM 标记的缺失实体
         CLASSIFICATION_CONFIDENCE: str = "classification_confidence"  # LLM 置信度
         SKIP_RETRIEVAL: str = "skip_retrieval"  # 问候/闲聊标记：跳过检索直接回答
+        KB_ENTITIES: str = "_kb_entities"  # KB 聚合候选实体文本（prompt 注入）
+        KB_SUGGESTIONS: str = "_kb_suggestions"  # KB 聚合候选生成的澄清建议映射
 
     class Rewrite:
         NAME: str = "rewrite"  # 查询改写

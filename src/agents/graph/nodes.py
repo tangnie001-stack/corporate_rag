@@ -22,7 +22,7 @@ from src.agents.graph.state import (
 from src.config import LLM_MODEL, TOP_K_RETRIEVAL
 from src.config.prompts import ABSTENTION_MARKERS, ABSTENTION_TEXT
 from src.infra.db.vector_store.types import ChunkResult
-from src.infra.search.query_router import QueryRouter
+from src.infra.search.query_router import QueryRouter, aggregate_kb_entities
 from src.rag.prompt import build_prompt, build_simple_prompt, format_context
 from src.rag.retrieval import rerank_results, rewrite_query, search
 from src.rag.stream import estimate_usage, stream_answer
@@ -74,12 +74,20 @@ def make_classify_node(llm) -> Callable:
     """创建 classify_node 工厂函数。"""
 
     async def classify_node(state: AgentState) -> dict:
-        """查询分类节点：基于 QueryRouter 输出三级路由 + 缺失实体。"""
+        """查询分类节点：基于 QueryRouter 输出三级路由 + 缺失实体。
+
+        先聚合 KB 候选实体（kb_router 节点已填充 _resolved_kb_ids），
+        注入 classifier prompt，并把聚合结果透传进 state 供 clarify 建议使用。
+        """
         logger.info("classify_node start: query={}", state.query[:50])
         router = QueryRouter(llm=llm)
-        result = router.route(state.query, state._history)
+        kb_aggregate = await aggregate_kb_entities(state._resolved_kb_ids)
+        result = router.route(
+            state.query, state._history, kb_entities=kb_aggregate.text
+        )
         logger.info(
-            "classify_node done: route={}", result[LangGraphNode.Classify.INTENT].route
+            "classify_node done: route={}",
+            result[LangGraphNode.Classify.INTENT].route,
         )
         return {
             LangGraphNode.Classify.INTENT: result[LangGraphNode.Classify.INTENT],
@@ -95,6 +103,8 @@ def make_classify_node(llm) -> Callable:
             LangGraphNode.Classify.SKIP_RETRIEVAL: result.get(
                 LangGraphNode.Classify.SKIP_RETRIEVAL, False
             ),
+            LangGraphNode.Classify.KB_ENTITIES: kb_aggregate.text,
+            LangGraphNode.Classify.KB_SUGGESTIONS: kb_aggregate.to_suggestions(),
         }
 
     return classify_node

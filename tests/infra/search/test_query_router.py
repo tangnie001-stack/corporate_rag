@@ -1,9 +1,16 @@
 """QueryRouter — 三层意图路由模块的单元测试。"""
 
-from unittest.mock import Mock
+import json
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
+import pytest
 
 from src.agents.graph.state import LangGraphNode
-from src.infra.search.query_router import QueryRouter
+from src.infra.search.query_router import (
+    KbEntityAggregate,
+    QueryRouter,
+    aggregate_kb_entities,
+)
 
 
 def test_l0_greeting_returns_simple() -> None:
@@ -111,3 +118,73 @@ def test_normal_query_not_skip_retrieval() -> None:
     router = QueryRouter(llm=None)
     result = router.route("2024年营收多少", [])
     assert result[LangGraphNode.Classify.SKIP_RETRIEVAL] is False
+
+
+def test_route_passes_kb_entities_to_llm_classify() -> None:
+    """route 应将 kb_entities 参数透传给 _llm_classify（末位位置参数）。"""
+    router = QueryRouter(llm=Mock())
+    router._llm_classify = Mock(
+        return_value={"route": "medium", "missing_entities": [], "confidence": 0.9}
+    )
+    router.route("营收多少", history=[], kb_entities="公司: 腾讯、阿里巴巴")
+    assert router._llm_classify.call_args.args[-1] == "公司: 腾讯、阿里巴巴"
+
+
+def test_kb_entity_aggregate_to_suggestions() -> None:
+    """to_suggestions 应为有候选的类型生成建议映射并追加"其他"。"""
+    agg = KbEntityAggregate(text="公司: 腾讯", companies=["腾讯"], periods=[], codes=[])
+    assert agg.to_suggestions() == {"company": ["腾讯", "其他"]}
+
+
+def test_kb_entity_aggregate_to_suggestions_empty() -> None:
+    """无候选时 to_suggestions 应返回空映射。"""
+    agg = KbEntityAggregate(text="无", companies=[], periods=[], codes=[])
+    assert agg.to_suggestions() == {}
+
+
+@pytest.mark.asyncio
+async def test_aggregate_kb_entities_empty_returns_no() -> None:
+    """kb_ids 为空/None 时聚合应返回 text="无" 且不查库。"""
+    agg = await aggregate_kb_entities(None)
+    assert agg.text == "无"
+    assert agg.companies == []
+    assert agg.periods == []
+    assert agg.codes == []
+
+
+@pytest.mark.asyncio
+async def test_aggregate_kb_entities_collects_from_meta_info() -> None:
+    """aggregate_kb_entities 应从多文档 meta_info 去重聚合候选实体并格式化。"""
+    doc1 = MagicMock()
+    doc1.meta_info = json.dumps(
+        {
+            "entities": {
+                "company": "腾讯",
+                "report_period": "2025年第一季度",
+                "sec_code": "00700",
+            }
+        }
+    )
+    doc2 = MagicMock()
+    doc2.meta_info = json.dumps(
+        {"entities": {"company": "阿里巴巴", "report_period": "2024年第四季度"}}
+    )
+    doc3 = MagicMock()
+    doc3.meta_info = None  # 无 meta_info 文档应被跳过
+
+    repo = AsyncMock()
+    repo.get_documents.return_value = [doc1, doc2, doc3]
+
+    with (
+        patch("src.infra.db.engine.session_factory", MagicMock()),
+        patch("src.infra.db.mysql_db.DocumentRepo", return_value=repo),
+    ):
+        agg = await aggregate_kb_entities(["kb-1", "kb-2"])
+
+    assert agg.companies == ["腾讯", "阿里巴巴"]
+    assert agg.periods == ["2024年第四季度", "2025年第一季度"]
+    assert agg.codes == ["00700"]
+    assert "公司: 腾讯、阿里巴巴" in agg.text
+    assert "报告期: 2024年第四季度、2025年第一季度" in agg.text
+    assert "代码: 00700" in agg.text
+    assert repo.get_documents.call_count == 2

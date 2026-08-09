@@ -2,6 +2,7 @@
 
 import json
 import re
+from dataclasses import dataclass
 from typing import Any
 
 from langchain_core.messages import HumanMessage
@@ -27,6 +28,89 @@ SUGGESTIONS_MAP: dict[str, list[str]] = {
 }
 
 
+@dataclass
+class KbEntityAggregate:
+    """KB 候选实体聚合结果。
+
+    text: 供 classifier prompt 注入的格式化字符串（无候选时为"无"）
+    companies: 聚合到的公司名列表（去重排序，可为空）
+    periods: 聚合到的报告期列表（去重排序，可为空）
+    codes: 聚合到的证券代码列表（去重排序，可为空）
+    """
+
+    text: str
+    companies: list[str]
+    periods: list[str]
+    codes: list[str]
+
+    def to_suggestions(self) -> dict[str, list[str]]:
+        """将聚合实体转换为 clarify 追问的 suggestions 映射。
+
+        Returns:
+            {实体类型: 候选列表}，与 SUGGESTIONS_MAP 同构；
+            每种类型末位追加"其他"快捷项，空类型不出现在结果中
+        """
+        result: dict[str, list[str]] = {}
+        if self.companies:
+            result["company"] = list(self.companies) + ["其他"]
+        if self.periods:
+            result["report_period"] = list(self.periods) + ["其他"]
+        if self.codes:
+            result["sec_code"] = list(self.codes) + ["其他"]
+        return result
+
+
+async def aggregate_kb_entities(kb_ids: list[str] | None) -> KbEntityAggregate:
+    """从 KB 文档的 meta_info 聚合候选实体（公司/报告期/代码）。
+
+    遍历每个 KB 下未删除文档的 meta_info["entities"]，去重后返回
+    格式化文本（供 classifier prompt 注入）与分类候选（供 clarify 建议）。
+
+    Args:
+        kb_ids: KB ID 列表；为空或 None 时返回空聚合（text="无"）
+
+    Returns:
+        KbEntityAggregate：含格式化文本与三类候选实体列表
+    """
+    if not kb_ids:
+        return KbEntityAggregate(text="无", companies=[], periods=[], codes=[])
+    from src.infra.db.engine import session_factory
+    from src.infra.db.mysql_db import DocumentRepo
+
+    repo = DocumentRepo(session_factory)
+    companies: set[str] = set()
+    periods: set[str] = set()
+    codes: set[str] = set()
+    for kb_id in kb_ids:
+        docs = await repo.get_documents(kb_id)
+        for d in docs:
+            meta = json.loads(d.meta_info or "{}")
+            entities = meta.get("entities", {}) or {}
+            if entities.get("company"):
+                companies.add(str(entities["company"]))
+            if entities.get("report_period"):
+                periods.add(str(entities["report_period"]))
+            if entities.get("sec_code"):
+                codes.add(str(entities["sec_code"]))
+    parts = []
+    if companies:
+        parts.append("公司: " + "、".join(sorted(companies)))
+    if periods:
+        parts.append("报告期: " + "、".join(sorted(periods)))
+    if codes:
+        parts.append("代码: " + "、".join(sorted(codes)))
+    if parts:
+        text = "; ".join(parts)
+    else:
+        text = "无"
+    return KbEntityAggregate(
+        text=text,
+        companies=sorted(companies),
+        periods=sorted(periods),
+        codes=sorted(codes),
+    )
+
+
 def _format_history(history: list) -> str:
     lines = []
     for msg in history[-4:]:
@@ -43,7 +127,12 @@ class QueryRouter:
         self._prompt_manager = prompt_manager or PromptManager()
         self._cache: dict[str, dict[str, Any]] = {}
 
-    def route(self, query: str, history: list | None = None) -> dict[str, Any]:
+    def route(
+        self,
+        query: str,
+        history: list | None = None,
+        kb_entities: str = "",
+    ) -> dict[str, Any]:
         history = history or []
         cleaned = query.strip()
         if not cleaned:
@@ -62,7 +151,7 @@ class QueryRouter:
         complexity_score = score_complexity(cleaned, entities)
         if self._llm:
             llm_result = self._llm_classify(
-                cleaned, entities, complexity_score, history
+                cleaned, entities, complexity_score, history, kb_entities
             )
         else:
             llm_result = self._fallback_route(complexity_score)
@@ -90,7 +179,7 @@ class QueryRouter:
         }
 
     def _llm_classify(
-        self, query, entities, complexity_score, history
+        self, query, entities, complexity_score, history, kb_entities: str = ""
     ) -> dict[str, Any]:
         entities_text = (
             "; ".join(f"{e.type}={e.value}" for e in entities if e.value)
@@ -103,6 +192,7 @@ class QueryRouter:
             entities=entities_text,
             complexity_score=complexity_score,
             history=history_text,
+            kb_entities=kb_entities,
         )
         try:
             from src.config import CLASSIFIER_TEMPERATURE

@@ -57,9 +57,60 @@ class TestStreamChatClarification:
         assert len(clarification_events) > 0
         assert clarification_events[0].type == "entity_completion"
         assert clarification_events[0].missing_entities[0]["type"] == "year"
+        # 无 KB 候选时兜底静态映射（year → 年份建议）
+        assert clarification_events[0].suggestions == ["2023年", "2024年", "其他"]
         # 验证在澄清事件后终止了流（finally 块再发一次 DONE）
         done_events = [e for e in events if isinstance(e, SSEDoneEvent)]
         assert len(done_events) == 2
+
+    @pytest.mark.asyncio
+    async def test_stream_chat_clarification_uses_kb_suggestions(self):
+        """澄清分支的 suggestions 应来自 KB 候选而非硬编码"腾讯/阿里巴巴"。"""
+        from src.agents.graph.state import (
+            LangGraphEvent,
+            LangGraphKey,
+            LangGraphNode,
+        )
+        from src.services.agent_service import AgentService
+
+        service = AgentService.__new__(AgentService)
+        service._llm = Mock()
+        service._chat_manager = AsyncMock()
+        service._chat_manager.get_history_async.return_value = []
+        service._chat_manager.add_message_async = AsyncMock()
+        service._prompt_manager = Mock()
+        service._tracer = Mock()
+
+        async def fake_astream(*args, **kwargs):
+            yield {
+                LangGraphKey.EVENT: LangGraphEvent.CHAIN_END,
+                LangGraphKey.NAME: LangGraphNode.Classify.NAME,
+                LangGraphKey.DATA: {
+                    LangGraphKey.OUTPUT: {
+                        "missing_entities": [
+                            {
+                                "type": "company",
+                                "question": "您想查询哪家公司？",
+                            }
+                        ],
+                        "_kb_suggestions": {"company": ["腾讯", "其他"]},
+                    }
+                },
+            }
+
+        service._graph = Mock()
+        service._graph.astream_events = fake_astream
+
+        events = []
+        async for event in service.stream_chat("kb1", "session1", "营收多少"):
+            events.append(event)
+
+        clarification_events = [
+            e for e in events if isinstance(e, SSEClarificationEvent)
+        ]
+        assert len(clarification_events) == 1
+        assert clarification_events[0].suggestions == ["腾讯", "其他"]
+        assert clarification_events[0].suggestions != ["腾讯", "阿里巴巴", "其他"]
 
     @pytest.mark.asyncio
     async def test_stream_chat_no_clarification_when_no_missing_entities(self):

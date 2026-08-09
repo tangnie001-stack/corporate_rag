@@ -153,6 +153,10 @@ class AgentService:
                                     _clarification_pending = {
                                         "type": "entity_completion",
                                         "missing_entities": missing,
+                                        "suggestions": output.get(
+                                            LangGraphNode.Classify.KB_SUGGESTIONS, {}
+                                        )
+                                        or {},
                                     }
                             elif LangGraphNode.Rerank.NAME in name:
                                 contexts = output.get(
@@ -180,9 +184,15 @@ class AgentService:
                 entity_type = first.get("type", "default")
                 from src.infra.search.query_router import SUGGESTIONS_MAP
 
-                suggestions = SUGGESTIONS_MAP.get(
-                    entity_type, SUGGESTIONS_MAP["default"]
-                )
+                kb_suggestions = cp.get("suggestions") or {}
+                if entity_type in kb_suggestions:
+                    # KB 候选优先（公司/报告期/代码等真实候选）
+                    suggestions = kb_suggestions[entity_type]
+                else:
+                    # 兜底静态映射（year/quarter/metric 等），default 最后兜底
+                    suggestions = SUGGESTIONS_MAP.get(
+                        entity_type, SUGGESTIONS_MAP["default"]
+                    )
                 yield SSEClarificationEvent(
                     type=cp["type"],
                     question=first.get("question", "请补充相关信息"),
