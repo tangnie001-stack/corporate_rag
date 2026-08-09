@@ -150,19 +150,13 @@ class TestEntityInjectionFailure:
             patch("src.services.document_service.tempfile") as mock_tempfile,
             patch("src.services.document_service.os.unlink"),
             patch.object(svc, "_enrich_chunk_metadata"),
-            patch(
-                "src.services.document_service.ChunkRouter"
-            ) as mock_router,
+            patch("src.services.document_service.ChunkRouter") as mock_router,
             patch(
                 "src.services.document_service.build_heading_segments",
                 return_value=[],
             ),
-            patch(
-                "src.services.document_service.validate_chunks"
-            ) as mock_validate,
-            patch(
-                "src.services.document_service.CHUNK_EVAL_ENABLED", False
-            ),
+            patch("src.services.document_service.validate_chunks") as mock_validate,
+            patch("src.services.document_service.CHUNK_EVAL_ENABLED", False),
             patch.object(
                 svc,
                 "_inject_document_entities",
@@ -175,9 +169,7 @@ class TestEntityInjectionFailure:
             mock_router.get_chunker.return_value = MagicMock(
                 chunk=MagicMock(return_value=chunks)
             )
-            mock_validate.return_value = MagicMock(
-                tiny_chunks=[], garbled_chunks=[]
-            )
+            mock_validate.return_value = MagicMock(tiny_chunks=[], garbled_chunks=[])
             svc.vector_store.add_chunks.return_value = 1
 
             await svc.process_document(

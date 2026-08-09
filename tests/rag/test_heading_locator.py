@@ -1,10 +1,13 @@
 """标题段区间定位器测试。"""
+
 from src.rag.heading_locator import build_heading_segments, locate_heading_path
 
 
 def test_build_heading_segments():
     """PDF 形态：标题行带 # 前缀，精确断言父级拼接路径与 start/end 偏移。"""
-    full_text = "# 一、主要财务数据\n内容A\n## （一）会计数据\n内容B\n# 二、股东信息\n内容C"
+    full_text = (
+        "# 一、主要财务数据\n内容A\n## （一）会计数据\n内容B\n# 二、股东信息\n内容C"
+    )
     heading_tree = [(1, "一、主要财务数据"), (2, "（一）会计数据"), (1, "二、股东信息")]
     segs = build_heading_segments(full_text, heading_tree)
     assert len(segs) == 3
@@ -62,7 +65,9 @@ def test_build_heading_segments_empty_tree():
 
 def test_locate_heading_path_matches():
     """正文内容命中其所属标题段。"""
-    full_text = "# 一、主要财务数据\n内容A\n## （一）会计数据\n内容B\n# 二、股东信息\n内容C"
+    full_text = (
+        "# 一、主要财务数据\n内容A\n## （一）会计数据\n内容B\n# 二、股东信息\n内容C"
+    )
     heading_tree = [(1, "一、主要财务数据"), (2, "（一）会计数据"), (1, "二、股东信息")]
     segs = build_heading_segments(full_text, heading_tree)
     # 内容B 属于 （一）会计数据

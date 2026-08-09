@@ -14,6 +14,7 @@ status=pending，重新触发 process_document 跑新链路（pymupdf4llm + 实�
   - 必须在 app 容器内执行（宿主机无法解析 minio/chroma 容器名）：
       docker compose exec app python -m scripts.rebuild_kb_data --kb-id <kb_id>
 """
+
 import argparse
 import asyncio
 import os

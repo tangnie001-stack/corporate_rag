@@ -78,9 +78,7 @@ def _locate_heading_line(full_text: str, title: str) -> int:
     return -1
 
 
-def locate_heading_path(
-    content: str, full_text: str, segments: list[dict]
-) -> str:
+def locate_heading_path(content: str, full_text: str, segments: list[dict]) -> str:
     """反推 chunk 内容所属的标题段路径。
 
     Args:

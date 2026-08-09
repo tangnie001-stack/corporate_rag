@@ -59,7 +59,9 @@ class AgentState:
     skip_clarify: bool = (
         False  # 评估模式标记：即使缺实体也不进 clarify 追问分支（由评估脚本设置）
     )
-    _kb_entities: str = ""  # KB 聚合候选实体文本（classify_node 注入 classifier prompt）
+    _kb_entities: str = (
+        ""  # KB 聚合候选实体文本（classify_node 注入 classifier prompt）
+    )
     _kb_suggestions: dict = field(
         default_factory=dict
     )  # KB 聚合候选生成的澄清建议映射（agent_service 消费）

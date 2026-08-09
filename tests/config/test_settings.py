@@ -73,7 +73,7 @@ def test_entity_llm_fallback_default_auto():
 
 
 def test_entity_text_prefix_len_default():
-    """ENTITY_TEXT_PREFIX_LEN defaults to 600（正文前缀字符数）. """
+    """ENTITY_TEXT_PREFIX_LEN defaults to 600（正文前缀字符数）."""
     from src.config.settings import ENTITY_TEXT_PREFIX_LEN
 
     assert ENTITY_TEXT_PREFIX_LEN == 600

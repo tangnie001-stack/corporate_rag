@@ -111,6 +111,7 @@ git commit -m "build(deps): upgrade pymupdf to 1.28.2, add pymupdf4llm 1.28.2"
 # tests/parsers/test_base.py 追加
 def test_parse_result_heading_tree_default():
     from src.parsers.base import ParseResult
+
     r = ParseResult(chunks=[], total_pages=0, file_type="txt")
     assert r.heading_tree == []
 ```
@@ -238,6 +239,7 @@ git commit -m "feat(parser): replace fitz text extraction with pymupdf4llm, add 
 # tests/parsers/test_docx_parser.py 追加
 def test_docx_heading_tree_extracted(self):
     from src.parsers.base import ParseResult
+
     result = self.parser.parse(self.sample_docx)  # 复用现有 sample
     assert isinstance(result, ParseResult)
     assert hasattr(result, "heading_tree")
@@ -248,6 +250,7 @@ def test_docx_heading_tree_extracted(self):
 ```python
 # src/parsers/docx_parser.py parse() 中，在提取 paragraphs 后：
 from docx.document import Document as _Doc
+
 heading_tree: list[tuple[int, str]] = []
 for para in doc.paragraphs:
     if not para.text.strip():
@@ -311,21 +314,29 @@ git commit -m "feat(parser): extract heading_tree from docx styles"
 ```python
 # tests/rag/test_heading_locator.py
 """标题段区间定位器测试。"""
+
 from src.rag.heading_locator import build_heading_segments, locate_heading_path
 
 
 def test_build_heading_segments():
-    full_text = "# 一、主要财务数据\n内容A\n## （一）会计数据\n内容B\n# 二、股东信息\n内容C"
+    full_text = (
+        "# 一、主要财务数据\n内容A\n## （一）会计数据\n内容B\n# 二、股东信息\n内容C"
+    )
     heading_tree = [(1, "一、主要财务数据"), (2, "（一）会计数据"), (1, "二、股东信息")]
     segs = build_heading_segments(full_text, heading_tree)
     assert len(segs) == 3
     # 第一个段从标题行开始，到第二个一级标题前
     assert segs[0]["start"] == 0
-    assert segs[1]["path"] == "一、主要财务数据 > （一）会计数据" or segs[1]["path"] == "（一）会计数据"
+    assert (
+        segs[1]["path"] == "一、主要财务数据 > （一）会计数据"
+        or segs[1]["path"] == "（一）会计数据"
+    )
 
 
 def test_locate_heading_path_matches():
-    full_text = "# 一、主要财务数据\n内容A\n## （一）会计数据\n内容B\n# 二、股东信息\n内容C"
+    full_text = (
+        "# 一、主要财务数据\n内容A\n## （一）会计数据\n内容B\n# 二、股东信息\n内容C"
+    )
     heading_tree = [(1, "一、主要财务数据"), (2, "（一）会计数据"), (1, "二、股东信息")]
     segs = build_heading_segments(full_text, heading_tree)
     # 内容B 属于 （一）会计数据
@@ -395,9 +406,7 @@ def build_heading_segments(
     return segments
 
 
-def locate_heading_path(
-    content: str, full_text: str, segments: list[dict]
-) -> str:
+def locate_heading_path(content: str, full_text: str, segments: list[dict]) -> str:
     """反推 chunk 内容所属的标题段路径。
 
     Args:
@@ -469,6 +478,7 @@ def _enrich_chunk_metadata(
 ```python
 # process_document 中调用处修改（原 _enrich_chunk_pages 调用点，约 L378）
 from src.rag.heading_locator import build_heading_segments
+
 heading_segments = build_heading_segments(full_text, parse_result.heading_tree)
 self._enrich_chunk_metadata(chunks, parse_result.chunks, full_text, heading_segments)
 ```
@@ -518,12 +528,14 @@ git commit -m "feat(chunking): heading segment locator + reverse-lookup heading_
 # tests/config/test_settings.py 追加
 def test_entity_llm_fallback_default_auto():
     from src.config.settings import ENTITY_LLM_FALLBACK
+
     assert ENTITY_LLM_FALLBACK in ("off", "on", "auto")
     assert ENTITY_LLM_FALLBACK == "auto"
 
 
 def test_entity_text_prefix_len_default():
     from src.config.settings import ENTITY_TEXT_PREFIX_LEN
+
     assert ENTITY_TEXT_PREFIX_LEN == 600
 ```
 
@@ -632,6 +644,7 @@ git commit -m "feat(config): entity extraction config + prompt templates"
 ```python
 # tests/infra/test_document_entity_extractor.py
 """文档级实体抽取器测试。"""
+
 from src.infra.search.document_entity_extractor import (
     DocumentEntityExtractor,
     extract_from_filename,
@@ -692,7 +705,11 @@ from typing import Any
 from loguru import logger
 
 from src.config import ENTITY_LLM_FALLBACK, ENTITY_TEXT_PREFIX_LEN
-from src.config.const import ENTITY_FULL_PIPELINE_TYPES, ENTITY_OPTIONAL_TYPES, ENTITY_TYPES
+from src.config.const import (
+    ENTITY_FULL_PIPELINE_TYPES,
+    ENTITY_OPTIONAL_TYPES,
+    ENTITY_TYPES,
+)
 from src.config.prompts import (
     ENTITY_EXTRACTION_SYSTEM_PROMPT,
     ENTITY_EXTRACTION_USER_TEMPLATE,
@@ -760,7 +777,9 @@ def _extract_from_text(text: str) -> dict:
     if m:
         year = m.group("year")
         q = m.group("quarter")
-        entities["report_period"] = f"{year}年第一季度" if q == "一" else f"{year}年Q{q}"
+        entities["report_period"] = (
+            f"{year}年第一季度" if q == "一" else f"{year}年Q{q}"
+        )
     return entities
 
 
@@ -872,12 +891,14 @@ Expected: PASS
 class TestLLMFallback:
     class _FakeLLM:
         """mock LLM：返回固定 JSON 内容。"""
+
         def __init__(self, content: str):
             self._content = content
 
         def invoke(self, messages, **kwargs):
             class _Resp:
                 content = None
+
             r = _Resp()
             r.content = self._content
             return r
@@ -885,6 +906,7 @@ class TestLLMFallback:
     def test_auto_mode_skips_when_rules_complete(self, monkeypatch):
         # 规则层已抽齐核心实体（company/year 文件名即给 company）
         from src.config import settings
+
         monkeypatch.setattr(settings, "ENTITY_LLM_FALLBACK", "auto")
         extractor = DocumentEntityExtractor(llm=self._FakeLLM('{"entities": {}}'))
         # neusoft 文件名给出 company/year，正文给出 sec_code/report_period
@@ -896,21 +918,21 @@ class TestLLMFallback:
 
     def test_auto_mode_triggers_when_missing_core(self, monkeypatch):
         from src.config import settings
+
         monkeypatch.setattr(settings, "ENTITY_LLM_FALLBACK", "auto")
         # LLM 补 report_period
-        llm = self._FakeLLM(
-            '{"entities": {"report_period": "2025年第一季度"}}'
-        )
+        llm = self._FakeLLM('{"entities": {"report_period": "2025年第一季度"}}')
         extractor = DocumentEntityExtractor(llm=llm)
-        entities = extractor.extract(
-            "report.pdf", [], "无证券代码 无年份", "pdf"
-        )
+        entities = extractor.extract("report.pdf", [], "无证券代码 无年份", "pdf")
         assert entities.get("report_period") == "2025年第一季度"
 
     def test_off_mode_never_calls_llm(self, monkeypatch):
         from src.config import settings
+
         monkeypatch.setattr(settings, "ENTITY_LLM_FALLBACK", "off")
-        extractor = DocumentEntityExtractor(llm=self._FakeLLM('{"entities": {"company": "X"}}'))
+        extractor = DocumentEntityExtractor(
+            llm=self._FakeLLM('{"entities": {"company": "X"}}')
+        )
         entities = extractor.extract("report.pdf", [], "无内容", "pdf")
         assert "company" not in entities
 ```
@@ -944,6 +966,7 @@ git commit -m "feat(entities): document entity extractor with rule + LLM fallbac
 ```python
 # tests/services/test_document_service.py 追加
 """实体抽取接入 document_service 的测试。"""
+
 from unittest.mock import patch
 
 
@@ -1035,6 +1058,7 @@ git commit -m "feat(ingest): inject document entities into chunk metadata + meta
 # tests/rag/test_retrieval.py 追加
 def test_to_prompt_text_with_entities():
     from src.rag.context import RAGContext
+
     ctx = RAGContext(
         content="营收增长",
         source="neusoft_2025_q1.pdf",
@@ -1050,6 +1074,7 @@ def test_to_prompt_text_with_entities():
 
 def test_to_prompt_text_without_entities():
     from src.rag.context import RAGContext
+
     ctx = RAGContext(
         content="营收增长",
         source="neusoft_2025_q1.pdf",
@@ -1074,6 +1099,7 @@ Expected: FAIL（RAGContext 无 entities 字段）
 from dataclasses import dataclass, field
 from src.config.const import ENTITY_RENDER_ORDER
 
+
 @dataclass(slots=True)
 class RAGContext:
     content: str
@@ -1096,9 +1122,11 @@ class RAGContext:
         for key in ENTITY_RENDER_ORDER:
             value = self.entities.get(key)
             if value:
-                label = {"company": "公司", "report_period": "期间", "sec_code": "代码"}.get(
-                    key, key
-                )
+                label = {
+                    "company": "公司",
+                    "report_period": "期间",
+                    "sec_code": "代码",
+                }.get(key, key)
                 entity_parts.append(f"{label}: {value}")
         if entity_parts:
             parts.append(" ".join(entity_parts))
@@ -1160,6 +1188,7 @@ git commit -m "feat(rag): RAGContext.entities passthrough + entity rendering in 
 ```python
 # tests/infra/test_prompt_manager.py
 """PromptManager 当前日期注入测试。"""
+
 from datetime import date
 from src.infra.llm.prompt_manager import PromptManager
 
@@ -1183,6 +1212,7 @@ Expected: FAIL（无日期）
 # src/infra/llm/prompt_manager.py
 from datetime import date
 
+
 def _with_current_date(prompt: str) -> str:
     """在系统提示词中追加今日日期，锚定相对时间表达（本报告期/今年）。"""
     today = date.today()
@@ -1190,6 +1220,7 @@ def _with_current_date(prompt: str) -> str:
     if date_line.strip() in prompt:
         return prompt
     return prompt + date_line
+
 
 # get_system_prompt() 中，在返回前追加：
 prompt = self._get(self.PROMPT_NAMES["system"], _FALLBACK_SYSTEM_PROMPT)
@@ -1333,22 +1364,29 @@ git commit -m "feat(clarify): dynamic KB entity candidates for clarify questions
 ### Task 11: 存量清除重建
 
 **Files:**
-- Create: `scripts/rebuild_kb_data.py`（清除 + 重入库辅助脚本）
+- Create: `scripts/rebuild_kb_data.py`（清 ChromaDB + 重置 status + 重触发入库辅助脚本）
 - Test: 手动验证（数据操作，无单测）
 
 **Interfaces:**
 - Consumes: 所有前置任务
-- Produces: 评估 KB 重建为带实体 metadata 的 chunks
+- Produces: 全库文档重建为带实体 metadata 的 chunks
+
+**决策**（用户确认）：保留 document 记录（含 MinIO file_path），只清 ChromaDB chunks + 重置 status=pending，重新触发 process_document 跑新解析/实体抽取链路。MinIO 文件不动，不丢数据。
 
 - [ ] **Step 1: 写清除重建脚本**
 
 ```python
 # scripts/rebuild_kb_data.py
-"""存量文档清除重建脚本 — 删除指定 KB 的 ChromaDB collection 与 document 记录。
+"""存量文档清除重建脚本 — 清 ChromaDB chunks + 重置 status + 重触发入库。
+
+策略：保留 document 记录（含 MinIO file_path），只清 ChromaDB chunks 并重置
+status=pending，重新触发 process_document 跑新链路（pymupdf4llm + 实体抽取）。
 
 用法:
-  python -m scripts.rebuild_kb_data --kb-id <kb_id> [--all]
+  python -m scripts.rebuild_kb_data --kb-id <kb_id>   # 重建单个 KB
+  python -m scripts.rebuild_kb_data --all             # 重建所有有文档的 KB
 """
+
 import argparse
 import asyncio
 
@@ -1359,22 +1397,40 @@ from src.infra.db.vector_store import VectorStore
 
 async def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--kb-id", required=True)
+    parser.add_argument("--kb-id")
+    parser.add_argument("--all", action="store_true")
     args = parser.parse_args()
 
     vector_store = VectorStore()
     repo = DocumentRepo(session_factory)
 
-    # 1. 清 ChromaDB collection（或按 kb_id 清 doc）
-    collection = vector_store.get_or_create_collection(args.kb_id)
-    ids = collection.get(include=[])["ids"]
-    if ids:
-        collection.delete(ids=ids)
-        print(f"ChromaDB: deleted {len(ids)} chunks in kb_{args.kb_id}")
+    if args.all:
+        kb_ids = [kb.id for kb in await KbRepo(session_factory).get_all_kb()]
+    elif args.kb_id:
+        kb_ids = [args.kb_id]
+    else:
+        raise SystemExit("需指定 --kb-id 或 --all")
 
-    # 2. 软删 document 记录
-    await repo.soft_delete_documents_by_kb(args.kb_id)
-    print(f"MySQL: soft-deleted documents for kb {args.kb_id}")
+    for kb_id in kb_ids:
+        docs = await repo.get_documents(kb_id)
+        if not docs:
+            print(f"KB {kb_id}: no documents, skip")
+            continue
+
+        # 1. 清 ChromaDB chunks
+        try:
+            collection = vector_store.get_or_create_collection(kb_id)
+            ids = collection.get(include=[])["ids"]
+            if ids:
+                collection.delete(ids=ids)
+                print(f"ChromaDB: deleted {len(ids)} chunks in kb_{kb_id}")
+        except Exception as e:  # noqa: BLE001
+            print(f"ChromaDB: clear failed for kb_{kb_id}: {e}")
+
+        # 2. 重置 status=pending + 清 meta_info 的 entities（保留 eval）
+        for d in docs:
+            await repo.update_document_status(d.id, "pending")
+        print(f"MySQL: reset {len(docs)} documents to pending for kb {kb_id}")
 
 
 if __name__ == "__main__":
@@ -1383,15 +1439,30 @@ if __name__ == "__main__":
 
 注意：脚本实现时先读 `src/infra/db/vector_store/__init__.py` 的现有 API（get_or_create_collection 是否暴露），按实际 API 调整。
 
-- [ ] **Step 2: 重建评估 KB**
+- [ ] **Step 2: 全库重建（容器内执行）**
 
 ```bash
-# 删除评估 KB 的存量 chunk
-python -m scripts.rebuild_kb_data --kb-id b9e74e820e0a4bad8472304446e54f5c
-
-# 重新上传 2 份文档触发重新入库（通过 API 或直接调 process_document）
-# 验证: 新 chunk metadata 含 company/report_period/sec_code + heading_path
+# 在 app 容器内执行（宿主机无法解析 minio/chroma 容器名）
+docker compose exec app python -m scripts.rebuild_kb_data --all
 ```
+
+脚本 Step 1 基础上补重跑逻辑（遍历 docs 直接调 process_document）：
+
+```python
+# scripts/rebuild_kb_data.py 追加（Step 1 脚本尾部）
+        # 3. 重新触发入库（直接调 process_document，minio_key = d.file_path）
+        from src.services.document_service import DocumentService
+        svc = DocumentService()
+        for d in docs:
+            ext = os.path.splitext(d.filename)[1] or ".pdf"
+            asyncio.create_task(
+                svc.process_document(kb_id, d.id, d.file_path or "", d.filename, ext)
+            )
+            print(f"  re-trigger: {d.filename}")
+        await asyncio.sleep(1)  # 给 create_task 启动机会
+```
+
+注意：容器内 `document.file_path` 即 minio_key，`DocumentService.process_document` 直接可用。全库 149 文档重建耗时较长（含 LLM 实体抽取），可先重建评估 KB 验证再全库。
 
 - [ ] **Step 3: 验证实体落库**
 

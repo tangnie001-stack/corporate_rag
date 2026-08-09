@@ -61,10 +61,22 @@ class TestExtractFromHeadings:
 class TestExtractFromText:
     def test_chinese_quarters(self):
         """中文数字季度应映射为 第X季度。"""
-        assert _extract_from_text("2025 年第一季度").get("report_period") == "2025年第一季度"
-        assert _extract_from_text("2025 年第二季度").get("report_period") == "2025年第二季度"
-        assert _extract_from_text("2025 年第三季度").get("report_period") == "2025年第三季度"
-        assert _extract_from_text("2025 年第四季度").get("report_period") == "2025年第四季度"
+        assert (
+            _extract_from_text("2025 年第一季度").get("report_period")
+            == "2025年第一季度"
+        )
+        assert (
+            _extract_from_text("2025 年第二季度").get("report_period")
+            == "2025年第二季度"
+        )
+        assert (
+            _extract_from_text("2025 年第三季度").get("report_period")
+            == "2025年第三季度"
+        )
+        assert (
+            _extract_from_text("2025 年第四季度").get("report_period")
+            == "2025年第四季度"
+        )
 
     def test_arabic_quarters(self):
         """阿拉伯数字季度应映射为 Q{num}。"""
@@ -140,7 +152,9 @@ class TestLLMFallback:
         from src.config import settings
 
         monkeypatch.setattr(settings, "ENTITY_LLM_FALLBACK", "off")
-        extractor = DocumentEntityExtractor(llm=self._FakeLLM('{"entities": {"company": "X"}}'))
+        extractor = DocumentEntityExtractor(
+            llm=self._FakeLLM('{"entities": {"company": "X"}}')
+        )
         entities = extractor.extract("report.pdf", [], "无内容", "pdf")
         assert "company" not in entities
 
@@ -175,6 +189,8 @@ class TestLLMFallback:
         extractor = DocumentEntityExtractor(llm=self._BrokenLLM())
         # txt 不走标题层；文件名给出 company/year，正文给出 sec_code，
         # 缺 report_period 触发 LLM → 失败 → 返回规则结果
-        entities = extractor.extract("neusoft_2025_q1.pdf", [], "证券代码：600718", "txt")
+        entities = extractor.extract(
+            "neusoft_2025_q1.pdf", [], "证券代码：600718", "txt"
+        )
         assert entities.get("company") == "neusoft"
         assert entities.get("sec_code") == "600718"

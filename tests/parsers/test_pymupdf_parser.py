@@ -116,7 +116,9 @@ class TestPyMuPDFParser:
         assert clean("<mark>、监事、</mark>") == "、监事、"
         assert clean("<u>单位：万元</u>") == "单位：万元"
         # <br> 替换为空格，不破坏表格 | 行结构
-        assert clean("经营业务<br>密切相关|8,981,032|") == "经营业务 密切相关|8,981,032|"
+        assert (
+            clean("经营业务<br>密切相关|8,981,032|") == "经营业务 密切相关|8,981,032|"
+        )
         # 邮箱等含下划线的真实内容不被误伤（裸 _X_ 规则已移除）
         assert clean("mm_sun@tkl.tsannkuen.com") == "mm_sun@tkl.tsannkuen.com"
         # 页脚页码行（如 "6 / 12"）被兜底剔除
