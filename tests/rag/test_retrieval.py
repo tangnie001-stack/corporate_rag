@@ -134,6 +134,39 @@ class TestRerank:
         assert len(contexts) == 1
 
 
+# ==================== to_prompt_text 实体渲染测试 ====================
+def test_to_prompt_text_with_entities():
+    """RAGContext 带实体时，to_prompt_text 应按 ENTITY_RENDER_ORDER 渲染存在的实体。"""
+    from src.rag.context import RAGContext
+
+    ctx = RAGContext(
+        content="营收增长",
+        source="neusoft_2025_q1.pdf",
+        page=3,
+        doc_id="d",
+        chunk_id="c",
+        entities={"company": "东软集团", "report_period": "2025年第一季度"},
+    )
+    text = ctx.to_prompt_text()
+    assert "东软集团" in text
+    assert "2025年第一季度" in text
+
+
+def test_to_prompt_text_without_entities():
+    """无实体时，to_prompt_text 应保持原格式（来源/页码/内容）。"""
+    from src.rag.context import RAGContext
+
+    ctx = RAGContext(
+        content="营收增长",
+        source="neusoft_2025_q1.pdf",
+        page=3,
+        doc_id="d",
+        chunk_id="c",
+    )
+    text = ctx.to_prompt_text()
+    assert text == "来源: neusoft_2025_q1.pdf (第3页)\n内容: 营收增长"
+
+
 # ==================== 查询改写测试 ====================
 class TestQueryRewrite:
     """测试 rewrite_query() 及辅助改写函数。"""

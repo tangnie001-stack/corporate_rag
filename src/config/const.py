@@ -35,6 +35,12 @@ ABSTENTION_STATUS_MSG: str = "未找到相关文档，已直接答复"
 ENTITY_TYPES: tuple[str, ...] = ("company", "report_period", "sec_code")
 # 核心实体渲染顺序（to_prompt_text 按此顺序渲染存在的实体）
 ENTITY_RENDER_ORDER: tuple[str, ...] = ("company", "report_period", "sec_code")
+# 实体渲染中文标签（to_prompt_text 渲染实体时的展示名，未知键回退为原始键）
+ENTITY_LABELS: dict[str, str] = {
+    "company": "公司",
+    "report_period": "期间",
+    "sec_code": "代码",
+}
 # 可选实体：LLM 兜底顺带返回，仅补充字段不渲染
 ENTITY_OPTIONAL_TYPES: tuple[str, ...] = ("person", "currency", "report_type")
 # 实体抽取完整三层流水线的文件类型（其余如 txt 走文件名+LLM）

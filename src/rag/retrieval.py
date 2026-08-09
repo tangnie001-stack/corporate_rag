@@ -13,12 +13,16 @@ from src.config import (
     TOP_K_RERANK,
     TOP_K_RETRIEVAL,
 )
+from src.config.const import ENTITY_OPTIONAL_TYPES, ENTITY_TYPES
 from src.infra.db.vector_store import VectorStore
 from src.infra.db.vector_store.types import ChunkResult
 from src.infra.llm.chat_message import ChatMessage
 from src.infra.search.bm25_index import BM25Index, rrf_fusion
 from src.models import with_retry
 from src.rag.context import RAGContext
+
+# 全部实体键（核心 + 可选），rerank 透传时从 chunk.metadata 读取
+_ALL_ENTITY_KEYS: tuple[str, ...] = tuple(ENTITY_TYPES) + tuple(ENTITY_OPTIONAL_TYPES)
 
 
 async def search(
@@ -158,6 +162,9 @@ def rerank_results(
                 chunk_id=r.id,
                 parent_content=pc,
                 score=score,
+                entities={
+                    k: r.metadata.get(k) for k in _ALL_ENTITY_KEYS if r.metadata.get(k)
+                },
             )
         )
     if contexts:
