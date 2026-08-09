@@ -64,6 +64,11 @@ class TestParseResult:
         # "hello"(5) + "world"(5) = 10，验证 __post_init__ 中的自动求和逻辑
         assert result.total_chars == 10
 
+    def test_parse_result_heading_tree_default(self):
+        """heading_tree 默认值：未显式传入时为空列表。"""
+        result = ParseResult(chunks=[], total_pages=0, file_type="txt")
+        assert result.heading_tree == []
+
 
 # ==================== BaseParser 抽象基类测试 ====================
 class TestBaseParser:

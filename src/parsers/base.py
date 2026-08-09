@@ -42,6 +42,7 @@ class ParseResult:
         is_scanned: 是否为扫描件（仅 PDF 有意义，扫描件无文字层）
         encoding: 文件编码（仅 TXT 有意义，如 utf-8 / gbk）
         file_type: 文件类型（txt / docx / pdf）
+        heading_tree: 标题层级列表 [(level, heading), ...]，PDF/docx 提取，txt 为空
     """
 
     chunks: list[ChunkData] = field(default_factory=list)
@@ -50,6 +51,9 @@ class ParseResult:
     is_scanned: bool = False
     encoding: str = "utf-8"
     file_type: str = ""
+    heading_tree: list[tuple[int, str]] = field(
+        default_factory=list
+    )  # (level, heading) 标题层级，PDF/docx 提取，txt 空
 
     def __post_init__(self):
         """自动计算 total_chars（如果构造时未传入）。"""

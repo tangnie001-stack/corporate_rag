@@ -35,7 +35,8 @@ class TestDocRouter:
 
     def test_route_pdf(self):
         """路由 .pdf 文件到 PyMuPDFParser。"""
-        result = self.router.parse("data/test_docs/sample.pdf")
+        # sample.pdf 仅为占位文件（无实际文字层），用真实年报验证分块
+        result = self.router.parse("data/test_docs/neusoft_2025_q1.pdf")
         assert isinstance(result, ParseResult)
         assert result.file_type == "pdf"
         assert len(result.chunks) > 0

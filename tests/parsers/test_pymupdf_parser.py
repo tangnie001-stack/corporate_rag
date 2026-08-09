@@ -21,7 +21,8 @@ class TestPyMuPDFParser:
     def setup_method(self):
         """每个测试前初始化解析器和测试文件路径。"""
         self.parser = PyMuPDFParser()
-        self.sample_pdf = "data/test_docs/sample.pdf"
+        # sample.pdf 仅为占位文件（无实际文字层），内容测试用真实年报
+        self.sample_pdf = "data/test_docs/neusoft_2025_q1.pdf"
 
     def test_parse_pdf_returns_parse_result(self):
         """基本解析：返回 ParseResult 且页数 / 字符数 > 0。"""
@@ -64,10 +65,10 @@ class TestPyMuPDFParser:
         原理：PyMuPDFParser 内部用 MIN_TEXT_CHARS 阈值判断，
         如果平均每页文本字符数低于阈值，则认为是扫描件。
         """
-        import fitz
+        import pymupdf
 
         # 构造一个几乎无文本的 PDF（仅 1 个字符，低于阈值）
-        doc = fitz.open()
+        doc = pymupdf.open()
         page = doc.new_page()
         page.insert_text((50, 50), "x")  # 只插入 1 个字符
         path = "/tmp/scanned_test.pdf"
@@ -104,3 +105,33 @@ class TestPyMuPDFParser:
                 return []
 
         assert self.parser._table_to_markdown(MockTable()) == ""
+
+
+class TestHeadingTree:
+    """标题树提取与页码保留测试。"""
+
+    def setup_method(self):
+        """每个测试前初始化解析器。"""
+        self.parser = PyMuPDFParser()
+
+    def test_pdf_heading_tree_extracted(self):
+        """标题树提取：能从 PDF 中解析出章节标题（如"主要财务数据"）。"""
+        path = "data/test_docs/neusoft_2025_q1.pdf"
+        if not os.path.exists(path):
+            pytest.skip("Test PDF not found")
+        result = self.parser.parse(path)
+        assert isinstance(result.heading_tree, list)
+        assert len(result.heading_tree) > 0
+        # 至少有一个章节标题（如"主要财务数据"）
+        titles = [h for _, h in result.heading_tree]
+        assert any("财务" in t for t in titles)
+
+    def test_pdf_page_preserved(self):
+        """页码保留：每个 chunk 的 page 元数据必须为正整数（从 1 开始）。"""
+        path = "data/test_docs/neusoft_2025_q1.pdf"
+        if not os.path.exists(path):
+            pytest.skip("Test PDF not found")
+        result = self.parser.parse(path)
+        pages = {c.metadata.get("page") for c in result.chunks}
+        # isinstance 过滤空值并缩小类型，保证 page 为正整数（从 1 开始）
+        assert pages and all(isinstance(p, int) and p >= 1 for p in pages)
