@@ -72,19 +72,27 @@ async def _rebuild_kb(
     print(f"MySQL: reset {len(docs)} documents to pending for kb {kb_id}")
 
     # 3. 重新触发入库：直接调 process_document，minio_key = d.file_path
-    #    gather 等待全部完成，避免脚本退出时后台任务被取消导致文档卡在 processing
+    #    跳过无 file_path 的文档（仅测试直接建库的记录，MinIO 无对应文件，
+    #    无法重跑入库；已重置为 pending，保持原状态）。其余 gather 等待全部
+    #    完成，避免脚本退出时后台任务被取消导致文档卡在 processing
+    ingestible = [d for d in docs if (d.file_path or "").strip()]
+    skipped = len(docs) - len(ingestible)
+    if skipped:
+        print(f"KB {kb_id}: skip {skipped} documents without MinIO file")
+    if not ingestible:
+        return
     tasks = [
         svc.process_document(
             kb_id,
             d.id,
-            d.file_path or "",
+            d.file_path,
             d.filename,
             os.path.splitext(d.filename)[1].lower() or ".pdf",
         )
-        for d in docs
+        for d in ingestible
     ]
     await asyncio.gather(*tasks, return_exceptions=True)
-    print(f"KB {kb_id}: re-ingest finished for {len(docs)} documents")
+    print(f"KB {kb_id}: re-ingest finished for {len(ingestible)} documents")
 
 
 async def main() -> None:
