@@ -1,34 +1,32 @@
-"""PDF 文档解析器 — 使用 pymupdf4llm 提取文字和表格，支持扫描件检测。
+"""PDF 文档解析器 — 双通道：fitz 全文+表格（主进程）+ pymupdf4llm 标题树（子进程）。
 
 处理流程：
-  1. 用 pymupdf 打开 PDF
-  2. 用 pymupdf4llm.to_markdown(page_chunks=True) 逐页转 Markdown
-     （内部自动识别标题层级 # 前缀、表格转 Markdown；header/footer 关闭去除页眉页脚）
-  3. 轻量清洗 Markdown/HTML 标记残留（强调标记、<sup>/<mark>/<u>/<br> 等）
-  4. 检测扫描件（每页可提取文字少于 MIN_TEXT_CHARS 视为扫描页）
-  5. 从拼接全文提取标题树 (level, heading)，过滤伪标题
-  6. 按页分块（每页独立分块，保留页码元数据）
+  1. fitz 通道（主进程）：逐页 find_tables() + blocks 文本提取，sanitize_cell 拍平跨行单元格
+  2. 检测扫描件（每页可提取文字少于 MIN_TEXT_CHARS 视为扫描页）
+  3. pm 通道（子进程）：pdf_heading_extractor 完整复刻 pymupdf4llm 标题树管道，输出清洗后标题树
+  4. 按页分块（每页独立分块，保留页码元数据）
 
-扫描件检测逻辑：
-  如果所有页面的可提取文字都少于 MIN_TEXT_CHARS（200 字符），
-  则标记 is_scanned=True，上层可以提示用户该文档需要 OCR 处理。
-  （MVP 阶段不支持 OCR，仅做检测和警告。）
-
-表格提取：
-  pymupdf4llm 内置表格识别，自动转为 Markdown 表格，
-  分块时通过 TABLE_PATTERN 标记 block_type="table"。
+为什么 pm 走子进程：
+  import pymupdf4llm 会设置全局 mupdf 状态，永久破坏同进程内
+  find_tables().extract() 的单元格顺序（63,134,713 → 63 134 713\n, ,）。
+  因此主进程不 import pymupdf4llm，标题树提取放子进程隔离全局污染。
 """
 
 import os
 import re
-from typing import cast
 
 import pymupdf
-import pymupdf4llm
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from src.config import CHUNK_OVERLAP, CHUNK_SIZE, MIN_TEXT_CHARS
+from src.config import (
+    CHUNK_OVERLAP,
+    CHUNK_SIZE,
+    FOOTER_MARGIN,
+    HEADER_MARGIN,
+    MIN_TEXT_CHARS,
+)
 from src.parsers.base import BaseParser, ChunkData, ParseResult
+from src.parsers.pdf_heading_extractor import extract_heading_tree
 
 # 匹配 Markdown 表格（以 | 开头和结尾的行组成的多行表格）
 TABLE_PATTERN = re.compile(r"^\|.+\|[\s\S]*?^\|.+\|", re.MULTILINE)
@@ -40,14 +38,14 @@ EMPHASIS_PATTERN = re.compile(r"\*{1,2}_([^*_]+)_\*{1,2}|\*\*([^*]+)\*\*")
 BR_PATTERN = re.compile(r"<br\s*/?>")
 # 匹配其余内联 HTML 标签残留（<sup>、<mark>、<u> 等，保留标签内文本）
 HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
-# 匹配页脚页码行（如 "6 / 12"），layout 引擎 footer=False 偶有漏网，兜底剔除
+# 匹配页脚页码行（如 "6 / 12"），子进程清洗标题时兜底剔除
 FOOTER_PAGE_NUM_PATTERN = re.compile(r"^\d+\s*/\s*\d+\s*$", re.MULTILINE)
 # 伪标题过滤：复选框行（√/□ 适用/不适用 等）、编制单位标注行
 PSEUDO_HEADING_PATTERN = re.compile(r"[√□]|^编制单位")
 
 
 class PyMuPDFParser(BaseParser):
-    """PDF 文档解析器 — pymupdf4llm 驱动，支持表格转 Markdown 和扫描件检测。"""
+    """PDF 文档解析器 — fitz 全文+表格（主进程）+ pymupdf4llm 标题树（子进程）。"""
 
     def parse(self, file_path: str) -> ParseResult:
         """解析 PDF 文件，按页提取文字并分块，同时提取标题树。
@@ -68,7 +66,9 @@ class PyMuPDFParser(BaseParser):
         doc = pymupdf.open(file_path)
         # 用 try-finally 保证异常时也关闭文件句柄，防止资源泄漏
         try:
-            text_by_page, total_chars, scanned_pages = self._extract_text_by_page(doc)
+            text_by_page, total_chars, scanned_pages = self._extract_text_by_page_fitz(
+                doc
+            )
         finally:
             doc.close()
 
@@ -77,9 +77,10 @@ class PyMuPDFParser(BaseParser):
         is_scanned = scanned_pages == total_pages
         source = os.path.basename(file_path)
 
-        # 标题树提取（从拼接全文，按 # 前缀数判断层级）
-        full_text = "\n".join(t for t, _ in text_by_page)
-        heading_tree = self._extract_heading_tree(full_text)
+        # pm 标题树（子进程）；扫描件无文字层，跳过子进程
+        heading_tree: list[tuple[int, str]] = []
+        if not is_scanned:
+            heading_tree = extract_heading_tree(file_path)
 
         chunks = self._split_chunks(text_by_page, source)
 
@@ -92,8 +93,11 @@ class PyMuPDFParser(BaseParser):
             heading_tree=heading_tree,
         )
 
-    def _extract_text_by_page(self, doc) -> tuple[list[tuple[str, int]], int, int]:
-        """用 pymupdf4llm 将 PDF 逐页转 Markdown，统计字符数与扫描页数。
+    def _extract_text_by_page_fitz(self, doc) -> tuple[list[tuple[str, int]], int, int]:
+        """fitz 通道：逐页提取文本块与表格，组装页面文字，统计字符数与扫描页数。
+
+        表格用 find_tables().extract() + sanitize_cell 拍平跨行单元格
+        （单元格内 \n → 空格），标签与数值保持同行，避免表格分块丢列。
 
         Args:
             doc: pymupdf 打开的文档对象
@@ -104,34 +108,83 @@ class PyMuPDFParser(BaseParser):
               - total_chars: 全文总字符数
               - scanned_pages: 文字量低于 MIN_TEXT_CHARS 的页数
         """
-        md_pages = pymupdf4llm.to_markdown(
-            doc,
-            page_chunks=True,
-            show_progress=False,
-            write_images=False,
-            header=False,
-            footer=False,
-        )
-        # page_chunks=True 时始终返回 list[dict]，显式声明类型便于静态检查
-        pages = cast(list[dict], md_pages)
-        text_by_page = []  # [(页面文字, 页码), ...]
+        total_pages = len(doc)
+        text_by_page: list[tuple[str, int]] = []
         total_chars = 0
-        scanned_pages = 0  # 扫描页计数器
+        scanned_pages = 0
 
-        # ====== 逐页提取 Markdown 文字并轻量清洗 ======
-        for p in pages:
-            text = self._clean_markdown_noise(p["text"])
-            # 双兼容页码键：Layout 引擎用 page_number，legacy 路径用 page
-            metadata = p["metadata"]
-            page_num = metadata.get("page_number")
-            if page_num is None:
-                page_num = metadata["page"]
+        for page_num in range(total_pages):
+            page = doc[page_num]
+            page_height = page.rect.height
+
+            # 先提取表格，按视觉顺序排序，过滤误检（不足 2 行的视为误检）
+            table_finder = page.find_tables()
+            if table_finder is None:
+                tables = []
+            else:
+                tables = sorted(table_finder, key=lambda t: (t.bbox[1], t.bbox[0]))
+            tables = [t for t in tables if len(t.extract()) >= 2]
+            table_mds = self._extract_tables_from_page(page, tables)
+            table_bboxes = [t.bbox for t in tables]
+
+            if table_bboxes:
+                # 有表格时：只提取表格区域外的文字，避免文本层与表格内容重复
+                blocks = page.get_text("blocks")
+                items: list[tuple[float, str, bool]] = []
+                for b in blocks:
+                    x0, y0, x1, y1 = float(b[0]), float(b[1]), float(b[2]), float(b[3])
+                    if y1 < HEADER_MARGIN or y0 > page_height - FOOTER_MARGIN:
+                        continue
+                    if not b[4].strip():
+                        continue
+                    bbox = pymupdf.Rect(x0, y0, x1, y1)
+                    block_area = (x1 - x0) * (y1 - y0)
+                    in_table = False
+                    for tb in table_bboxes:
+                        tr = pymupdf.Rect(tb)
+                        if bbox.intersects(tr):
+                            inter = bbox.intersect(tr)
+                            inter_area = (inter.x1 - inter.x0) * (inter.y1 - inter.y0)
+                            if inter_area / block_area > 0.5:
+                                in_table = True
+                                break
+                    if not in_table:
+                        items.append(((y0 + y1) / 2, b[4], False))
+                # 收集表格 markdown（取表格的 Y 中心位置）
+                for table, md in zip(tables, table_mds):
+                    tb = table.bbox
+                    items.append(((tb[1] + tb[3]) / 2, md, True))
+                # 按 Y 位置排序后组装文本
+                items.sort(key=lambda x: x[0])
+                text_parts: list[str] = []
+                for _, content, is_table in items:
+                    if text_parts and is_table:
+                        text_parts.append("\n\n" + content)
+                    elif text_parts:
+                        text_parts.append("\n" + content)
+                    else:
+                        text_parts.append(content)
+                text = "".join(text_parts)
+            else:
+                # 无表格时：按块提取并排除页眉页脚
+                blocks = page.get_text("blocks")
+                content_blocks = []
+                for b in blocks:
+                    y0 = float(b[1])
+                    y1 = float(b[3])
+                    if y1 < HEADER_MARGIN or y0 > page_height - FOOTER_MARGIN:
+                        continue
+                    if not b[4].strip():
+                        continue
+                    content_blocks.append(b[4])
+                text = "\n".join(content_blocks)
+
             char_count = len(text.strip())
             total_chars += char_count
             # 扫描页检测：文字极少说明该页可能是图片扫描件
             if char_count < MIN_TEXT_CHARS:
                 scanned_pages += 1
-            text_by_page.append((text, page_num))
+            text_by_page.append((text, page_num + 1))
         return text_by_page, total_chars, scanned_pages
 
     def _split_chunks(
@@ -174,14 +227,57 @@ class PyMuPDFParser(BaseParser):
                 )
         return chunks
 
-    def _extract_heading_tree(self, full_text: str) -> list[tuple[int, str]]:
-        """从拼接后的全文提取标题树。
-
-        pymupdf4llm 输出的 Markdown 标题以 # 前缀标记（# 数量表示层级），
-        逐行扫描提取 (level, heading) 元组，并清洗标记残留、过滤伪标题。
+    def _extract_tables_from_page(self, page, tables=None) -> list[str]:
+        """从单页 PDF 提取所有表格，返回 Markdown 格式的表格字符串列表。
 
         Args:
-            full_text: 拼接后的全文 Markdown 文本
+            page: PyMuPDF 页面对象
+            tables: 预排序的表格列表（为 None 时自动获取并按视觉顺序排序）
+
+        Returns:
+            Markdown 表格字符串列表（每个元素是一个完整的 Markdown 表格）
+        """
+        if tables is None:
+            tables = list(page.find_tables())
+            # 按视觉顺序（Y 从上到下，X 从左到右）排序
+            tables.sort(key=lambda t: (t.bbox[1], t.bbox[0]))
+        result = []
+        for table in tables:
+            md = self._table_to_markdown(table)
+            if md:
+                result.append(md)
+        return result
+
+    def _table_to_markdown(self, table) -> str:
+        """将 PyMuPDF 表格对象转换为 Markdown 格式字符串。
+
+        Args:
+            table: PyMuPDF 表格对象（find_tables() 返回的条目）
+
+        Returns:
+            Markdown 格式的表格字符串，空表格返回空字符串
+
+        Note:
+            extract() 在畸形表格结构下可能返回 None，
+            空单元格为 None，用 sanitize_cell 保证输出空字符串。
+        """
+        rows = table.extract()
+        if not rows or len(rows) < 1:
+            return ""
+        lines = ["| " + " | ".join(self.sanitize_cell(c) for c in rows[0]) + " |"]
+        lines.append("| " + " | ".join(["---"] * len(rows[0])) + " |")
+        for row in rows[1:]:
+            lines.append("| " + " | ".join(self.sanitize_cell(c) for c in row) + " |")
+        return "\n".join(lines)
+
+    def _extract_heading_tree(self, full_text: str) -> list[tuple[int, str]]:
+        """从拼接后的 pm Markdown 全文提取标题树。
+
+        供子进程 pdf_heading_extractor 使用（主进程 parse 不再直接调用）。
+        逐行扫描 # 前缀，清洗标记残留、过滤伪标题。
+
+        Args:
+            full_text: 拼接后的 pm Markdown 文本
 
         Returns:
             标题层级列表 [(level, heading), ...]

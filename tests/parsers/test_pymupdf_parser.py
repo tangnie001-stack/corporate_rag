@@ -9,6 +9,7 @@
 
 import os
 import re
+from unittest.mock import patch
 
 import pytest
 
@@ -22,8 +23,18 @@ class TestPyMuPDFParser:
     def setup_method(self):
         """每个测试前初始化解析器和测试文件路径。"""
         self.parser = PyMuPDFParser()
+        # 单测 mock 子进程：标题树用固定值，避免真实 subprocess 依赖
+        self._tree_patcher = patch(
+            "src.parsers.pymupdf_parser.extract_heading_tree",
+            return_value=[(1, "一、主要财务数据"), (2, "（一）会计数据")],
+        )
+        self._tree_patcher.start()
         # sample.pdf 仅为占位文件（无实际文字层），内容测试用真实年报
         self.sample_pdf = "data/test_docs/neusoft_2025_q1.pdf"
+
+    def teardown_method(self):
+        """每个测试后停止子进程 mock。"""
+        self._tree_patcher.stop()
 
     def test_parse_pdf_returns_parse_result(self):
         """基本解析：返回 ParseResult 且页数 / 字符数 > 0。"""
@@ -123,6 +134,26 @@ class TestPyMuPDFParser:
         assert clean("mm_sun@tkl.tsannkuen.com") == "mm_sun@tkl.tsannkuen.com"
         # 页脚页码行（如 "6 / 12"）被兜底剔除
         assert clean("页脚残留\n6 / 12") == "页脚残留"
+
+    def test_table_cell_newline_flattened(self):
+        """跨行单元格拍平：标签与数值保持同行（Q4 修复核心）。"""
+        if not os.path.exists(self.sample_pdf):
+            pytest.skip("Test PDF not found")
+        result = self.parser.parse(self.sample_pdf)
+        # 同一个 chunk 内同时含标签与数值 → 跨行单元格未被拆成两行
+        assert any(
+            "购建固定资产" in c.content and "63,134,713" in c.content
+            for c in result.chunks
+        )
+
+    def test_header_margin_keeps_page_top_content(self):
+        """顶部边距 45：页首标题/内容段保留（tencent 回归）。"""
+        path = "data/test_docs/tencent_2024_annual.pdf"
+        if not os.path.exists(path):
+            pytest.skip("Test PDF not found")
+        result = self.parser.parse(path)
+        joined = "\n".join(c.content for c in result.chunks)
+        assert "二零二四年第四季业绩摘要" in joined
 
 
 class TestHeadingTree:
