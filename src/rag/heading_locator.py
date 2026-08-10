@@ -1,5 +1,7 @@
 """标题段区间定位器 — 由标题树 + 全文建立标题段区间，反推 chunk 归属。"""
 
+import re
+
 
 def build_heading_segments(
     full_text: str, heading_tree: list[tuple[int, str]]
@@ -43,6 +45,21 @@ def build_heading_segments(
     return segments
 
 
+def _normalize_ws(text: str) -> str:
+    """去掉全部空白，用于标题匹配的格式归一化。
+
+    中文无词间空格，pm 标题与 fitz 正文的空白差异（合并/保留、标点邻接空格）
+    只需去掉全部空白即可对齐。仅用于比较，不影响原文。
+
+    Args:
+        text: 待归一化的标题或行文本
+
+    Returns:
+        去空白后的文本
+    """
+    return re.sub(r"\s+", "", text)
+
+
 def _locate_heading_line(full_text: str, title: str) -> int:
     """定位标题文本在全文中的行首偏移。
 
@@ -68,11 +85,12 @@ def _locate_heading_line(full_text: str, title: str) -> int:
         if line.lstrip("#").strip() == title:
             return line_start
 
-    # 退化：逐行匹配标题文本（兼容 find 命中的是正文同名文本的场景）
+    # 退化：去全部空白归一化逐行匹配（覆盖 pm 标题 vs fitz 正文的空白格式差异）
+    norm_title = _normalize_ws(title)
     line_start = 0
     for line in full_text.split("\n"):
         stripped = line.strip()
-        if stripped.lstrip("#").strip() == title:
+        if _normalize_ws(stripped.lstrip("#").strip()) == norm_title:
             return line_start
         line_start += len(line) + 1
     return -1

@@ -1,6 +1,11 @@
 """标题段区间定位器测试。"""
 
-from src.rag.heading_locator import build_heading_segments, locate_heading_path
+from src.rag.heading_locator import (
+    _locate_heading_line,
+    _normalize_ws,
+    build_heading_segments,
+    locate_heading_path,
+)
 
 
 def test_build_heading_segments():
@@ -88,3 +93,37 @@ def test_locate_heading_path_no_match():
     """空段表或内容不在全文中时返回空串。"""
     segs = []
     assert locate_heading_path("任意", "任意全文", segs) == ""
+
+
+def test_normalize_ws_removes_all_whitespace():
+    """_normalize_ws 去掉全部空白（含单空格与标点邻接空格）。"""
+    assert (
+        _normalize_ws("收入高质量增长 运营效率持续提升")
+        == "收入高质量增长运营效率持续提升"
+    )
+    assert _normalize_ws("约 1 , 120 亿港元") == "约1,120亿港元"
+    assert _normalize_ws("同比 8% ，毛利") == "同比8%，毛利"
+
+
+def test_locate_heading_line_whitespace_diff():
+    """单空格差异：pm 标题无空格，fitz 正文有空格，仍能定位。"""
+    full_text = "收入高质量增长 运营效率持续提升\n内容A"
+    assert _locate_heading_line(full_text, "收入高质量增长运营效率持续提升") == 0
+
+
+def test_locate_heading_line_emphasis_punct_diff():
+    """强调标点邻接空格：'约 1 , 120 亿港元' vs '约 1,120 亿港元' 仍能定位。"""
+    full_text = "回购增长逾倍至约 1,120 亿港元\n内容A"
+    assert _locate_heading_line(full_text, "回购增长逾倍至约 1 , 120 亿港元") == 0
+
+
+def test_locate_heading_line_table_row_not_matched():
+    """表格内 |...| 包裹的标题不作为独立标题行定位（接受缺口）。"""
+    full_text = "| 其他财务资料 | 100 | 200 |\n内容A"
+    assert _locate_heading_line(full_text, "其他财务资料") == -1
+
+
+def test_locate_heading_line_truncated_not_matched():
+    """截断标题（标题是正文子串但整行不相等）不匹配。"""
+    full_text = "总收入：同比增长 8% 至 5,835 亿港元\n内容A"
+    assert _locate_heading_line(full_text, "总收入：同比增长 8%") == -1
