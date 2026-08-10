@@ -65,3 +65,28 @@
 **问题**：`pymupdf_parser.py` 和 `docx_parser.py` 各自内联了相同的 `str(c or "").replace("\n", " ")` 处理逻辑，新增 parser 容易遗漏。
 
 **解决**：在 `BaseParser` 基类中新增 `sanitize_cell()` 静态方法，所有 parser 统一调用。
+
+## 双通道解析重构（Q4 数值列回归与 F5 全局污染）
+
+### 1. Q4 回归根因：pymupdf4llm Layout 引擎拆跨行单元格
+**问题**：pymupdf4llm Layout 引擎会把跨行表格单元格拆成独立行，导致 `table_preserving` 的 `_split_large_tables` 把标签行与数值行切到不同 chunk，数值列（如 `63,134,713`）丢失，reranker 低分，最终拒答。
+
+**解决**：改为双通道解析，fitz 主进程用 `find_tables().extract()` + `sanitize_cell` 拍平跨行单元格，保证标签与数值同行输出 Markdown 表格。
+
+### 2. F5 全局污染：import pymupdf4llm 不可逆破坏 fitz 表格提取
+**问题**：`import pymupdf4llm` 会设置全局 mupdf 状态（quad corrections / layout 分析器），永久破坏同进程内 `find_tables().extract()` 的单元格顺序（`63,134,713` → `63 134 713\n, ,`），且 `unset_quad_corrections(False)`、`extra.set_skip_quad_corrections(False)`、`pymupdf._get_layout=None` 均无法恢复。
+
+**解决**：主进程不 import pymupdf4llm，标题树提取放子进程 `src/parsers/pdf_heading_extractor.py`（`python -m src.parsers.pdf_heading_extractor <file>` 调用，完整复刻 pm 管道，仅在 `__main__` 内才 import pymupdf4llm）。
+
+### 3. 双通道方案与标题定位归一化
+**问题**：同一进程内无法同时安全使用 fitz 表格提取和 pymupdf4llm 标题树；且标题定位对空白差异敏感，边距过滤参数过粗。
+
+**解决**：
+- fitz 主进程产全文+表格（`sanitize_cell` 拍平跨行单元格），pm 子进程产标题树；
+- 标题定位 `_locate_heading_line` 增加去全部空白归一化匹配（`_normalize_ws`，`re.sub(r"\s+", "", text)`），不命中返回 -1 保持静默跳过语义；
+- 边距过滤拆为 `HEADER_MARGIN=45`（顶部）/`FOOTER_MARGIN=80`（底部）。
+
+### 4. 效果：Q4 数值列回归修复
+**问题**：重构前 Q4 faithfulness 仅 0.8889，其中 Q4 题 faithfulness 0.3333，数值列丢失导致 reranker 低分拒答。
+
+**解决**：双通道重构 + 归一化匹配后，Q4 faithfulness 0.8889 → 0.9833（超基线 0.9333），Q4 题 faithfulness 0.3333 → 1.0。
