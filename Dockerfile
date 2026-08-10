@@ -29,6 +29,7 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy source code
 COPY src/ src/
+COPY scripts/ scripts/
 COPY deploy/ deploy/
 
 # Volume mount points
