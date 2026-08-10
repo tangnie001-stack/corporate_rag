@@ -195,3 +195,27 @@ class TestHeadingTree:
         # 复选框行（√适用□不适用 等）与编制单位标注行应被过滤
         assert not any("√" in t or "□" in t for t in titles)
         assert not any(t.startswith("编制单位") for t in titles)
+
+
+class TestDualChannelIntegration:
+    """端到端集成：真子进程 pm 标题树 + fitz 表格完整性（不 mock）。"""
+
+    def setup_method(self):
+        """每个测试前初始化解析器。"""
+        self.parser = PyMuPDFParser()
+
+    def test_parse_neusoft_dual_channel_integration(self):
+        """真实链路：标题树含"财务" + Q4 表格数值同行（Q4 修复验收）。"""
+        path = "data/test_docs/neusoft_2025_q1.pdf"
+        if not os.path.exists(path):
+            pytest.skip("Test PDF not found")
+        result = self.parser.parse(path)
+        # 子进程标题树（真 subprocess，import pymupdf4llm 只在子进程）
+        titles = [h for _, h in result.heading_tree]
+        assert len(result.heading_tree) > 0
+        assert any("财务" in t for t in titles)
+        # fitz 表格完整性：同一 chunk 含标签与数值
+        assert any(
+            "购建固定资产" in c.content and "63,134,713" in c.content
+            for c in result.chunks
+        )
