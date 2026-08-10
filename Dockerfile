@@ -10,7 +10,7 @@ COPY pyproject.toml .
 # pip install 需要 README.md（pyproject.toml 声明了 readme = "README.md"），
 # 放一个临时的占位，避免 README.md 改动触发重新安装全部依赖
 RUN echo "# placeholder" > README.md && \
-    mkdir -p src && pip install "." && \
+    mkdir -p src && pip install ".[dev]" && \
     pip show financial-qa-mvp | grep Location | cut -d' ' -f2 > /site-packages-path.txt
 # 再 COPY 真正的 README.md（此后的变动不影响上层的 pip 缓存）
 COPY README.md .
