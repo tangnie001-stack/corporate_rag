@@ -146,8 +146,18 @@ TOP_K_RERANK: int = int(os.getenv("TOP_K_RERANK", "5"))
 RERANK_MIN_SCORE: float = float(os.getenv("RERANK_MIN_SCORE", "0.3"))
 # 扫描件检测阈值：单页可提取文字少于 200 字符视为"扫描页"
 MIN_TEXT_CHARS: int = int(os.getenv("MIN_TEXT_CHARS", "200"))
-# 页眉页脚排除阈值：距离页面顶部/底部 N px 内的文本块视为页眉页脚
-HEADER_FOOTER_MARGIN: int = int(os.getenv("HEADER_FOOTER_MARGIN", "80"))
+# 页眉页脚边距过滤（fitz 通道按 y 坐标剔除重复页眉/页脚）
+# 顶部 45：保留页首内容标题（如 tencent 的"简明综合财务状况表"，y≈52-66）
+# 底部 80：剔除页码页脚（如 neusoft 的 "1 / 10 东软集团..."，y≈768-791）
+HEADER_MARGIN: int = int(os.getenv("HEADER_MARGIN", "45"))
+FOOTER_MARGIN: int = int(os.getenv("FOOTER_MARGIN", "80"))
+# pm 标题树子进程：超时秒数与主进程并发上限（每个子进程 import pymupdf4llm 约 200MB）
+PDF_HEADING_SUBPROCESS_TIMEOUT: int = int(
+    os.getenv("PDF_HEADING_SUBPROCESS_TIMEOUT", "180")
+)
+MAX_CONCURRENT_HEADING_SUBPROCESS: int = int(
+    os.getenv("MAX_CONCURRENT_HEADING_SUBPROCESS", "2")
+)
 # 跨页表格合并阈值：TABLE → 短文本（< N 字符）→ TABLE 合并为一个 chunk
 CROSS_PAGE_TABLE_MERGE_THRESHOLD: int = int(
     os.getenv("CROSS_PAGE_TABLE_MERGE_THRESHOLD", "100")

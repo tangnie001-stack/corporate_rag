@@ -4,6 +4,8 @@ import os
 from importlib import reload
 from unittest.mock import patch
 
+import pytest
+
 import src.config.settings as config
 
 
@@ -77,3 +79,26 @@ def test_entity_text_prefix_len_default():
     from src.config.settings import ENTITY_TEXT_PREFIX_LEN
 
     assert ENTITY_TEXT_PREFIX_LEN == 600
+
+
+def test_margin_constants_split():
+    """HEADER_MARGIN/FOOTER_MARGIN 替换 HEADER_FOOTER_MARGIN（默认 45/80）。"""
+    from src.config import FOOTER_MARGIN, HEADER_MARGIN
+
+    assert HEADER_MARGIN == 45
+    assert FOOTER_MARGIN == 80
+    with pytest.raises(ImportError):
+        from src.config import (
+            HEADER_FOOTER_MARGIN,  # noqa: F401  # pyright: ignore[reportAttributeAccessIssue]
+        )
+
+
+def test_pdf_heading_subprocess_constants():
+    """pm 标题树子进程超时与并发上限默认值。"""
+    from src.config import (
+        MAX_CONCURRENT_HEADING_SUBPROCESS,
+        PDF_HEADING_SUBPROCESS_TIMEOUT,
+    )
+
+    assert PDF_HEADING_SUBPROCESS_TIMEOUT == 180
+    assert MAX_CONCURRENT_HEADING_SUBPROCESS == 2
