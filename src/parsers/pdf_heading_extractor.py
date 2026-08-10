@@ -24,7 +24,6 @@ from src.config import (
     MAX_CONCURRENT_HEADING_SUBPROCESS,
     PDF_HEADING_SUBPROCESS_TIMEOUT,
 )
-from src.infra.llm.trace_context import current_trace_id
 
 # 限制主进程并发 pm 子进程数（每个子进程 import pymupdf4llm 约 200MB 内存，
 # 批量入库并发子进程可能击穿容器 mem_limit）
@@ -34,10 +33,9 @@ _SUBPROCESS_SEMAPHORE = threading.Semaphore(MAX_CONCURRENT_HEADING_SUBPROCESS)
 def extract_heading_tree(file_path: str) -> list[tuple[int, str]]:
     """在子进程中跑 pymupdf4llm 标题树管道，返回清洗后的标题树。
 
-    从 current_trace_id ContextVar 读取当前请求 trace_id，作为 argv[2]
-    传给子进程，使子进程自己的 loguru 日志也能带上 trace_id（ContextVar
-    不跨进程，需显式传递）；主进程侧的失败警告由 loguru patcher 自动注入
-    trace_id（asyncio.to_thread 会传播 contextvar）。
+    子进程自身的日志（pm 管道 start/标题数等）打到 stderr，本函数在成功
+    路径逐行转发到主进程 loguru（主进程 loguru patcher 注入当前请求
+    trace_id），使子进程活动在主日志流中与请求串联。
 
     Args:
         file_path: PDF 文件路径
@@ -46,10 +44,7 @@ def extract_heading_tree(file_path: str) -> list[tuple[int, str]]:
         标题层级列表 [(level, heading), ...]；失败/超时返回空列表（不抛异常）。
     """
     repo_root = Path(__file__).resolve().parents[2]
-    trace_id = current_trace_id.get()
     cmd = [sys.executable, "-m", "src.parsers.pdf_heading_extractor", file_path]
-    if trace_id:
-        cmd.append(trace_id)
     try:
         with _SUBPROCESS_SEMAPHORE:
             proc = subprocess.run(
@@ -82,6 +77,11 @@ def extract_heading_tree(file_path: str) -> list[tuple[int, str]]:
             proc.stderr[-500:],
         )
         return []
+    # 成功路径：转发子进程 stderr（pm 管道自身的日志/警告）到主进程日志，
+    # 由主进程 loguru patcher 注入当前请求 trace_id；截断尾部防刷屏
+    if proc.stderr.strip():
+        for line in proc.stderr.strip().splitlines()[-20:]:
+            logger.info("pm subprocess: {}", line)
     try:
         data = json.loads(proc.stdout)
     except (json.JSONDecodeError, TypeError):
@@ -106,14 +106,9 @@ if __name__ == "__main__":
 
     from src.parsers.pymupdf_parser import PyMuPDFParser
 
-    # trace_id 作为可选 argv[2] 传入；子进程日志用 loguru patcher 注入，
-    # 与主进程请求日志串联（ContextVar 不跨进程，需显式传递）
-    _trace_id = sys.argv[2] if len(sys.argv) > 2 else None
-    if _trace_id:
-        logger.configure(
-            extra={"trace_id": ""},
-            patcher=lambda record: record["extra"].__setitem__("trace_id", _trace_id),
-        )
+    # 子进程活动打到 stderr，由主进程 extract_heading_tree 成功路径转发到
+    # 主进程日志（带 trace_id）；trace_id 不在此处处理
+    print(f"pm heading subprocess: start {sys.argv[1]}", file=sys.stderr)
 
     parser = PyMuPDFParser()
     doc = pymupdf.open(sys.argv[1])
@@ -135,4 +130,5 @@ if __name__ == "__main__":
     cleaned_pages = [parser._clean_markdown_noise(p["text"]) for p in pages]
     full_text = "\n".join(cleaned_pages)
     tree = parser._extract_heading_tree(full_text)
+    print(f"pm heading subprocess: extracted {len(tree)} headings", file=sys.stderr)
     json.dump([[level, title] for level, title in tree], sys.stdout)
