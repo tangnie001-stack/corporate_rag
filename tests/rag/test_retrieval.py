@@ -9,6 +9,7 @@
 注意：外部依赖通过 unittest.mock 进行 mock。
 """
 
+from typing import cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -16,6 +17,35 @@ import pytest
 from src.infra.db.vector_store.types import ChunkResult
 from src.infra.llm.chat_message import ChatMessage
 from src.rag import retrieval
+from src.rag.retrieval import rerank_results
+
+
+def _cr(content, cid="c1") -> ChunkResult:
+    """构造一个 mock ChunkResult，字段满足 rerank_results 读取所需。"""
+    return cast(
+        ChunkResult,
+        type(
+            "CR",
+            (),
+            {
+                "content": content,
+                "id": cid,
+                "distance": 0.3,
+                "metadata": {},
+                "bm25_score": None,
+            },
+        )(),
+    )
+
+
+def _mock_reranker(scores):
+    """构造按给定分数列表返回结果的 mock reranker。"""
+
+    class R:
+        def rerank(self, docs, query):
+            return [{"index": i, "relevance_score": s} for i, s in enumerate(scores)]
+
+    return R()
 
 
 # ==================== 检索测试 ====================
@@ -105,66 +135,39 @@ class TestRerank:
         contexts = retrieval.rerank_results("query", [], MagicMock())
         assert contexts == []
 
-    def test_rerank_filters_below_threshold(self):
-        """低于 RERANK_MIN_SCORE 的 context 应被过滤。"""
-        reranker = MagicMock()
-        reranker.rerank.return_value = [
-            {"index": 0, "relevance_score": 0.9},
-            {"index": 1, "relevance_score": 0.1},
-        ]
-        results = [
-            ChunkResult(
-                id=f"d1:{i}",
-                content=f"content {i}",
-                metadata={"source": f"a{i}.pdf", "page": 1, "doc_id": "d1"},
-            )
-            for i in range(2)
-        ]
-        with patch("src.rag.retrieval.RERANK_MIN_SCORE", 0.3):
-            contexts = retrieval.rerank_results("query", results, reranker)
-        assert len(contexts) == 1
-        assert contexts[0].source == "a0.pdf"
+    def test_rerank_no_absolute_threshold(self):
+        """低分但相对相关的结果不再被绝对阈值过滤，全部进入 top-N。"""
+        results = [_cr("a"), _cr("b")]
+        # 两个低分但相对相关，旧逻辑会被 0.3 全过滤；新逻辑取 top2
+        ctx = rerank_results("q", results, _mock_reranker([0.2, 0.15]))
+        assert len(ctx) == 2  # 不再因 <0.3 过滤
+        assert [c.score for c in ctx] == [0.2, 0.15]
 
-    def test_rerank_all_below_threshold_returns_empty(self):
-        """全部低于阈值应返回空列表。"""
-        reranker = MagicMock()
-        reranker.rerank.return_value = [
-            {"index": 0, "relevance_score": 0.1},
-            {"index": 1, "relevance_score": 0.05},
-        ]
-        results = [
-            ChunkResult(
-                id=f"d1:{i}",
-                content=f"content {i}",
-                metadata={"source": f"a{i}.pdf", "page": 1, "doc_id": "d1"},
-            )
-            for i in range(2)
-        ]
-        with patch("src.rag.retrieval.RERANK_MIN_SCORE", 0.3):
-            contexts = retrieval.rerank_results("query", results, reranker)
-        assert contexts == []
+    def test_rerank_top_n_capped(self):
+        """rerank 结果数量以 TOP_K_RERANK 为上限。"""
+        results = [_cr("a"), _cr("b"), _cr("c")]
+        ctx = rerank_results("q", results, _mock_reranker([0.9, 0.8, 0.7]))
+        assert len(ctx) == min(3, 5)  # TOP_K_RERANK 上限
 
-    def test_rerank_fallback_skips_threshold(self):
-        """rerank 失败 fallback（1-distance 分数）不应用阈值。"""
+    def test_rerank_fallback_keeps_raw_order(self):
+        """rerank 失败 fallback（1-distance 分数）保持 raw order，不应用阈值。"""
         reranker = MagicMock()
         reranker.rerank.side_effect = RuntimeError("rerank down")
         results = [
             ChunkResult(
                 id=f"d1:{i}",
                 content=f"content {i}",
-                distance=0.5,  # 1-0.5=0.5，若应用阈值 0.3 会保留；用 0.9 距离=0.1 分验证不过滤
+                distance=0.9,
                 metadata={"source": f"a{i}.pdf", "page": 1, "doc_id": "d1"},
             )
-            for i in range(1)
+            for i in range(2)
         ]
-        # 距离 0.9 → fallback 分数 0.1 < 0.3，若应用阈值会被过滤；不应被过滤
-        results[0].distance = 0.9
-        with (
-            patch("src.rag.retrieval.RERANK_MIN_SCORE", 0.3),
-            patch("src.rag.retrieval.with_retry", side_effect=lambda f, **kw: f),
-        ):
+        # r0 距离 0.9 → 分 0.1，r1 距离 0.5 → 分 0.5；raw order 下先 r0 后 r1
+        results[1].distance = 0.5
+        with patch("src.rag.retrieval.with_retry", side_effect=lambda f, **kw: f):
             contexts = retrieval.rerank_results("query", results, reranker)
-        assert len(contexts) == 1
+        assert len(contexts) == 2
+        assert [c.score for c in contexts] == pytest.approx([0.1, 0.5])
 
 
 # ==================== to_prompt_text 实体渲染测试 ====================

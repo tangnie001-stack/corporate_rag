@@ -6,7 +6,6 @@ from loguru import logger
 
 from src.config import (
     HYBRID_SEARCH_ENABLED,
-    RERANK_MIN_SCORE,
     RETRY_BACKOFF_FACTOR,
     RETRY_INITIAL_INTERVAL,
     RETRY_MAX_ATTEMPTS,
@@ -98,15 +97,13 @@ def rerank_results(
 
     Returns:
         精排后的 RAGContext 列表，按相关性降序排列，长度不超过 TOP_K_RERANK；
-        rerank 成功时过滤掉分数低于 RERANK_MIN_SCORE 的 context，失败 fallback 不应用阈值
+        取前 TOP_K_RERANK 条相对结果，不应用绝对分数阈值过滤
     """
     if not results:
         logger.info("[DIAG] rerank_results: input empty, returning []")
         return []
 
     docs = [r.content for r in results]
-    # rerank 成功与否影响是否应用阈值：失败 fallback 分数量纲不同（1-distance），不应用阈值
-    apply_threshold = True
     logger.info(
         "Rerank start: model={} docs={} query_len={}",
         getattr(reranker, "model", ""),
@@ -126,7 +123,6 @@ def rerank_results(
             RETRY_MAX_ATTEMPTS,
             e,
         )
-        apply_threshold = False
         reranked = []
         for i, r in enumerate(results):
             if r.distance is not None:
@@ -140,14 +136,6 @@ def rerank_results(
         idx = item["index"]
         r = results[idx]
         score = item.get("relevance_score", 0)
-        if apply_threshold and score < RERANK_MIN_SCORE:
-            logger.info(
-                "Rerank filter: idx={} score={:.4f} < RERANK_MIN_SCORE={}",
-                idx,
-                score,
-                RERANK_MIN_SCORE,
-            )
-            continue
         pc = r.metadata.get("parent_content")
         if pc:
             content = pc
