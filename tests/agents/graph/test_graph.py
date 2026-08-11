@@ -305,6 +305,39 @@ def test_generate_node_abstains_on_empty_retrieval():
     assert out["answer"] == ABSTENTION_TEXT
 
 
+def test_generate_node_non_empty_retrieval_delegates_to_llm():
+    """检索非空但 contexts 空时，应委托 LLM 生成而非静态 abstain。
+
+    判别性：旧实现按 `if not contexts:` 判定会静态返回 ABSTENTION_TEXT，
+    此断言失败；新实现按 retrieval_results 判定，检索非空走 LLM 生成，断言通过。
+    """
+    from src.agents.graph.nodes import make_generate_node
+    from src.agents.graph.state import AgentState
+    from src.config.prompts import ABSTENTION_TEXT
+    from src.infra.db.vector_store.types import ChunkResult
+
+    prompt_manager = MagicMock()
+    prompt_manager.get_system_prompt.return_value = "system"
+    prompt_manager.get_user_template.return_value = "user {context} {query}"
+
+    llm = MagicMock()
+    llm.model = "test-model"
+    node = make_generate_node(llm=llm, prompt_manager=prompt_manager)
+    state = AgentState(
+        query="x",
+        retrieval_results=[ChunkResult(content="c", id="c1", distance=0.3)],
+        contexts=[],
+        skip_retrieval=False,
+    )
+    with patch(
+        "src.agents.graph.nodes.stream_answer", return_value=["生成的回答"]
+    ) as mock_stream:
+        out = node(state)
+    mock_stream.assert_called_once()
+    assert out["answer"] == "生成的回答"
+    assert out["answer"] != ABSTENTION_TEXT
+
+
 def test_rerank_node_medium_uses_original_query():
     """medium 路由下 rerank 打分应使用原始 query，而非 rewritten_queries。"""
     from src.agents.graph.nodes import make_rerank_node
