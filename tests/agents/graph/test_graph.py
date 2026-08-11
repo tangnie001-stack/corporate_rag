@@ -491,3 +491,32 @@ def test_rewrite_node_medium_short_query_calls_llm():
     assert calls  # 触发了 LLM
     assert out["rewritten_queries"] == ["腾讯2024年毛利率是多少", "毛利率呢"]
     assert out["rewritten_query"] == "腾讯2024年毛利率是多少"
+
+
+def test_rewrite_node_complex_joins_sub_queries():
+    """complex 路由下 rewritten_query 应拼接所有子查询，而非取第一个。"""
+    import asyncio
+    from unittest.mock import MagicMock, patch
+
+    from src.agents.graph.nodes import make_rewrite_node
+    from src.agents.graph.state import AgentState, RAGQueryIntent
+
+    def fake_llm_rewrite(query, history, route, llm):
+        return ["腾讯利润", "东软利润"], 10, 5
+
+    llm = MagicMock()
+    with patch(
+        "src.infra.search.query_router._llm_rewrite", side_effect=fake_llm_rewrite
+    ):
+        node = make_rewrite_node(llm)
+        state = AgentState(
+            query="腾讯和东软哪个利润更高",
+            intent=RAGQueryIntent(route="complex"),
+        )
+        out = asyncio.run(node(state))
+    assert out["rewritten_query"] == "腾讯利润 东软利润"  # " ".join(rewritten)
+    assert out["rewritten_queries"] == [
+        "腾讯利润",
+        "东软利润",
+        "腾讯和东软哪个利润更高",
+    ]

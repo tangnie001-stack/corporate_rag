@@ -161,7 +161,12 @@ def make_rewrite_node(classify_llm) -> Callable:
             _llm_rewrite, query, state._history or [], route, classify_llm
         )
         queries = list(dict.fromkeys([*rewritten, query]))  # 去重保留原 query
-        main_query = queries[0]
+        if route == "complex":
+            main_query = " ".join(
+                rewritten
+            )  # complex 全量子查询拼接，与 design D5 旧实现语义一致
+        else:
+            main_query = queries[0]  # medium 用改写结果首个（standalone_query）
         result = {
             LangGraphNode.Rewrite.REWRITTEN_QUERIES: queries,
             LangGraphNode.Rewrite.REWRITTEN_QUERY: main_query,
