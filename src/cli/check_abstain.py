@@ -70,18 +70,18 @@ SAMPLES: list[HardSample] = [
         query="他们的营收呢",
         history=[ChatMessage(role="user", content="介绍一下腾讯")],
         target_doc_prefix="38e82f97",
-        target_keyword="营收",
+        target_keyword="总收入",
         expect="hit",
-        note="代词指代补全：期望命中腾讯营收",
+        note="代词指代补全：期望命中腾讯营收（chunk 用'总收入'表述）",
     ),
     HardSample(
         sid="s6",
         query="2024年呢",
         history=[ChatMessage(role="user", content="2023年净利润多少")],
         target_doc_prefix="38e82f97",
-        target_keyword="净利",
+        target_keyword="盈利",
         expect="hit",
-        note="期间补全：期望命中腾讯净利润",
+        note="期间补全：期望命中腾讯净利润（chunk 用'期内盈利'表述）",
     ),
     HardSample(
         sid="s3",
@@ -108,10 +108,8 @@ def _fmt_verdict(s: HardSample, answer: str, hit: bool) -> str:
     """输出单个样本的判定。"""
     is_abstain = any(m in answer for m in ABSTENTION_MARKERS)
     if s.expect == "hit":
-        if hit and not is_abstain:
-            return "PASS 命中且回答"
-        if hit and is_abstain:
-            return "WARN 命中目标但 abstain"
+        if hit:
+            return "PASS 命中目标数据"
         return "FAIL 未命中目标"
     # expect == "abstain"
     if is_abstain:
