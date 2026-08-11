@@ -61,7 +61,7 @@ class SSEModelInfoEvent:
 class SSEClarificationEvent:
     """追问事件 — 当系统需要用户补充信息时触发。"""
 
-    type: str  # "entity_completion" | "intent_clarification"
+    type: str  # "entity_completion" | "intent_clarification" | "no_data_guidance"
     question: str  # 追问文本（取第一个问题的文案，兼容旧前端）
     missing_entities: list[dict]  # [{"type": "year"}, ...]
     suggestions: list[str]  # 快捷选项（取第一个问题的，兼容旧前端）

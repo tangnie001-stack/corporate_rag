@@ -202,7 +202,7 @@ data: {}
 | `status` | 节点开始 | 四阶段状态（classify / retrieving / reranking / generating） |
 | `token` | LLM 生成中 | LLM 生成文本片段，前端逐段追加 |
 | `citation` | rerank 节点完成 | 引用来源，按 source+page 去重 |
-| **`clarification`** | **classify 检测到缺失实体** | **追问事件，前端展示追问气泡 + 快捷选项** |
+| **`clarification`** | **classify 检测到缺失实体；检索空 abstention 引导（KB 有候选时）** | **追问事件，前端展示追问气泡 + 快捷选项** |
 | `model_info` | generate 节点完成 | 实际使用的模型名和 fallback 状态 |
 | `done` | 流结束 | 流结束标记（追问路径也在 clarification 后立即发送） |
 | `error` | 异常 | 异常时推送，无 retry 机制 |
@@ -212,10 +212,11 @@ data: {}
 ```python
 # 数据结构（src/utils/sse.py: SSEClarificationEvent）
 {
-  "type": "entity_completion" | "intent_clarification",
+  "type": "entity_completion" | "intent_clarification" | "no_data_guidance",
   "question": str,              # 追问文本，如 "请问您想查询哪一年的数据？"
   "missing_entities": [dict],   # [{"type": "year", "question": "请问您想查询哪一年的数据？"}]
-  "suggestions": [str]          # 快捷选项，如 ["2023年", "2024年", "其他"]
+  "suggestions": [str],         # 快捷选项，如 ["2023年", "2024年", "其他"]
+  "questions": [dict]           # 批量追问列表 [{"type", "question", "suggestions"}, ...]；空则省略，兼容旧前端
 }
 ```
 
@@ -467,9 +468,8 @@ name = f"kb_{kb_id.replace('-', '')}"
 |------|--------------|---------|------|
 | **kb_router** | `"kb_router"` | `_resolved_kb_ids: list[str] \| None` | KB 路由穿透/智能匹配 |
 | **classify** | `"classify"` | `intent`, `extracted_entities`, `missing_entities`, `classification_confidence` | 三层意图路由 |
-| **rewrite** | `"rewrite"` | `rewritten_query: str` | 查询改写（仅 medium/complex） |
+| **rewrite** | `"rewrite"` | `rewritten_queries: list[str]`, `rewritten_query: str` | 查询改写（仅 medium/complex） |
 | **retrieve** | `"retrieve"` | `retrieval_results: list[ChunkResult]` | 混合检索（Dense + BM25） |
-| **grader** | `"grader"` | `grader_score`, `retrieval_retries`, `downgraded`, `downgrade_reason` | 检索质量评分 |
 | **rerank** | `"rerank"` | `contexts: list[RAGContext]` | DashScope Reranker 精排 |
 | **generate** | `"generate"` | `answer: str`, `model_used: str` | LLM 流式生成 |
 | **format** | `"format"` | `citations: list[dict]` | 去重引用列表 |
@@ -561,10 +561,9 @@ name = f"kb_{kb_id.replace('-', '')}"
         L2: ComplexityScorer → score=2.5 (medium)
         L3: LLM → route=medium, missing=[], confidence=0.95
     → route_by_intent: "medium" → rewrite
-    → rewrite_node: 查询改写
+    → rewrite_node: 查询改写（输出 rewritten_queries 多查询列表）
     → retrieve_node: Hybrid Search (Dense + BM25 + RRF)
-    → grader_node: 检索质量评分 (score ≥ 0.5 → pass)
-    → rerank_node: DashScope Reranker 精排
+    → rerank_node: DashScope Reranker 精排（retrieve → rerank 直连，grader 已删除）
     → generate_node: LLM 流式生成
     → format_node: 去重引用列表
     → SSE 事件流推送至前端:

@@ -33,9 +33,8 @@
 |---|---|---|
 | `kb_router` | `kb_id`, `query` | `_resolved_kb_ids` |
 | `classify` | `query`, `_history` | `intent`, `extracted_entities`, `missing_entities`, `classification_confidence`, `skip_retrieval` |
-| `rewrite` | `query`, `intent` | `rewritten_query` |
-| `retrieve` | `rewritten_query`, `_resolved_kb_ids` | `retrieval_results` |
-| `grader` | `rewritten_query`, `retrieval_results` | `grader_score`, `retrieval_retries`, `downgraded`, `downgrade_reason` |
+| `rewrite` | `query`, `intent` | `rewritten_queries`, `rewritten_query` |
+| `retrieve` | `rewritten_query`, `rewritten_queries`, `_resolved_kb_ids` | `retrieval_results` |
 | `rerank` | `rewritten_query`, `retrieval_results` | `contexts` |
 | `generate` | `query`, `contexts`, `_history` | `answer`, `model_used`, `is_fallback` |
 | `format` | `answer`, `contexts` | `citations` |
