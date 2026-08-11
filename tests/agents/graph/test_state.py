@@ -26,10 +26,11 @@ def test_agent_state_with_contexts():
     assert state.contexts[0].content == "净利润100亿"
 
 
-def test_agent_state_downgrade_fields():
-    state = AgentState(query="test", downgraded=True, downgrade_reason="rerank_empty")
-    assert state.downgraded is True
-    assert state.downgrade_reason == "rerank_empty"
+def test_agent_state_no_grader_fields():
+    state = AgentState(query="test")
+    assert not hasattr(state, "grader_score")
+    assert not hasattr(state, "retrieval_retries")
+    assert not hasattr(state, "downgraded")
 
 
 def test_agent_state_trace_id():

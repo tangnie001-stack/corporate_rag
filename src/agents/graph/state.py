@@ -33,14 +33,9 @@ class AgentState:
         default_factory=list
     )  # 向量/BM25 检索结果
     contexts: list[RAGContext] = field(default_factory=list)  # rerank 精排后的上下文
-    grader_score: float | None = None  # grader 关键词覆盖度评分（0~1）
-    retrieval_retries: int = 0  # 检索重试次数
     # ── 输出 ──
     answer: str = ""  # LLM 生成的完整回答
     citations: list[dict] = field(default_factory=list)  # 去重引用列表
-    # ── 降级控制 ──
-    downgraded: bool = False  # 是否降级
-    downgrade_reason: str = ""  # 降级原因
     # ── 模型信息 ──
     model_used: str = ""  # LiteLLM 实际使用的模型名（用于识别 fallback）
     is_fallback: bool = False  # 是否触发了模型 fallback
@@ -69,7 +64,6 @@ class AgentState:
     _history: list[ChatMessage] = field(
         default_factory=list
     )  # 对话历史（注入 prompt 用）
-    _prev_rewritten_query: str = ""  # 上一轮改写查询（grader 短路重试用，空串=首轮）
     _token_usage: dict = field(default_factory=dict)  # token 用量统计
     timings: dict = field(default_factory=dict)  # 各节点耗时统计
 
@@ -105,16 +99,6 @@ class LangGraphNode:
 
     class Retrieve:
         NAME: str = "retrieve"  # 文档检索
-
-    class Grader:
-        NAME: str = "grader"  # 检索质量评分
-        SCORE: str = "grader_score"  # 关键词覆盖度评分（0~1）
-        RETRIEVAL_RETRIES: str = "retrieval_retries"  # 检索重试次数
-        DOWNGRADED: str = "downgraded"  # 是否降级
-        DOWNGRADE_REASON: str = "downgrade_reason"  # 降级原因
-        PREV_REWRITTEN_QUERY: str = (
-            "_prev_rewritten_query"  # 上一轮改写查询（短路判断用）
-        )
 
     class Rerank:
         NAME: str = "rerank"  # 重排序
@@ -172,8 +156,3 @@ SSE_STATUS: dict[str, str] = {
     LangGraphNode.Rerank.NAME: "正在精排结果...",
     LangGraphNode.Generate.NAME: "正在生成回答...",
 }
-
-# ── 降级原因（grader 短路 / 重试耗尽） ──
-DOWNGRADE_REASON_REWRITE_NO_INCREMENT: str = (
-    "rewrite_no_increment"  # rewrite 无信息增量，重试必复现失败，短路降级
-)
