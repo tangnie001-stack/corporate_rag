@@ -169,27 +169,33 @@ class AgentService:
                                     output.get(LangGraphNode.Format.CITATIONS, []) or []
                                 )
 
-            # 追问处理：缺少实体时返回澄清事件
+            # 追问处理：缺少实体时返回澄清事件（批量 questions）
             if _clarification_pending:
                 cp = _clarification_pending
-                first = cp["missing_entities"][0]
-                entity_type = first.get("type", "default")
                 from src.infra.search.query_router import SUGGESTIONS_MAP
 
                 kb_suggestions = cp.get("suggestions") or {}
-                if entity_type in kb_suggestions:
-                    # KB 候选优先（公司/报告期/代码等真实候选）
-                    suggestions = kb_suggestions[entity_type]
-                else:
-                    # 兜底静态映射（year/quarter/metric 等），default 最后兜底
-                    suggestions = SUGGESTIONS_MAP.get(
-                        entity_type, SUGGESTIONS_MAP["default"]
+                questions = []
+                for me in cp["missing_entities"]:
+                    etype = me.get("type", "default")
+                    # KB 候选优先（公司/报告期/代码等真实候选），否则兜底静态映射
+                    sugg = kb_suggestions.get(etype) or SUGGESTIONS_MAP.get(
+                        etype, SUGGESTIONS_MAP["default"]
                     )
+                    questions.append(
+                        {
+                            "type": etype,
+                            "question": me.get("question", "请补充相关信息"),
+                            "suggestions": sugg,
+                        }
+                    )
+                first = questions[0]
                 yield SSEClarificationEvent(
                     type=cp["type"],
-                    question=first.get("question", "请补充相关信息"),
+                    question=first["question"],
                     missing_entities=cp["missing_entities"],
-                    suggestions=suggestions,
+                    suggestions=first["suggestions"],
+                    questions=questions,
                 )
                 yield SSEDoneEvent()
                 return

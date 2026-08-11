@@ -59,6 +59,14 @@ class TestStreamChatClarification:
         assert clarification_events[0].missing_entities[0]["type"] == "year"
         # 无 KB 候选时兜底静态映射（year → 年份建议）
         assert clarification_events[0].suggestions == ["2023年", "2024年", "其他"]
+        # 批量澄清：questions 与单问题字段兼容
+        assert clarification_events[0].questions == [
+            {
+                "type": "year",
+                "question": "请提供年份信息",
+                "suggestions": ["2023年", "2024年", "其他"],
+            }
+        ]
         # 验证在澄清事件后终止了流（finally 块再发一次 DONE）
         done_events = [e for e in events if isinstance(e, SSEDoneEvent)]
         assert len(done_events) == 2
@@ -111,6 +119,14 @@ class TestStreamChatClarification:
         assert len(clarification_events) == 1
         assert clarification_events[0].suggestions == ["腾讯", "其他"]
         assert clarification_events[0].suggestions != ["腾讯", "阿里巴巴", "其他"]
+        # questions 每项沿用各自实体类型的 KB 候选
+        assert clarification_events[0].questions == [
+            {
+                "type": "company",
+                "question": "您想查询哪家公司？",
+                "suggestions": ["腾讯", "其他"],
+            }
+        ]
 
     @pytest.mark.asyncio
     async def test_stream_chat_no_clarification_when_no_missing_entities(self):
