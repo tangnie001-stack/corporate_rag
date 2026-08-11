@@ -102,8 +102,6 @@ class AgentService:
         try:
             t0 = time.perf_counter()
             contexts: list[RAGContext] = []
-            downgraded = False
-            downgrade_reason = ""
             _clarification_pending = None
 
             async for event in self._graph.astream_events(
@@ -162,12 +160,6 @@ class AgentService:
                                 contexts = output.get(
                                     LangGraphNode.Rerank.CONTEXTS, contexts
                                 )
-                            elif LangGraphNode.Grader.NAME in name:
-                                if output.get(LangGraphNode.Grader.DOWNGRADED):
-                                    downgraded = True
-                                    downgrade_reason = output.get(
-                                        LangGraphNode.Grader.DOWNGRADE_REASON, ""
-                                    )
                             elif LangGraphNode.Generate.NAME in name:
                                 answer = output.get("answer", "") or answer
                                 model_used = output.get("model_used", model_used)
@@ -253,11 +245,8 @@ class AgentService:
 
             t1 = time.perf_counter()
             logger.info(
-                "AgentService stream_chat completed: total={:.1f}s "
-                "downgraded={} reason={} contexts={}",
+                "AgentService stream_chat completed: total={:.1f}s contexts={}",
                 t1 - t0,
-                downgraded,
-                downgrade_reason,
                 len(contexts),
             )
 

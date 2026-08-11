@@ -141,9 +141,6 @@ async def generate_answers_and_contexts(
                     "session_id": session_id,
                     "query": q,
                     "trace_id": trace_id,
-                    "retrieval_retries": 0,
-                    "downgraded": False,
-                    "downgrade_reason": "",
                     "_history": [],
                     # 评估模式：即使 classify 判定缺实体也跳过 clarify 追问，
                     # 直接走检索+生成，否则批量评估会因追问而空答（指标全 0）
