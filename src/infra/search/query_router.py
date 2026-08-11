@@ -191,6 +191,83 @@ def _format_history(history: list) -> str:
     return "\n".join(lines)
 
 
+def _llm_rewrite(
+    query: str,
+    history: list,
+    route: str,
+    llm: Any,
+) -> tuple[list[str], int, int]:
+    """独立 LLM 查询改写，失败回退到规则改写。
+
+    Args:
+        query: 用户原始查询
+        history: 对话历史（ChatMessage 列表）
+        route: "medium" | "complex"
+        llm: ChatOpenAI 实例（flash）
+
+    Returns:
+        (list[str] 改写查询列表, prompt_tokens, completion_tokens)；
+        LLM 失败时回退规则改写结果（expand/condense/decompose），仍无效回退原 query
+    """
+    from langchain_core.messages import HumanMessage
+
+    from src.config import CLASSIFIER_TEMPERATURE
+    from src.config.prompts import REWRITE_SYSTEM_PROMPT, REWRITE_USER_TEMPLATE
+    from src.rag.retrieval import rewrite_query
+
+    history_text = _format_history(history)
+    if history_text:
+        prompt = f"{REWRITE_SYSTEM_PROMPT}\n\n{REWRITE_USER_TEMPLATE.format(query=query, route=route, history=history_text)}"
+    else:
+        prompt = f"{REWRITE_SYSTEM_PROMPT}\n\n{REWRITE_USER_TEMPLATE.format(query=query, route=route, history='无')}"
+    try:
+        response = llm.invoke(
+            [HumanMessage(content=prompt)], temperature=CLASSIFIER_TEMPERATURE
+        )
+        raw = (response.content or "").strip()
+        if raw.startswith("```"):
+            lines = raw.split("\n")
+            if lines[-1] == "```":
+                raw = "\n".join(lines[1:-1])
+            else:
+                raw = "\n".join(lines[1:])
+        if raw:
+            data = json.loads(raw)
+        else:
+            data = {}
+        # token 统计（复用 _llm_classify 的 metadata 读取模式）
+        metadata = getattr(response, "response_metadata", {}) or {}
+        usage = metadata.get("token_usage", {})
+        pt = usage.get("prompt_tokens")
+        ct = usage.get("completion_tokens")
+        if pt is None or ct is None:
+            usage_meta = getattr(response, "usage_metadata", None) or {}
+            pt = usage_meta.get("input_tokens")
+            ct = usage_meta.get("output_tokens")
+        pt = int(pt or 0)
+        ct = int(ct or 0)
+        subs = data.get("sub_queries")
+        if isinstance(subs, list):
+            valid = [q for q in subs if isinstance(q, str) and q.strip()]
+            if valid:
+                return valid, pt, ct
+        sq = data.get("standalone_query")
+        if isinstance(sq, str) and sq.strip():
+            return [sq], pt, ct
+    except Exception:  # noqa: BLE001
+        logger.warning("_llm_rewrite LLM failed, fallback to rules")
+    # fallback：规则改写 → 原 query
+    rule = rewrite_query(query, history, intent_route=route)
+    if isinstance(rule, list):
+        valid_rules = [q for q in rule if q]
+    else:
+        if rule:
+            valid_rules = [rule]
+        else:
+            valid_rules = []
+    return valid_rules or [query], 0, 0
+
+
 class QueryRouter:
     def __init__(self, llm: Any = None, prompt_manager: PromptManager | None = None):
         self._entity_extractor = EntityExtractor()
