@@ -60,8 +60,9 @@ class VectorStore:
         Returns:
             实际写入的分块数量
         """
-        collection = self._chroma.get_or_create_collection(kb_id)
-        return _store.add_chunks(collection, kb_id, chunks, doc_id, embeddings)
+        with self._chroma._lock:
+            collection = self._chroma.get_or_create_collection(kb_id)
+            return _store.add_chunks(collection, kb_id, chunks, doc_id, embeddings)
 
     def similarity_search(
         self, kb_id: str, query: str, k: int = 5
@@ -76,8 +77,11 @@ class VectorStore:
         Returns:
             检索结果列表，按相关性降序排列
         """
-        collection = self._chroma.get_or_create_collection(kb_id)
-        return _search.similarity_search(collection, self._embed_fn, kb_id, query, k)
+        with self._chroma._lock:
+            collection = self._chroma.get_or_create_collection(kb_id)
+            return _search.similarity_search(
+                collection, self._embed_fn, kb_id, query, k
+            )
 
     def similarity_search_all(self, query: str, k: int = 10) -> list[ChunkResult]:
         """在所有知识库中执行语义检索，合并后排序取 top-k。
@@ -89,25 +93,26 @@ class VectorStore:
         Returns:
             合并排序后的检索结果列表
         """
-        names = self._chroma.list_collection_names()
-        if not names:
-            return []
-        collections = {}
-        for name in names:
-            kb_id = name.removeprefix(CHROMA_COLLECTION_PREFIX)
-            try:
-                collections[kb_id] = self._chroma.get_or_create_collection(kb_id)
-            except Exception:  # noqa: BLE001, S112
-                continue
-        return _search.similarity_search_all(collections, self._embed_fn, query, k)
+        with self._chroma._lock:
+            names = self._chroma.list_collection_names()
+            if not names:
+                return []
+            collections = {}
+            for name in names:
+                kb_id = name.removeprefix(CHROMA_COLLECTION_PREFIX)
+                try:
+                    collections[kb_id] = self._chroma.get_or_create_collection(kb_id)
+                except Exception:  # noqa: BLE001, S112
+                    continue
+            return _search.similarity_search_all(collections, self._embed_fn, query, k)
 
     def similarity_search_multi(
         self, kb_ids: list[str], query: str, k: int = 5
     ) -> list[ChunkResult]:
-        """在指定多个知识库中并行执行语义检索，合并后排序取 top-k。
+        """在指定多个知识库中执行语义检索，合并后排序取 top-k。
 
         每个 KB 单独搜索 TOP_K_RETRIEVAL 条，合并后按距离升序取 top-k。
-        使用 ThreadPoolExecutor 并行加速。
+        chromadb PersistentClient 非线程安全，检索在 ChromaClient 锁内串行执行。
 
         Args:
             kb_ids: 知识库 ID 列表
@@ -117,16 +122,9 @@ class VectorStore:
         Returns:
             合并排序后的检索结果列表
         """
-        import concurrent.futures
-
-        def _search_one(kb_id: str) -> list[ChunkResult]:
-            return self.similarity_search(kb_id, query, k)
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(kb_ids)) as pool:
-            futures = [pool.submit(_search_one, kb_id) for kb_id in kb_ids]
-            all_results: list[ChunkResult] = []
-            for future in concurrent.futures.as_completed(futures):
-                all_results.extend(future.result() or [])
+        all_results: list[ChunkResult] = []
+        for kb_id in kb_ids:
+            all_results.extend(self.similarity_search(kb_id, query, k) or [])
 
         all_results.sort(
             key=lambda r: r.distance if r.distance is not None else float("inf")
@@ -143,8 +141,9 @@ class VectorStore:
         Returns:
             分块结果列表
         """
-        collection = self._chroma.get_or_create_collection(kb_id)
-        return _search.get_chunks_by_doc_id(collection, doc_id)
+        with self._chroma._lock:
+            collection = self._chroma.get_or_create_collection(kb_id)
+            return _search.get_chunks_by_doc_id(collection, doc_id)
 
     def get_chunks_paginated(
         self, doc_id: str, kb_id: str, page: int = 1, page_size: int = 50

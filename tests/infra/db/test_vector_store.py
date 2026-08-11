@@ -136,3 +136,26 @@ class TestVectorStore:
         """无任何 collection 时返回空列表。"""
         results = vs.similarity_search_all("test", k=5)
         assert results == []
+
+    def test_concurrent_similarity_search_safe(self, vs, kb_id):
+        """并发相似度检索不抛异常：chromadb PersistentClient 非线程安全，
+        须由 ChromaClient._lock 串行化（回归验证 Task 11 并行检索引入的崩溃）。"""
+        import concurrent.futures
+        from unittest.mock import MagicMock
+
+        vs.get_or_create_collection(kb_id)
+        # mock 掉 embedding 模型调用（测试不发真实网络）
+        vs._chroma._embed_fn = MagicMock()
+        vs._chroma._embed_fn.embed_query.return_value = [0.1] * 10
+
+        errors = []
+
+        def _search(_):
+            try:
+                vs.similarity_search(kb_id, "营收", k=3)
+            except Exception as e:  # noqa: BLE001
+                errors.append(e)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            list(pool.map(_search, range(8)))
+        assert not errors, f"并发检索抛异常: {errors}"

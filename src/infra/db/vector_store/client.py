@@ -1,5 +1,7 @@
 """ChromaDB 连接管理和 collection 缓存。"""
 
+import threading
+
 import chromadb
 from chromadb.api import ClientAPI
 from chromadb.config import Settings
@@ -26,6 +28,9 @@ class ChromaClient:
         self._client: ClientAPI | None = None
         self._collection_cache: dict[str, chromadb.Collection] = {}
         self._embed_fn = DashScopeEmbeddingFunction()
+        # chromadb PersistentClient 底层 Rust 绑定非线程安全，多查询/多 KB 并行
+        # 检索时必须串行化对 client/collection 的访问（见 VectorStore 检索方法）
+        self._lock = threading.RLock()
 
     def _get_client(self) -> ClientAPI:
         """获取或创建 PersistentClient 实例（惰性初始化）。
