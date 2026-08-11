@@ -288,6 +288,67 @@ def test_generate_node_abstention_uses_llm_model_attr():
     assert result["model_used"] == "qwen-custom-model"
 
 
+def test_rerank_node_medium_uses_original_query():
+    """medium 路由下 rerank 打分应使用原始 query，而非 rewritten_queries。"""
+    from src.agents.graph.nodes import make_rerank_node
+    from src.agents.graph.state import AgentState, RAGQueryIntent
+    from src.infra.db.vector_store.types import ChunkResult
+
+    def _cr(content, cid) -> ChunkResult:
+        return ChunkResult(content=content, id=cid, distance=0.3)
+
+    calls = []
+
+    class FakeReranker:
+        def rerank(self, docs, query):
+            calls.append(query)
+            return [
+                {"index": i, "relevance_score": 0.5 - i * 0.1} for i in range(len(docs))
+            ]
+
+    state = AgentState(
+        query="毛利率呢",
+        intent=RAGQueryIntent(route="medium"),
+        rewritten_queries=["腾讯2024年毛利率是多少", "毛利率呢"],
+        retrieval_results=[_cr("毛利率数据", "c1"), _cr("营收数据", "c2")],
+    )
+    node = make_rerank_node(FakeReranker())
+    out = node(state)
+    assert calls[0] == "毛利率呢"  # medium 用原 query 打分
+    assert "contexts" in out
+
+
+def test_rerank_node_complex_scores_each_sub_query_and_dedups():
+    """complex 路由下应逐子查询打分，并按 chunk_id 去重合并。"""
+    from src.agents.graph.nodes import make_rerank_node
+    from src.agents.graph.state import AgentState, RAGQueryIntent
+    from src.infra.db.vector_store.types import ChunkResult
+
+    def _cr(content, cid) -> ChunkResult:
+        return ChunkResult(content=content, id=cid, distance=0.3)
+
+    calls = []
+
+    class FakeReranker:
+        def rerank(self, docs, query):
+            calls.append(query)
+            return [
+                {"index": i, "relevance_score": 0.5 - i * 0.1} for i in range(len(docs))
+            ]
+
+    state = AgentState(
+        query="腾讯2024年营收和毛利率",
+        intent=RAGQueryIntent(route="complex"),
+        rewritten_queries=["腾讯2024年营收", "腾讯2024年毛利率"],
+        retrieval_results=[_cr("营收数据", "c1"), _cr("毛利率数据", "c2")],
+    )
+    node = make_rerank_node(FakeReranker())
+    out = node(state)
+    assert calls == ["腾讯2024年营收", "腾讯2024年毛利率"]  # complex 逐子查询打分
+    assert len(out["contexts"]) == 2  # 合并去重，c1/c2 各出现一次
+    assert {c.chunk_id for c in out["contexts"]} == {"c1", "c2"}
+
+
 def test_graph_no_grader_node():
     """图结构断言：grader 节点已删除，retrieve 直连 rerank。"""
     from unittest.mock import MagicMock

@@ -172,11 +172,25 @@ def make_rerank_node(reranker) -> Callable:
     """创建精排节点工厂函数。"""
 
     def rerank_node(state: AgentState) -> dict:
-        query = state.rewritten_query or state.query
         results = state.retrieval_results or []
         if not results:
             return {LangGraphNode.Rerank.CONTEXTS: []}
-        contexts = rerank_results(query, results, reranker)
+        contexts = []
+        route = state.intent.route or "medium"
+        if route == "complex" and state.rewritten_queries:
+            # complex：逐子查询打分，各取 top 后按 chunk_id 去重合并
+            merged = []
+            seen = set()
+            for sub in state.rewritten_queries:
+                for ctx in rerank_results(sub, results, reranker):
+                    if ctx.chunk_id in seen:
+                        continue
+                    seen.add(ctx.chunk_id)
+                    merged.append(ctx)
+            contexts = merged
+        else:
+            # medium：统一用原始 query 对合并候选池打一次分
+            contexts = rerank_results(state.query, results, reranker)
         # 直接存 RAGContext 列表，不做 dict 转换
         logger.info("rerank_node: contexts={}", len(contexts))
         return {LangGraphNode.Rerank.CONTEXTS: contexts}

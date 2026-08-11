@@ -29,6 +29,9 @@ class AgentState:
     # ── 中间态 ──
     intent: RAGQueryIntent = field(default_factory=RAGQueryIntent)  # classify_node 输出
     rewritten_query: str = ""  # rewrite_node 改写后的查询
+    rewritten_queries: list[str] = field(
+        default_factory=list
+    )  # complex 路由改写后的子查询列表（rewrite_node 输出）
     retrieval_results: list[ChunkResult] = field(
         default_factory=list
     )  # 向量/BM25 检索结果
