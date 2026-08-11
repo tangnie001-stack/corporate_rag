@@ -115,3 +115,32 @@ def rrf_fusion(
 
     ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
     return [data[doc_id] for doc_id, _ in ranked[:top_n]]
+
+
+def rrf_fusion_multi(
+    results_groups: list[list[ChunkResult]],
+    k: int = 60,
+    top_n: int = 50,
+) -> list[ChunkResult]:
+    """任意路 RRF 融合多组检索结果。
+
+    每路按排名贡献 1/(k+rank)，跨路累加后按得分降序取 top_n。
+
+    Args:
+        results_groups: 多组检索结果（每组一个查询的 dense 或 bm25 结果）
+        k: RRF 排序常数（默认 60）
+        top_n: 融合后保留的 top-N 结果数
+
+    Returns:
+        融合结果列表，按 RRF 得分降序，长度不超过 top_n
+    """
+    scores: dict[str, float] = {}
+    data: dict[str, ChunkResult] = {}
+    for group in results_groups:
+        for rank, doc in enumerate(group):
+            doc_id = doc.id
+            scores[doc_id] = scores.get(doc_id, 0) + 1.0 / (k + rank + 1)
+            if doc_id not in data:
+                data[doc_id] = doc
+    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    return [data[doc_id] for doc_id, _ in ranked[:top_n]]

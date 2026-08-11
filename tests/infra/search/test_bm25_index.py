@@ -12,6 +12,19 @@ from src.infra.search.bm25_index import BM25Index, rrf_fusion
 from src.parsers.base import ChunkData
 
 
+def _cr(content: str, id: str) -> ChunkResult:
+    """构造测试用的 ChunkResult。
+
+    Args:
+        content: 分块内容
+        id: 分块 ID
+
+    Returns:
+        构造出的 ChunkResult 实例
+    """
+    return ChunkResult(content=content, id=id)
+
+
 class TestBM25Index:
     """BM25Index 构建与检索功能的测试。"""
 
@@ -90,3 +103,18 @@ class TestRRFFusion:
         assert result[0].id == "1"
         # "3" 在两个列表的第 3 位，"2" 在 dense 第 2 位但不在 bm25 中
         # 取决于 RRF 分数，但确保 1 排在第一位
+
+
+class TestRRFFusionMulti:
+    """任意路 RRF 融合函数的测试。"""
+
+    def test_rrf_fusion_multi_three_way(self):
+        """3 路融合：两路命中的结果应排前且去重。"""
+        from src.infra.search.bm25_index import rrf_fusion_multi
+
+        g1 = [_cr("a", "id1"), _cr("b", "id2")]
+        g2 = [_cr("c", "id3"), _cr("a", "id1")]
+        g3 = [_cr("b", "id2")]
+        merged = rrf_fusion_multi([g1, g2, g3], k=60, top_n=5)
+        assert merged[0].id in ("id1", "id2")  # 两路命中的排前
+        assert {c.id for c in merged} == {"id1", "id2", "id3"}
