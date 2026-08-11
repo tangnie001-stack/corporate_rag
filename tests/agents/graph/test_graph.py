@@ -288,68 +288,34 @@ def test_generate_node_abstention_uses_llm_model_attr():
     assert result["model_used"] == "qwen-custom-model"
 
 
-def test_grader_node_short_circuit_on_first_fail():
-    """首轮 score<0.5 且无上一轮改写记录时，应记录 _prev_rewritten_query 并走重试。"""
-    from src.agents.graph.nodes import grader_node
-    from src.agents.graph.state import AgentState
-    from src.infra.db.vector_store.types import ChunkResult
+def test_graph_no_grader_node():
+    """图结构断言：grader 节点已删除，retrieve 直连 rerank。"""
+    from unittest.mock import MagicMock
 
-    results = [ChunkResult(id="c1", content="无关内容", metadata={})]
-    state = AgentState(
-        query="阿里巴巴",
-        rewritten_query="本季度营收情况如何？ 阿里巴巴",
-        retrieval_results=results,
-        retrieval_retries=0,
+    from src.agents.graph.workflow import build_graph
+
+    graph = build_graph(
+        MagicMock(),
+        None,
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
     )
-    with patch("src.agents.graph.nodes.RetrievalGrader.grade", return_value=0.0):
-        result = grader_node(state)
-    assert result["retrieval_retries"] == 1
-    assert result["_prev_rewritten_query"] == "本季度营收情况如何？ 阿里巴巴"
-    assert result.get("downgraded") is not True
-
-
-def test_grader_node_short_circuit_when_rewrite_unchanged():
-    """本轮改写查询与上一轮相同（rewrite 无信息增量）时直接降级，不再重试。"""
-    from src.agents.graph.nodes import grader_node
-    from src.agents.graph.state import (
-        DOWNGRADE_REASON_REWRITE_NO_INCREMENT,
-        AgentState,
-    )
-    from src.infra.db.vector_store.types import ChunkResult
-
-    results = [ChunkResult(id="c1", content="无关内容", metadata={})]
-    state = AgentState(
-        query="阿里巴巴",
-        rewritten_query="本季度营收情况如何？ 阿里巴巴",
-        retrieval_results=results,
-        retrieval_retries=1,
-        _prev_rewritten_query="本季度营收情况如何？ 阿里巴巴",
-    )
-    with patch("src.agents.graph.nodes.RetrievalGrader.grade", return_value=0.0):
-        result = grader_node(state)
-    assert result["downgraded"] is True
-    assert result["downgrade_reason"] == DOWNGRADE_REASON_REWRITE_NO_INCREMENT
-
-
-def test_grader_node_still_retries_when_rewrite_changed():
-    """本轮改写查询与上一轮不同时，应继续重试（最多到 retries<2）。"""
-    from src.agents.graph.nodes import grader_node
-    from src.agents.graph.state import AgentState
-    from src.infra.db.vector_store.types import ChunkResult
-
-    results = [ChunkResult(id="c1", content="无关内容", metadata={})]
-    state = AgentState(
-        query="阿里巴巴",
-        rewritten_query="腾讯2024年营收",
-        retrieval_results=results,
-        retrieval_retries=1,
-        _prev_rewritten_query="本季度营收情况如何？ 阿里巴巴",
-    )
-    with patch("src.agents.graph.nodes.RetrievalGrader.grade", return_value=0.0):
-        result = grader_node(state)
-    assert result["retrieval_retries"] == 2
-    assert result["_prev_rewritten_query"] == "腾讯2024年营收"
-    assert result.get("downgraded") is not True
+    nodes = graph.get_graph().nodes
+    # LangGraph 内部哨兵节点 __start__/__end__ 不属于业务节点，断言前剔除
+    node_names = set(nodes) - {"__start__", "__end__"}
+    assert "grader" not in node_names
+    assert node_names == {
+        "kb_router",
+        "classify",
+        "rewrite",
+        "retrieve",
+        "rerank",
+        "generate",
+        "format",
+    }
 
 
 def test_generate_node_skip_retrieval_uses_simple_prompt():

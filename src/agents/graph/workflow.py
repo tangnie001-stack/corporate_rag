@@ -7,7 +7,6 @@ from loguru import logger
 
 from src.agents.graph.nodes import (
     format_node,
-    grader_node,
     make_classify_node,
     make_generate_node,
     make_kb_router_node,
@@ -30,29 +29,6 @@ def route_by_intent(state: AgentState) -> str:
         logger.info("route_by_intent: missing_entities detected -> clarify")
         return "clarify"
     return state.intent.route or "medium"
-
-
-def route_by_grader(state: AgentState) -> str:
-    """根据 grader 分数决定继续还是重试（纯条件函数，不修改 state）。"""
-    if state.downgraded:
-        logger.info("route_by_grader: downgraded=true -> pass")
-        return "pass"
-    score = state.grader_score or 0
-    retries = state.retrieval_retries
-    if score >= 0.5:
-        logger.info("route_by_grader: score={:.2f} >= 0.5 -> pass", score)
-        return "pass"
-    if retries < 3:
-        logger.info(
-            "route_by_grader: score={:.2f} retries={} < 3 -> rewrite", score, retries
-        )
-        return "rewrite"
-    logger.info(
-        "route_by_grader: score={:.2f} retries={} >= 3 -> pass (downgrade)",
-        score,
-        retries,
-    )
-    return "pass"
 
 
 def build_graph(
@@ -78,7 +54,6 @@ def build_graph(
     builder.add_node(
         LangGraphNode.Retrieve.NAME, make_retrieve_node(vector_store, bm25)
     )
-    builder.add_node(LangGraphNode.Grader.NAME, grader_node)
     builder.add_node(LangGraphNode.Rerank.NAME, make_rerank_node(reranker))
     builder.add_node(
         LangGraphNode.Generate.NAME, make_generate_node(llm, prompt_manager)
@@ -104,23 +79,13 @@ def build_graph(
     # medium + complex → rewrite → retrieve
     builder.add_edge(LangGraphNode.Rewrite.NAME, LangGraphNode.Retrieve.NAME)
 
-    # retrieve → grader
-    builder.add_edge(LangGraphNode.Retrieve.NAME, LangGraphNode.Grader.NAME)
-
-    # grader 条件边：通过 → rerank，不通过 → rewrite 重试
-    builder.add_conditional_edges(
-        LangGraphNode.Grader.NAME,
-        route_by_grader,
-        {
-            "pass": LangGraphNode.Rerank.NAME,
-            "rewrite": LangGraphNode.Rewrite.NAME,
-        },
-    )
+    # retrieve → rerank 直连（grader 节点已删除）
+    builder.add_edge(LangGraphNode.Retrieve.NAME, LangGraphNode.Rerank.NAME)
 
     builder.add_edge(LangGraphNode.Rerank.NAME, LangGraphNode.Generate.NAME)
     builder.add_edge(LangGraphNode.Generate.NAME, LangGraphNode.Format.NAME)
     builder.add_edge(LangGraphNode.Format.NAME, END)
 
     graph = builder.compile()
-    logger.info("LangGraph StateGraph compiled: 8 nodes, KB router + 3-tier routing")
+    logger.info("LangGraph StateGraph compiled: 7 nodes, KB router + 3-tier routing")
     return graph
