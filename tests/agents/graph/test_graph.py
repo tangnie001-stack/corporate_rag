@@ -460,3 +460,34 @@ def test_generate_node_skip_retrieval_uses_simple_prompt():
         result = node(state)
     m.assert_called_once()
     assert "你好" in result["answer"]
+
+
+def test_rewrite_node_medium_short_query_calls_llm():
+    """medium 短省略查询（有 history）应触发 LLM 改写，输出多查询列表。"""
+    import asyncio
+    from unittest.mock import MagicMock, patch
+
+    from src.agents.graph.nodes import make_rewrite_node
+    from src.agents.graph.state import AgentState, RAGQueryIntent
+    from src.infra.llm.chat_message import ChatMessage
+
+    calls = []
+
+    def fake_llm_rewrite(query, history, route, llm):
+        calls.append((query, route))
+        return ["腾讯2024年毛利率是多少"], 10, 5
+
+    llm = MagicMock()
+    with patch(
+        "src.infra.search.query_router._llm_rewrite", side_effect=fake_llm_rewrite
+    ):
+        node = make_rewrite_node(llm)
+        state = AgentState(
+            query="毛利率呢",
+            intent=RAGQueryIntent(route="medium"),
+            _history=[ChatMessage("user", "腾讯2024年营收多少")],
+        )
+        out = asyncio.run(node(state))
+    assert calls  # 触发了 LLM
+    assert out["rewritten_queries"] == ["腾讯2024年毛利率是多少", "毛利率呢"]
+    assert out["rewritten_query"] == "腾讯2024年毛利率是多少"

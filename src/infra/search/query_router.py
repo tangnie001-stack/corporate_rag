@@ -254,8 +254,8 @@ def _llm_rewrite(
         sq = data.get("standalone_query")
         if isinstance(sq, str) and sq.strip():
             return [sq], pt, ct
-    except Exception:  # noqa: BLE001
-        logger.warning("_llm_rewrite LLM failed, fallback to rules")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("_llm_rewrite LLM failed, fallback to rules: {}", e)
     # fallback：规则改写 → 原 query
     rule = rewrite_query(query, history, intent_route=route)
     if isinstance(rule, list):

@@ -12,7 +12,7 @@ from src.agents.graph.nodes import (
     make_kb_router_node,
     make_rerank_node,
     make_retrieve_node,
-    rewrite_node,
+    make_rewrite_node,
 )
 from src.agents.graph.state import AgentState, LangGraphNode
 from src.infra.db.vector_store import VectorStore
@@ -50,7 +50,7 @@ def build_graph(
         LangGraphNode.KbRouter.NAME, make_kb_router_node(embed_fn, classify_llm)
     )
     builder.add_node(LangGraphNode.Classify.NAME, make_classify_node(classify_llm))
-    builder.add_node(LangGraphNode.Rewrite.NAME, rewrite_node)
+    builder.add_node(LangGraphNode.Rewrite.NAME, make_rewrite_node(classify_llm))
     builder.add_node(
         LangGraphNode.Retrieve.NAME, make_retrieve_node(vector_store, bm25)
     )

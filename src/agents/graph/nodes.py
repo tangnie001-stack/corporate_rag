@@ -8,7 +8,6 @@
 import asyncio
 import re
 from collections.abc import Callable
-from typing import Any
 
 from loguru import logger
 
@@ -27,7 +26,7 @@ from src.infra.search.query_router import (
     needs_kb_entities,
 )
 from src.rag.prompt import build_prompt, build_simple_prompt, format_context
-from src.rag.retrieval import rerank_results, rewrite_query, search
+from src.rag.retrieval import rerank_results, search
 from src.rag.stream import estimate_usage, stream_answer
 
 
@@ -118,25 +117,63 @@ def make_classify_node(llm) -> Callable:
     return classify_node
 
 
-def rewrite_node(state: AgentState) -> dict:
-    """查询改写节点：对非 simple 路径的查询进行改写。"""
-    query = state.query
-    intent_route = state.intent.route or "medium"
-    rewritten = rewrite_query(query, state._history or [], intent_route=intent_route)
+def make_rewrite_node(classify_llm) -> Callable:
+    """创建查询改写节点工厂函数（独立 LLM 改写）。"""
+    from src.infra.search.entity_extractor import EntityExtractor
+    from src.infra.search.query_router import _llm_rewrite
 
-    if isinstance(rewritten, list):
-        rewritten = " ".join(rewritten)
+    _ORAL_WORDS = ("呢", "啊", "吧", "么")
+    _ANALYSIS_WORDS = ("分析", "解释", "说明", "为什么")
 
-    result: dict[str, Any] = {"rewritten_query": rewritten}
-    if rewritten != query:
-        result[LangGraphNode.Classify.INTENT] = RAGQueryIntent(
-            route=state.intent.route or "medium",
-            rewritten=True,
+    def _has_full_entities(query: str) -> bool:
+        """查询是否已含关键实体（公司/期间/指标），组合消息视为完整。"""
+        types = {e.type for e in EntityExtractor().extract(query)}
+        return bool(types & {"company", "quarter", "year", "metric"})
+
+    def _should_rewrite(state: AgentState) -> bool:
+        """判断当前查询是否需要 LLM 改写（complex 必改，其余按启发式触发）。"""
+        route = state.intent.route or "medium"
+        if route == "complex":
+            return True
+        query = state.query.strip()
+        if len(query) < 10:
+            return True
+        if any(w in query for w in _ORAL_WORDS):
+            return True
+        if any(w in query for w in _ANALYSIS_WORDS):
+            return True
+        # 组合消息/完整查询已含关键实体且无省略词 → 跳过（避免批量澄清后误触发）
+        if _has_full_entities(query):
+            return False
+        # 短省略查询且有多轮上下文 → 需 LLM 补全
+        return bool(state._history)
+
+    async def rewrite_node(state: AgentState) -> dict:
+        """查询改写节点：按触发条件决定是否调 LLM 改写，输出多查询列表。"""
+        query = state.query
+        route = state.intent.route or "medium"
+        if not _should_rewrite(state):
+            return {
+                LangGraphNode.Rewrite.REWRITTEN_QUERIES: [query],
+                LangGraphNode.Rewrite.REWRITTEN_QUERY: query,
+            }
+        rewritten, _, _ = await asyncio.to_thread(
+            _llm_rewrite, query, state._history or [], route, classify_llm
         )
-        logger.info("rewrite_node: {} -> {}", query[:30], rewritten[:30])
-    else:
-        logger.info("rewrite_node: no rewrite")
-    return result
+        queries = list(dict.fromkeys([*rewritten, query]))  # 去重保留原 query
+        main_query = queries[0]
+        result = {
+            LangGraphNode.Rewrite.REWRITTEN_QUERIES: queries,
+            LangGraphNode.Rewrite.REWRITTEN_QUERY: main_query,
+        }
+        if main_query != query:
+            result[LangGraphNode.Classify.INTENT] = RAGQueryIntent(
+                route=route, rewritten=True
+            )
+        logger.info("rewrite_node: {} -> {}", query[:30], queries)
+        return result
+
+    return rewrite_node
 
 
 def make_retrieve_node(vector_store, bm25) -> Callable:
