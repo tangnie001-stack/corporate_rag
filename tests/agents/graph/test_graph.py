@@ -1,6 +1,6 @@
 """Tests for LangGraph node functions."""
 
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
@@ -286,6 +286,23 @@ def test_generate_node_abstention_uses_llm_model_attr():
     result = node(state)
     assert result["answer"] == ABSTENTION_TEXT
     assert result["model_used"] == "qwen-custom-model"
+
+
+def test_generate_node_abstains_on_empty_retrieval():
+    """检索空（retrieval_results 为空）时 generate_node 应返回静态 abstention 文案。"""
+    from src.agents.graph.nodes import make_generate_node
+    from src.agents.graph.state import AgentState
+    from src.config.prompts import ABSTENTION_TEXT
+
+    state = AgentState(
+        query="x",
+        retrieval_results=[],
+        contexts=[],
+        skip_retrieval=False,
+    )
+    node = make_generate_node(MagicMock(), MagicMock())
+    out = node(state)
+    assert out["answer"] == ABSTENTION_TEXT
 
 
 def test_rerank_node_medium_uses_original_query():

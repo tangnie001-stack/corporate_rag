@@ -225,9 +225,9 @@ def make_generate_node(llm, prompt_manager) -> Callable:
             )
             return result
 
-        # ② 检索无达标 context：abstention 静态文案，不回 LLM
-        if not contexts:
-            logger.info("generate_node: empty contexts, abstention")
+        # ② 检索无结果：abstention 静态文案（检索空才静态，非空由 LLM 判断）
+        if not (state.retrieval_results or []):
+            logger.info("generate_node: empty retrieval, abstention")
             usage = estimate_usage([], ABSTENTION_TEXT)
             logger.info(
                 "generate_node done (abstention): answer_len={} tokens={}",
