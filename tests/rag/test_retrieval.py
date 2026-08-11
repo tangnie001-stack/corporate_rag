@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from src.config import TOP_K_RERANK
 from src.infra.db.vector_store.types import ChunkResult
 from src.infra.llm.chat_message import ChatMessage
 from src.rag import retrieval
@@ -145,9 +146,11 @@ class TestRerank:
 
     def test_rerank_top_n_capped(self):
         """rerank 结果数量以 TOP_K_RERANK 为上限。"""
-        results = [_cr("a"), _cr("b"), _cr("c")]
-        ctx = rerank_results("q", results, _mock_reranker([0.9, 0.8, 0.7]))
-        assert len(ctx) == min(3, 5)  # TOP_K_RERANK 上限
+        # 构造超过 TOP_K_RERANK(5) 的 7 条候选，验证真正发生截断而非恒真断言
+        results = [_cr(f"r{i}", cid=f"c{i}") for i in range(7)]
+        scores = [0.95 - i * 0.05 for i in range(7)]
+        ctx = rerank_results("q", results, _mock_reranker(scores))
+        assert len(ctx) == TOP_K_RERANK
 
     def test_rerank_fallback_keeps_raw_order(self):
         """rerank 失败 fallback（1-distance 分数）保持 raw order，不应用阈值。"""

@@ -16,7 +16,7 @@ from src.agents.graph.state import (
     LangGraphNode,
     RAGQueryIntent,
 )
-from src.config import LLM_MODEL, TOP_K_RETRIEVAL
+from src.config import LLM_MODEL, TOP_K_RERANK, TOP_K_RETRIEVAL
 from src.config.prompts import ABSTENTION_MARKERS, ABSTENTION_TEXT
 from src.infra.db.vector_store.types import ChunkResult
 from src.infra.search.bm25_index import rrf_fusion_multi
@@ -235,7 +235,8 @@ def make_rerank_node(reranker) -> Callable:
         contexts = []
         route = state.intent.route or "medium"
         if route == "complex" and state.rewritten_queries:
-            # complex：逐子查询打分，各取 top 后按 chunk_id 去重合并
+            # complex：逐子查询打分，各取 top 后按 chunk_id 去重合并，
+            # 按分数降序排序后截断到 TOP_K_RERANK 上限（与 medium 分支对齐）
             merged = []
             seen = set()
             for sub in state.rewritten_queries:
@@ -244,7 +245,8 @@ def make_rerank_node(reranker) -> Callable:
                         continue
                     seen.add(ctx.chunk_id)
                     merged.append(ctx)
-            contexts = merged
+            merged.sort(key=lambda ctx: ctx.score, reverse=True)
+            contexts = merged[:TOP_K_RERANK]
         else:
             # medium：统一用原始 query 对合并候选池打一次分
             contexts = rerank_results(state.query, results, reranker)
