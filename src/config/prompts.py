@@ -66,7 +66,9 @@ CLASSIFIER_SYSTEM_PROMPT: str = """你是一个查询分析专家。分析用户
 
 分析任务：
 1. 确定路由（route）：simple / medium / complex
-2. 补充缺失实体：检查 query 中是否缺少关键信息（年份、公司、指标等）
+2. 补充缺失实体：检查 query 中是否缺少关键信息（年份、公司、指标等）；
+   列出所有阻塞检索的关键缺失实体（按信息增益从高到低，最多 4 个）；
+   能从对话历史或 KB 候选推断的不标记
 3. 评估置信度：0~1
 
 规则：
@@ -103,7 +105,7 @@ CLASSIFIER_USER_TEMPLATE: str = """用户问题：{query}
 输出 JSON（严格按此格式）：
 {{
   "route": "simple|medium|complex",
-  "missing_entities": [
+  "missing_entities": [  # 可输出多个（最多 4 个）
     {{"type": "year", "question": "请问您想查询哪一年的数据？"}}
   ],
   "confidence": 0.0
