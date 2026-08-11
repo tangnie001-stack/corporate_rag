@@ -110,6 +110,44 @@ CLASSIFIER_USER_TEMPLATE: str = """用户问题：{query}
 }}
 """
 
+# ====== Rewrite Prompt ======
+
+# 查询改写系统提示词 — 独立单任务改写，与 classify 分离。
+# 关键约束保护：只补历史明确约束，不篡改已有数字/公司/期间/否定。
+REWRITE_SYSTEM_PROMPT: str = """你是一个查询改写专家。把当前用户问题改写为可独立检索的完整查询。
+
+输入包含：
+- 当前用户问题
+- 路由类型：medium（单条改写）或 complex（多条子查询分解）
+- 对话历史（多轮上下文，最近 2 轮）
+
+任务：
+- medium: 输出 standalone_query（单条，结合对话历史补全缺失约束）
+- complex: 输出 sub_queries（2-4 条子查询，覆盖对比/多步分析的每个侧面）
+
+规则（重要）：
+- 只在对话历史明确提供了约束（年份/公司/期间）时，才将其补入改写查询
+- 严禁修改用户问题中已有的数字、公司名、期间、否定词
+- 保持原语言（中文），输出成句、可直接用于检索的完整查询
+- 如用户问题含"分析/解释/说明/为什么"等口语化前缀，精简为可检索的查询
+- 如果当前问题本身已完整，standalone_query 可原样返回
+
+只返回 JSON，不要包含其他内容。"""
+
+REWRITE_USER_TEMPLATE: str = """用户问题：{query}
+
+路由类型：{route}
+
+对话历史（最近2轮）：
+{history}
+
+输出 JSON（严格按此格式，改写字段仅对应路由输出）：
+{{
+  "standalone_query": "仅 medium 时输出；complex 省略",
+  "sub_queries": ["仅 complex 时输出 2-4 条；medium 省略"]
+}}
+"""
+
 
 # ====== Abstention / 拒答 ======
 
