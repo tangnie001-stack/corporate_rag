@@ -103,6 +103,7 @@ class AgentService:
             t0 = time.perf_counter()
             contexts: list[RAGContext] = []
             _clarification_pending = None
+            _kb_suggestions_all: dict = {}
 
             async for event in self._graph.astream_events(
                 initial_state,
@@ -141,6 +142,11 @@ class AgentService:
                         )
                         if isinstance(output, dict):
                             if LangGraphNode.Classify.NAME in name:
+                                # 无条件保存 KB 候选（含无 missing 场景），供 abstention 引导使用
+                                _kb_suggestions_all = (
+                                    output.get(LangGraphNode.Classify.KB_SUGGESTIONS)
+                                    or {}
+                                )
                                 missing = output.get(
                                     LangGraphNode.Classify.MISSING_ENTITIES, []
                                 )
@@ -195,6 +201,26 @@ class AgentService:
                     question=first["question"],
                     missing_entities=cp["missing_entities"],
                     suggestions=first["suggestions"],
+                    questions=questions,
+                )
+                yield SSEDoneEvent()
+                return
+
+            # abstention 引导：检索空且 KB 有候选时发一次 clarification
+            if not contexts and not _clarification_pending and _kb_suggestions_all:
+                questions = [
+                    {
+                        "type": k,
+                        "question": "文档中未找到相关数据，可尝试查询：",
+                        "suggestions": v,
+                    }
+                    for k, v in _kb_suggestions_all.items()
+                ]
+                yield SSEClarificationEvent(
+                    type="no_data_guidance",
+                    question="未在文档中找到相关数据，可尝试查询以下内容：",
+                    missing_entities=[],
+                    suggestions=[],
                     questions=questions,
                 )
                 yield SSEDoneEvent()

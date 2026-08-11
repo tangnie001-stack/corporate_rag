@@ -186,6 +186,90 @@ class TestStreamChatClarification:
         ]
         assert len(clarification_events) == 0
 
+    @pytest.mark.asyncio
+    async def test_stream_chat_sends_no_data_guidance_when_abstain_with_kb_suggestions(
+        self,
+    ):
+        """检索空 abstain 且 KB 有候选时，应发 no_data_guidance 澄清而非 abstention token。"""
+        from src.agents.graph.state import (
+            LangGraphEvent,
+            LangGraphKey,
+            LangGraphNode,
+        )
+        from src.config.prompts import ABSTENTION_TEXT
+        from src.services.agent_service import AgentService
+        from src.utils.sse import SSEClarificationEvent, SSEDoneEvent, SSETokenEvent
+
+        service = AgentService.__new__(AgentService)
+        service._llm = Mock()
+        service._chat_manager = AsyncMock()
+        service._chat_manager.get_history_async.return_value = []
+        service._chat_manager.add_message_async = AsyncMock()
+        service._prompt_manager = Mock()
+        service._tracer = Mock()
+
+        async def fake_astream(*args, **kwargs):
+            # classify 带 KB 候选（无 missing_entities），rerank 空 contexts → generate 静态 abstain
+            yield {
+                LangGraphKey.EVENT: LangGraphEvent.CHAIN_END,
+                LangGraphKey.NAME: LangGraphNode.Classify.NAME,
+                LangGraphKey.DATA: {
+                    LangGraphKey.OUTPUT: {
+                        "missing_entities": [],
+                        "_kb_suggestions": {
+                            "company": ["腾讯", "其他"],
+                            "year": ["2023年", "2024年"],
+                        },
+                    }
+                },
+            }
+            yield {
+                LangGraphKey.EVENT: LangGraphEvent.CHAIN_END,
+                LangGraphKey.NAME: LangGraphNode.Rerank.NAME,
+                LangGraphKey.DATA: {LangGraphKey.OUTPUT: {"contexts": []}},
+            }
+            yield {
+                LangGraphKey.EVENT: LangGraphEvent.CHAIN_END,
+                LangGraphKey.NAME: LangGraphNode.Generate.NAME,
+                LangGraphKey.DATA: {
+                    LangGraphKey.OUTPUT: {
+                        "answer": ABSTENTION_TEXT,
+                        "model_used": "",
+                        "is_fallback": False,
+                    }
+                },
+            }
+
+        service._graph = Mock()
+        service._graph.astream_events = fake_astream
+
+        events = []
+        async for event in service.stream_chat("kb1", "session1", "营收多少"):
+            events.append(event)
+
+        clarification_events = [
+            e for e in events if isinstance(e, SSEClarificationEvent)
+        ]
+        assert len(clarification_events) == 1
+        assert clarification_events[0].type == "no_data_guidance"
+        assert clarification_events[0].questions == [
+            {
+                "type": "company",
+                "question": "文档中未找到相关数据，可尝试查询：",
+                "suggestions": ["腾讯", "其他"],
+            },
+            {
+                "type": "year",
+                "question": "文档中未找到相关数据，可尝试查询：",
+                "suggestions": ["2023年", "2024年"],
+            },
+        ]
+        # 引导后终止流，不再发送 abstention token
+        tokens = [e for e in events if isinstance(e, SSETokenEvent)]
+        assert tokens == []
+        done_events = [e for e in events if isinstance(e, SSEDoneEvent)]
+        assert len(done_events) == 2
+
 
 @pytest.mark.asyncio
 async def test_stream_chat_yields_generate_tokens_from_metadata():
