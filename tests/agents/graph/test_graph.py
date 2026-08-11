@@ -520,3 +520,43 @@ def test_rewrite_node_complex_joins_sub_queries():
         "东软利润",
         "腾讯和东软哪个利润更高",
     ]
+
+
+def test_retrieve_node_multi_query_rrf():
+    """retrieve_node 应并行遍历 rewritten_queries 逐条检索，多查询用 RRF 融合。"""
+    import asyncio
+
+    from src.agents.graph.nodes import make_retrieve_node
+    from src.agents.graph.state import AgentState
+
+    class FakeStore:
+        def __init__(self):
+            self.calls = []
+
+        def similarity_search(self, kb_id, q, k):
+            self.calls.append(q)
+            return [
+                type(
+                    "CR",
+                    (),
+                    {
+                        "id": f"{q}_{i}",
+                        "content": q,
+                        "distance": 0.3,
+                        "metadata": {},
+                        "bm25_score": None,
+                    },
+                )()
+                for i in range(2)
+            ]
+
+    store = FakeStore()
+    node = make_retrieve_node(store, None)
+    state = AgentState(
+        query="毛利率呢",
+        rewritten_queries=["腾讯2024年毛利率是多少", "毛利率呢"],
+        _resolved_kb_ids=["kb-1"],
+    )
+    out = asyncio.run(node(state))
+    assert store.calls == ["腾讯2024年毛利率是多少", "毛利率呢"]  # 并行遍历
+    assert len(out["retrieval_results"]) == 4

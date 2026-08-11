@@ -19,6 +19,7 @@ from src.agents.graph.state import (
 from src.config import LLM_MODEL, TOP_K_RETRIEVAL
 from src.config.prompts import ABSTENTION_MARKERS, ABSTENTION_TEXT
 from src.infra.db.vector_store.types import ChunkResult
+from src.infra.search.bm25_index import rrf_fusion_multi
 from src.infra.search.query_router import (
     KbEntityAggregate,
     QueryRouter,
@@ -185,6 +186,12 @@ def make_retrieve_node(vector_store, bm25) -> Callable:
     """创建检索节点工厂函数。"""
 
     async def retrieve_node(state: AgentState) -> dict:
+        """检索节点：单 KB 对改写后多查询并行逐条检索，多查询用 RRF 融合。
+
+        单 KB 时取 state.rewritten_queries（缺省为 [state.query]），多于一条时
+        用 asyncio.gather 并行逐条 dense+BM25 检索，过滤空结果后经
+        rrf_fusion_multi 融合；仅一条直接返回。多 KB 路由保持 similarity_search_multi。
+        """
         q = state.rewritten_query or state.query
         resolved_ids = state._resolved_kb_ids or state.kb_id
         # resolved_ids 是非空 list（单/多库）或空值；空值时跳过搜索直接返回空结果
@@ -201,7 +208,15 @@ def make_retrieve_node(vector_store, bm25) -> Callable:
         elif isinstance(resolved_ids, list) and len(resolved_ids) == 1:
             # 单元素 list 需取出字符串，search() 的 kb_id 参数只接受 str | None
             kb_id = resolved_ids[0]
-            results = await search(q, kb_id, vector_store, bm25)
+            queries = state.rewritten_queries or [state.query]
+            if len(queries) > 1:
+                # 并行逐条检索，过滤空结果后 N 路 RRF 融合
+                groups = await asyncio.gather(
+                    *[search(query, kb_id, vector_store, bm25) for query in queries]
+                )
+                results = rrf_fusion_multi([group for group in groups if group])
+            else:
+                results = await search(queries[0], kb_id, vector_store, bm25)
         # 无 else：resolved_ids 为空（未解析出知识库）时不发起搜索，保持空结果
 
         logger.info("retrieve_node done: results={}", len(results))
