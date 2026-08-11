@@ -25,7 +25,7 @@ import sys
 
 from loguru import logger
 
-from src.config import CLASSIFIER_TEMPERATURE, RERANK_MIN_SCORE, TOP_K_RETRIEVAL
+from src.config import CLASSIFIER_TEMPERATURE, TOP_K_RETRIEVAL
 from src.config.prompts import CLASSIFIER_SYSTEM_PROMPT, CLASSIFIER_USER_TEMPLATE
 from src.core.logging import setup_logging
 from src.infra.db.engine import session_factory
@@ -510,7 +510,7 @@ async def main() -> None:
 
     total_tokens = {"A": [0, 0], "B": [0, 0], "B_rewrite": [0, 0]}
     print(f"KB: {args.kb_name} ({kb_id})  kb_entities={kb_entities[:80]}")
-    print(f"RERANK_MIN_SCORE={RERANK_MIN_SCORE} (低于此分数视为不达标)")
+    # 注：rerank 已去阈值改为相对 top-N，分数仅供参考，各样本 top5 见下方输出
 
     for s in SAMPLES:
         entities = entity_extractor.extract(s.query)

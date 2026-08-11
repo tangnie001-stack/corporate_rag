@@ -209,8 +209,6 @@ def _llm_rewrite(
         (list[str] 改写查询列表, prompt_tokens, completion_tokens)；
         LLM 失败时回退规则改写结果（expand/condense/decompose），仍无效回退原 query
     """
-    from langchain_core.messages import HumanMessage
-
     from src.config import CLASSIFIER_TEMPERATURE
     from src.config.prompts import REWRITE_SYSTEM_PROMPT, REWRITE_USER_TEMPLATE
     from src.rag.retrieval import rewrite_query

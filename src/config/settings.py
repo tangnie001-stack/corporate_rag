@@ -142,8 +142,6 @@ CHUNK_OVERLAP: int = int(os.getenv("CHUNK_OVERLAP", "64"))
 TOP_K_RETRIEVAL: int = int(os.getenv("TOP_K_RETRIEVAL", "50"))
 # 重排序后保留的 top-N 数量（最终送入 LLM 的上下文数量）
 TOP_K_RERANK: int = int(os.getenv("TOP_K_RERANK", "5"))
-# 重排序后保留的最低分数阈值：低于此分数的 context 不送入 LLM（rerank 失败 fallback 不应用）
-RERANK_MIN_SCORE: float = float(os.getenv("RERANK_MIN_SCORE", "0.3"))
 # 扫描件检测阈值：单页可提取文字少于 200 字符视为"扫描页"
 MIN_TEXT_CHARS: int = int(os.getenv("MIN_TEXT_CHARS", "200"))
 # 页眉页脚边距过滤（fitz 通道按 y 坐标剔除重复页眉/页脚）

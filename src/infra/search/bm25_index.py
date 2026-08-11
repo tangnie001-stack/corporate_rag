@@ -124,7 +124,7 @@ def rrf_fusion_multi(
 ) -> list[ChunkResult]:
     """任意路 RRF 融合多组检索结果。
 
-    每路按排名贡献 1/(k+rank)，跨路累加后按得分降序取 top_n。
+    每路按排名贡献 1/(k+rank+1)，跨路累加后按得分降序取 top_n。
 
     Args:
         results_groups: 多组检索结果（每组一个查询的 dense 或 bm25 结果）
