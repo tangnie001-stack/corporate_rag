@@ -107,10 +107,53 @@ RAGAS 评估盲区：测试集问题由 chunk 生成、与文档字面匹配（"
 4. 部署容器，用难样本集（s1-s6 + session 真实轨迹）回归：s2/s5 由 abstain 转命中、complex 子查询命中、session 场景 1 轮往返问完。
 5. 回滚：各步独立 commit 可 revert；不涉及数据迁移。
 
+## 验证结果（2026-08-11 容器部署实测）
+
+### 难样本验收（`src/cli/check_abstain.py`，KB test123，真实 LLM/rerank/检索）
+
+| 样本 | 期望 | 结果 | 回答 |
+|---|---|---|---|
+| s2 `毛利率呢`（历史腾讯2024营收） | hit | PASS | "腾讯2024年毛利率 53%[1]" |
+| s5 `他们的营收呢`（历史介绍一下腾讯） | hit | PASS | "腾讯营收：2024年度总收入 6,603亿元" |
+| s6 `2024年呢`（历史2023净利） | hit | PASS | "2024年净利润 196,467百万元" |
+| s3 对比腾讯/东软利润 | hit | PASS | 腾讯利润数据（年度盈利 2,272亿） |
+| s1 `毛利率呢`（历史2025Q1，数据缺失） | abstain | PASS | "未在文档中找到…文档仅包含腾讯2024"（未拿腾讯冒充东软） |
+| 批量澄清 `本季度营收情况如何？` | 多维度 | PASS | classify 一次列出 2 个缺失维度 |
+
+**5/5 达标**：多轮追问从 abstain 转命中、complex 对比命中、数据缺失诚实拒绝、缺参一次问完。
+
+### RAGAS 回归对比（基线 fix-pdf-table 后 rerun vs 改造后）
+
+| 指标 | 基线 | 改造后 | 说明 |
+|---|---|---|---|
+| context_recall | 0.9167 | **1.0000** | ↑ 双路径检索召回更全 |
+| context_precision | 1.0000 | 1.0000 | = 无回归 |
+| faithfulness | 1.0000 | 0.9750 | ↓0.025，部分子问题诚实拒答 |
+| answer_relevancy | 0.8802 | 0.7779 | ↓0.10，诚实拒答段副作用 + 指标噪声（基线 n=3 统计意义弱） |
+
+### playwright 前端验证
+
+- **发现部署问题**：nginx 容器跑旧版 chat.html（部署只 rebuild app，chat.html 由 nginx 服务）→ 需 rebuild nginx 同步前端
+- 后端确认：classify 一次输出 2 个缺失（company + year/period），SSE questions 数组正确
+- 前端实测：多问题表单渲染（2 sections + chips + 提交按钮）✅、chip 点击填入对应维度 ✅、组合提交 "东软集团股份有限公司 2024年" ✅
+
+### 实现期发现并修复的真实 bug
+
+- **并行检索触发 ChromaDB 线程安全崩溃**（`RustBindingsAPI`）：Task 11 的 `asyncio.gather` 并行检索在真实环境崩溃（共享 `PersistentClient` 非线程安全）。修复：`ChromaClient` 加 `threading.RLock` 串行化所有 chromadb 访问；`similarity_search_multi` 改回串行；新增并发安全测试。
+
+### 部署注意点
+
+本次改动涉及 app + nginx 两个镜像，部署需同时 rebuild：
+
+```bash
+docker compose build app nginx && docker compose up -d --force-recreate app nginx
+```
+
 ## Open Questions
 
 - **LLM abstain 判定可靠性（基线实验已通过，幻觉率 0/3）**：qwen3.7-max 实测 4 场景——正常回答 1/1 正确（"53%[1]"），应 abstain 3/3 全部正确（无关公司/缺指标/完全不相关），且 S3 主动说明"不自行计算文档中未直接给出的比率"。去阈值方案可行，张冠李戴风险在 LLM 判定层被拦住。实现时按 tasks 6.5 用更大难样本集正式跑。
-- **rerank API 输入上限**：`DashScopeRerank.rerank` 全量直传候选池无分批，双路径 + complex 合并候选池可能 100-250 条；需确认 DashScope TextReRank 单次 documents 上限，超限需 RRF 合并后截断（如 top100）或分批。
-- **complex context 数量上限**：逐子查询打分合并后 context 可能超过 `TOP_K_RERANK=5`，需定义 complex 的 context 上限（如 8-10）并评估 generate token 成本。
+- **rerank API 输入上限（已落地）**：`rrf_fusion_multi` 合并后 `top_n=50` 截断，候选池不会超过 50 条进 rerank，无超限风险。
+- **complex context 数量上限（已落地）**：rerank_node complex 分支合并后按 `ctx.score` 降序并截断到 `TOP_K_RERANK`（final-fix 实现）。
 - **相对时间表达**："本季度/今年/去年"无解析机制（classify 不标 missing、rewrite 不解析），是既有问题；批量澄清期间维度可能兜不住"本季度"类输入，后续需相对时间解析。
 - **多期间/多公司 KB 下双路径 + 原 query 打分的错误期间风险**：当前 KB 每文档单报告期无冲突；G2 实验证明 LLM 能识别"东软问题 + 腾讯 context"并 abstain，张冠李戴风险已在 LLM 判定层缓解；多期间时仍建议 metadata 约束过滤。
+- **双路径检索升级为多变体**：未来用户问法口语化多样（措辞差异导致检索 miss）时，可在约束补全基础上叠加多变体生成（MultiQueryRetriever/RAG-Fusion），双路径被泛化为 N+1 路多路径。已记录需求池 F-09。
