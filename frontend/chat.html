@@ -299,50 +299,6 @@
   }
   .clarification-send svg { width: 18px; height: 18px; }
 
-  /* ── Batch Clarification (multi-section) ── */
-  .clarification-section {
-    margin-bottom: 14px;
-    padding-bottom: 14px;
-    border-bottom: 1px solid var(--border);
-  }
-  .clarification-section:last-of-type {
-    margin-bottom: 12px;
-    padding-bottom: 0;
-    border-bottom: none;
-  }
-  .clarification-section .clarification-input {
-    width: 100%;
-    box-sizing: border-box;
-    padding: 8px 14px;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    font-size: 14px;
-    outline: none;
-    transition: box-shadow 200ms, border-color 200ms;
-    font-family: var(--font-body);
-    color: var(--text);
-    background: var(--surface);
-  }
-  .clarification-section .clarification-input::placeholder { color: var(--text-muted); }
-  .clarification-section .clarification-input:focus {
-    box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
-    border-color: var(--primary);
-  }
-  .clarification-submit {
-    width: 100%;
-    padding: 10px 0;
-    border: none;
-    border-radius: 10px;
-    background: var(--accent);
-    color: #fff;
-    font-size: 14px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: background var(--transition);
-    font-family: var(--font-body);
-  }
-  .clarification-submit:hover { background: var(--accent-hover); }
-
   /* ── Highlighted Answer ── */
   .answer-highlight {
     background: #FEF3C7;
@@ -731,19 +687,6 @@ function renderClarification(clarEvent) {
   const card = document.createElement('div');
   card.className = 'clarification-card';
 
-  const questions = clarEvent.questions;
-  if (Array.isArray(questions) && questions.length > 1) {
-    renderBatchClarification(card, questions);
-  } else {
-    renderSingleClarification(card, clarEvent);
-  }
-
-  chatContainer.appendChild(card);
-  scrollToBottom();
-}
-
-// 单问题澄清：chip 点击即提交，保持旧行为（兼容后端不发 questions 的场景）
-function renderSingleClarification(card, clarEvent) {
   const chipsHtml = (clarEvent.suggestions || []).map(s => {
     const isOther = s === '其他';
     return `<button class="chip${isOther ? ' other' : ''}" data-value="${escapeHtml(s)}">${escapeHtml(s)}</button>`;
@@ -790,50 +733,9 @@ function renderSingleClarification(card, clarEvent) {
     }
   });
 
+  chatContainer.appendChild(card);
+  scrollToBottom();
   setTimeout(() => clarInput?.focus(), 100);
-}
-
-// 批量澄清：每个缺失维度一个 section，chip 点击填入该维度输入框，底部"提交"组合所有已填维度
-function renderBatchClarification(card, questions) {
-  const sectionsHtml = questions.map((q, qi) => {
-    const chips = (q.suggestions || []).map(s => {
-      const isOther = s === '其他';
-      return `<button class="chip${isOther ? ' other' : ''}" data-qi="${qi}" data-value="${escapeHtml(s)}">${escapeHtml(s)}</button>`;
-    }).join('');
-    return `<div class="clarification-section" data-qi="${qi}">
-      <div class="clarification-question">${escapeHtml(q.question)}</div>
-      <div class="suggestion-chips">${chips}</div>
-      <input type="text" class="clarification-input" placeholder="输入补充信息…" data-qi="${qi}">
-    </div>`;
-  }).join('');
-
-  card.innerHTML = `
-    <div class="clarification-label">系统 · 缺少信息</div>
-    <div class="clarification-inner">
-      ${sectionsHtml}
-      <button class="clarification-submit">提交</button>
-    </div>`;
-
-  // chip 点击：选择该维度（"其他"聚焦输入框手动输入）
-  card.querySelectorAll('.chip').forEach(chip => chip.addEventListener('click', () => {
-    const qi = chip.dataset.qi;
-    const v = chip.dataset.value;
-    if (v === '其他') {
-      card.querySelector(`.clarification-input[data-qi="${qi}"]`)?.focus();
-      return;
-    }
-    card.querySelector(`.clarification-input[data-qi="${qi}"]`).value = v;
-  }));
-
-  // 提交：收集所有已填维度，空格 join 后发起一次查询；至少一个已填才提交
-  card.querySelector('.clarification-submit').addEventListener('click', () => {
-    const answers = [];
-    card.querySelectorAll('.clarification-section').forEach(sec => {
-      const v = sec.querySelector('.clarification-input').value.trim();
-      if (v) answers.push(v);
-    });
-    if (answers.length) submitClarification(answers.join(' '));
-  });
 }
 
 function submitClarification(value) {
