@@ -31,7 +31,7 @@
 - Test: `tests/agents/graph/test_state.py`（新建）
 
 **Interfaces:**
-- Produces: `AgentState.messages: Annotated[list[BaseMessage], AddMessages]`、`AgentState.tool_contexts: list[RAGContext]`、`AgentState._agent_iterations: int`、`AgentState._max_agent_iterations: int`、`AgentState._ask_count: int`（仅日志用途）、删除 classify/rewrite/retrieve/rerank 相关字段
+- Produces: `AgentState.messages: Annotated[list[BaseMessage], add_messages]`、`AgentState.tool_contexts: list[RAGContext]`、`AgentState._agent_iterations: int`、`AgentState._max_agent_iterations: int`、`AgentState._ask_count: int`（仅日志用途）、删除 classify/rewrite/retrieve/rerank 相关字段
 - Produces: `LangGraphNode` 仅保留 `KbRouter`/`Format`；`SSE_STATUS` 映射删除
 - Consumes: `MAX_AGENT_ITERATIONS`（来自 `src/config/const.py`，Task 0 需先添加）
 
@@ -57,7 +57,7 @@ from src.agents.graph.state import AgentState, LangGraphNode
 
 def test_state_has_messages_with_addmessages_reducer():
     assert "messages" in {f.name for f in fields(AgentState)}
-    # AddMessages 注解使 messages 支持追加（LangGraph 验证在 graph 测试中）
+    # add_messages reducer 使 messages 支持追加（LangGraph 验证在 graph 测试中）
 
 def test_state_has_agent_fields():
     assert "tool_contexts" in {f.name for f in fields(AgentState)}
@@ -87,7 +87,7 @@ Expected: FAIL（messages/tool_contexts 字段不存在）
 ```python
 from typing import Annotated
 from langchain_core.messages import BaseMessage
-from langgraph.graph.message import AddMessages
+from langgraph.graph.message import add_messages
 from src.config.const import MAX_AGENT_ITERATIONS
 
 @dataclass
@@ -100,7 +100,7 @@ class AgentState:
     query: str = ""  # 用户原始查询
     trace_id: str = field(default_factory=lambda: current_trace_id.get() or "unknown")  # 链路追踪 ID
     # ── agent 循环 ──
-    messages: Annotated[list[BaseMessage], AddMessages] = field(default_factory=list)  # 模型可见消息（追加语义）
+    messages: Annotated[list[BaseMessage], add_messages] = field(default_factory=list)  # 模型可见消息（追加语义）
     tool_contexts: list[RAGContext] = field(default_factory=list)  # retrieve_kb 累积的检索上下文（引用溯源）
     _agent_iterations: int = 0  # 循环迭代计数
     _max_agent_iterations: int = MAX_AGENT_ITERATIONS  # 迭代上限

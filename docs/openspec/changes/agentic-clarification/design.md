@@ -140,7 +140,7 @@ abstention 是模型决策（token 流），前端无法识别。后端在 agent
 
 ### D17. AgentState 与 LangGraph messages 融合
 
-`AgentState` 新增 `messages: Annotated[list[BaseMessage], AddMessages]` 字段（默认 []），循环内 model 输出 + ToolMessage 追加。初始注入：agent 节点第一轮前把 system prompt + `_history`（ChatMessage → LangChain 消息，复用 `build_prompt` 转换逻辑）+ 当前 query 组装为初始 messages。`_history` 保留为"初始注入数据源"（classify/rewrite/generate 删除后仅此消费方）。ToolNode 用默认 `messages_key="messages"`。
+`AgentState` 新增 `messages: Annotated[list[BaseMessage], add_messages]` 字段（默认 []），循环内 model 输出 + ToolMessage 追加。初始注入：agent 节点第一轮前把 system prompt + `_history`（ChatMessage → LangChain 消息，复用 `build_prompt` 转换逻辑）+ 当前 query 组装为初始 messages。`_history` 保留为"初始注入数据源"（classify/rewrite/generate 删除后仅此消费方）。ToolNode 用默认 `messages_key="messages"`。
 
 ### D18. 状态事件按事件类型发
 
