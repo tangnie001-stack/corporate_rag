@@ -13,6 +13,19 @@
 ## 技术栈
 Python 3.11+ / FastAPI / ChromaDB / LangChain / DashScope / MySQL 8.0 / Redis 7 / Langfuse / Nginx
 
+## 文档组织（一事一档）
+每个事实只有一个归属文档，别处一律链接，不复制内容；新增内容先找归属文档，找不到再建新档。
+
+| 文档 | 归属内容 | 何时查阅 |
+|------|---------|---------|
+| docs/agents/rules.md | 架构规约：异常处理 / 响应包装 / 日志约定 / 排查规范 / 代码注释标准 | 写代码前 |
+| docs/agents/api_contract.md | 接口契约：参数语义、返回值格式、历史踩坑 | 改 API / 公共方法签名前；前端页面对接接口时 |
+| docs/agents/data-flow.md | 数据流链路 | 排查问题、理解系统流程 |
+| docs/agents/codegraph-guide.md | 依赖图查询（比逐文件 grep 高效） | 查询代码关系 |
+| docs/agents/chunking-issues.md | 分块问题排查与修复记录 | 遇到分块问题优先查阅 |
+| docs/agents/ui-design-flow.md | UI 设计与前端验证 | 改 UI / 新增组件，改完用 playwright-cli 验证 |
+| docs/agents/requirements_pool.md | 需求池 | 需求相关 |
+
 ## 代码目录结构（修改代码前必读）
 
 ```
@@ -43,12 +56,6 @@ tests/            # 与 src/ 模块一一对应
 - 单文件超过 400 行 → 必须拆分为模块包
 - 单函数超过 80 行 → 必须拆分子函数
 
-## 数据流
-- 链路详解参考 docs/agents/data-flow.md（排查问题/理解系统流程时查阅）。
-
-## 依赖图
-- 查询代码关系时参考 docs/agents/codegraph-guide.md（比逐文件 grep 高效）。
-
 ## 常用命令
 ```bash
 uvicorn src.main:app --reload          # 启动（热重载）
@@ -66,20 +73,17 @@ docker compose build --no-cache app    # 改依赖后重建
 
 ## 验证
 改完代码后自检以下清单：
-1. **质量门禁**：`pytest tests/ -v` 全部通过、`ruff check .` 无错误、`pyright src/` 新增/修改的代码不引入新 error（存量错误多为第三方库误报，以不新增为准；python 解释器由 `[tool.pyright]` 的 `venvPath`/`venv` 指定，不需要 `--pythonpath`）、无遗留 `print()`/TODO/调试代码
+1. **质量门禁**：`pytest tests/ -v` 全部通过、`ruff check .` 无错误、`pyright src/` 不引入新 error（存量多为第三方库误报，以不新增为准）、无遗留 `print()`/TODO/调试代码
 2. **契约同步**：改了 API 响应结构 / 请求体 / 公共方法签名时，同步搜索并更新受影响测试的断言（`tests/` 中硬编码的结构如 `["data"]["x"]` 常因响应包装等全局变更而失联）
 3. **结构检查**：新增/修改的代码位置正确吗？api/ 是否只做参数校验和路由转发？有无违反层间调用规则的 import（如 api/ import infra/）？
-
-## 设计流程
-- 改 UI 或新增组件时参考 docs/agents/ui-design-flow.md，改前端后用 playwright-cli 验证交互。
 
 ## 规则
 - 架构规约（异常处理 / 响应包装 / 日志约定 / 排查规范）详见 docs/agents/rules.md
 - API 路由 handler 必须标注请求体和返回类型（请求用 Pydantic BaseModel，返回也用 Pydantic BaseModel 描述 data 结构，SSE 标注 StreamingResponse）
 - API Key 和 Token 通过 `.env` 加载，日志中脱敏；连接串不记录到日志
 - 测试 mock 外部依赖，不发起真实网络调用
-- 需求池文档在docs/requirements_pool.md
-- **接口契约**：API 参数、返回值、历史踩坑记录详见 docs/api_contract.md，修改公共方法签名**或响应结构**时，同步更新契约文档与受影响测试的断言
+- 需求池文档在 docs/agents/requirements_pool.md
+- **接口契约**：API 参数、返回值、历史踩坑记录详见 docs/agents/api_contract.md，修改公共方法签名**或响应结构**时，同步更新契约文档与受影响测试的断言
 - **代码风格**：不用三元表达式（`a if cond else b`），写完整的 if/else 结构，保持可读性
 - **显式类型检查**：类型不确定的值不用 `getattr(x, "attr", default)` 隐式兜底，用 `x.attr if x is not None else default` 或 `isinstance` 显式判断
 - **硬编码集中管理**：新增的常量/文案/阈值不得散落在业务代码中，统一放入 `src/config/`，按用途分工：
@@ -94,9 +98,6 @@ docker compose build --no-cache app    # 改依赖后重建
 - 所有函数必须写 docstring，详细标准见 docs/agents/rules.md 的"代码注释标准"章节。
 - 所有 dataclass 的每个字段必须加行内注释，说明来源、范围和用途。
 - 结构化数据优先使用 dataclass 而非 dict，避免 `.get("key")` 散落各处。
-
-## 经验总结
-- 分块问题排查和修复记录详见 docs/agents/chunking-issues.md，遇到分块相关问题时优先查阅。
 
 ## 参考项目
 以下项目在对应场景下优先参考其实现模式：
