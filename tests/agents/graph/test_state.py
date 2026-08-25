@@ -1,3 +1,8 @@
+from dataclasses import fields
+from typing import Annotated, get_args, get_origin
+
+from langgraph.graph.message import add_messages
+
 from src.agents.graph.state import AgentState
 from src.rag.context import RAGContext
 
@@ -67,3 +72,29 @@ def test_agent_state_skip_retrieval_default_false():
 
     state = AgentState.make_initial_state("s1", "kb1", "营收多少", [])
     assert state.skip_retrieval is False
+
+
+def test_state_has_messages_with_addmessages_reducer():
+    """messages 字段应存在，且带追加语义 reducer（add_messages）注解。"""
+    msg_field = next(f for f in fields(AgentState) if f.name == "messages")
+    assert get_origin(msg_field.type) is Annotated
+    assert add_messages in get_args(msg_field.type)
+
+
+def test_state_has_agent_fields():
+    """新增的 agent 循环护栏字段应存在。"""
+    names = {f.name for f in fields(AgentState)}
+    assert "tool_contexts" in names
+    assert "_agent_iterations" in names
+    assert "_max_agent_iterations" in names
+    assert "_ask_count" in names
+
+
+def test_old_fields_still_present():
+    """旧字段应仍保留（本次改造只加不删）。"""
+    names = {f.name for f in fields(AgentState)}
+    assert "missing_entities" in names
+    assert "intent" in names
+    assert "rewritten_query" in names
+    assert "retrieval_results" in names
+    assert "contexts" in names

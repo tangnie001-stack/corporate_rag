@@ -1,6 +1,10 @@
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Annotated, Literal
 
+from langchain_core.messages import BaseMessage
+from langgraph.graph.message import add_messages
+
+from src.config.const import MAX_AGENT_ITERATIONS
 from src.infra.db.vector_store.types import ChunkResult
 from src.infra.llm.chat_message import ChatMessage
 from src.infra.llm.trace_context import current_trace_id
@@ -26,6 +30,18 @@ class AgentState:
     trace_id: str = field(
         default_factory=lambda: current_trace_id.get() or "unknown"
     )  # 全链路追踪 ID（自动从 contextvar 读取）
+    # ── agent 循环 ──
+    messages: Annotated[list[BaseMessage], add_messages] = field(
+        default_factory=list
+    )  # 模型可见消息（来源：agent 循环节点追加；范围：整轮执行；用途：LLM 上下文，add_messages 提供追加语义）
+    tool_contexts: list[RAGContext] = field(
+        default_factory=list
+    )  # retrieve_kb 累积的检索上下文（来源：检索节点写入；范围：整轮执行；用途：引用溯源）
+    _agent_iterations: int = (
+        0  # 循环迭代计数（来源：agent 节点自增；范围：单轮执行；用途：调试与护栏判断）
+    )
+    _max_agent_iterations: int = MAX_AGENT_ITERATIONS  # 迭代上限（来源：src/config/const.py；用途：超限强制收尾）
+    _ask_count: int = 0  # 本 turn ask_user 调用次数（来源：ask_user 节点自增；范围：单 turn；用途：日志/兜底，实际检查走 contextvar）
     # ── 中间态 ──
     intent: RAGQueryIntent = field(default_factory=RAGQueryIntent)  # classify_node 输出
     rewritten_query: str = ""  # rewrite_node 改写后的主查询（列表首个）

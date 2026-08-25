@@ -45,3 +45,13 @@ ENTITY_LABELS: dict[str, str] = {
 ENTITY_OPTIONAL_TYPES: tuple[str, ...] = ("person", "currency", "report_type")
 # 实体抽取完整三层流水线的文件类型（其余如 txt 走文件名+LLM）
 ENTITY_FULL_PIPELINE_TYPES: tuple[str, ...] = ("pdf", "docx")
+
+
+# ── agent 循环护栏常量 ──
+# 来源：agentic 改造需求（2026-08-26 phase1）；用途：agent 循环的迭代/追问/历史注入/并发控制
+MAX_AGENT_ITERATIONS = 5  # agent 循环最大迭代数，超限强制收尾
+MAX_ASK_PER_TURN = 2  # 单 turn 内 ask_user 最大调用次数
+ASK_USER_TIMEOUT = 120  # ask_user 等待用户回答超时秒数
+HISTORY_MAX_TURNS = 10  # 历史注入保留最近轮数
+HISTORY_TOKEN_RATIO = 0.3  # 历史 token 占 context 窗口上限比例
+SESSION_LOCK_TTL = 30  # per-session 并发锁 TTL 秒
