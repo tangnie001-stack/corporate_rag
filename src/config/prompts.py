@@ -160,6 +160,24 @@ ABSTENTION_MARKERS: tuple[str, ...] = ("未在文档中找到",)
 ABSTENTION_TEXT: str = "未在文档中找到相关数据。请尝试更换问题表述或补充更多文档。"
 
 
+# ====== ask_user 澄清工具文案 ======
+
+# ask_user 上下文不可用文案：current_request_ctx 未设置时直接返回给 LLM
+ASK_USER_CTX_UNAVAILABLE: str = "Error: 请求上下文不可用"
+
+# ask_user 达本回合询问上限文案：返回给 LLM 促其基于现有信息作答
+ASK_USER_LIMIT_REACHED: str = "Error: 已达本回合询问上限，请基于现有信息作答"
+
+# ask_user 等待期间答案 Future 被取消文案：POST 端取消挂起澄清时返回
+ASK_USER_ANSWER_CANCELLED: str = "Error: 等待用户回答被取消"
+
+# ask_user 等待期间请求被取消文案：abort 信号置位（客户端断开/取消）时返回
+ASK_USER_REQUEST_CANCELLED: str = "Error: 请求已取消"
+
+# ask_user 等待用户回答超时文案：超过 ASK_USER_TIMEOUT（const.py 秒数）未获答案时返回
+ASK_USER_TIMEOUT_TEXT: str = "Error: 等待用户回答超时"
+
+
 # ====== 实体抽取 ======
 
 # 实体抽取系统提示词 — 引导 LLM 校验规则候选并补全盲区。

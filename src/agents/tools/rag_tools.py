@@ -17,6 +17,13 @@ from pydantic import BaseModel, Field
 from src.agents.graph.state import AgentState
 from src.config import TOP_K_RERANK
 from src.config.const import ASK_USER_TIMEOUT, MAX_ASK_PER_TURN
+from src.config.prompts import (
+    ASK_USER_ANSWER_CANCELLED,
+    ASK_USER_CTX_UNAVAILABLE,
+    ASK_USER_LIMIT_REACHED,
+    ASK_USER_REQUEST_CANCELLED,
+    ASK_USER_TIMEOUT_TEXT,
+)
 from src.infra.db.vector_store import VectorStore
 from src.infra.db.vector_store.types import ChunkResult
 from src.infra.llm.request_context import current_request_ctx, pending_asks
@@ -157,9 +164,9 @@ async def ask_user(
     """
     ctx = current_request_ctx.get()
     if ctx is None:
-        return "Error: 请求上下文不可用"
+        return ASK_USER_CTX_UNAVAILABLE
     if ctx.ask_count >= MAX_ASK_PER_TURN:  # 同步检查+自增，无 await
-        return "Error: 已达本回合询问上限，请基于现有信息作答"
+        return ASK_USER_LIMIT_REACHED
     ctx.ask_count += 1
     enriched = []
     for q in questions:
@@ -172,18 +179,20 @@ async def ask_user(
                 "multi_select": q.multi_select,
             }
         )
-    # 推送问题（经 channel → SSE 事件），随后登记挂起 Future 并等待答案
-    await ctx.clarify_channel.put({"type": "ask_user", "questions": enriched})
+    # 先登记挂起 Future（进程级注册表）再推送问题事件，避免 POST /clarify-answer 在登记前到达
     loop = asyncio.get_running_loop()
     fut = loop.create_future()
     pending_asks[ctx.session_id] = fut
     try:
+        # 推送问题（经 channel → SSE 事件），随后等待答案
+        await ctx.clarify_channel.put({"type": "ask_user", "questions": enriched})
         answers = await _wait_with_abort_and_timeout(
             fut, ctx.abort_signal, ASK_USER_TIMEOUT
         )
         return str(answers)
     finally:
         pending_asks.pop(ctx.session_id, None)
+        fut.cancel()
 
 
 async def _load_dimension_options(
@@ -235,10 +244,10 @@ async def _wait_with_abort_and_timeout(
         )
         if fut in done:
             if fut.cancelled():
-                return "Error: 等待用户回答被取消"
+                return ASK_USER_ANSWER_CANCELLED
             return fut.result()
         if abort_task in done:
-            return "Error: 请求已取消"
-        return "Error: 等待用户回答超时"
+            return ASK_USER_REQUEST_CANCELLED
+        return ASK_USER_TIMEOUT_TEXT
     finally:
         abort_task.cancel()
