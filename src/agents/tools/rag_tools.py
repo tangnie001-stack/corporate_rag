@@ -48,7 +48,7 @@ def make_rag_tools(
         vector_store: 向量存储实例（闭包注入，search 使用）
         bm25: BM25 检索引擎实例（闭包注入，混合检索时使用）
         reranker: Reranker 模型实例（闭包注入，rerank_results 使用）
-        prompt_manager: 提示词管理器（预留，ask_user 工具使用，本任务未使用）
+        prompt_manager: 提示词管理器（闭包注入，当前工具未直接使用，保留签名）
 
     Returns:
         工具列表，当前仅含 retrieve_kb
@@ -104,7 +104,7 @@ def make_rag_tools(
         ]
         return "\n\n".join(blocks)
 
-    return [retrieve_kb]
+    return [retrieve_kb, ask_user]
 
 
 def _merge_search_results(results_list: list[list[ChunkResult]]) -> list[ChunkResult]:
