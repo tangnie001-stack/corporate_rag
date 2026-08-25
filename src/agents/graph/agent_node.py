@@ -37,7 +37,14 @@ def make_agent_model_node(llm, tools, prompt_manager) -> Callable:
         else:
             messages = _initial_messages(state)
         result = await model.ainvoke(messages)
-        return {"messages": [result], "_agent_iterations": state._agent_iterations + 1}
+        if state.messages:
+            update_messages = [result]
+        else:
+            update_messages = [*messages, result]
+        return {
+            "messages": update_messages,
+            "_agent_iterations": state._agent_iterations + 1,
+        }
 
     return agent_model
 

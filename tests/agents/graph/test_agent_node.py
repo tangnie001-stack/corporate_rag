@@ -120,7 +120,23 @@ def test_route_agent_non_ai_message_finalizes():
 
 @pytest.mark.asyncio
 async def test_agent_model_increments_iterations():
-    """model 节点应自增迭代计数并追加模型输出消息。"""
+    """model 节点后续轮次应自增迭代计数并仅追加模型输出消息。"""
+    fake_response = AIMessage(content="模型回答")
+    llm = MockChatModel(fake_response)
+    node = make_agent_model_node(llm, [], StubPromptManager())
+
+    state = AgentState.make_initial_state("s1", "kb1", "q", [])
+    state.messages = [HumanMessage(content="q")]  # 已有消息，模拟后续轮次
+    out = await node(state)
+
+    assert out["_agent_iterations"] == state._agent_iterations + 1
+    assert len(out["messages"]) == 1
+    assert out["messages"][0] == fake_response
+
+
+@pytest.mark.asyncio
+async def test_agent_model_first_round_persists_initial_messages():
+    """首轮 messages 为空时，返回应持久化初始消息（system + 原始 query）及模型输出。"""
     fake_response = AIMessage(content="模型回答")
     llm = MockChatModel(fake_response)
     node = make_agent_model_node(llm, [], StubPromptManager())
@@ -128,9 +144,12 @@ async def test_agent_model_increments_iterations():
     state = AgentState.make_initial_state("s1", "kb1", "q", [])
     out = await node(state)
 
-    assert out["_agent_iterations"] == state._agent_iterations + 1
-    assert len(out["messages"]) == 1
-    assert out["messages"][0] == fake_response
+    msgs = out["messages"]
+    assert len(msgs) == 3  # system + user(query) + 模型 AIMessage
+    assert msgs[0].type == "system"
+    assert isinstance(msgs[1], HumanMessage)
+    assert "q" in msgs[1].content
+    assert msgs[2] == fake_response
 
 
 @pytest.mark.asyncio
