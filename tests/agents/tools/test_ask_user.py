@@ -1,0 +1,115 @@
+"""测试 ask_user 工具 — 挂起 Future 进程级注册表 + contextvar 计数 + KB 注入 options。
+
+KB 聚合通过 monkeypatch mock（固定返回公司/期间候选），不发真实网络/DB 调用。
+async 工具不支持 sync invoke（NotImplementedError），测试统一用 ainvoke。
+"""
+
+import asyncio
+
+import pytest
+
+from src.agents.graph.state import AgentState
+from src.agents.tools import rag_tools
+from src.agents.tools.rag_tools import ask_user
+from src.config.const import MAX_ASK_PER_TURN
+from src.infra.llm.request_context import (
+    RequestContext,
+    current_request_ctx,
+    pending_asks,
+)
+from src.infra.search.query_router import KbEntityAggregate
+
+
+@pytest.fixture(autouse=True)
+def mock_kb_aggregate(monkeypatch):
+    """mock aggregate_kb_entities：固定返回公司/期间候选，避免真实 DB 查询。"""
+
+    async def fake_aggregate(kb_ids):
+        return KbEntityAggregate(
+            text="公司: 腾讯; 报告期: 2024年",
+            companies=["腾讯"],
+            periods=["2024年"],
+            codes=[],
+        )
+
+    monkeypatch.setattr(rag_tools, "aggregate_kb_entities", fake_aggregate)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def clean_pending_asks():
+    """每个测试前后清空进程级挂起注册表，避免跨测试污染。"""
+    pending_asks.clear()
+    yield
+    pending_asks.clear()
+
+
+def _ask_args(session_id: str = "s1", kb_id: str = "kb1") -> dict:
+    """构造 ask_user.ainvoke 的入参（单条 period 问题）。"""
+    return {
+        "questions": [
+            {
+                "id": "q1",
+                "question": "哪一年？",
+                "dimension": "period",
+                "multi_select": False,
+            }
+        ],
+        "state": AgentState.make_initial_state(session_id, kb_id, "q", []),
+    }
+
+
+@pytest.mark.asyncio
+async def test_ask_user_blocks_and_resolves():
+    """未回答前工具阻塞；POST 端经 pending_asks 解析 Future 后返回答案，并清理注册表。"""
+    ctx = RequestContext(session_id="s1")
+    token = current_request_ctx.set(ctx)
+    try:
+        task = asyncio.create_task(ask_user.ainvoke(_ask_args()))
+        await asyncio.sleep(0.05)
+        # 未回答前工具应阻塞（task 未完成）
+        assert not task.done()
+        # 已推送澄清事件，且按 dimension 从 KB 聚合注入真实候选 options
+        event = await asyncio.wait_for(ctx.clarify_channel.get(), timeout=1)
+        assert event["type"] == "ask_user"
+        assert event["questions"][0]["options"] == ["2024年"]
+        # 进程级注册表已登记该 session 的 Future
+        fut = pending_asks.get("s1")
+        assert fut is not None
+        fut.set_result({"answers": [{"id": "q1", "selected": ["2024年"]}]})
+        result = await asyncio.wait_for(task, timeout=1)
+        assert "2024年" in result
+        assert ctx.ask_count == 1
+    finally:
+        current_request_ctx.reset(token)
+    # 工具结束后注册表已清理
+    assert "s1" not in pending_asks
+
+
+@pytest.mark.asyncio
+async def test_ask_user_ask_limit():
+    """ask_count 达上限时直接返回错误文本，不推送问题也不登记 Future。"""
+    ctx = RequestContext(session_id="s1")
+    ctx.ask_count = MAX_ASK_PER_TURN
+    token = current_request_ctx.set(ctx)
+    try:
+        result = await ask_user.ainvoke(_ask_args())
+        assert "上限" in result
+        assert ctx.clarify_channel.empty()
+        assert "s1" not in pending_asks
+    finally:
+        current_request_ctx.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_ask_user_timeout(monkeypatch):
+    """不 resolve 时在 ASK_USER_TIMEOUT 后返回超时错误，并清理注册表。"""
+    monkeypatch.setattr(rag_tools, "ASK_USER_TIMEOUT", 0.1)
+    ctx = RequestContext(session_id="s1")
+    token = current_request_ctx.set(ctx)
+    try:
+        result = await ask_user.ainvoke(_ask_args())
+        assert "超时" in result
+    finally:
+        current_request_ctx.reset(token)
+    assert "s1" not in pending_asks

@@ -30,7 +30,7 @@ class RequestContext:
     )  # 断连/取消信号，范围：请求内共享，用途：客户端断开或取消时置位以中断 agent 循环
     registry: dict = field(
         default_factory=dict
-    )  # session_id -> asyncio.Future（挂起澄清），范围：请求内共享，用途：澄清应答按 session_id 写入对应 Future
+    )  # [已弃用] session_id -> asyncio.Future（挂起澄清），范围：请求内共享；POST/SSE 是独立请求，contextvar 不跨请求，请改用模块级 pending_asks（保留字段避免破坏既有引用）
     tool_contexts: list[RAGContext] = field(
         default_factory=list
     )  # retrieve_kb 累积上下文，范围：请求内累积，用途：按编号顺序拼装引用（编号顺序即引用顺序）
@@ -42,4 +42,12 @@ class RequestContext:
 current_request_ctx: ContextVar[RequestContext | None] = ContextVar(
     "current_request_ctx", default=None
 )
-"""当前请求共享对象；工具/节点经此读取 queue/abort/registry/tool_contexts。"""
+"""当前请求共享对象；工具/节点经此读取 queue/abort/tool_contexts/ask_count。"""
+
+pending_asks: dict[str, asyncio.Future] = {}
+"""进程级挂起澄清注册表（session_id -> asyncio.Future）。
+
+ask_user 工具登记挂起 Future，POST /clarify-answer 按 session_id 解析；
+与 RequestContext.registry 不同，它是进程级共享的——POST 与 SSE 是独立
+HTTP 请求，contextvar 不跨请求传播，per-request dict 无法被 POST 端访问。
+"""
