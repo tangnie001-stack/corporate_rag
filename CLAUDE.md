@@ -26,8 +26,11 @@ Python 3.11+ / FastAPI / ChromaDB / LangChain / DashScope / MySQL 8.0 / Redis 7 
 | docs/agents/api_contract.md | 接口契约：参数语义、返回值格式、历史踩坑 | 改 API / 公共方法签名前；前端页面对接接口时 |
 | docs/agents/data-flow.md | 数据流链路 | 排查问题、理解系统流程 |
 | docs/agents/codegraph-guide.md | 依赖图查询（比逐文件 grep 高效） | 查询代码关系 |
+| docs/agents/glossary.md | 领域词汇表：核心标识符 / 响应信封 / RAG 流水线 / RAGAS 指标等规范术语 | 术语含义不确定、写文档或命名时查阅 |
 | docs/agents/chunking-issues.md | 分块问题排查与修复记录 | 遇到分块问题优先查阅 |
+| docs/agents/defensive-patterns.md | 防御性模式：并发 / SSE / 精排 / 实体 / prompt / DB / 部署的防复发规则 | 写相关领域代码前 |
 | docs/agents/ui-design-flow.md | UI 设计与前端验证 | 改 UI / 新增组件，改完用 playwright-cli 验证 |
+| docs/agents/cookbook.md | 操作记录协议：什么该记、怎么记；条目按协议追加 | 遇到可复用操作流程时按协议记录；需要操作步骤时查阅 |
 | docs/agents/requirements_pool.md | 需求池（意向清单，非已确认需求） | 规划/排期时参考；不作为功能实现依据 |
 
 ## 代码目录结构（修改代码前必读）
@@ -81,10 +84,11 @@ docker compose build --no-cache app    # 改依赖后重建
 2. **契约同步**：改了 API 响应结构 / 请求体 / 公共方法签名时，同步搜索并更新受影响测试的断言（`tests/` 中硬编码的结构如 `["data"]["x"]` 常因响应包装等全局变更而失联）
 3. **结构检查**：新增/修改的代码位置正确吗？api/ 是否只做参数校验和路由转发？有无违反层间调用规则的 import（如 api/ import infra/）？
 4. **一事一档自检**：改文档后检查是否复制了别处内容？是则改成链接；新建归属文档是否已登记进「文档组织」表？
+5. **文档登记自检**：本次改动是否产生——新术语（→ glossary.md）、新可复发缺陷类别（分块→chunking-issues.md，其他→defensive-patterns.md）、新可复用操作流程（→ cookbook.md）？有则按对应协议登记。
 
 ## 规则
 - 架构规约（异常处理 / 响应包装 / 日志约定 / 排查规范）详见 docs/agents/rules.md
-- API 路由 handler 必须标注请求体和返回类型（请求用 Pydantic BaseModel，返回也用 Pydantic BaseModel 描述 data 结构，SSE 标注 StreamingResponse）
+- API 路由 handler 必须标注请求体和返回类型（Pydantic BaseModel / StreamingResponse），详细标准见 docs/agents/rules.md
 - API Key 和 Token 通过 `.env` 加载，日志中脱敏；连接串不记录到日志
 - 测试 mock 外部依赖，不发起真实网络调用
 - 需求池文档在 docs/agents/requirements_pool.md

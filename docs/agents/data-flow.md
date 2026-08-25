@@ -105,3 +105,5 @@ MySQL 查元信息 → ChromaDB 取分块 → 脱敏 → 构建 KnowledgeGraph
 - **健康检查**: `GET /api/health` / `POST /api/config`
 
 > ★ 标注的为关键链路
+
+> 新增链路或修改节点字段矩阵（AgentState 生产-消费）时，同步更新本文件对应链路。
