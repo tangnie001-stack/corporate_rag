@@ -39,7 +39,7 @@ def test_format_node_only_keeps_cited_sources():
     """format_node 应只保留回答中实际引用的来源，并带原始编号。"""
     state = AgentState(
         answer="腾讯2024年营收3943亿元[1]，灿坤2019年营收见[3]",
-        contexts=[
+        tool_contexts=[
             RAGContext(
                 content="腾讯2024年报内容",
                 source="腾讯.pdf",
@@ -87,7 +87,7 @@ def test_format_node_ignores_invalid_index():
     """超出范围的引用编号应被忽略。"""
     state = AgentState(
         answer="内容[9]",  # 只有 1 个 context，编号 9 非法
-        contexts=[
+        tool_contexts=[
             RAGContext(
                 content="内容",
                 source="a.pdf",
@@ -106,7 +106,7 @@ def test_format_node_empty_when_abstention():
     """回答含拒答语时 citations 应为空。"""
     state = AgentState(
         answer="未在文档中找到相关数据。",
-        contexts=[
+        tool_contexts=[
             RAGContext(
                 content="内容",
                 source="a.pdf",

@@ -5,18 +5,9 @@ from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 
 from src.config.const import MAX_AGENT_ITERATIONS
-from src.infra.db.vector_store.types import ChunkResult
 from src.infra.llm.chat_message import ChatMessage
 from src.infra.llm.trace_context import current_trace_id
 from src.rag.context import RAGContext
-
-
-@dataclass
-class RAGQueryIntent:
-    """查询意图分类结果。"""
-
-    route: str = ""  # "simple" | "medium" | "complex" | ""
-    rewritten: bool = False  # 是否已被 rewrite_node 改写
 
 
 @dataclass
@@ -42,16 +33,6 @@ class AgentState:
     )
     _max_agent_iterations: int = MAX_AGENT_ITERATIONS  # 迭代上限（来源：src/config/const.py；用途：超限强制收尾）
     _ask_count: int = 0  # 本 turn ask_user 调用次数（来源：ask_user 节点自增；范围：单 turn；用途：日志/兜底，实际检查走 contextvar）
-    # ── 中间态 ──
-    intent: RAGQueryIntent = field(default_factory=RAGQueryIntent)  # classify_node 输出
-    rewritten_query: str = ""  # rewrite_node 改写后的主查询（列表首个）
-    rewritten_queries: list[str] = field(
-        default_factory=list
-    )  # rewrite_node 输出的检索查询列表（含原 query）
-    retrieval_results: list[ChunkResult] = field(
-        default_factory=list
-    )  # 向量/BM25 检索结果
-    contexts: list[RAGContext] = field(default_factory=list)  # rerank 精排后的上下文
     # ── 输出 ──
     answer: str = ""  # LLM 生成的完整回答
     citations: list[dict] = field(default_factory=list)  # 去重引用列表
@@ -61,24 +42,6 @@ class AgentState:
     # ── 路由控制 ──
     _resolved_kb_ids: list[str] | None = None
     # None = 未路由 / 降级全量；[...] = 路由选中的 KB ID 列表
-    # ── 意图理解 ──
-    extracted_entities: list[dict] = field(default_factory=list)  # EntityExtractor 输出
-    missing_entities: list[dict] = field(
-        default_factory=list
-    )  # LLM 标记的缺失实体（如 [{"type": "year", "question": "哪一年？"}]
-    classification_confidence: float = 0.0  # LLM 置信度（LLM 输出 key="confidence"）
-    skip_retrieval: bool = (
-        False  # 问候/闲聊标记：跳过检索直接回答（由 classify_node 设置）
-    )
-    skip_clarify: bool = (
-        False  # 评估模式标记：即使缺实体也不进 clarify 追问分支（由评估脚本设置）
-    )
-    _kb_entities: str = (
-        ""  # KB 聚合候选实体文本（classify_node 注入 classifier prompt）
-    )
-    _kb_suggestions: dict = field(
-        default_factory=dict
-    )  # KB 聚合候选生成的澄清建议映射（agent_service 消费）
     # ── 内部 ──
     _history: list[ChatMessage] = field(
         default_factory=list

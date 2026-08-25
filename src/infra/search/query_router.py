@@ -8,7 +8,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 from loguru import logger
 
-from src.agents.graph.state import LangGraphNode, RAGQueryIntent
+from src.agents.graph.state import LangGraphNode
 from src.infra.llm.prompt_manager import PromptManager
 from src.infra.search.complexity_scorer import score_complexity
 from src.infra.search.entity_extractor import EntityExtractor
@@ -304,7 +304,10 @@ class QueryRouter:
         else:
             llm_result = self._fallback_route(complexity_score)
         result = {
-            LangGraphNode.Classify.INTENT: RAGQueryIntent(route=llm_result["route"]),
+            LangGraphNode.Classify.INTENT: {
+                "route": llm_result["route"],
+                "rewritten": False,
+            },
             LangGraphNode.Classify.EXTRACTED_ENTITIES: entities_dict,
             LangGraphNode.Classify.MISSING_ENTITIES: llm_result.get(
                 "missing_entities", []
@@ -319,7 +322,7 @@ class QueryRouter:
 
     def _simple_result(self, skip_retrieval: bool = True) -> dict[str, Any]:
         return {
-            LangGraphNode.Classify.INTENT: RAGQueryIntent(route="simple"),
+            LangGraphNode.Classify.INTENT: {"route": "simple", "rewritten": False},
             LangGraphNode.Classify.EXTRACTED_ENTITIES: [],
             LangGraphNode.Classify.MISSING_ENTITIES: [],
             LangGraphNode.Classify.CLASSIFICATION_CONFIDENCE: 1.0,

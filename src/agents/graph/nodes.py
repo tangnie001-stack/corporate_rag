@@ -54,7 +54,7 @@ def make_kb_router_node(embed_fn, llm) -> Callable:
 def format_node(state: AgentState) -> dict:
     """格式化节点：只保留回答中实际引用的来源，去重并带原始编号。"""
     answer = state.answer or ""
-    contexts = state.contexts or []
+    contexts = state.tool_contexts or []
 
     # 拒答检测：回答明确表示未找到数据时，不输出引用
     if any(marker in answer for marker in ABSTENTION_MARKERS):
