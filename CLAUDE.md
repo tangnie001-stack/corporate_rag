@@ -16,6 +16,10 @@ Python 3.11+ / FastAPI / ChromaDB / LangChain / DashScope / MySQL 8.0 / Redis 7 
 ## 文档组织（一事一档）
 每个事实只有一个归属文档，别处一律链接，不复制内容；新增内容先找归属文档，找不到再建新档。
 
+- **归属判定**："这条规则不在上下文里就会犯错吗？" 会 → 常驻 CLAUDE.md（一句话 + 链接）；不会 → 进归属文档并在表中登记。
+- **表保鲜**：新建归属文档时，必须同步登记进上表（含归属内容与何时查阅），否则视为未完成。
+- **"复制"定义**：指把某文档的正文搬进另一文档；一句话的指针引用不算复制。
+
 | 文档 | 归属内容 | 何时查阅 |
 |------|---------|---------|
 | docs/agents/rules.md | 架构规约：异常处理 / 响应包装 / 日志约定 / 排查规范 / 代码注释标准 | 写代码前 |
@@ -24,7 +28,7 @@ Python 3.11+ / FastAPI / ChromaDB / LangChain / DashScope / MySQL 8.0 / Redis 7 
 | docs/agents/codegraph-guide.md | 依赖图查询（比逐文件 grep 高效） | 查询代码关系 |
 | docs/agents/chunking-issues.md | 分块问题排查与修复记录 | 遇到分块问题优先查阅 |
 | docs/agents/ui-design-flow.md | UI 设计与前端验证 | 改 UI / 新增组件，改完用 playwright-cli 验证 |
-| docs/agents/requirements_pool.md | 需求池 | 需求相关 |
+| docs/agents/requirements_pool.md | 需求池（意向清单，非已确认需求） | 规划/排期时参考；不作为功能实现依据 |
 
 ## 代码目录结构（修改代码前必读）
 
@@ -76,6 +80,7 @@ docker compose build --no-cache app    # 改依赖后重建
 1. **质量门禁**：`pytest tests/ -v` 全部通过、`ruff check .` 无错误、`pyright src/` 不引入新 error（存量多为第三方库误报，以不新增为准）、无遗留 `print()`/TODO/调试代码
 2. **契约同步**：改了 API 响应结构 / 请求体 / 公共方法签名时，同步搜索并更新受影响测试的断言（`tests/` 中硬编码的结构如 `["data"]["x"]` 常因响应包装等全局变更而失联）
 3. **结构检查**：新增/修改的代码位置正确吗？api/ 是否只做参数校验和路由转发？有无违反层间调用规则的 import（如 api/ import infra/）？
+4. **一事一档自检**：改文档后检查是否复制了别处内容？是则改成链接；新建归属文档是否已登记进「文档组织」表？
 
 ## 规则
 - 架构规约（异常处理 / 响应包装 / 日志约定 / 排查规范）详见 docs/agents/rules.md
