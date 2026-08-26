@@ -63,12 +63,17 @@ def traced(name: str):
 
             self._tracer.start_trace(name, input_data)
             token = current_tracer.set(self._tracer)
+            agen = func(self, *args, **kwargs)
             try:
-                async for item in func(self, *args, **kwargs):
+                async for item in agen:
                     yield item
             finally:
                 current_tracer.reset(token)
                 self._tracer.end_trace()
+                # 显式关闭内层生成器：async for 在生成器被 aclose 时不会
+                # 传播关闭（GeneratorExit 不会触发内层 finally），不关则
+                # 内层清理（ctx reset / abort 联动）延迟到 GC 才执行
+                await agen.aclose()
 
         return wrapper
 

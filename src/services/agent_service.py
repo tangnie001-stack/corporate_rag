@@ -8,8 +8,10 @@
 """
 
 import asyncio
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
+from typing import TypeAlias
 
+from langchain_core.runnables.schema import StreamEvent
 from langgraph.graph.state import CompiledStateGraph
 from loguru import logger
 
@@ -23,6 +25,7 @@ from src.agents.graph.state import (
 from src.agents.graph.workflow import build_graph
 from src.chat.manager import ChatManager
 from src.config.const import ASK_USER_STATUS_MSG
+from src.config.prompts import SSE_ERROR_PREFIX
 from src.infra.db.vector_store import VectorStore
 from src.infra.llm.langfuse_tracing import LangfuseTracer, traced
 from src.infra.llm.prompt_manager import PromptManager
@@ -49,7 +52,11 @@ class _ErrorMarker:
         self.error = error
 
 
-def _convert_event(item) -> list[SSEEvent]:
+# 合并队列元素类型：LangGraph 事件（StreamEvent）或 ask_user 事件 dict，或哨兵
+_QueueItem: TypeAlias = StreamEvent | dict | _EndMarker | _ErrorMarker
+
+
+def _convert_event(item: _QueueItem) -> list[SSEEvent]:
     """把 queue 中的 item 转成 SSE 事件列表（空列表 = 无需产出）。
 
     queue 中混有两类 item：
@@ -69,6 +76,10 @@ def _convert_event(item) -> list[SSEEvent]:
     """
     if isinstance(item, dict) and item.get("type") == "ask_user":
         return [SSEStatusEvent(stage="ask_user", message=ASK_USER_STATUS_MSG)]
+
+    # 哨兵类已被 _dual_stream 提前消费，此处防御性排除以收窄类型
+    if not isinstance(item, dict):
+        return []
 
     kind = item.get(LangGraphKey.EVENT, "")
     name = item.get(LangGraphKey.NAME, "")
@@ -103,8 +114,8 @@ def _convert_event(item) -> list[SSEEvent]:
 
 
 async def _dual_stream(
-    event_source,
-    queue: asyncio.Queue,
+    event_source: AsyncIterator[StreamEvent | dict],
+    queue: asyncio.Queue[_QueueItem],
     abort_signal: asyncio.Event,
 ) -> AsyncGenerator[SSEEvent, None]:
     """双路合并：Task A 迭代事件源推 queue，Task B（本生成器）消费并转换产出 SSE 事件。
@@ -146,7 +157,7 @@ async def _dual_stream(
             if isinstance(item, _EndMarker):
                 break
             if isinstance(item, _ErrorMarker):
-                yield SSEErrorEvent(f"暂时无法回答：{item.error}")
+                yield SSEErrorEvent(f"{SSE_ERROR_PREFIX}{item.error}")
                 break
             for event in _convert_event(item):
                 yield event
@@ -202,8 +213,10 @@ class AgentService:
 
         graph 事件与 ask_user 澄清经 _dual_stream 双路合并产出；本方法创建
         RequestContext 并 set 到 current_request_ctx（工具/节点经 contextvar
-        读取 queue/abort/tool_contexts），finally 中 reset。assistant 消息
-        持久化由 api 层（_stream_rag_response 流结束后 create_task）负责。
+        读取 queue/abort/tool_contexts），finally 中 reset。循环正常结束后
+        将累积的 assistant 文本写入 chat_manager（Redis 历史，供多轮对话
+        构建 prompt）；MySQL 持久化由 api 层（_stream_rag_response 流结束后
+        create_task）负责。
 
         Args:
             kb_id: 知识库 ID（空字符串表示跨库搜索）
@@ -220,16 +233,29 @@ class AgentService:
 
         ctx = RequestContext(session_id=session_id)
         ctx_token = current_request_ctx.set(ctx)
+        full_answer = ""
+        stream = _dual_stream(
+            self._graph.astream_events(initial_state, version=LangGraph.VERSION),
+            ctx.clarify_channel,
+            ctx.abort_signal,
+        )
         try:
-            async for event in _dual_stream(
-                self._graph.astream_events(initial_state, version=LangGraph.VERSION),
-                ctx.clarify_channel,
-                ctx.abort_signal,
-            ):
+            async for event in stream:
+                if isinstance(event, SSETokenEvent):
+                    full_answer += event.token
                 yield event
         except Exception as e:  # noqa: BLE001
             logger.exception("AgentService stream_chat failed: {}", e)
-            yield SSEErrorEvent(f"暂时无法回答：{str(e)[:100]}")
+            yield SSEErrorEvent(f"{SSE_ERROR_PREFIX}{str(e)[:100]}")
+            yield SSEDoneEvent()
+        else:
+            if full_answer:
+                await self._chat_manager.add_message_async(
+                    session_id, "assistant", full_answer
+                )
+            yield SSEDoneEvent()
         finally:
             current_request_ctx.reset(ctx_token)
-            yield SSEDoneEvent()
+            # 显式关闭事件源：本生成器被 aclose 时 async for 不传播关闭，
+            # 需手动触发 _dual_stream finally（abort 置位 + 取消 Task A）
+            await stream.aclose()

@@ -1,15 +1,18 @@
 """_dual_stream 双路合并与 _convert_event 事件转换单元测试。"""
 
 import asyncio
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from langchain_core.messages import AIMessageChunk
 
 from src.agents.graph.state import LangGraphEvent, LangGraphKey, LangGraphNode
 from src.config.const import ASK_USER_STATUS_MSG
-from src.services.agent_service import _convert_event, _dual_stream
+from src.infra.llm.request_context import current_request_ctx
+from src.services.agent_service import AgentService, _convert_event, _dual_stream
 from src.utils.sse import (
     SSECitationEvent,
+    SSEDoneEvent,
     SSEErrorEvent,
     SSEStatusEvent,
     SSETokenEvent,
@@ -219,3 +222,97 @@ class TestConvertEvent:
     def test_convert_unknown_item(self):
         """无法识别的 item → 空列表（不产出）。"""
         assert _convert_event({"foo": "bar"}) == []
+
+
+def _make_service() -> tuple[AgentService, AsyncMock]:
+    """构造最小可用的 AgentService（跳过 __init__，仅 mock 外部依赖）。
+
+    Returns:
+        (service, chat_manager)：chat_manager 单独返回以便直接断言 mock 调用
+    """
+    service = AgentService.__new__(AgentService)
+    service._llm = Mock()
+    chat_manager = AsyncMock()
+    chat_manager.get_history_async.return_value = []
+    chat_manager.add_message_async = AsyncMock()
+    service._chat_manager = chat_manager
+    service._prompt_manager = Mock()
+    service._tracer = Mock()
+    return service, chat_manager
+
+
+class TestStreamChatWrapper:
+    """stream_chat 外层生命周期测试（断连清理 / assistant Redis 写入）。"""
+
+    @pytest.mark.asyncio
+    async def test_stream_chat_aclose_clean(self):
+        """客户端断连：aclose 不抛 RuntimeError，ctx 已 reset，abort_signal 已置位。"""
+        service, _ = _make_service()
+
+        entered_block = asyncio.Event()  # 事件源已进入阻塞的标志
+
+        async def fake_astream(*args, **kwargs):
+            yield _make_token_item("你好")
+            entered_block.set()
+            await asyncio.sleep(60)  # 阻塞直至被 Task A 取消
+
+        service._graph = Mock()
+        service._graph.astream_events = fake_astream
+
+        agen = service.stream_chat("kb1", "session1", "营收多少")
+        it = agen.__aiter__()
+        first = await it.__anext__()
+        assert first == SSETokenEvent("你好")
+        ctx = current_request_ctx.get()
+        assert ctx is not None
+        # 等待事件源进入阻塞后再断连，确保取消落在挂起的 Task A 上
+        await asyncio.wait_for(entered_block.wait(), timeout=2)
+        await agen.aclose()
+        assert current_request_ctx.get() is None
+        assert ctx.abort_signal.is_set()
+
+    @pytest.mark.asyncio
+    async def test_stream_chat_persists_assistant_to_redis(self):
+        """正常结束后累积的 assistant 文本写入 chat_manager（Redis 历史）。"""
+        service, chat_manager = _make_service()
+
+        async def fake_astream(*args, **kwargs):
+            yield _make_token_item("你好")
+            yield _make_token_item("，世界")
+
+        service._graph = Mock()
+        service._graph.astream_events = fake_astream
+
+        events = []
+        async for event in service.stream_chat("kb1", "session1", "营收多少"):
+            events.append(event)
+
+        tokens = [e for e in events if isinstance(e, SSETokenEvent)]
+        assert [t.token for t in tokens] == ["你好", "，世界"]
+        done_events = [e for e in events if isinstance(e, SSEDoneEvent)]
+        assert len(done_events) == 1
+        # user 消息先写，assistant 消息后写（含全部累积 token）
+        chat_manager.add_message_async.assert_any_call(
+            "session1", "assistant", "你好，世界"
+        )
+
+    @pytest.mark.asyncio
+    async def test_stream_chat_no_assistant_write_when_empty(self):
+        """无任何 token 产出时（full_answer 为空）不写 assistant 到 chat_manager。"""
+        service, chat_manager = _make_service()
+
+        async def fake_astream(*args, **kwargs):
+            yield _make_format_end_item([])
+
+        service._graph = Mock()
+        service._graph.astream_events = fake_astream
+
+        events = []
+        async for event in service.stream_chat("kb1", "session1", "营收多少"):
+            events.append(event)
+
+        done_events = [e for e in events if isinstance(e, SSEDoneEvent)]
+        assert len(done_events) == 1
+        chat_manager.add_message_async.assert_any_call("session1", "user", "营收多少")
+        for call in chat_manager.add_message_async.await_args_list:
+            assert call.args[1] != "assistant"

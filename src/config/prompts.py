@@ -160,6 +160,12 @@ ABSTENTION_MARKERS: tuple[str, ...] = ("未在文档中找到",)
 ABSTENTION_TEXT: str = "未在文档中找到相关数据。请尝试更换问题表述或补充更多文档。"
 
 
+# ====== SSE 错误事件文案 ======
+
+# SSEErrorEvent 统一错误前缀：_dual_stream（事件源异常）与 stream_chat（外层兜底）共用
+SSE_ERROR_PREFIX: str = "暂时无法回答："
+
+
 # ====== ask_user 澄清工具文案 ======
 
 # ask_user 上下文不可用文案：current_request_ctx 未设置时直接返回给 LLM
