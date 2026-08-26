@@ -7,14 +7,13 @@ import pytest
 from langchain_core.messages import AIMessageChunk
 
 from src.agents.graph.state import LangGraphEvent, LangGraphKey, LangGraphNode
-from src.config.const import ASK_USER_STATUS_MSG
 from src.infra.llm.request_context import current_request_ctx
 from src.services.agent_service import AgentService, _convert_event, _dual_stream
 from src.utils.sse import (
+    SSEAskUserEvent,
     SSECitationEvent,
     SSEDoneEvent,
     SSEErrorEvent,
-    SSEStatusEvent,
     SSETokenEvent,
 )
 
@@ -205,7 +204,7 @@ class TestConvertEvent:
         assert _convert_event(_make_format_end_item([])) == []
 
     def test_convert_ask_user_item(self):
-        """ask_user 工具经 clarify_channel 推送的 item → 过渡状态事件。"""
+        """ask_user 工具经 clarify_channel 推送的 item → SSEAskUserEvent 问题卡片。"""
         item = {
             "type": "ask_user",
             "questions": [
@@ -217,7 +216,7 @@ class TestConvertEvent:
             ],
         }
         result = _convert_event(item)
-        assert result == [SSEStatusEvent(stage="ask_user", message=ASK_USER_STATUS_MSG)]
+        assert result == [SSEAskUserEvent(questions=item["questions"])]
 
     def test_convert_unknown_item(self):
         """无法识别的 item → 空列表（不产出）。"""

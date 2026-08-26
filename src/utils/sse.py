@@ -59,7 +59,10 @@ class SSEModelInfoEvent:
 
 @dataclass
 class SSEClarificationEvent:
-    """追问事件 — 当系统需要用户补充信息时触发。"""
+    """追问事件 — 已退役：classify 已删，无预判来源，不再生产。
+
+    保留类定义与序列化逻辑仅供旧调用方兼容，新代码不得再构造。
+    """
 
     type: str  # "entity_completion" | "intent_clarification" | "no_data_guidance"
     question: str  # 追问文本（取第一个问题的文案，兼容旧前端）
@@ -72,6 +75,25 @@ class SSEClarificationEvent:
     )
 
 
+@dataclass
+class SSEAskUserEvent:
+    """ask_user 工具推送的问题卡片事件。"""
+
+    type: str = "ask_user"  # 事件类型标识，前端据此路由到追问卡片
+    questions: list = field(
+        default_factory=list
+    )  # [{id, question, options, multi_select}]
+
+
+@dataclass
+class SSEAbstentionEvent:
+    """abstention 标识事件 — 检索无达标 context 时提示转人工。"""
+
+    type: str = "abstention"  # 事件类型标识，前端据此路由到转人工提示
+    # 转人工提示文案：与 prompts.ABSTENTION_TEXT（"更换问题表述"引导）语义不同，此处引导转人工，故不复用常量
+    message: str = "未在文档中找到相关数据，可尝试转人工咨询"
+
+
 SSEEvent = (
     SSEStatusEvent
     | SSETokenEvent
@@ -79,7 +101,9 @@ SSEEvent = (
     | SSEErrorEvent
     | SSEDoneEvent
     | SSEModelInfoEvent
-    | SSEClarificationEvent  # 追问事件
+    | SSEClarificationEvent  # 追问事件（已退役，仅供旧调用方兼容）
+    | SSEAskUserEvent  # ask_user 问题卡片
+    | SSEAbstentionEvent  # abstention 转人工提示
 )
 
 
@@ -194,6 +218,38 @@ def sse_clarification(event: SSEClarificationEvent) -> str:
     return f"event: clarification\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def sse_ask_user(event: SSEAskUserEvent) -> str:
+    """构建 SSE ask_user 事件。
+
+    Args:
+        event: 问题卡片事件对象
+
+    Returns:
+        SSE 格式的文本行
+    """
+    data: dict = {
+        "type": event.type,
+        "questions": event.questions,
+    }
+    return f"event: ask_user\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def sse_abstention(event: SSEAbstentionEvent) -> str:
+    """构建 SSE abstention 事件。
+
+    Args:
+        event: abstention 转人工提示事件对象
+
+    Returns:
+        SSE 格式的文本行
+    """
+    data: dict = {
+        "type": event.type,
+        "message": event.message,
+    }
+    return f"event: abstention\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
 def to_sse(event: SSEEvent) -> str:
     """将结构化事件转为 SSE 格式字符串。
 
@@ -229,3 +285,7 @@ def to_sse(event: SSEEvent) -> str:
             type=t, question=q, missing_entities=me, suggestions=s, questions=qs
         ):
             return sse_clarification(SSEClarificationEvent(t, q, me, s, qs))
+        case SSEAskUserEvent(type=t, questions=questions):
+            return sse_ask_user(SSEAskUserEvent(t, questions))
+        case SSEAbstentionEvent(type=t, message=message):
+            return sse_abstention(SSEAbstentionEvent(t, message))

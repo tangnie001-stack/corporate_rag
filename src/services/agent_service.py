@@ -24,7 +24,6 @@ from src.agents.graph.state import (
 )
 from src.agents.graph.workflow import build_graph
 from src.chat.manager import ChatManager
-from src.config.const import ASK_USER_STATUS_MSG
 from src.config.prompts import SSE_ERROR_PREFIX
 from src.infra.db.vector_store import VectorStore
 from src.infra.llm.langfuse_tracing import LangfuseTracer, traced
@@ -32,11 +31,11 @@ from src.infra.llm.prompt_manager import PromptManager
 from src.infra.llm.request_context import RequestContext, current_request_ctx
 from src.infra.search.bm25_index import BM25Index
 from src.utils.sse import (
+    SSEAskUserEvent,
     SSECitationEvent,
     SSEDoneEvent,
     SSEErrorEvent,
     SSEEvent,
-    SSEStatusEvent,
     SSETokenEvent,
 )
 
@@ -61,7 +60,7 @@ def _convert_event(item: _QueueItem) -> list[SSEEvent]:
 
     queue 中混有两类 item：
     - ask_user 工具经 clarify_channel 推送的 {"type": "ask_user", "questions": [...]}
-      → 过渡期产出 SSEStatusEvent(stage="ask_user")（Task 9 换 SSEAskUserEvent）
+      → SSEAskUserEvent（问题卡片）
     - LangGraph astream_events 事件 dict：
       on_chat_model_stream（metadata.langgraph_node == "agent" 且 chunk 内容非空）
       → SSETokenEvent（agent 节点对 LLM 的流式 token）
@@ -75,7 +74,7 @@ def _convert_event(item: _QueueItem) -> list[SSEEvent]:
         list[SSEEvent]: 转换后的 SSE 事件列表；无法转换/无需产出的 item 返回空列表
     """
     if isinstance(item, dict) and item.get("type") == "ask_user":
-        return [SSEStatusEvent(stage="ask_user", message=ASK_USER_STATUS_MSG)]
+        return [SSEAskUserEvent(questions=item.get("questions", []))]
 
     # 哨兵类已被 _dual_stream 提前消费，此处防御性排除以收窄类型
     if not isinstance(item, dict):
