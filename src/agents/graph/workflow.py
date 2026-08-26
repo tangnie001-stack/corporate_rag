@@ -44,7 +44,9 @@ def build_graph(
     if tools is not None:
         rag_tools = tools
     else:
-        rag_tools = make_rag_tools(vector_store, bm25, reranker, prompt_manager)
+        rag_tools = make_rag_tools(
+            vector_store, bm25, reranker, prompt_manager, embed_fn
+        )
 
     builder.add_node(
         LangGraphNode.KbRouter.NAME, make_kb_router_node(embed_fn, classify_llm)

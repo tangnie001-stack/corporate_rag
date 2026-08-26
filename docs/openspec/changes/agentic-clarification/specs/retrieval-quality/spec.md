@@ -8,6 +8,6 @@
 - **WHEN** retrieve_kb 返回空结果
 - **THEN** 模型收到空工具结果后自行决定 abstain / 追问 / 转人工，不由流水线硬编码判断
 
-#### Scenario: KB 未解析时空结果
-- **WHEN** kb_router 未解析出知识库（如无 user_id）且检索为空
-- **THEN** retrieve_kb 返回空工具结果，模型按 abstain / ask_user / escalate 决策，不触发旧确定性 abstention 文案
+#### Scenario: KB 未解析 → 语义选库检索
+- **WHEN** kb_router 未解析出知识库（如无 user_id）
+- **THEN** retrieve_kb 以语义匹配 query 与各 KB 的 name+description，选中相似度最高的 1 个知识库进行检索；匹配失败（无 KB 或相似度低于阈值）时返回空工具结果，模型按 abstain / ask_user / escalate 决策，不触发旧确定性 abstention 文案

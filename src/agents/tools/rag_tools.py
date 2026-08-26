@@ -42,7 +42,11 @@ class RetrieveKBArgs(BaseModel):
 
 
 def make_rag_tools(
-    vector_store: VectorStore, bm25: BM25Index | None, reranker, prompt_manager
+    vector_store: VectorStore,
+    bm25: BM25Index | None,
+    reranker,
+    prompt_manager,
+    embed_fn,
 ) -> list[BaseTool]:
     """构建 agent 工具列表，共享依赖经闭包注入。
 
@@ -51,6 +55,7 @@ def make_rag_tools(
         bm25: BM25 检索引擎实例（闭包注入，混合检索时使用）
         reranker: Reranker 模型实例（闭包注入，rerank_results 使用）
         prompt_manager: 提示词管理器（闭包注入，当前工具未直接使用，保留签名）
+        embed_fn: 嵌入函数（闭包注入，_semantic_select_kb 语义选库使用，需实现 embed_query）
 
     Returns:
         工具列表：retrieve_kb（知识库检索）与 ask_user（澄清追问）
@@ -81,7 +86,8 @@ def make_rag_tools(
             kb_ids = None
 
         start = time.monotonic()
-        # 多 KB 并行检索后合并去重；None/空列表按全量检索（kb_id="" 触发 search 的 similarity_search_all）
+        # kb_ids 非空 → 多 KB 并行检索后合并去重；
+        # kb_ids 为空（kb_router 未解析出 KB）→ 语义选库取最相关 1 个 KB 检索，匹配失败返回空结果
         if kb_ids:
             tasks = [
                 retrieval.search(query, kb_id, vector_store, bm25) for kb_id in kb_ids
@@ -89,7 +95,13 @@ def make_rag_tools(
             per_kb_results = await asyncio.gather(*tasks)
             results = _merge_search_results(per_kb_results)
         else:
-            results = await retrieval.search(query, "", vector_store, bm25)
+            matched_kb_id = await _semantic_select_kb(query, embed_fn)
+            if matched_kb_id:
+                results = await retrieval.search(
+                    query, matched_kb_id, vector_store, bm25
+                )
+            else:
+                results = []  # 无匹配 KB → 空工具结果，模型自行决定 abstain/ask/转人工
 
         contexts = retrieval.rerank_results(query, results, reranker)
         contexts = contexts[:top_k]
@@ -120,6 +132,44 @@ def make_rag_tools(
         return "\n\n".join(blocks)
 
     return [retrieve_kb, ask_user]
+
+
+async def _semantic_select_kb(query: str, embed_fn) -> str | None:
+    """kb_router 未解析出 KB 时，语义匹配 query 与 KB name+description，返回最相关 1 个 KB id。
+
+    惰性 import KbRepo/session_factory/current_user_id/KBRouter（参照 nodes.py
+    make_kb_router_node 模式），避免模块导入时触发数据库引擎初始化。
+
+    Args:
+        query: 用户查询文本
+        embed_fn: 嵌入函数，需实现 embed_query(text) -> list[float]
+
+    Returns:
+        最相关的知识库 id；无 KB 或相似度低于阈值（无 LLM 兜底）时返回 None
+    """
+    from src.infra.db.engine import session_factory
+    from src.infra.db.mysql_db import KbRepo
+    from src.infra.llm.trace_context import current_user_id
+    from src.rag.kb_router import KBRouter
+
+    uid = current_user_id.get()
+    kbs = await KbRepo(session_factory).get_all_kb(uid)
+    if not kbs:
+        logger.info(
+            "_semantic_select_kb: query={} no kb available, return None", query[:40]
+        )
+        return None
+
+    router = KBRouter(embed_fn, None)  # 语义匹配，无 LLM 兜底
+    matched = router.route(query, kbs)
+    selected = matched[0] if matched else None
+    logger.info(
+        "_semantic_select_kb: query={} kb_count={} selected={}",
+        query[:40],
+        len(kbs),
+        selected,
+    )
+    return selected
 
 
 def _merge_search_results(results_list: list[list[ChunkResult]]) -> list[ChunkResult]:
