@@ -4,11 +4,12 @@ import asyncio
 from collections.abc import AsyncGenerator
 
 import jieba
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
 from src.api.dependencies import get_app_service
+from src.config.const import SESSION_LOCK_TTL
 from src.services.app_service import AppService
 from src.utils.sse import (
     SSECitationEvent,
@@ -249,6 +250,33 @@ async def _persist_conversation(
     )
 
 
+async def _acquire_session_lock(redis, session_id: str) -> bool:
+    """SETNX 获取 per-session 并发锁，返回是否获取成功。
+
+    锁 key 为 chat_lock:{session_id}，带 TTL（SESSION_LOCK_TTL）兜底过期，
+    防止流中断（如客户端断连）后锁永不释放。
+
+    Args:
+        redis: redis.asyncio 客户端（Redis 不可用时为 None，由调用方跳过加锁）
+        session_id: 会话 ID
+
+    Returns:
+        bool: 获取成功返回 True；已有锁（并发冲突）返回 False
+    """
+    key = f"chat_lock:{session_id}"
+    return bool(await redis.set(key, "1", nx=True, ex=SESSION_LOCK_TTL))
+
+
+async def _release_session_lock(redis, session_id: str) -> None:
+    """释放 per-session 并发锁（删除对应 Redis key）。
+
+    Args:
+        redis: redis.asyncio 客户端
+        session_id: 会话 ID
+    """
+    await redis.delete(f"chat_lock:{session_id}")
+
+
 @router.get("/chat/stream")
 async def chat_stream(
     request: Request,
@@ -274,10 +302,41 @@ async def chat_stream(
 
     Raises:
         HTTPException 422: 参数校验失败（FastAPI 自动处理）
+        HTTPException 409: 同一会话已有进行中的请求（并发锁冲突）
     """
     user_id = getattr(request.state, "user_id", "") if request else ""
+
+    # per-session 并发锁：Redis 可用时加锁，冲突直接返回 409
+    lock_held = False
+    redis = svc.chat_manager._redis
+    if redis is not None:
+        try:
+            lock_held = await _acquire_session_lock(redis, session_id)
+        except Exception as e:  # noqa: BLE001
+            # Redis 不可用：跳过锁，不阻塞请求（与 ChatManager 降级策略一致）
+            logger.warning("Session lock skipped (Redis unavailable): {}", e)
+        else:
+            # 仅当 SETNX 明确返回 False（已有锁）才视为冲突
+            if not lock_held:
+                raise HTTPException(409, "当前会话正在处理中")
+
+    async def _stream_with_lock() -> AsyncGenerator[str, None]:
+        """持有并发锁流式推送 RAG 响应，流结束或异常时在 finally 释放锁。"""
+        try:
+            async for event in _stream_rag_response(
+                svc, kb_id, session_id, query, user_id
+            ):
+                yield event
+        finally:
+            if lock_held:
+                try:
+                    await _release_session_lock(redis, session_id)
+                except Exception as e:  # noqa: BLE001
+                    # 释放失败只记日志：锁有 TTL 兜底过期，不影响响应
+                    logger.warning("Session lock release failed: {}", e)
+
     return StreamingResponse(
-        _stream_rag_response(svc, kb_id, session_id, query, user_id),
+        _stream_with_lock(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
