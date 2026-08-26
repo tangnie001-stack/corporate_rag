@@ -186,6 +186,11 @@ class AppService:
         """设置 chat_manager 的 ChatRepo。"""
         self.chat_manager.set_chat_repo(self._chat_repo)
 
+    @property
+    def chat_repo(self) -> ChatRepo:
+        """返回会话/消息 Repo，供 API 层写入答案反馈等。"""
+        return self._chat_repo
+
     async def save_session_async(
         self, session_id: str, title: str, kb_id: str, user_id: str = ""
     ) -> None:

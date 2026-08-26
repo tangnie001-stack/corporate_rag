@@ -6,6 +6,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 
 from src.infra.db.models.chat import MessageModel, SessionModel
+from src.infra.db.models.feedback import FeedbackModel
 from src.infra.db.models.kb import KbModel
 
 
@@ -105,6 +106,31 @@ class ChatRepo:
                 model_name=getattr(msg, "model_name", ""),
             )
             session.add(m)
+            await session.commit()
+
+    async def save_feedback(
+        self,
+        session_id: str,
+        message_index: int,
+        rating: str,
+        comment: str,
+    ) -> None:
+        """写入一条答案反馈记录到 feedback 表。
+
+        Args:
+            session_id: 会话 ID
+            message_index: 会话内消息序号（前端消息数组索引，从 0 起）
+            rating: 评分（positive/negative）
+            comment: 用户评论
+        """
+        async with self._sf() as session:
+            fb = FeedbackModel(
+                session_id=session_id,
+                message_index=message_index,
+                rating=rating,
+                comment=comment,
+            )
+            session.add(fb)
             await session.commit()
 
     async def delete_session_and_messages(self, session_id: str) -> bool:

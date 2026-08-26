@@ -13,6 +13,7 @@ from src.api import (
     chat_router,
     clarify_router,
     doc_router,
+    feedback_router,
     health_router,
     kb_eval_router,
     kb_router,
@@ -170,6 +171,7 @@ app.include_router(kb_router, prefix="/api", tags=["knowledge-bases"])
 app.include_router(doc_router, prefix="/api", tags=["documents"])
 app.include_router(chat_router, prefix="/api", tags=["chat"])
 app.include_router(clarify_router, prefix="/api", tags=["chat"])
+app.include_router(feedback_router, prefix="/api", tags=["feedback"])
 app.include_router(sessions_router, prefix="/api", tags=["sessions"])
 app.include_router(kb_eval_router, prefix="/api", tags=["evaluation"])
 app.include_router(ragas_generate_routes.router, prefix="/api", tags=["ragas"])

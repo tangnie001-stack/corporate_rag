@@ -339,6 +339,32 @@ Success:
 {"status": "ok"}
 ```
 
+### 2.7 答案反馈
+
+#### 2.7.1 `POST /api/feedback → 200`
+
+保存用户对单条答案的评分与可选评论。Body:
+
+```json
+{"session_id": "sid", "message_index": 2, "rating": "positive", "comment": "回答准确"}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `session_id` | str | 会话 ID |
+| `message_index` | int | 会话内消息序号（前端消息数组索引，从 0 起），非数据库 ID |
+| `rating` | str | `positive` / `negative`，非法值返回 422 |
+| `comment` | str | 用户评论，可选，默认空串 |
+
+Success:
+```json
+{"code": "SUCCESS", "message": "操作成功", "data": true}
+```
+
+⚠️ 落库失败只记日志不报错（容错），前端始终收到成功响应。
+⚠️ `message_index` 是前端消息数组的序号语义，存到 `feedback` 表原样保留，
+不解析到 `conversation_history` 行。同一 (session_id, message_index) 可重复反馈（追加记录）。
+
 ---
 
 ## 3. 接口层：AppService ↔ MySQLDB
