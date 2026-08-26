@@ -57,14 +57,14 @@ def _chat_model_stream_item(content: str) -> dict:
 
 
 def _chat_model_end_item(model: str) -> dict:
-    """构造 agent 节点 on_chat_model_end 事件（output 携带 response_metadata.model）。"""
+    """构造 agent 节点 on_chat_model_end 事件（output 携带 response_metadata.model_name）。"""
     return {
         LangGraphKey.EVENT: LangGraphEvent.CHAT_MODEL_END,
         LangGraphKey.NAME: "ChatOpenAI",
         "metadata": {"langgraph_node": "agent"},
         LangGraphKey.DATA: {
             LangGraphKey.OUTPUT: AIMessage(
-                content="", response_metadata={"model": model}
+                content="", response_metadata={"model_name": model}
             )
         },
     }

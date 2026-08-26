@@ -67,7 +67,7 @@ class _StreamCapture:
     """单次流式执行的捕获结果（事件转换时收集，供 stream_chat 收尾使用）。
 
     捕获来源：
-    - model_used：agent 节点 on_chat_model_end 的 response_metadata.model
+    - model_used：agent 节点 on_chat_model_end 的 response_metadata.model_name
     - final_answer / final_contexts：agent_finalize 节点 on_chain_end 的产物
     """
 
@@ -91,13 +91,16 @@ def _extract_model_name(output) -> str:
         output: LLM 调用输出（AIMessage 或兼容对象）
 
     Returns:
-        模型名；output 非 BaseMessage 或 response_metadata 无 model 时返回空字符串
+        模型名；output 非 BaseMessage 或 response_metadata 无 model_name/model 时返回空字符串
     """
     if not isinstance(output, BaseMessage):
         return ""
     response_metadata = output.response_metadata
     if not isinstance(response_metadata, dict):
         return ""
+    model_name = response_metadata.get("model_name")
+    if isinstance(model_name, str):
+        return model_name
     model = response_metadata.get("model")
     if isinstance(model, str):
         return model
