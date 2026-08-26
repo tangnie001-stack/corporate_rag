@@ -27,12 +27,15 @@ class FeedbackBody(BaseModel):
         rating: 评分，仅允许 positive（点赞）/ negative（点踩），
             Pydantic Literal 自动校验，非法值返回 422
         comment: 用户评论，可为空字符串
+        trace_id: 全链路追踪 ID（前端从 SSE done 事件记录，随反馈回传，
+            用于经 trace_id 还原该答案的生成链路）
     """
 
     session_id: str
     message_index: int
     rating: Literal["positive", "negative"]
     comment: str = ""
+    trace_id: str = ""
 
 
 async def _save_feedback(
@@ -41,6 +44,7 @@ async def _save_feedback(
     message_index: int,
     rating: str,
     comment: str,
+    trace_id: str = "",
 ) -> None:
     """异步写入一条答案反馈，失败仅记日志不抛异常。
 
@@ -50,6 +54,7 @@ async def _save_feedback(
         message_index: 会话内消息序号
         rating: 评分（positive/negative）
         comment: 用户评论
+        trace_id: 全链路追踪 ID（空串表示前端未捕获到）
     """
     try:
         await repo.save_feedback(
@@ -57,6 +62,7 @@ async def _save_feedback(
             message_index=message_index,
             rating=rating,
             comment=comment,
+            trace_id=trace_id,
         )
     except Exception as e:  # noqa: BLE001
         logger.warning("Failed to save feedback: {}", e)
@@ -73,7 +79,7 @@ async def submit_feedback(
     落库失败只记日志，始终返回成功，不因存储问题影响前端交互。
 
     Args:
-        body: 反馈请求体，含 session_id/message_index/rating/comment
+        body: 反馈请求体，含 session_id/message_index/rating/comment/trace_id
         svc: AppService 实例（FastAPI 注入），经其 chat_repo 访问存储
 
     Returns:
@@ -85,5 +91,6 @@ async def submit_feedback(
         message_index=body.message_index,
         rating=body.rating,
         comment=body.comment,
+        trace_id=body.trace_id,
     )
     return ResponseModel(data=True)

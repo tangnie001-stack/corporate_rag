@@ -585,6 +585,7 @@ const state = {
   sessionId: '',
   kbId: '',        // 可配置
   abortController: null,
+  traceId: '',     // 最近一次完成的 SSE 流的 trace_id（done 事件记录，反馈时回传）
 };
 
 // 反馈 message_index 自增计数器
@@ -891,7 +892,12 @@ function sendFeedback(sessionId, messageIndex, rating) {
   fetch('/api/feedback', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ session_id: sessionId, message_index: messageIndex, rating }),
+    body: JSON.stringify({
+      session_id: sessionId,
+      message_index: messageIndex,
+      rating,
+      trace_id: state.traceId,
+    }),
   }).catch(() => { /* 反馈失败静默 */ });
 }
 
@@ -970,7 +976,11 @@ function startSSE(query) {
     } catch (err) { /* ignore */ }
   });
 
-  source.addEventListener('done', () => {
+  source.addEventListener('done', (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      if (data.trace_id) state.traceId = data.trace_id;
+    } catch (err) { /* ignore */ }
     source.close();
     if (state.current === STATE.CLARIFYING) {
       // ask_user 期间流结束（后端等待超时）：关闭 composer 恢复输入

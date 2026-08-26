@@ -10,6 +10,7 @@ from loguru import logger
 
 from src.api.dependencies import get_app_service
 from src.config.const import SESSION_LOCK_TTL
+from src.infra.llm.trace_context import current_trace_id
 from src.services.app_service import AppService
 from src.utils.sse import (
     SSECitationEvent,
@@ -177,7 +178,7 @@ async def _stream_rag_response(
     except Exception as e:  # noqa: BLE001
         logger.exception("Chat stream unhandled error: {}", str(e))
         yield to_sse(SSEErrorEvent(str(e)))
-        yield to_sse(SSEDoneEvent())
+        yield to_sse(SSEDoneEvent(trace_id=current_trace_id.get() or ""))
         return
 
     # 流结束后持久化对话

@@ -23,7 +23,30 @@ async def test_save_feedback_positive():
     )
 
     repo.save_feedback.assert_awaited_once_with(
-        session_id="s1", message_index=2, rating="positive", comment="准"
+        session_id="s1", message_index=2, rating="positive", comment="准", trace_id=""
+    )
+
+
+@pytest.mark.asyncio
+async def test_save_feedback_with_trace_id():
+    """trace_id 非空时原样透传到存储（供还原生成链路）。"""
+    repo = AsyncMock()
+
+    await _save_feedback(
+        repo,
+        session_id="s1",
+        message_index=2,
+        rating="negative",
+        comment="",
+        trace_id="trace_abc123",
+    )
+
+    repo.save_feedback.assert_awaited_once_with(
+        session_id="s1",
+        message_index=2,
+        rating="negative",
+        comment="",
+        trace_id="trace_abc123",
     )
 
 
@@ -66,17 +89,27 @@ async def test_feedback_store_failure_ignored():
 
 @pytest.mark.asyncio
 async def test_submit_feedback_endpoint_success():
-    """端点成功路径：返回统一 ResponseModel（data=True），写入参数完整。"""
+    """端点成功路径：返回统一 ResponseModel（data=True），写入参数完整（含 trace_id）。"""
     repo = AsyncMock()
     svc = AsyncMock()
     svc.chat_repo = repo
 
     result = await submit_feedback(
-        FeedbackBody(session_id="s1", message_index=2, rating="positive", comment="好"),
+        FeedbackBody(
+            session_id="s1",
+            message_index=2,
+            rating="positive",
+            comment="好",
+            trace_id="trace_xyz",
+        ),
         svc,
     )
 
     assert result.data is True
     repo.save_feedback.assert_awaited_once_with(
-        session_id="s1", message_index=2, rating="positive", comment="好"
+        session_id="s1",
+        message_index=2,
+        rating="positive",
+        comment="好",
+        trace_id="trace_xyz",
     )

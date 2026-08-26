@@ -29,6 +29,10 @@ class FeedbackModel(Base, IDMixin):
     comment: Mapped[str] = mapped_column(
         Text, nullable=False, default="", comment="用户评论"
     )
+    # 全链路追踪 ID（前端从 SSE done 事件记录并随反馈回传，用于还原生成链路）
+    trace_id: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="", comment="全链路追踪 ID"
+    )
     created_at: Mapped[datetime] = mapped_column(
         UTCDateTime(), server_default=func.now(), nullable=False
     )

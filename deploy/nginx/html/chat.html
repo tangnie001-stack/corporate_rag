@@ -194,11 +194,6 @@
   }
 
   /* ── Clarification Bubble ── */
-  .clarification-card {
-    align-self: flex-start;
-    max-width: 85%;
-    animation: fadeInUp 300ms ease-out;
-  }
   .clarification-inner {
     background: var(--bubble-ai);
     border: 1px solid var(--border);
@@ -219,85 +214,6 @@
     color: var(--text);
     margin-bottom: 14px;
   }
-
-  /* ── Suggestion Chips ── */
-  .suggestion-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-bottom: 14px;
-  }
-  .chip {
-    padding: 6px 18px;
-    border-radius: 20px;
-    border: 1.5px solid var(--primary);
-    background: var(--surface);
-    color: var(--primary);
-    font-size: 14px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all var(--transition);
-    font-family: var(--font-body);
-    line-height: 1.4;
-  }
-  .chip:hover {
-    background: var(--primary-light);
-    border-color: var(--primary-hover);
-  }
-  .chip:focus-visible {
-    outline: 2px solid var(--primary);
-    outline-offset: 2px;
-  }
-  .chip.other {
-    border-color: var(--text-muted);
-    color: var(--text-secondary);
-  }
-  .chip.other:hover {
-    background: #F1F5F9;
-    border-color: var(--text-secondary);
-  }
-
-  /* ── Clarification Input ── */
-  .clarification-input-row {
-    display: flex;
-    gap: 8px;
-  }
-  .clarification-input-row input {
-    flex: 1;
-    padding: 8px 14px;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    font-size: 14px;
-    outline: none;
-    transition: box-shadow 200ms, border-color 200ms;
-    font-family: var(--font-body);
-    color: var(--text);
-    background: var(--surface);
-  }
-  .clarification-input-row input::placeholder { color: var(--text-muted); }
-  .clarification-input-row input:focus {
-    box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
-    border-color: var(--primary);
-  }
-  .clarification-send {
-    width: 38px; height: 38px;
-    background: var(--accent);
-    border: none;
-    border-radius: 10px;
-    color: white;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: background var(--transition);
-    flex-shrink: 0;
-  }
-  .clarification-send:hover { background: var(--accent-hover); }
-  .clarification-send:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-  }
-  .clarification-send svg { width: 18px; height: 18px; }
 
   /* ── Batch Clarification (multi-section) ── */
   .clarification-section {
@@ -342,6 +258,78 @@
     font-family: var(--font-body);
   }
   .clarification-submit:hover { background: var(--accent-hover); }
+
+  /* ── Composer（ask_user 输入区接管） ── */
+  .composer-container {
+    display: none;
+    flex: 1 1 100%;
+    max-height: 40vh;
+    overflow-y: auto;
+  }
+  .composer-container.active { display: block; }
+  .composer-options {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+  .composer-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    cursor: pointer;
+    transition: border-color var(--transition), background var(--transition);
+  }
+  .composer-option:hover { border-color: var(--primary); }
+  .composer-option:has(input:checked) {
+    border-color: var(--primary);
+    background: var(--primary-light);
+  }
+  .composer-option input { margin-top: 3px; flex-shrink: 0; }
+  .composer-option-text { display: flex; flex-direction: column; gap: 2px; }
+  .composer-option-label { font-size: 14px; color: var(--text); }
+  .composer-option-desc { font-size: 12px; color: var(--text-secondary); }
+
+  /* ── Abstention（转人工入口） ── */
+  .abstention-tag { cursor: default; }
+  .abstention-btn {
+    margin-left: 8px;
+    padding: 2px 10px;
+    border: 1px solid var(--primary);
+    border-radius: 14px;
+    background: var(--surface);
+    color: var(--primary);
+    font-size: 12px;
+    font-family: var(--font-body);
+    cursor: pointer;
+    transition: all var(--transition);
+    flex-shrink: 0;
+  }
+  .abstention-btn:hover { background: var(--primary-light); }
+  .abstention-btn:disabled { opacity: 0.6; cursor: default; }
+
+  /* ── Feedback（👍/👎） ── */
+  .feedback-row {
+    display: flex;
+    gap: 6px;
+    margin-top: 10px;
+  }
+  .feedback-btn {
+    padding: 2px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    font-size: 13px;
+    font-family: var(--font-body);
+    cursor: pointer;
+    transition: border-color var(--transition), opacity var(--transition);
+  }
+  .feedback-btn:hover { border-color: var(--primary); }
+  .feedback-btn-disabled { opacity: 0.45; cursor: default; }
 
   /* ── Highlighted Answer ── */
   .answer-highlight {
@@ -531,7 +519,6 @@
   /* ── Responsive ── */
   @media (max-width: 480px) {
     .bubble-row { max-width: 92%; }
-    .clarification-card { max-width: 92%; }
     .clarification-inner { padding: 14px; }
     .chat-container { padding: 16px 12px 110px; }
     .status-tag { margin-left: 0; }
@@ -581,6 +568,7 @@
     <button class="chat-send" id="sendBtn" title="发送" aria-label="发送消息">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
     </button>
+    <div id="composerContainer" class="composer-container"></div>
   </div>
 </div>
 
@@ -596,9 +584,12 @@ const state = {
   current: STATE.IDLE,
   sessionId: '',
   kbId: '',        // 可配置
-  clarPending: null,  // 当前追问信息
   abortController: null,
+  traceId: '',     // 最近一次完成的 SSE 流的 trace_id（done 事件记录，反馈时回传）
 };
+
+// 反馈 message_index 自增计数器
+let messageIndex = 0;
 
 // ── Session ID ──
 function getOrCreateSessionId() {
@@ -630,6 +621,11 @@ function showError(msg) {
   errorMessage.textContent = msg;
   errorToast.classList.remove('hidden');
   setTimeout(() => errorToast.classList.add('hidden'), 6000);
+}
+
+// 非错误类的提示（复用 error toast 展示），如澄清超时、转人工记录
+function showHint(msg) {
+  showError(msg);
 }
 
 function setInputState(enabled, placeholder) {
@@ -725,134 +721,184 @@ function renderModelInfo(model, isFallback) {
   scrollToBottom();
 }
 
-function renderClarification(clarEvent) {
-  state.clarPending = clarEvent;
+// ── Composer（ask_user 输入区接管） ──
 
-  const card = document.createElement('div');
-  card.className = 'clarification-card';
+function hideInputArea() {
+  chatInput.style.display = 'none';
+  sendBtn.style.display = 'none';
+}
 
-  const questions = clarEvent.questions;
-  if (Array.isArray(questions) && questions.length > 1) {
-    renderBatchClarification(card, questions);
-  } else {
-    renderSingleClarification(card, clarEvent);
+function hideComposer() {
+  const composer = $('composerContainer');
+  if (composer) {
+    composer.innerHTML = '';
+    composer.classList.remove('active');
+  }
+}
+
+function restoreInputArea() {
+  hideComposer();
+  chatInput.style.display = '';
+  sendBtn.style.display = '';
+  setInputState(true, '输入问题...');
+}
+
+// 输入区接管的问题表单：每问一个 section，选项单选/多选 + 自定义输入，底部提交
+function renderComposer(questions) {
+  const composer = $('composerContainer');
+  if (!composer || !Array.isArray(questions) || !questions.length) {
+    restoreInputArea();
+    return;
   }
 
-  chatContainer.appendChild(card);
+  const sectionsHtml = questions.map((q, qi) => {
+    const type = q.multi_select ? 'checkbox' : 'radio';
+    const name = `composer_q_${qi}`;
+    const optionsHtml = (q.options || []).map(opt => {
+      const label = typeof opt === 'string' ? opt : (opt ? (opt.label || '') : '');
+      const desc = (typeof opt === 'string' || !opt) ? '' : (opt.description || '');
+      return `
+        <label class="composer-option">
+          <input type="${type}" name="${name}" value="${escapeHtml(label)}">
+          <span class="composer-option-text">
+            <span class="composer-option-label">${escapeHtml(label)}</span>
+            ${desc ? `<span class="composer-option-desc">${escapeHtml(desc)}</span>` : ''}
+          </span>
+        </label>`;
+    }).join('');
+
+    return `
+      <div class="clarification-section" data-qi="${qi}">
+        <div class="clarification-question">${escapeHtml(q.question || '')}</div>
+        ${optionsHtml ? `<div class="composer-options">${optionsHtml}</div>` : ''}
+        <input type="text" class="clarification-input composer-custom" placeholder="自定义输入…" data-qi="${qi}">
+      </div>`;
+  }).join('');
+
+  composer.innerHTML = `
+    <div class="clarification-inner">
+      <div class="clarification-label">系统 · 需要补充信息</div>
+      ${sectionsHtml}
+      <button class="clarification-submit" type="button">提交</button>
+    </div>`;
+  composer.classList.add('active');
+
+  // 提交：收集每问的 {id, selected, custom}，至少一项有内容才提交
+  composer.querySelector('.clarification-submit').addEventListener('click', () => {
+    const answers = questions.map((q, qi) => {
+      const sec = composer.querySelector(`.clarification-section[data-qi="${qi}"]`);
+      if (!sec) return null;
+      const checked = sec.querySelectorAll(
+        'input[type="radio"]:checked, input[type="checkbox"]:checked'
+      );
+      const selected = Array.from(checked).map(input => input.value);
+      const customInput = sec.querySelector('.composer-custom');
+      const custom = customInput ? customInput.value.trim() : '';
+      return { id: q.id || '', selected, custom };
+    }).filter(Boolean);
+
+    const hasContent = answers.some(a => (a.selected && a.selected.length) || a.custom);
+    if (!hasContent) {
+      showHint('请选择至少一个选项或填写自定义内容');
+      return;
+    }
+    submitComposer(answers);
+  });
+
   scrollToBottom();
 }
 
-// 单问题澄清：chip 点击即提交，保持旧行为（兼容后端不发 questions 的场景）
-function renderSingleClarification(card, clarEvent) {
-  const chipsHtml = (clarEvent.suggestions || []).map(s => {
-    const isOther = s === '其他';
-    return `<button class="chip${isOther ? ' other' : ''}" data-value="${escapeHtml(s)}">${escapeHtml(s)}</button>`;
-  }).join('');
-
-  card.innerHTML = `
-    <div class="clarification-label">系统 · 缺少信息</div>
-    <div class="clarification-inner">
-      <div class="clarification-question">${escapeHtml(clarEvent.question)}</div>
-      <div class="suggestion-chips">${chipsHtml}</div>
-      <div class="clarification-input-row">
-        <input type="text" class="clarification-input" placeholder="输入补充信息…" autofocus>
-        <button class="clarification-send" title="发送">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-        </button>
-      </div>
-    </div>
-  `;
-
-  // Chip click handler
-  card.querySelectorAll('.chip').forEach(chip => {
-    chip.addEventListener('click', () => {
-      const value = chip.dataset.value;
-      if (value === '其他') {
-        card.querySelector('.clarification-input')?.focus();
-        return;
-      }
-      submitClarification(value);
-    });
-  });
-
-  // Clarification input send
-  const clarInput = card.querySelector('.clarification-input');
-  const clarSend = card.querySelector('.clarification-send');
-  clarSend.addEventListener('click', () => {
-    const val = clarInput.value.trim();
-    if (val) submitClarification(val);
-  });
-  clarInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      const val = clarInput.value.trim();
-      if (val) submitClarification(val);
-    }
-  });
-
-  setTimeout(() => clarInput?.focus(), 100);
+// 将用户答案格式化为用户气泡文本
+function formatAnswers(answers) {
+  return answers.map(a => {
+    const parts = [];
+    if (a.selected && a.selected.length) parts.push(a.selected.join('、'));
+    if (a.custom) parts.push(a.custom);
+    return parts.join('；');
+  }).filter(Boolean).join('；');
 }
 
-// 批量澄清：每个缺失维度一个 section，chip 点击填入该维度输入框，底部"提交"组合所有已填维度
-function renderBatchClarification(card, questions) {
-  const sectionsHtml = questions.map((q, qi) => {
-    const chips = (q.suggestions || []).map(s => {
-      const isOther = s === '其他';
-      return `<button class="chip${isOther ? ' other' : ''}" data-qi="${qi}" data-value="${escapeHtml(s)}">${escapeHtml(s)}</button>`;
-    }).join('');
-    return `<div class="clarification-section" data-qi="${qi}">
-      <div class="clarification-question">${escapeHtml(q.question)}</div>
-      <div class="suggestion-chips">${chips}</div>
-      <input type="text" class="clarification-input" placeholder="输入补充信息…" data-qi="${qi}">
-    </div>`;
-  }).join('');
-
-  card.innerHTML = `
-    <div class="clarification-label">系统 · 缺少信息</div>
-    <div class="clarification-inner">
-      ${sectionsHtml}
-      <button class="clarification-submit">提交</button>
-    </div>`;
-
-  // chip 点击：选择该维度（"其他"聚焦输入框手动输入）
-  card.querySelectorAll('.chip').forEach(chip => chip.addEventListener('click', () => {
-    const qi = chip.dataset.qi;
-    const v = chip.dataset.value;
-    if (v === '其他') {
-      card.querySelector(`.clarification-input[data-qi="${qi}"]`)?.focus();
-      return;
-    }
-    card.querySelector(`.clarification-input[data-qi="${qi}"]`).value = v;
-  }));
-
-  // 提交：收集所有已填维度，空格 join 后发起一次查询；至少一个已填才提交
-  card.querySelector('.clarification-submit').addEventListener('click', () => {
-    const answers = [];
-    card.querySelectorAll('.clarification-section').forEach(sec => {
-      const v = sec.querySelector('.clarification-input').value.trim();
-      if (v) answers.push(v);
-    });
-    if (answers.length) submitClarification(answers.join(' '));
-  });
-}
-
-function submitClarification(value) {
-  removeClarification();
-
-  // Show user response
-  renderUserBubble(value);
-
-  // Remove any leftover status tags from the previous attempt
-  chatContainer.querySelectorAll('.status-tag').forEach(el => el.remove());
+// 提交答案：同流续答（SSE 保持连接），非 2xx（超时/不存在）退回空闲态
+function submitComposer(answers) {
+  hideComposer();
+  renderUserBubble(formatAnswers(answers));
 
   state.current = STATE.STREAMING;
+  chatInput.style.display = '';
+  sendBtn.style.display = '';
   setInputState(false, '正在检索...');
-  startSSE(value);
+
+  fetch('/api/chat/clarify-answer', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: state.sessionId, answers }),
+  }).then(res => {
+    if (!res.ok) {
+      state.current = STATE.IDLE;
+      setInputState(true, '输入问题...');
+      showHint('该问题已超时，请重新提问');
+    }
+  }).catch(() => {
+    state.current = STATE.IDLE;
+    setInputState(true, '输入问题...');
+    showHint('提交失败，请重新提问');
+  });
 }
 
-function removeClarification() {
-  const card = chatContainer.querySelector('.clarification-card');
-  if (card) card.remove();
+// ── Abstention（转人工入口，阶段一只记录会话标记，不建工单） ──
+function renderAbstention(message) {
+  const div = document.createElement('div');
+  div.className = 'status-tag abstention-tag';
+  div.innerHTML = `
+    <span>${escapeHtml(message)}</span>
+    <button class="abstention-btn" type="button">转人工咨询</button>
+  `;
+  div.querySelector('.abstention-btn').addEventListener('click', () => {
+    localStorage.setItem('rag_human_transfer', JSON.stringify({
+      sessionId: state.sessionId,
+      at: Date.now(),
+    }));
+    const btn = div.querySelector('.abstention-btn');
+    btn.disabled = true;
+    btn.textContent = '已记录';
+    showHint('已记录转人工需求，客服将尽快与您联系');
+  });
+  chatContainer.appendChild(div);
+  scrollToBottom();
+}
+
+// ── Feedback（👍/👎，POST /api/feedback，失败静默） ──
+function appendFeedback(bubble) {
+  if (!bubble || bubble.querySelector('.feedback-row')) return;
+  const index = messageIndex++;
+  const row = document.createElement('div');
+  row.className = 'feedback-row';
+  row.innerHTML = `
+    <button class="feedback-btn" type="button" data-rating="positive" aria-label="有帮助">👍</button>
+    <button class="feedback-btn" type="button" data-rating="negative" aria-label="无帮助">👎</button>
+  `;
+  row.querySelectorAll('.feedback-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (row.dataset.sent) return;
+      row.dataset.sent = '1';
+      row.querySelectorAll('.feedback-btn').forEach(b => b.classList.add('feedback-btn-disabled'));
+      sendFeedback(state.sessionId, index, btn.dataset.rating);
+    });
+  });
+  bubble.appendChild(row);
+}
+
+function sendFeedback(sessionId, messageIndex, rating) {
+  fetch('/api/feedback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      session_id: sessionId,
+      message_index: messageIndex,
+      rating,
+      trace_id: state.traceId,
+    }),
+  }).catch(() => { /* 反馈失败静默 */ });
 }
 
 function removeStreamingState() {
@@ -905,17 +951,21 @@ function startSSE(query) {
     } catch (err) { /* ignore */ }
   });
 
-  source.addEventListener('clarification', (e) => {
+  source.addEventListener('ask_user', (e) => {
     try {
       const data = JSON.parse(e.data);
-      // Clean up
-      source.close();
-      removeStreamingState();
-
+      // 不关流：SSE 保持连接，composer 接管输入区，提交后同流续答
       state.current = STATE.CLARIFYING;
-      setInputState(true, '输入补充信息…');
+      removeStreamingState();
+      hideInputArea();
+      renderComposer(data.questions || []);
+    } catch (err) { /* ignore */ }
+  });
 
-      renderClarification(data);
+  source.addEventListener('abstention', (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      renderAbstention(data.message || '未在文档中找到相关数据，可尝试转人工咨询');
     } catch (err) { /* ignore */ }
   });
 
@@ -926,25 +976,39 @@ function startSSE(query) {
     } catch (err) { /* ignore */ }
   });
 
-  source.addEventListener('done', () => {
+  source.addEventListener('done', (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      if (data.trace_id) state.traceId = data.trace_id;
+    } catch (err) { /* ignore */ }
     source.close();
-    state.current = STATE.IDLE;
-    if (state.clarPending) {
-      // clarification path - input already enabled
-      // state is now CLARIFYING, don't reset
+    if (state.current === STATE.CLARIFYING) {
+      // ask_user 期间流结束（后端等待超时）：关闭 composer 恢复输入
+      state.current = STATE.IDLE;
+      restoreInputArea();
+      showHint('该问题已超时，请重新提问');
     } else {
+      state.current = STATE.IDLE;
       setInputState(true, '输入问题...');
+      // 取最后一个 AI 气泡（不能用 :last-child：citation/model_info 在气泡之后）
+      const aiRows = chatContainer.querySelectorAll('.bubble-row.ai');
+      const lastAi = aiRows.length ? aiRows[aiRows.length - 1] : null;
+      appendFeedback(lastAi ? lastAi.querySelector('.bubble-content') : null);
     }
     chatInput.focus();
   });
 
   source.addEventListener('error', (e) => {
     source.close();
-    // Only show error if we're still streaming (not in clarification)
     if (state.current === STATE.STREAMING) {
       showError('连接异常，请重试');
       state.current = STATE.IDLE;
       setInputState(true, '输入问题...');
+    } else if (state.current === STATE.CLARIFYING) {
+      // ask_user 期间断连：关闭 composer 恢复输入
+      state.current = STATE.IDLE;
+      restoreInputArea();
+      showError('连接异常，请重试');
     }
   });
 
@@ -955,6 +1019,11 @@ function startSSE(query) {
       showError('连接断开，请重试');
       state.current = STATE.IDLE;
       setInputState(true, '输入问题...');
+    } else if (state.current === STATE.CLARIFYING) {
+      source.close();
+      state.current = STATE.IDLE;
+      restoreInputArea();
+      showError('连接断开，请重试');
     }
   };
 }
@@ -972,7 +1041,6 @@ function sendMessage() {
   renderUserBubble(query);
 
   state.current = STATE.STREAMING;
-  state.clarPending = null;
   setInputState(false, '正在检索...');
   startSSE(query);
 }

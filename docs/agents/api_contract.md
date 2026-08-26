@@ -178,7 +178,7 @@ event: model_info
 data: {"model": "模型名", "is_fallback": false}
 
 event: done
-data: {}
+data: {"trace_id": "trace_xxx"}
 
 event: error
 data: {"error": "错误消息"}
@@ -204,9 +204,9 @@ data: {}
 | `citation` | rerank 节点完成 | 引用来源，按 source+page 去重 |
 | **`clarification`** | ~~classify 检测到缺失实体~~ | **已退役**：classify 已删，无预判来源，不再生产，前端已由 `ask_user` 接管 |
 | **`ask_user`** | **ask_user 工具被调用（agent 需要用户补充信息）** | **问题卡片事件，前端 composer 接管输入区；提交答案后同流续答** |
-| **`abstention`** | **检索无达标 context，判定拒答转人工** | **abstention 标识 + 转人工提示文案，前端展示转人工入口** |
+| **`abstention`** | **模型输出命中拒答标记（如"未在文档中找到"）** | **abstention 标识 + 转人工提示文案，前端展示转人工入口；判定只看 answer 文案，与是否触发检索无关** |
 | `model_info` | generate 节点完成 | 实际使用的模型名和 fallback 状态 |
-| `done` | 流结束 | 流结束标记 |
+| `done` | 流结束 | 流结束标记；携带 `trace_id`（当前请求全链路追踪 ID），前端记录后随答案反馈回传 |
 | `error` | 异常 | 异常时推送，无 retry 机制 |
 
 #### 2.3.2 `POST /api/chat/clarify-answer → 200 | 404`
@@ -232,6 +232,8 @@ detail 为 `CLARIFY_ANSWER_NOT_FOUND_TEXT`（"澄清问题已过期或不存在"
 
 > ⚠️ `POST /chat/clarify-answer` 与 SSE 是独立 HTTP 请求，contextvar 不跨请求，
 > 答案经进程级 `pending_asks` 注册表（session_id → asyncio.Future）送达。
+> 解析成功后，答案文本还会作为 user 消息写入 Redis 对话历史（chat_manager.add_message_async），
+> 与 `stream_chat` 入口写入原始 query 的轨道并存，保证跨 turn 上下文不丢。
 
 ### `clarification` 事件详情
 
@@ -405,7 +407,7 @@ Success:
 保存用户对单条答案的评分与可选评论。Body:
 
 ```json
-{"session_id": "sid", "message_index": 2, "rating": "positive", "comment": "回答准确"}
+{"session_id": "sid", "message_index": 2, "rating": "positive", "comment": "回答准确", "trace_id": "trace_xxx"}
 ```
 
 | 字段 | 类型 | 说明 |
@@ -414,6 +416,7 @@ Success:
 | `message_index` | int | 会话内消息序号（前端消息数组索引，从 0 起），非数据库 ID |
 | `rating` | str | `positive` / `negative`，非法值返回 422 |
 | `comment` | str | 用户评论，可选，默认空串 |
+| `trace_id` | str | 全链路追踪 ID（前端从 SSE `done` 事件记录并回传，用于还原该答案的生成链路），可选，默认空串 |
 
 Success:
 ```json

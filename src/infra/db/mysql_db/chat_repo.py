@@ -114,6 +114,7 @@ class ChatRepo:
         message_index: int,
         rating: str,
         comment: str,
+        trace_id: str = "",
     ) -> None:
         """写入一条答案反馈记录到 feedback 表。
 
@@ -122,6 +123,7 @@ class ChatRepo:
             message_index: 会话内消息序号（前端消息数组索引，从 0 起）
             rating: 评分（positive/negative）
             comment: 用户评论
+            trace_id: 全链路追踪 ID（还原生成链路用，空串 = 未捕获到）
         """
         async with self._sf() as session:
             fb = FeedbackModel(
@@ -129,6 +131,7 @@ class ChatRepo:
                 message_index=message_index,
                 rating=rating,
                 comment=comment,
+                trace_id=trace_id,
             )
             session.add(fb)
             await session.commit()
