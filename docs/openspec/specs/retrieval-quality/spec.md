@@ -51,14 +51,14 @@ Results SHALL include average relevance score and recall@K metrics per combinati
 - **WHEN** 请求完成时检查状态
 - **THEN** AgentState 不包含 `grader_score`/`retrieval_retries`/`downgraded` 等字段，且请求只执行一次检索和一次 rerank
 
-### Requirement: abstention 由 LLM 语义判定
+### Requirement: abstention 决策路径（全模型决策）
 
-系统 SHALL 在检索返回空结果（dense + BM25 均无结果）时返回静态 abstention 文案；检索非空时，将 rerank 相对 top-N 的 context 全部交给生成 LLM，由 LLM 依据系统提示词（"文档中没有相关信息，请说明'未在文档中找到相关数据'"）语义判断能否回答，不因 rerank 绝对分数而提前拒绝。
+删除 classify 节点与固定流水线后，系统 SHALL 将空检索的 abstention 触发全部改为"模型决策"：`retrieve_kb` 返回空结果（或证据不足）时作为普通工具结果回喂模型，模型 SHALL 基于证据情况自行选择——输出 abstention 文案、调用 `ask_user` 追问、调用 `escalate_to_human` 转人工、或基于已有证据作答。不再存在"确定性 abstention 分支"。
 
-#### Scenario: 检索空返回静态 abstention
-- **WHEN** dense + BM25 均无检索结果
-- **THEN** 生成节点返回"未在文档中找到相关数据"静态文案，不调用生成 LLM
+#### Scenario: 空检索模型决策
+- **WHEN** retrieve_kb 返回空结果
+- **THEN** 模型收到空工具结果后自行决定 abstain / 追问 / 转人工，不由流水线硬编码判断
 
-#### Scenario: 低分 context 交由 LLM 判断
-- **WHEN** 检索非空但相关 chunk rerank 分数低于 0.3
-- **THEN** context 仍进入生成阶段，LLM 判断能否回答；不能回答时输出 abstention 文案而非编造
+#### Scenario: KB 未解析 → 语义选库检索
+- **WHEN** kb_router 未解析出知识库（如无 user_id）
+- **THEN** retrieve_kb 以语义匹配 query 与各 KB 的 name+description，选中相似度最高的 1 个知识库进行检索；匹配失败（无 KB 或相似度低于阈值）时返回空工具结果，模型按 abstain / ask_user / escalate 决策，不触发旧确定性 abstention 文案
