@@ -160,6 +160,18 @@ ABSTENTION_MARKERS: tuple[str, ...] = ("未在文档中找到",)
 ABSTENTION_TEXT: str = "未在文档中找到相关数据。请尝试更换问题表述或补充更多文档。"
 
 
+# ====== Agent 状态事件文案 ======
+
+# on_chat_model_start（agent 节点）→ SSEStatusEvent("agent")：模型开始思考
+AGENT_STATUS_THINKING: str = "正在思考..."
+
+# on_tool_start（retrieve_kb）→ SSEStatusEvent("retrieve")：开始检索
+AGENT_STATUS_RETRIEVING: str = "正在检索相关文档..."
+
+# on_tool_end（retrieve_kb）→ SSEStatusEvent("retrieve")：检索完成
+AGENT_STATUS_RETRIEVED: str = "检索完成，正在分析..."
+
+
 # ====== SSE 错误事件文案 ======
 
 # SSEErrorEvent 统一错误前缀：_dual_stream（事件源异常）与 stream_chat（外层兜底）共用
