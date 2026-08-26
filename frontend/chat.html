@@ -958,15 +958,15 @@ function appendFeedback(bubble) {
   const row = document.createElement('div');
   row.className = 'feedback-row';
   row.innerHTML = `
-    <button class="feedback-btn" type="button" data-rating="1" aria-label="有帮助">👍</button>
-    <button class="feedback-btn" type="button" data-rating="0" aria-label="无帮助">👎</button>
+    <button class="feedback-btn" type="button" data-rating="positive" aria-label="有帮助">👍</button>
+    <button class="feedback-btn" type="button" data-rating="negative" aria-label="无帮助">👎</button>
   `;
   row.querySelectorAll('.feedback-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       if (row.dataset.sent) return;
       row.dataset.sent = '1';
       row.querySelectorAll('.feedback-btn').forEach(b => b.classList.add('feedback-btn-disabled'));
-      sendFeedback(state.sessionId, index, parseInt(btn.dataset.rating, 10));
+      sendFeedback(state.sessionId, index, btn.dataset.rating);
     });
   });
   bubble.appendChild(row);
