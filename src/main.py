@@ -11,6 +11,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from src.api import auth as auth_routes
 from src.api import (
     chat_router,
+    clarify_router,
     doc_router,
     health_router,
     kb_eval_router,
@@ -168,6 +169,7 @@ app.include_router(health_router, prefix="/api", tags=["health"])
 app.include_router(kb_router, prefix="/api", tags=["knowledge-bases"])
 app.include_router(doc_router, prefix="/api", tags=["documents"])
 app.include_router(chat_router, prefix="/api", tags=["chat"])
+app.include_router(clarify_router, prefix="/api", tags=["chat"])
 app.include_router(sessions_router, prefix="/api", tags=["sessions"])
 app.include_router(kb_eval_router, prefix="/api", tags=["evaluation"])
 app.include_router(ragas_generate_routes.router, prefix="/api", tags=["ragas"])

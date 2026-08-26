@@ -177,6 +177,9 @@ ASK_USER_REQUEST_CANCELLED: str = "Error: 请求已取消"
 # ask_user 等待用户回答超时文案：超过 ASK_USER_TIMEOUT（const.py 秒数）未获答案时返回
 ASK_USER_TIMEOUT_TEXT: str = "Error: 等待用户回答超时"
 
+# /chat/clarify-answer 404 文案：POST 解析挂起澄清时查无该 session 或 Future 已结束（超时/取消）
+CLARIFY_ANSWER_NOT_FOUND_TEXT: str = "该澄清问题已超时或不存在"
+
 
 # ====== 实体抽取 ======
 
