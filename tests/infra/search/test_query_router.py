@@ -17,7 +17,7 @@ def test_l0_greeting_returns_simple() -> None:
     router = QueryRouter(llm=Mock())
     router._llm_classify = Mock()
     result = router.route("你好", history=[])
-    assert result[LangGraphNode.Classify.INTENT].route == "simple"
+    assert result[LangGraphNode.Classify.INTENT]["route"] == "simple"
     router._llm_classify.assert_not_called()
 
 
@@ -26,7 +26,7 @@ def test_l0_short_query_returns_simple() -> None:
     router = QueryRouter(llm=Mock())
     router._llm_classify = Mock()
     result = router.route("营收", history=[])
-    assert result[LangGraphNode.Classify.INTENT].route == "simple"
+    assert result[LangGraphNode.Classify.INTENT]["route"] == "simple"
     assert result[LangGraphNode.Classify.SKIP_RETRIEVAL] is False
     router._llm_classify.assert_not_called()
 

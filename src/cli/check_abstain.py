@@ -133,7 +133,6 @@ async def _run_sample(
             "_history": [
                 ChatMessage(role=m.role, content=m.content) for m in sample.history
             ],
-            "skip_clarify": True,  # 验收聚焦检索+生成链路，跳过追问
         }
     )
     answer = final_state.get("answer", "") or ""

@@ -142,9 +142,6 @@ async def generate_answers_and_contexts(
                     "query": q,
                     "trace_id": trace_id,
                     "_history": [],
-                    # 评估模式：即使 classify 判定缺实体也跳过 clarify 追问，
-                    # 直接走检索+生成，否则批量评估会因追问而空答（指标全 0）
-                    "skip_clarify": True,
                 }
             )
             full_answer = final_state.get("answer", "")
@@ -153,7 +150,9 @@ async def generate_answers_and_contexts(
             # 提取上下文字段列表（用于 context_recall / context_precision 评估）
             # 与生产 prompt（RAGContext.to_prompt_text）保持同一渲染格式，
             # 让 RAGAS 的 NLI 看到与生成模型一致的上下文（含来源/页码锚点）
-            ctx_list = [c.to_prompt_text() for c in final_state.get("contexts", [])]
+            ctx_list = [
+                c.to_prompt_text() for c in final_state.get("tool_contexts", [])
+            ]
             contexts.append(ctx_list)
 
             logger.info(
