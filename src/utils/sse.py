@@ -48,6 +48,8 @@ class SSEErrorEvent:
 class SSEDoneEvent:
     """流结束事件。"""
 
+    trace_id: str = ""  # 全链路追踪 ID（前端收到 done 时记录，随答案反馈回传）
+
 
 @dataclass
 class SSEModelInfoEvent:
@@ -152,9 +154,13 @@ def sse_citation(
     return f"event: citation\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def sse_done() -> str:
-    """构建 SSE done 事件（标记流式响应结束）。"""
-    return "event: done\ndata: {}\n\n"
+def sse_done(trace_id: str = "") -> str:
+    """构建 SSE done 事件（标记流式响应结束，携带 trace_id 供前端反馈还原链路）。
+
+    Args:
+        trace_id: 全链路追踪 ID（空串 = 未捕获到，前端忽略）
+    """
+    return f"event: done\ndata: {json.dumps({'trace_id': trace_id}, ensure_ascii=False)}\n\n"
 
 
 def sse_error(error: str) -> str:
@@ -238,8 +244,8 @@ def to_sse(event: SSEEvent) -> str:
             return sse_status(stage, message)
         case SSEErrorEvent(error=error):
             return sse_error(error)
-        case SSEDoneEvent():
-            return sse_done()
+        case SSEDoneEvent(trace_id=trace_id):
+            return sse_done(trace_id)
         case SSEModelInfoEvent(model=model, is_fallback=is_fallback):
             return sse_model_info(model, is_fallback)
         case SSEAskUserEvent(type=t, questions=questions):

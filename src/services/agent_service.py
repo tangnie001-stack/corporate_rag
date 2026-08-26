@@ -37,6 +37,7 @@ from src.infra.db.vector_store import VectorStore
 from src.infra.llm.langfuse_tracing import LangfuseTracer, traced
 from src.infra.llm.prompt_manager import PromptManager
 from src.infra.llm.request_context import RequestContext, current_request_ctx
+from src.infra.llm.trace_context import current_trace_id
 from src.infra.search.bm25_index import BM25Index
 from src.utils.sse import (
     SSEAbstentionEvent,
@@ -108,16 +109,15 @@ def _extract_model_name(output) -> str:
 
 
 def _is_abstention(state: AgentState) -> bool:
-    """abstention 判定：无检索上下文或答案命中拒答标记。
+    """abstention 判定：仅凭模型输出是否命中拒答标记。
 
     Args:
         state: agent 循环结束后的最终状态
 
     Returns:
-        True 表示应提示转人工（tool_contexts 为空或 answer 包含 ABSTENTION_MARKERS 任一标记）
+        True 表示应提示转人工（answer 包含 ABSTENTION_MARKERS 任一标记）；
+        闲聊/概念问答等未触发检索但正常作答的场景不再误判
     """
-    if not state.tool_contexts:
-        return True
     return any(marker in state.answer for marker in ABSTENTION_MARKERS)
 
 
@@ -359,7 +359,7 @@ class AgentService:
         except Exception as e:  # noqa: BLE001
             logger.exception("AgentService stream_chat failed: {}", e)
             yield SSEErrorEvent(f"{SSE_ERROR_PREFIX}{str(e)[:100]}")
-            yield SSEDoneEvent()
+            yield SSEDoneEvent(trace_id=current_trace_id.get() or "")
         else:
             if full_answer:
                 await self._chat_manager.add_message_async(
@@ -375,7 +375,7 @@ class AgentService:
             model_used = capture.model_used
             self._last_model_used = model_used
             yield SSEModelInfoEvent(model=model_used, is_fallback=False)
-            yield SSEDoneEvent()
+            yield SSEDoneEvent(trace_id=current_trace_id.get() or "")
         finally:
             current_request_ctx.reset(ctx_token)
             # 显式关闭事件源：本生成器被 aclose 时 async for 不传播关闭，

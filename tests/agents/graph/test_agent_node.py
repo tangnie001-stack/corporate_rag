@@ -4,7 +4,7 @@ fake LLM（MockChatModel）与 stub PromptManager 均为内存实现，不发真
 """
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
 from src.agents.graph.agent_node import (
     make_agent_finalize_node,
@@ -17,7 +17,7 @@ from src.rag.context import RAGContext
 
 
 class MockChatModel:
-    """极简 fake LLM：bind_tools 原样返回，ainvoke 返回固定 AIMessage。"""
+    """极简 fake LLM：bind_tools 原样返回，astream 返回固定响应（单块）。"""
 
     def __init__(self, response):
         """记录固定响应。"""
@@ -27,9 +27,9 @@ class MockChatModel:
         """绑定工具：fake 直接返回自身。"""
         return self
 
-    async def ainvoke(self, messages):
-        """返回固定 AIMessage，不真正调用模型。"""
-        return self.response
+    async def astream(self, messages):
+        """以单块流式序列返回固定响应。"""
+        yield self.response
 
 
 class StubPromptManager:
@@ -158,11 +158,11 @@ async def test_agent_model_injects_initial_messages():
     captured = {}
 
     class CapturingChatModel(MockChatModel):
-        """记录 ainvoke 收到的 messages。"""
+        """记录 astream 收到的 messages。"""
 
-        async def ainvoke(self, messages):
+        async def astream(self, messages):
             captured["messages"] = messages
-            return self.response
+            yield self.response
 
     llm = CapturingChatModel(AIMessage(content="ok"))
     node = make_agent_model_node(llm, [], StubPromptManager())
@@ -174,3 +174,40 @@ async def test_agent_model_injects_initial_messages():
     assert len(msgs) == 2  # system + user（无历史时）
     assert msgs[0].type == "system"
     assert "q" in msgs[-1].content
+
+
+@pytest.mark.asyncio
+async def test_agent_model_astream_merges_chunks():
+    """astream 多块经 += 聚合：content 拼接且 tool_call_chunks 合并为 tool_calls。"""
+    chunks = [
+        AIMessageChunk(content="需要"),
+        AIMessageChunk(
+            content="",
+            tool_call_chunks=[
+                {
+                    "name": "retrieve_kb",
+                    "args": '{"query": "营收"}',
+                    "id": "c1",
+                    "index": 0,
+                    "type": "tool_call_chunk",
+                }
+            ],
+        ),
+    ]
+
+    class MultiChunkModel(MockChatModel):
+        """astream 返回多个 chunk 的 fake。"""
+
+        async def astream(self, messages):
+            for chunk in self.response:
+                yield chunk
+
+    llm = MultiChunkModel(chunks)
+    node = make_agent_model_node(llm, [], StubPromptManager())
+
+    state = AgentState.make_initial_state("s1", "kb1", "q", [])
+    out = await node(state)
+
+    result = out["messages"][-1]  # 首轮注入 system+user，模型输出在末尾
+    assert result.content == "需要"
+    assert result.tool_calls and result.tool_calls[0]["name"] == "retrieve_kb"

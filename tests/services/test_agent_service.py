@@ -134,7 +134,7 @@ def _make_service() -> tuple[AgentService, AsyncMock]:
 class TestIsAbstention:
     """_is_abstention 判定逻辑。"""
 
-    def test_empty_contexts_is_abstention(self):
+    def test_answer_matches_marker_is_abstention_without_contexts(self):
         state = AgentState.make_initial_state("s1", "kb1", "q", [])
         state.answer = "未在文档中找到相关数据"
         assert _is_abstention(state)
@@ -149,6 +149,12 @@ class TestIsAbstention:
         state = AgentState.make_initial_state("s1", "kb1", "q", [])
         state.tool_contexts.append(_make_context())
         state.answer = "2024年营收为100亿 [1]"
+        assert not _is_abstention(state)
+
+    def test_empty_contexts_normal_answer_not_abstention(self):
+        """无检索上下文 + 正常回答 → 不判定 abstention（收窄判定，闲聊不误报）。"""
+        state = AgentState.make_initial_state("s1", "kb1", "q", [])
+        state.answer = "你好！这是概念解释……"
         assert not _is_abstention(state)
 
 
@@ -246,7 +252,7 @@ async def test_stream_chat_emits_full_event_sequence():
     assert abstentions == []
     assert len(dones) == 1
     # 有检索上下文 + 正常回答 → 不 abstention；done 恒在末尾
-    assert events[-1] == SSEDoneEvent()
+    assert isinstance(events[-1], SSEDoneEvent)
     assert service._last_model_used == "gpt-4o"
 
 
@@ -325,4 +331,4 @@ async def test_stream_chat_no_abstention_without_final_state():
         events.append(event)
 
     assert [e for e in events if isinstance(e, SSEAbstentionEvent)] == []
-    assert events[-1] == SSEDoneEvent()
+    assert isinstance(events[-1], SSEDoneEvent)

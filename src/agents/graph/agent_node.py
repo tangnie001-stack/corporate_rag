@@ -8,6 +8,7 @@ from collections.abc import Callable
 
 from langchain_core.messages import AIMessage, BaseMessage
 from langgraph.prebuilt import ToolNode
+from loguru import logger
 
 from src.agents.graph.state import AgentState
 from src.config.const import HISTORY_MAX_TURNS, HISTORY_TOKEN_RATIO
@@ -71,14 +72,30 @@ def make_agent_model_node(llm, tools, prompt_manager) -> Callable:
             messages = state.messages
         else:
             messages = _initial_messages(state)
-        result = await model.ainvoke(messages)
+        iteration = state._agent_iterations + 1
+        logger.info("agent iteration={} msgs={}", iteration, len(messages))
+        # 流式聚合：astream 逐块产出，经 AIMessageChunk 的 += 合并 content 与
+        # tool_call_chunks，最终消息带 tool_calls（若模型发起工具调用），
+        # 同时驱动 on_chat_model_stream 事件把 token 流式下发前端
+        chunks = []
+        async for chunk in model.astream(messages):
+            chunks.append(chunk)
+        result = chunks[0]
+        for chunk in chunks[1:]:
+            result = result + chunk
+        if iteration >= state._max_agent_iterations:
+            logger.warning(
+                "agent iteration limit reached query={} iteration={}",
+                state.query,
+                iteration,
+            )
         if state.messages:
             update_messages = [result]
         else:
             update_messages = [*messages, result]
         return {
             "messages": update_messages,
-            "_agent_iterations": state._agent_iterations + 1,
+            "_agent_iterations": iteration,
         }
 
     return agent_model
