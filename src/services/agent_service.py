@@ -3,18 +3,17 @@
 职责：
 1. 初始化并编译 StateGraph
 2. 调用 graph.astream_events() 执行
-3. 将 LangGraph 事件转换为 SSE 事件
-4. 异常边界处理和三降级策略
+3. 将 LangGraph 事件转换为 SSE 事件（双路合并：graph 事件 + ask_user 澄清）
+4. 异常边界处理和 abort 信号联动
 """
 
-import time
+import asyncio
 from collections.abc import AsyncGenerator
 
 from langgraph.graph.state import CompiledStateGraph
 from loguru import logger
 
 from src.agents.graph.state import (
-    SSE_STATUS,
     AgentState,
     LangGraph,
     LangGraphEvent,
@@ -23,25 +22,138 @@ from src.agents.graph.state import (
 )
 from src.agents.graph.workflow import build_graph
 from src.chat.manager import ChatManager
-from src.config.const import (
-    ABSTENTION_STATUS_MSG,
-)
-from src.config.prompts import ABSTENTION_TEXT
+from src.config.const import ASK_USER_STATUS_MSG
 from src.infra.db.vector_store import VectorStore
 from src.infra.llm.langfuse_tracing import LangfuseTracer, traced
 from src.infra.llm.prompt_manager import PromptManager
+from src.infra.llm.request_context import RequestContext, current_request_ctx
 from src.infra.search.bm25_index import BM25Index
-from src.rag.context import RAGContext
 from src.utils.sse import (
     SSECitationEvent,
-    SSEClarificationEvent,
     SSEDoneEvent,
     SSEErrorEvent,
     SSEEvent,
-    SSEModelInfoEvent,
     SSEStatusEvent,
     SSETokenEvent,
 )
+
+
+class _EndMarker:
+    """事件源正常结束哨兵，标记 queue 中不再有新事件。"""
+
+
+class _ErrorMarker:
+    """事件源异常哨兵，携带原始异常。"""
+
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+
+
+def _convert_event(item) -> list[SSEEvent]:
+    """把 queue 中的 item 转成 SSE 事件列表（空列表 = 无需产出）。
+
+    queue 中混有两类 item：
+    - ask_user 工具经 clarify_channel 推送的 {"type": "ask_user", "questions": [...]}
+      → 过渡期产出 SSEStatusEvent(stage="ask_user")（Task 9 换 SSEAskUserEvent）
+    - LangGraph astream_events 事件 dict：
+      on_chat_model_stream（metadata.langgraph_node == "agent" 且 chunk 内容非空）
+      → SSETokenEvent（agent 节点对 LLM 的流式 token）
+      on_chain_end（name == "format"）→ output.citations 逐个转 SSECitationEvent
+    其余事件（on_chain_start / tools 等）忽略；状态事件由 Task 12 以事件类型重建。
+
+    Args:
+        item: queue 中取出的原始 item（clarify_channel 推送 dict 或 LangGraph 事件 dict）
+
+    Returns:
+        list[SSEEvent]: 转换后的 SSE 事件列表；无法转换/无需产出的 item 返回空列表
+    """
+    if isinstance(item, dict) and item.get("type") == "ask_user":
+        return [SSEStatusEvent(stage="ask_user", message=ASK_USER_STATUS_MSG)]
+
+    kind = item.get(LangGraphKey.EVENT, "")
+    name = item.get(LangGraphKey.NAME, "")
+
+    if kind == LangGraphEvent.CHAT_MODEL_STREAM:
+        metadata = item.get("metadata", {}) or {}
+        if metadata.get("langgraph_node") == "agent":
+            chunk = item.get(LangGraphKey.DATA, {}).get(LangGraphKey.CHUNK)
+            if chunk is not None:
+                content = chunk.content
+            else:
+                content = ""
+            if content:
+                return [SSETokenEvent(content)]
+        return []
+
+    if kind == LangGraphEvent.CHAIN_END and name == LangGraphNode.Format.NAME:
+        output = item.get(LangGraphKey.DATA, {}).get(LangGraphKey.OUTPUT) or {}
+        citations = output.get(LangGraphNode.Format.CITATIONS, []) or []
+        return [
+            SSECitationEvent(
+                source=c.get("source", ""),
+                page=c.get("page", 0),
+                snippet=c.get("snippet", ""),
+                score=c.get("score", 0.0),
+                index=c.get("index", 0),
+            )
+            for c in citations
+        ]
+
+    return []
+
+
+async def _dual_stream(
+    event_source,
+    queue: asyncio.Queue,
+    abort_signal: asyncio.Event,
+) -> AsyncGenerator[SSEEvent, None]:
+    """双路合并：Task A 迭代事件源推 queue，Task B（本生成器）消费并转换产出 SSE 事件。
+
+    queue 同时承载 graph.astream_events 事件与 ask_user 工具经 clarify_channel
+    推送的澄清 item（应为无界 queue，避免哨兵 put 在取消路径阻塞）。事件源
+    异常/正常收尾统一用哨兵表达：异常 → _ErrorMarker 产出 SSEErrorEvent 后
+    break；正常结束 → _EndMarker 后 break。
+
+    本生成器（Task B）无论正常结束还是被取消（客户端断连触发 aclose），
+    finally 都会置位 abort_signal、取消 Task A 并 gather 等待其退出，
+    保证事件源不再滞留。
+
+    Args:
+        event_source: 事件源异步迭代器（graph.astream_events 返回值）
+        queue: 双路事件合并队列（graph 事件 + clarify_channel 澄清 item）
+        abort_signal: 请求级中止信号（置位后 ask_user 等待被唤醒并中断）
+
+    Yields:
+        SSEEvent: 事件源事件转换后的 SSE 事件（token / citation / status / error）
+    """
+
+    async def run_source():
+        """Task A：迭代事件源逐个推入 queue，异常/正常收尾统一放哨兵。"""
+        try:
+            async for ev in event_source:
+                await queue.put(ev)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            await queue.put(_ErrorMarker(e))
+        finally:
+            await queue.put(_EndMarker())
+
+    task_a = asyncio.create_task(run_source())
+    try:
+        while True:
+            item = await queue.get()
+            if isinstance(item, _EndMarker):
+                break
+            if isinstance(item, _ErrorMarker):
+                yield SSEErrorEvent(f"暂时无法回答：{item.error}")
+                break
+            for event in _convert_event(item):
+                yield event
+    finally:
+        abort_signal.set()
+        task_a.cancel()
+        await asyncio.gather(task_a, return_exceptions=True)
 
 
 class AgentService:
@@ -86,204 +198,38 @@ class AgentService:
         session_id: str,
         query: str,
     ) -> AsyncGenerator[SSEEvent, None]:
-        """执行图并流式返回 SSE 事件。"""
+        """执行图并流式返回 SSE 事件。
 
+        graph 事件与 ask_user 澄清经 _dual_stream 双路合并产出；本方法创建
+        RequestContext 并 set 到 current_request_ctx（工具/节点经 contextvar
+        读取 queue/abort/tool_contexts），finally 中 reset。assistant 消息
+        持久化由 api 层（_stream_rag_response 流结束后 create_task）负责。
+
+        Args:
+            kb_id: 知识库 ID（空字符串表示跨库搜索）
+            session_id: 会话 ID
+            query: 用户查询文本
+
+        Yields:
+            SSEEvent: 转换后的 SSE 事件（token / citation / status / error / done）
+        """
         history = await self._chat_manager.get_history_async(session_id) or []
         await self._chat_manager.add_message_async(session_id, "user", query)
 
         initial_state = AgentState.make_initial_state(session_id, kb_id, query, history)
 
-        full_answer = ""
-        answer = ""
-        formatted_citations = None  # None=Format 节点未捕获（兜底用）；[]=明确无引用
-        model_used = ""
-        is_fallback = False
-
+        ctx = RequestContext(session_id=session_id)
+        ctx_token = current_request_ctx.set(ctx)
         try:
-            t0 = time.perf_counter()
-            contexts: list[RAGContext] = []
-            _clarification_pending = None
-            _kb_suggestions_all: dict = {}
-
-            async for event in self._graph.astream_events(
-                initial_state,
-                version=LangGraph.VERSION,
+            async for event in _dual_stream(
+                self._graph.astream_events(initial_state, version=LangGraph.VERSION),
+                ctx.clarify_channel,
+                ctx.abort_signal,
             ):
-                kind = event.get(LangGraphKey.EVENT, "")
-                name = event.get(LangGraphKey.NAME, "")
-
-                match kind:
-                    case LangGraphEvent.CHAIN_START:
-                        for node, message in SSE_STATUS.items():
-                            if node in name:
-                                yield SSEStatusEvent(node, message)
-                                break
-
-                    case LangGraphEvent.CHAT_MODEL_STREAM:
-                        metadata = event.get("metadata", {}) or {}
-                        node_name = metadata.get("langgraph_node", "")
-                        chunk = event.get(LangGraphKey.DATA, {}).get(LangGraphKey.CHUNK)
-                        content = chunk.content if chunk is not None else ""
-                        if LangGraphNode.Generate.NAME not in node_name:
-                            if content:
-                                logger.info(
-                                    "CHAT_MODEL_STREAM filtered: node={} content_prefix={!r:.50}",
-                                    node_name,
-                                    content,
-                                )
-                            continue
-                        if content:
-                            full_answer += content
-                            yield SSETokenEvent(content)
-
-                    case LangGraphEvent.CHAIN_END:
-                        output = event.get(LangGraphKey.DATA, {}).get(
-                            LangGraphKey.OUTPUT
-                        )
-                        if isinstance(output, dict):
-                            if LangGraphNode.Classify.NAME in name:
-                                # 无条件保存 KB 候选（含无 missing 场景），供 abstention 引导使用
-                                _kb_suggestions_all = (
-                                    output.get(LangGraphNode.Classify.KB_SUGGESTIONS)
-                                    or {}
-                                )
-                                missing = output.get(
-                                    LangGraphNode.Classify.MISSING_ENTITIES, []
-                                )
-                                if missing:
-                                    logger.info(
-                                        "classify detected missing_entities={}", missing
-                                    )
-                                    _clarification_pending = {
-                                        "type": "entity_completion",
-                                        "missing_entities": missing,
-                                        "suggestions": output.get(
-                                            LangGraphNode.Classify.KB_SUGGESTIONS, {}
-                                        )
-                                        or {},
-                                    }
-                            elif LangGraphNode.Rerank.NAME in name:
-                                contexts = output.get(
-                                    LangGraphNode.Rerank.CONTEXTS, contexts
-                                )
-                            elif LangGraphNode.Generate.NAME in name:
-                                answer = output.get("answer", "") or answer
-                                model_used = output.get("model_used", model_used)
-                                is_fallback = output.get("is_fallback", is_fallback)
-                            elif LangGraphNode.Format.NAME in name:
-                                formatted_citations = (
-                                    output.get(LangGraphNode.Format.CITATIONS, []) or []
-                                )
-
-            # 追问处理：缺少实体时返回澄清事件（批量 questions）
-            if _clarification_pending:
-                cp = _clarification_pending
-                from src.infra.search.query_router import SUGGESTIONS_MAP
-
-                kb_suggestions = cp.get("suggestions") or {}
-                questions = []
-                for me in cp["missing_entities"]:
-                    etype = me.get("type", "default")
-                    # KB 候选优先（公司/报告期/代码等真实候选），否则兜底静态映射
-                    sugg = kb_suggestions.get(etype) or SUGGESTIONS_MAP.get(
-                        etype, SUGGESTIONS_MAP["default"]
-                    )
-                    questions.append(
-                        {
-                            "type": etype,
-                            "question": me.get("question", "请补充相关信息"),
-                            "suggestions": sugg,
-                        }
-                    )
-                first = questions[0]
-                yield SSEClarificationEvent(
-                    type=cp["type"],
-                    question=first["question"],
-                    missing_entities=cp["missing_entities"],
-                    suggestions=first["suggestions"],
-                    questions=questions,
-                )
-                yield SSEDoneEvent()
-                return
-
-            # abstention 引导：检索空且 KB 有候选时发一次 clarification
-            if not contexts and not _clarification_pending and _kb_suggestions_all:
-                questions = [
-                    {
-                        "type": k,
-                        "question": "文档中未找到相关数据，可尝试查询：",
-                        "suggestions": v,
-                    }
-                    for k, v in _kb_suggestions_all.items()
-                ]
-                yield SSEClarificationEvent(
-                    type="no_data_guidance",
-                    question="未在文档中找到相关数据，可尝试查询以下内容：",
-                    missing_entities=[],
-                    suggestions=[],
-                    questions=questions,
-                )
-                yield SSEDoneEvent()
-                return
-
-            # abstention 兜底：generate 返回静态 answer 且无流式 token 时，作为 token 送达
-            if not full_answer and answer:
-                full_answer = answer
-                if answer == ABSTENTION_TEXT:
-                    yield SSEStatusEvent("generate", ABSTENTION_STATUS_MSG)
-                yield SSETokenEvent(answer)
-
-            # 引用事件：优先用 format_node 过滤后的 citations
-            # formatted_citations 为 None 表示 Format 节点未捕获（异常路径），兜底遍历 contexts
-            # formatted_citations 为 [] 表示明确无引用（拒答/未引用任何文档），直接不发
-            if formatted_citations is None:
-                seen = set()
-                citations_to_send = []
-                for ctx in contexts:
-                    key = (ctx.source, ctx.page or 0)
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    citations_to_send.append(
-                        {
-                            "source": ctx.source or "",
-                            "page": ctx.page or 0,
-                            "snippet": (ctx.content or "")[:200],
-                            "score": ctx.score or 0,
-                            "index": 0,
-                        }
-                    )
-            else:
-                citations_to_send = formatted_citations
-            for c in citations_to_send:
-                yield SSECitationEvent(
-                    source=c.get("source", ""),
-                    page=c.get("page", 0),
-                    snippet=c.get("snippet", ""),
-                    score=c.get("score", 0.0),
-                    index=c.get("index", 0),
-                )
-
-            if full_answer:
-                await self._chat_manager.add_message_async(
-                    session_id, "assistant", full_answer
-                )
-
-            # 模型信息（含 fallback 状态）
-            yield SSEModelInfoEvent(
-                model=model_used or "",
-                is_fallback=is_fallback,
-            )
-
-            t1 = time.perf_counter()
-            logger.info(
-                "AgentService stream_chat completed: total={:.1f}s contexts={}",
-                t1 - t0,
-                len(contexts),
-            )
-
+                yield event
         except Exception as e:  # noqa: BLE001
             logger.exception("AgentService stream_chat failed: {}", e)
             yield SSEErrorEvent(f"暂时无法回答：{str(e)[:100]}")
         finally:
+            current_request_ctx.reset(ctx_token)
             yield SSEDoneEvent()

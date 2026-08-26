@@ -30,6 +30,12 @@ GENERATE_LABELS = _Labels(
 ABSTENTION_STATUS_MSG: str = "未找到相关文档，已直接答复"
 
 
+# ── ask_user 澄清过渡状态提示 ──
+# agent_service 收到 ask_user 工具经 clarify_channel 推送时先产出该状态事件
+# （Task 9 将替换为 SSEAskUserEvent，此处为过渡实现）
+ASK_USER_STATUS_MSG: str = "正在向您确认补充信息..."
+
+
 # ── 实体抽取常量 ──
 # 核心实体类型：文档级属性，渲染进 prompt 支撑 faithfulness 锚点
 ENTITY_TYPES: tuple[str, ...] = ("company", "report_period", "sec_code")
