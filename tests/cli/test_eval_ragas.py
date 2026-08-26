@@ -59,15 +59,13 @@ class TestGenerateAnswers:
         from src.cli.eval_ragas import generate_answers_and_contexts
 
         mock_graph = MagicMock()
-        captured_states: list[dict] = []
 
         async def mock_ainvoke(state: dict) -> dict:
-            captured_states.append(state)
             return {
                 "answer": f"Answer for: {state['query'][:10]}",
-                "contexts": [
-                    MagicMock(content="Context about 茅台营收1,741亿元"),
-                    MagicMock(content="Context about 同比增长15.66%"),
+                "tool_contexts": [
+                    MagicMock(to_prompt_text=lambda: "Context about 茅台营收1,741亿元"),
+                    MagicMock(to_prompt_text=lambda: "Context about 同比增长15.66%"),
                 ],
             }
 
@@ -88,8 +86,6 @@ class TestGenerateAnswers:
         assert trace_ids[0].startswith("eval_")
         assert "Answer for" in answers[0]
         assert len(contexts[0]) == 2
-        # 评估模式必须跳过 clarify 追问，否则批量评估会空答
-        assert all(st["skip_clarify"] is True for st in captured_states)
 
     def test_generate_partial_failure(self) -> None:
         """部分问题失败时应返回错误标记，不中断整体流程。"""
@@ -104,7 +100,10 @@ class TestGenerateAnswers:
             q = state["query"]
             if "失败" in q:
                 raise ValueError("模拟错误")
-            return {"answer": "正常回答", "contexts": [MagicMock(content="ctx")]}
+            return {
+                "answer": "正常回答",
+                "tool_contexts": [MagicMock(to_prompt_text=lambda: "ctx")],
+            }
 
         mock_graph.ainvoke = AsyncMock(side_effect=mock_ainvoke)
 

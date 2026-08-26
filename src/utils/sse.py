@@ -58,24 +58,6 @@ class SSEModelInfoEvent:
 
 
 @dataclass
-class SSEClarificationEvent:
-    """追问事件 — 已退役：classify 已删，无预判来源，不再生产。
-
-    保留类定义与序列化逻辑仅供旧调用方兼容，新代码不得再构造。
-    """
-
-    type: str  # "entity_completion" | "intent_clarification" | "no_data_guidance"
-    question: str  # 追问文本（取第一个问题的文案，兼容旧前端）
-    missing_entities: list[dict]  # [{"type": "year"}, ...]
-    suggestions: list[str]  # 快捷选项（取第一个问题的，兼容旧前端）
-    questions: list[dict] = (
-        field(  # 批量追问列表 [{"type","question","suggestions"}, ...]
-            default_factory=list  # 空列表表示旧调用方未构造，序列化时省略
-        )
-    )
-
-
-@dataclass
 class SSEAskUserEvent:
     """ask_user 工具推送的问题卡片事件。"""
 
@@ -101,7 +83,6 @@ SSEEvent = (
     | SSEErrorEvent
     | SSEDoneEvent
     | SSEModelInfoEvent
-    | SSEClarificationEvent  # 追问事件（已退役，仅供旧调用方兼容）
     | SSEAskUserEvent  # ask_user 问题卡片
     | SSEAbstentionEvent  # abstention 转人工提示
 )
@@ -198,26 +179,6 @@ def sse_model_info(model: str, is_fallback: bool) -> str:
     )
 
 
-def sse_clarification(event: SSEClarificationEvent) -> str:
-    """构建 SSE clarification 事件。
-
-    Args:
-        event: 追问事件对象
-
-    Returns:
-        SSE 格式的文本行
-    """
-    data: dict = {
-        "type": event.type,
-        "question": event.question,
-        "missing_entities": event.missing_entities,
-        "suggestions": event.suggestions,
-    }
-    if event.questions:
-        data["questions"] = event.questions
-    return f"event: clarification\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
-
-
 def sse_ask_user(event: SSEAskUserEvent) -> str:
     """构建 SSE ask_user 事件。
 
@@ -281,10 +242,6 @@ def to_sse(event: SSEEvent) -> str:
             return sse_done()
         case SSEModelInfoEvent(model=model, is_fallback=is_fallback):
             return sse_model_info(model, is_fallback)
-        case SSEClarificationEvent(
-            type=t, question=q, missing_entities=me, suggestions=s, questions=qs
-        ):
-            return sse_clarification(SSEClarificationEvent(t, q, me, s, qs))
         case SSEAskUserEvent(type=t, questions=questions):
             return sse_ask_user(SSEAskUserEvent(t, questions))
         case SSEAbstentionEvent(type=t, message=message):

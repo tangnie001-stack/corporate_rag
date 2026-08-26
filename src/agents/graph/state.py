@@ -66,31 +66,6 @@ class LangGraphNode:
     class KbRouter:
         NAME: str = "kb_router"  # 知识库路由（按 user_id 分发到对应知识库）
 
-    class Classify:
-        NAME: str = "classify"  # 查询分类
-        INTENT: str = "intent"  # 查询意图（RAGQueryIntent 路由结果）
-        EXTRACTED_ENTITIES: str = "extracted_entities"  # 正则提取的实体列表
-        MISSING_ENTITIES: str = "missing_entities"  # LLM 标记的缺失实体
-        CLASSIFICATION_CONFIDENCE: str = "classification_confidence"  # LLM 置信度
-        SKIP_RETRIEVAL: str = "skip_retrieval"  # 问候/闲聊标记：跳过检索直接回答
-        KB_ENTITIES: str = "_kb_entities"  # KB 聚合候选实体文本（prompt 注入）
-        KB_SUGGESTIONS: str = "_kb_suggestions"  # KB 聚合候选生成的澄清建议映射
-
-    class Rewrite:
-        NAME: str = "rewrite"  # 查询改写
-        REWRITTEN_QUERY: str = "rewritten_query"  # 改写后主查询（列表首个）
-        REWRITTEN_QUERIES: str = "rewritten_queries"  # 检索查询列表（含原 query）
-
-    class Retrieve:
-        NAME: str = "retrieve"  # 文档检索
-
-    class Rerank:
-        NAME: str = "rerank"  # 重排序
-        CONTEXTS: str = "contexts"  # 精排后的上下文列表
-
-    class Generate:
-        NAME: str = "generate"  # LLM 生成回答
-
     class Format:
         NAME: str = "format"  # 引用格式化
         CITATIONS: str = "citations"  # 引用列表输出字段
@@ -129,14 +104,3 @@ class LangGraph:
     """astream_events API 版本。"""
 
     VERSION: Literal["v1", "v2"] = "v2"  # 当前 LangGraph 稳定版本
-
-
-# ── SSE 状态事件映射（节点名 → 前端状态提示） ──
-# 与 LangGraphNode.* 保持一致，不引入额外分词差异
-SSE_STATUS: dict[str, str] = {
-    LangGraphNode.Classify.NAME: "正在分析查询类型...",
-    LangGraphNode.Rewrite.NAME: "正在优化查询...",
-    LangGraphNode.Retrieve.NAME: "正在检索相关文档...",
-    LangGraphNode.Rerank.NAME: "正在精排结果...",
-    LangGraphNode.Generate.NAME: "正在生成回答...",
-}

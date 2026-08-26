@@ -69,34 +69,6 @@ def test_chat_stream_passes_user_id():
 
 
 @pytest.mark.asyncio
-async def test_clarify_not_persisted():
-    """clarify 追问（缺实体）时不应持久化对话，避免写入空 assistant 消息。"""
-    from src.api.chat import _stream_rag_response
-    from src.utils.sse import SSEClarificationEvent, SSEDoneEvent
-
-    svc = MagicMock()
-    events = [
-        SSEClarificationEvent(
-            type="entity_completion",
-            question="请问您想查询哪家公司？",
-            missing_entities=[{"type": "company"}],
-            suggestions=[],
-        ),
-        SSEDoneEvent(),
-    ]
-
-    async def _stream(kb_id, session_id, query):
-        for e in events:
-            yield e
-
-    with patch("src.api.chat._persist_conversation") as mock_persist:
-        svc.agent_service.stream_chat = _stream
-        async for _ in _stream_rag_response(svc, "", "s1", "营收多少"):
-            pass
-    mock_persist.assert_not_called()
-
-
-@pytest.mark.asyncio
 async def test_normal_answer_persisted():
     """正常回答（有 token 无澄清）时应持久化对话。"""
     from src.api.chat import _stream_rag_response

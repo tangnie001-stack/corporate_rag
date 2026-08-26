@@ -122,3 +122,4 @@ docker compose build --no-cache app    # 改依赖后重建
 - `../github/dify-1.16.1` — Dify 官方。涉及 LLMOps 平台、AI 应用编排、工作流引擎、RAG 管道、插件体系时参考
 - `../github/financial_rag-main` — 财税法务 RAG 知识库。涉及多智能体协作、LangGraph 状态机、知识图谱、混合检索、三层记忆体系时参考
 - `../github/ragflow-0.26.4` — RAGFlow 开源 RAG 引擎。涉及 DeepDoc 文档解析、模板化分块、知识编译器、引用溯源、Agent 沙箱时参考
+- `../github/deepseek-harness`

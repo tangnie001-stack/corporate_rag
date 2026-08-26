@@ -51,7 +51,7 @@ def make_rag_tools(
         prompt_manager: 提示词管理器（闭包注入，当前工具未直接使用，保留签名）
 
     Returns:
-        工具列表，当前仅含 retrieve_kb
+        工具列表：retrieve_kb（知识库检索）与 ask_user（澄清追问）
     """
 
     @tool("retrieve_kb", args_schema=RetrieveKBArgs)

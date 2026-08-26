@@ -184,7 +184,7 @@ event: error
 data: {"error": "错误消息"}
 ```
 
-追问路径（当 classify 检测到缺失实体时）：
+追问路径（~~当 classify 检测到缺失实体时~~ ⚠️ 已退役，agent 化后由 `ask_user` 事件 + `POST /chat/clarify-answer` 接管，见下文 2.3.2 与 ask_user 事件详情）：
 
 ```json
 event: status
@@ -202,12 +202,41 @@ data: {}
 | `status` | 节点开始 | 四阶段状态（classify / retrieving / reranking / generating） |
 | `token` | LLM 生成中 | LLM 生成文本片段，前端逐段追加 |
 | `citation` | rerank 节点完成 | 引用来源，按 source+page 去重 |
-| **`clarification`** | **classify 检测到缺失实体；检索空 abstention 引导（KB 有候选时）** | **追问事件，前端展示追问气泡 + 快捷选项** |
+| **`clarification`** | ~~classify 检测到缺失实体~~ | **已退役**：classify 已删，无预判来源，不再生产，前端已由 `ask_user` 接管 |
+| **`ask_user`** | **ask_user 工具被调用（agent 需要用户补充信息）** | **问题卡片事件，前端 composer 接管输入区；提交答案后同流续答** |
+| **`abstention`** | **检索无达标 context，判定拒答转人工** | **abstention 标识 + 转人工提示文案，前端展示转人工入口** |
 | `model_info` | generate 节点完成 | 实际使用的模型名和 fallback 状态 |
-| `done` | 流结束 | 流结束标记（追问路径也在 clarification 后立即发送） |
+| `done` | 流结束 | 流结束标记 |
 | `error` | 异常 | 异常时推送，无 retry 机制 |
 
+#### 2.3.2 `POST /api/chat/clarify-answer → 200 | 404`
+
+提交 ask_user 问题答案，解析挂起的澄清 Future，使 agent 继续执行。
+
+```json
+{"session_id": "sid", "answers": [{"id": "q1", "selected": ["2024年"], "custom": ""}]}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `session_id` | str | 会话 ID，定位挂起的 ask_user Future |
+| `answers` | list | 用户答案列表，每条含 id/selected（可含 custom），原样写入 Future 作为 ask_user 返回值 |
+
+Success:
+```json
+{"code": "SUCCESS", "message": "操作成功", "data": true}
+```
+
+**404 语义**：该澄清问题已超时或不存在（查无 Future 或 Future 已结束），
+detail 为 `CLARIFY_ANSWER_NOT_FOUND_TEXT`（"澄清问题已过期或不存在"）。`pop` 保证单次消费。
+
+> ⚠️ `POST /chat/clarify-answer` 与 SSE 是独立 HTTP 请求，contextvar 不跨请求，
+> 答案经进程级 `pending_asks` 注册表（session_id → asyncio.Future）送达。
+
 ### `clarification` 事件详情
+
+> ⚠️ **已退役**：classify 已删（agent 化改造），无预判来源，不再生产；
+> 类定义与序列化逻辑已从 `src/utils/sse.py` 删除。以下内容仅供历史追溯。
 
 ```python
 # 数据结构（src/utils/sse.py: SSEClarificationEvent）
@@ -230,6 +259,36 @@ data: {}
 | `company` | `["腾讯", "阿里巴巴", "其他"]` |
 | `metric` | `["营收", "利润", "毛利率", "其他"]` |
 | `default` | `["请补充说明", "其他"]` |
+
+### `ask_user` 事件详情
+
+```json
+event: ask_user
+data: {"type": "ask_user", "questions": [{"id": "q1", "question": "您想查询哪一年的数据？", "options": ["2024年", "2023年", "其他"], "multi_select": false}]}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `type` | str | 固定 `"ask_user"`，前端据此路由到追问卡片 |
+| `questions` | list | 问题卡片列表；每条含 `id`（答案回显）/`question`（问题文本）/`options`（候选，KB 聚合或 `SUGGESTIONS_MAP` 兜底）/`multi_select`（是否多选） |
+
+> 提交答案走 `POST /api/chat/clarify-answer`，提交后 SSE 保持连接、同流续答；
+> 单 turn 最多 `MAX_ASK_PER_TURN`（2）次调用，超时（`ASK_USER_TIMEOUT` 120s）返回超时文案继续。
+
+### `abstention` 事件详情
+
+```json
+event: abstention
+data: {"type": "abstention", "message": "未在文档中找到相关数据，可尝试转人工咨询"}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `type` | str | 固定 `"abstention"`，前端据此路由到转人工提示 |
+| `message` | str | 转人工提示文案（`SSEAbstentionEvent` 默认值） |
+
+> 触发：agent 迭代结束后检索上下文为空或答案命中拒答标记（`_is_abstention`）；
+> 文案与 `prompts.ABSTENTION_TEXT`（"更换问题表述"引导）语义不同，不混用。
 
 ### 追问流程关键约束
 
@@ -607,6 +666,9 @@ name = f"kb_{kb_id.replace('-', '')}"
 ```
 
 ### 6.2 追问路径（缺失实体）
+
+> ⚠️ **已退役**：以下 classify 追问链路已删除（agent 化改造），
+> 缺失信息由 agent 循环中的 `ask_user` 工具 + `POST /chat/clarify-answer` 处理（见 2.3.2 / ask_user 事件详情）。
 
 ```
 用户提问 "营收多少"（缺年份，无历史上下文）

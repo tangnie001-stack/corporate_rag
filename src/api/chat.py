@@ -13,7 +13,6 @@ from src.config.const import SESSION_LOCK_TTL
 from src.services.app_service import AppService
 from src.utils.sse import (
     SSECitationEvent,
-    SSEClarificationEvent,
     SSEDoneEvent,
     SSEErrorEvent,
     SSETokenEvent,
@@ -167,7 +166,6 @@ async def _stream_rag_response(
     """
     full_answer = ""
     sources: list[str] = []
-    clarification_requested = False
     try:
         async for event in svc.agent_service.stream_chat(kb_id, session_id, query):
             match event:
@@ -175,9 +173,6 @@ async def _stream_rag_response(
                     full_answer += token
                 case SSECitationEvent(source=src, page=page):
                     sources.append(f"{src} (第{page}页)")
-                case SSEClarificationEvent():
-                    # 追问：系统在向用户索要缺失信息，未产生问答，不持久化
-                    clarification_requested = True
             yield to_sse(event)
     except Exception as e:  # noqa: BLE001
         logger.exception("Chat stream unhandled error: {}", str(e))
@@ -185,13 +180,12 @@ async def _stream_rag_response(
         yield to_sse(SSEDoneEvent())
         return
 
-    # 流结束后持久化对话（clarify 追问不持久化，避免写入空 assistant 消息）
-    if not clarification_requested:
-        asyncio.create_task(
-            _persist_conversation(
-                svc, session_id, kb_id, query, full_answer, sources, user_id
-            )
+    # 流结束后持久化对话
+    asyncio.create_task(
+        _persist_conversation(
+            svc, session_id, kb_id, query, full_answer, sources, user_id
         )
+    )
 
 
 async def _persist_conversation(

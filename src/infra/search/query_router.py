@@ -8,7 +8,6 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 from loguru import logger
 
-from src.agents.graph.state import LangGraphNode
 from src.infra.llm.prompt_manager import PromptManager
 from src.infra.search.complexity_scorer import score_complexity
 from src.infra.search.entity_extractor import EntityExtractor
@@ -304,29 +303,25 @@ class QueryRouter:
         else:
             llm_result = self._fallback_route(complexity_score)
         result = {
-            LangGraphNode.Classify.INTENT: {
+            "intent": {
                 "route": llm_result["route"],
                 "rewritten": False,
             },
-            LangGraphNode.Classify.EXTRACTED_ENTITIES: entities_dict,
-            LangGraphNode.Classify.MISSING_ENTITIES: llm_result.get(
-                "missing_entities", []
-            ),
-            LangGraphNode.Classify.CLASSIFICATION_CONFIDENCE: llm_result.get(
-                "confidence", 0.0
-            ),
-            LangGraphNode.Classify.SKIP_RETRIEVAL: False,
+            "extracted_entities": entities_dict,
+            "missing_entities": llm_result.get("missing_entities", []),
+            "classification_confidence": llm_result.get("confidence", 0.0),
+            "skip_retrieval": False,
         }
         self._cache[cleaned] = result
         return result
 
     def _simple_result(self, skip_retrieval: bool = True) -> dict[str, Any]:
         return {
-            LangGraphNode.Classify.INTENT: {"route": "simple", "rewritten": False},
-            LangGraphNode.Classify.EXTRACTED_ENTITIES: [],
-            LangGraphNode.Classify.MISSING_ENTITIES: [],
-            LangGraphNode.Classify.CLASSIFICATION_CONFIDENCE: 1.0,
-            LangGraphNode.Classify.SKIP_RETRIEVAL: skip_retrieval,
+            "intent": {"route": "simple", "rewritten": False},
+            "extracted_entities": [],
+            "missing_entities": [],
+            "classification_confidence": 1.0,
+            "skip_retrieval": skip_retrieval,
         }
 
     def _llm_classify(

@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
-from src.agents.graph.state import LangGraphNode
 from src.infra.search.query_router import (
     KbEntityAggregate,
     QueryRouter,
@@ -17,7 +16,7 @@ def test_l0_greeting_returns_simple() -> None:
     router = QueryRouter(llm=Mock())
     router._llm_classify = Mock()
     result = router.route("你好", history=[])
-    assert result[LangGraphNode.Classify.INTENT]["route"] == "simple"
+    assert result["intent"]["route"] == "simple"
     router._llm_classify.assert_not_called()
 
 
@@ -26,8 +25,8 @@ def test_l0_short_query_returns_simple() -> None:
     router = QueryRouter(llm=Mock())
     router._llm_classify = Mock()
     result = router.route("营收", history=[])
-    assert result[LangGraphNode.Classify.INTENT]["route"] == "simple"
-    assert result[LangGraphNode.Classify.SKIP_RETRIEVAL] is False
+    assert result["intent"]["route"] == "simple"
+    assert result["skip_retrieval"] is False
     router._llm_classify.assert_not_called()
 
 
@@ -37,7 +36,7 @@ def test_entity_extraction_included() -> None:
         return_value={"route": "medium", "missing_entities": [], "confidence": 0.9}
     )
     result = router.route("2024年营收多少", history=[])
-    assert len(result[LangGraphNode.Classify.EXTRACTED_ENTITIES]) > 0
+    assert len(result["extracted_entities"]) > 0
 
 
 def test_missing_entity_triggers() -> None:
@@ -50,7 +49,7 @@ def test_missing_entity_triggers() -> None:
         }
     )
     result = router.route("营收多少", history=[])
-    assert len(result[LangGraphNode.Classify.MISSING_ENTITIES]) > 0
+    assert len(result["missing_entities"]) > 0
 
 
 def test_no_year_triggers_missing() -> None:
@@ -66,8 +65,8 @@ def test_no_year_triggers_missing() -> None:
         }
     )
     result = router.route("营收多少", history=[])
-    assert len(result[LangGraphNode.Classify.MISSING_ENTITIES]) == 1
-    assert result[LangGraphNode.Classify.MISSING_ENTITIES][0]["type"] == "year"
+    assert len(result["missing_entities"]) == 1
+    assert result["missing_entities"][0]["type"] == "year"
 
 
 def test_history_resolves_entity() -> None:
@@ -87,7 +86,7 @@ def test_history_resolves_entity() -> None:
         ChatMessage(role="assistant", content="2024年营收为100亿"),
     ]
     result = router.route("利润率呢", history=history)
-    assert len(result[LangGraphNode.Classify.MISSING_ENTITIES]) == 0
+    assert len(result["missing_entities"]) == 0
 
 
 def test_cache_hits() -> None:
@@ -108,7 +107,7 @@ def test_greeting_sets_skip_retrieval() -> None:
 
     router = QueryRouter(llm=Mock())
     result = router.route("你好", [])
-    assert result[LangGraphNode.Classify.SKIP_RETRIEVAL] is True
+    assert result["skip_retrieval"] is True
 
 
 def test_normal_query_not_skip_retrieval() -> None:
@@ -117,7 +116,7 @@ def test_normal_query_not_skip_retrieval() -> None:
 
     router = QueryRouter(llm=None)
     result = router.route("2024年营收多少", [])
-    assert result[LangGraphNode.Classify.SKIP_RETRIEVAL] is False
+    assert result["skip_retrieval"] is False
 
 
 def test_route_passes_kb_entities_to_llm_classify() -> None:
