@@ -10,8 +10,42 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langgraph.prebuilt import ToolNode
 
 from src.agents.graph.state import AgentState
+from src.config.const import HISTORY_MAX_TURNS, HISTORY_TOKEN_RATIO
+from src.infra.llm.chat_message import ChatMessage
 from src.infra.llm.request_context import current_request_ctx
 from src.rag.prompt import build_prompt
+
+
+def _truncate_history(
+    history: list[ChatMessage],
+    max_turns: int = HISTORY_MAX_TURNS,
+    token_ratio: float = HISTORY_TOKEN_RATIO,
+    context_window: int = 8000,
+) -> list[ChatMessage]:
+    """历史窗口截断：保留最近 N 轮 + token 双上限，最近 1 轮完整保留。
+
+    Args:
+        history: 完整对话历史（user/assistant 交替排列）
+        max_turns: 保留的最近轮数（每轮 user+assistant 两条消息）
+        token_ratio: 历史消息 token 占 context 窗口的上限比例
+        context_window: 模型 context 窗口大小（token）
+
+    Returns:
+        截断后的历史列表：先按轮数保留最近 max_turns 轮，总 token 超出预算时
+        从最旧逐条弹出直到达标，最近 1 轮（最后 2 条）始终不截。
+        token 粗估为 len(content) // 2，与 estimate_usage 一致。
+        返回新列表，不修改入参。
+    """
+    if len(history) > max_turns * 2:
+        recent = history[-(max_turns * 2) :]
+    else:
+        recent = list(history)
+    budget = int(context_window * token_ratio)
+    total = sum(len(m.content) // 2 for m in recent)
+    while total > budget and len(recent) > 2:
+        dropped = recent.pop(0)
+        total -= len(dropped.content) // 2
+    return recent
 
 
 def make_agent_model_node(llm, tools, prompt_manager) -> Callable:
@@ -28,8 +62,9 @@ def make_agent_model_node(llm, tools, prompt_manager) -> Callable:
     model = llm.bind_tools(tools)
 
     def _initial_messages(state: AgentState) -> list[BaseMessage]:
-        # 复用 build_prompt：system + 历史(ChatMessage→LangChain) + 当前 query
-        return build_prompt(state.query, "", state._history or [], prompt_manager)
+        # 历史窗口截断（最近 N 轮 + token 双上限）后再组装初始消息
+        history = _truncate_history(state._history or [])
+        return build_prompt(state.query, "", history, prompt_manager)
 
     async def agent_model(state: AgentState) -> dict:
         if state.messages:
