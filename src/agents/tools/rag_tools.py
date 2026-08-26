@@ -8,10 +8,12 @@ RequestContext.tool_contexts，由后续节点读入 state；ask_user 的挂起 
 """
 
 import asyncio
+import time
 from typing import Annotated, Any
 
 from langchain_core.tools import BaseTool, tool
 from langgraph.prebuilt import InjectedState
+from loguru import logger
 from pydantic import BaseModel, Field
 
 from src.agents.graph.state import AgentState
@@ -78,6 +80,7 @@ def make_rag_tools(
         else:
             kb_ids = None
 
+        start = time.monotonic()
         # 多 KB 并行检索后合并去重；None/空列表按全量检索（kb_id="" 触发 search 的 similarity_search_all）
         if kb_ids:
             tasks = [
@@ -90,6 +93,18 @@ def make_rag_tools(
 
         contexts = retrieval.rerank_results(query, results, reranker)
         contexts = contexts[:top_k]
+
+        if state is not None:
+            iteration = state._agent_iterations
+        else:
+            iteration = 0
+        logger.info(
+            "tool=retrieve_kb iteration={} query={} result_count={} latency_ms={:.0f}",
+            iteration,
+            query,
+            len(contexts),
+            (time.monotonic() - start) * 1000,
+        )
 
         # 全局递增编号：同步块内读取偏移并追加，无 await，asyncio 单线程保证原子
         ctx = current_request_ctx.get()
@@ -165,7 +180,18 @@ async def ask_user(
     ctx = current_request_ctx.get()
     if ctx is None:
         return ASK_USER_CTX_UNAVAILABLE
+    if state is not None:
+        query_text = state.query
+        iteration = state._agent_iterations
+    else:
+        query_text = ""
+        iteration = 0
     if ctx.ask_count >= MAX_ASK_PER_TURN:  # 同步检查+自增，无 await
+        logger.warning(
+            "ask_user limit reached session_id={} query={}",
+            ctx.session_id,
+            query_text,
+        )
         return ASK_USER_LIMIT_REACHED
     ctx.ask_count += 1
     enriched = []
@@ -179,6 +205,21 @@ async def ask_user(
                 "multi_select": q.multi_select,
             }
         )
+    logger.info(
+        "tool=ask_user iteration={} questions={} session_id={}",
+        iteration,
+        len(questions),
+        ctx.session_id,
+    )
+    # 单槽保护：登记前检查同一 session 是否已有挂起澄清（并发 ask_user），
+    # 已存在则拒绝本次提问，避免覆盖前一个 Future（检查与登记间无 await，原子）
+    if ctx.session_id in pending_asks:
+        logger.warning(
+            "ask_user slot occupied session_id={} query={}",
+            ctx.session_id,
+            query_text,
+        )
+        return ASK_USER_LIMIT_REACHED
     # 先登记挂起 Future（进程级注册表）再推送问题事件，避免 POST /clarify-answer 在登记前到达
     loop = asyncio.get_running_loop()
     fut = loop.create_future()
@@ -189,6 +230,17 @@ async def ask_user(
         answers = await _wait_with_abort_and_timeout(
             fut, ctx.abort_signal, ASK_USER_TIMEOUT
         )
+        if str(answers) in (
+            ASK_USER_TIMEOUT_TEXT,
+            ASK_USER_REQUEST_CANCELLED,
+            ASK_USER_ANSWER_CANCELLED,
+        ):
+            logger.warning(
+                "ask_user ended session_id={} query={} outcome={}",
+                ctx.session_id,
+                query_text,
+                answers,
+            )
         return str(answers)
     finally:
         pending_asks.pop(ctx.session_id, None)

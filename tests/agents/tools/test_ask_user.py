@@ -113,3 +113,26 @@ async def test_ask_user_timeout(monkeypatch):
     finally:
         current_request_ctx.reset(token)
     assert "s1" not in pending_asks
+
+
+@pytest.mark.asyncio
+async def test_ask_user_concurrent_second_rejected():
+    """同一 session 并发两个 ask_user：第二个因单槽占用直接返回上限错误，不覆盖第一个 Future。"""
+    ctx = RequestContext(session_id="s1")
+    token = current_request_ctx.set(ctx)
+    try:
+        t1 = asyncio.create_task(ask_user.ainvoke(_ask_args()))
+        t2 = asyncio.create_task(ask_user.ainvoke(_ask_args()))
+
+        result2 = await asyncio.wait_for(t2, timeout=1)
+        assert "上限" in result2
+
+        # 第一个仍持有挂起 Future，resolve 后正常返回
+        fut = pending_asks.get("s1")
+        assert fut is not None
+        fut.set_result({"answers": [{"id": "q1", "selected": ["2024年"]}]})
+        result1 = await asyncio.wait_for(t1, timeout=1)
+        assert "2024年" in result1
+    finally:
+        current_request_ctx.reset(token)
+    assert "s1" not in pending_asks

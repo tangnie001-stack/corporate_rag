@@ -54,4 +54,6 @@ MAX_ASK_PER_TURN = 2  # 单 turn 内 ask_user 最大调用次数
 ASK_USER_TIMEOUT = 120  # ask_user 等待用户回答超时秒数
 HISTORY_MAX_TURNS = 10  # 历史注入保留最近轮数
 HISTORY_TOKEN_RATIO = 0.3  # 历史 token 占 context 窗口上限比例
-SESSION_LOCK_TTL = 30  # per-session 并发锁 TTL 秒
+# per-session 并发锁 TTL 秒：须大于 ASK_USER_TIMEOUT（ask_user 挂起等待期间锁不能提前
+# 过期，否则并发兜底失效），在超时基础上留 60s 余量
+SESSION_LOCK_TTL = ASK_USER_TIMEOUT + 60
