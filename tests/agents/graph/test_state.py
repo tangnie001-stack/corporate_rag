@@ -61,9 +61,19 @@ def test_state_has_agent_fields():
 
 def test_classify_fields_removed():
     """classify/rewrite/retrieve/rerank 旧字段应已删除。"""
+    removed = {
+        "intent",
+        "extracted_entities",
+        "missing_entities",
+        "classification_confidence",
+        "skip_retrieval",
+        "skip_clarify",
+        "_kb_entities",
+        "_kb_suggestions",
+        "rewritten_query",
+        "rewritten_queries",
+        "retrieval_results",
+        "contexts",
+    }
     names = {f.name for f in fields(AgentState)}
-    assert "intent" not in names
-    assert "missing_entities" not in names
-    assert "rewritten_query" not in names
-    assert "retrieval_results" not in names
-    assert "contexts" not in names
+    assert removed & names == set()

@@ -136,7 +136,7 @@ async def _run_sample(
         }
     )
     answer = final_state.get("answer", "") or ""
-    contexts = final_state.get("contexts", []) or []
+    contexts = final_state.get("tool_contexts", []) or []
     hit = False
     for ctx in contexts:
         if (
