@@ -78,7 +78,9 @@ def make_agent_model_node(llm, tools, prompt_manager) -> Callable:
         # tool_call_chunks，最终消息带 tool_calls（若模型发起工具调用），
         # 同时驱动 on_chat_model_stream 事件把 token 流式下发前端
         chunks = []
-        async for chunk in model.astream(messages):
+        async for chunk in model.astream(
+            messages, extra_body={"enable_thinking": state.deep_thinking}
+        ):
             chunks.append(chunk)
         result = chunks[0]
         for chunk in chunks[1:]:

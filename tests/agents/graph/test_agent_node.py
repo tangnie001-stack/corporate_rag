@@ -27,8 +27,8 @@ class MockChatModel:
         """绑定工具：fake 直接返回自身。"""
         return self
 
-    async def astream(self, messages):
-        """以单块流式序列返回固定响应。"""
+    async def astream(self, messages, **kwargs):
+        """以单块流式序列返回固定响应，忽略 extra_body 等额外参数。"""
         yield self.response
 
 
@@ -160,7 +160,7 @@ async def test_agent_model_injects_initial_messages():
     class CapturingChatModel(MockChatModel):
         """记录 astream 收到的 messages。"""
 
-        async def astream(self, messages):
+        async def astream(self, messages, **kwargs):
             captured["messages"] = messages
             yield self.response
 
@@ -198,7 +198,7 @@ async def test_agent_model_astream_merges_chunks():
     class MultiChunkModel(MockChatModel):
         """astream 返回多个 chunk 的 fake。"""
 
-        async def astream(self, messages):
+        async def astream(self, messages, **kwargs):
             for chunk in self.response:
                 yield chunk
 
@@ -211,6 +211,27 @@ async def test_agent_model_astream_merges_chunks():
     result = out["messages"][-1]  # 首轮注入 system+user，模型输出在末尾
     assert result.content == "需要"
     assert result.tool_calls and result.tool_calls[0]["name"] == "retrieve_kb"
+
+
+@pytest.mark.asyncio
+async def test_agent_model_passes_enable_thinking():
+    """model 节点应按 state.deep_thinking 向 astream 传 extra_body.enable_thinking。"""
+    captured = {}
+
+    class CapturingThinkingModel(MockChatModel):
+        """记录 astream 收到的 kwargs。"""
+
+        async def astream(self, messages, **kwargs):
+            captured["extra_body"] = kwargs.get("extra_body")
+            yield self.response
+
+    llm = CapturingThinkingModel(AIMessage(content="ok"))
+    node = make_agent_model_node(llm, [], StubPromptManager())
+
+    state = AgentState.make_initial_state("s1", "kb1", "q", [], deep_thinking=True)
+    await node(state)
+
+    assert captured["extra_body"] == {"enable_thinking": True}
 
 
 def test_make_initial_state_deep_thinking_default_false():
