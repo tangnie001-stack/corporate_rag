@@ -577,9 +577,224 @@
       transition-duration: 0.01ms !important;
     }
   }
+
+  /* ── 新布局：Sidebar + Chat Main ── */
+  body { flex-direction: row; }
+  .chat-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 100vh;
+  }
+  .chat-main .chat-container { flex: 1; }
+
+  /* ── Sidebar（深色，与会话历史）── */
+  .sidebar {
+    width: 240px;
+    flex-shrink: 0;
+    background: #0F172A;
+    color: #CBD5E1;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    z-index: 30;
+    transition: transform 250ms ease;
+  }
+  .sidebar-logo { padding: 16px; border-bottom: 1px solid #1E293B; }
+  .sidebar-logo h1 {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 15px; font-weight: 600; color: #fff;
+    font-family: var(--font-display);
+  }
+  .sidebar-logo .logo-badge {
+    width: 30px; height: 30px;
+    border-radius: 8px;
+    background: var(--primary);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 13px; font-weight: 700;
+    flex-shrink: 0;
+  }
+  .sidebar-logo p { font-size: 11px; color: #64748B; margin-top: 2px; padding-left: 40px; }
+  .sidebar-nav { padding: 10px 12px; border-bottom: 1px solid #1E293B; }
+  .sidebar-nav a {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    color: #CBD5E1;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background var(--transition);
+  }
+  .sidebar-nav a:hover { background: #1E293B; color: #fff; }
+  .sidebar-nav a.active { background: rgba(59,130,246,0.15); color: #60A5FA; font-weight: 500; }
+  .sidebar-nav a + a { margin-top: 2px; }
+  .sidebar-nav .icon { font-size: 14px; }
+
+  .sidebar-sessions { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .sidebar-sessions-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 14px 8px;
+  }
+  .sidebar-sessions-head span {
+    font-size: 11px; font-weight: 600;
+    color: #64748B;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .session-new-btn {
+    width: 26px; height: 26px;
+    border: none; border-radius: 6px;
+    background: #1E293B;
+    color: #CBD5E1;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    transition: background var(--transition);
+  }
+  .session-new-btn:hover { background: var(--primary); color: #fff; }
+  .session-list { flex: 1; overflow-y: auto; padding: 2px 8px 12px; }
+  .session-item {
+    display: block;
+    width: 100%;
+    padding: 8px 10px;
+    border: none; border-radius: 8px;
+    background: transparent;
+    color: #CBD5E1;
+    font-size: 13px;
+    font-family: var(--font-body);
+    text-align: left;
+    cursor: pointer;
+    transition: background var(--transition);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .session-item:hover { background: #1E293B; color: #fff; }
+  .session-item.active { background: rgba(59,130,246,0.15); color: #60A5FA; }
+  .session-item + .session-item { margin-top: 2px; }
+  .sidebar-empty { padding: 16px 12px; font-size: 12px; color: #64748B; text-align: center; }
+
+  /* 移动端抽屉 */
+  .sidebar-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 20;
+    display: none;
+  }
+  .sidebar-overlay.show { display: block; }
+  .hamburger {
+    display: none;
+    position: fixed; top: 12px; left: 12px;
+    z-index: 40;
+    width: 36px; height: 36px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    align-items: center; justify-content: center;
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+
+  /* ── User Area（右上角登录/退出）── */
+  .user-area { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+  .user-avatar {
+    width: 32px; height: 32px;
+    border: none; border-radius: 50%;
+    background: linear-gradient(135deg, #3B82F6, #6366F1);
+    color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    transition: box-shadow var(--transition);
+  }
+  .user-avatar:hover { box-shadow: 0 2px 8px rgba(59,130,246,0.4); }
+  .user-avatar svg { width: 18px; height: 18px; }
+  .user-login-btn {
+    padding: 6px 14px;
+    border: none; border-radius: 8px;
+    background: linear-gradient(135deg, #3B82F6, #6366F1);
+    color: #fff;
+    font-size: 12px; font-weight: 500;
+    font-family: var(--font-body);
+    cursor: pointer;
+    transition: opacity var(--transition);
+    text-decoration: none;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .user-login-btn:hover { opacity: 0.9; }
+  .user-dropdown {
+    position: absolute; right: 0; top: calc(100% + 6px);
+    min-width: 140px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: var(--shadow-lg);
+    padding: 4px;
+    z-index: 50;
+    display: none;
+  }
+  .user-dropdown.show { display: block; }
+  .user-dropdown button {
+    width: 100%; text-align: left;
+    padding: 8px 10px;
+    border: none; border-radius: 8px;
+    background: transparent;
+    color: #DC2626;
+    font-size: 13px;
+    font-family: var(--font-body);
+    cursor: pointer;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .user-dropdown button:hover { background: #FEF2F2; }
+  .user-menu { position: relative; }
+
+  /* 移动端：抽屉收起 + hamburger */
+  @media (max-width: 767px) {
+    .sidebar {
+      position: fixed;
+      transform: translateX(-100%);
+      width: 240px;
+      height: 100vh;
+    }
+    .sidebar.open { transform: translateX(0); }
+    .hamburger { display: flex; }
+    .chat-main { min-height: 100vh; }
+  }
 </style>
 </head>
 <body>
+
+<!-- Sidebar -->
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-logo">
+    <h1><span class="logo-badge">FQ</span> Corporate RAG</h1>
+    <p>金融文档智能问答系统</p>
+  </div>
+  <nav class="sidebar-nav">
+    <a href="/" class="active"><span class="icon">💬</span> 智能问答</a>
+    <a href="/Knowledgebase"><span class="icon">📚</span> 知识库管理</a>
+  </nav>
+  <div class="sidebar-sessions">
+    <div class="sidebar-sessions-head">
+      <span>会话历史</span>
+      <button class="session-new-btn" type="button" title="新建会话" onclick="newSession()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4v16m8-8H4"/></svg>
+      </button>
+    </div>
+    <div class="session-list" id="sessionList"></div>
+  </div>
+</aside>
+
+<!-- Mobile Overlay + Hamburger -->
+<div id="sidebarOverlay" class="sidebar-overlay" onclick="toggleSidebar()"></div>
+<button class="hamburger" type="button" onclick="toggleSidebar()" aria-label="菜单">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+</button>
+
+<!-- Main -->
+<main class="chat-main">
 
 <!-- Header -->
 <header class="app-header">
@@ -589,6 +804,7 @@
       <div class="app-title">企业知识库助手</div>
       <div class="app-subtitle">基于 RAG 的知识问答</div>
     </div>
+    <div class="user-area" id="userArea"></div>
   </div>
 </header>
 
@@ -621,6 +837,8 @@
     <div id="composerContainer" class="composer-container"></div>
   </div>
 </div>
+
+</main>
 
 <script>
 // ── State ──
@@ -1123,6 +1341,161 @@ if (thinkingToggle) {
   });
 }
 
+// ── Sidebar / 会话历史 / 用户区 ──
+
+function generateTraceId() {
+  return 'trace_' + (crypto.randomUUID ? crypto.randomUUID() : Date.now() + '_' + Math.random().toString(36).slice(2, 10));
+}
+
+function toggleSidebar() {
+  const sidebar = document.getElementById('sidebar');
+  const overlay = document.getElementById('sidebarOverlay');
+  if (!sidebar) return;
+  sidebar.classList.toggle('open');
+  if (overlay) overlay.classList.toggle('show');
+}
+
+// 加载会话历史列表（POST /api/sessions/list）
+async function loadSessions() {
+  const listEl = document.getElementById('sessionList');
+  if (!listEl) return;
+  try {
+    const res = await fetch('/api/sessions/list', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Trace-ID': generateTraceId() },
+      body: JSON.stringify({}),
+    });
+    const body = await res.json().catch(() => null);
+    const sessions = (body && body.code === 'SUCCESS' && Array.isArray(body.data)) ? body.data : [];
+    if (!sessions.length) {
+      listEl.innerHTML = '<div class="sidebar-empty">暂无会话历史</div>';
+      return;
+    }
+    listEl.innerHTML = sessions.map(s => {
+      const title = s.title || s.id.slice(0, 8);
+      return `<button type="button" class="session-item ${s.id === state.sessionId ? 'active' : ''}" onclick="switchSession('${s.id}')" title="${escapeHtml(title)}">${escapeHtml(title)}</button>`;
+    }).join('');
+  } catch (e) {
+    listEl.innerHTML = '<div class="sidebar-empty">加载失败</div>';
+  }
+}
+
+// 切换会话：更新 session_id 并加载该会话历史消息
+async function switchSession(sessionId) {
+  if (sessionId === state.sessionId) return;
+  state.sessionId = sessionId;
+  localStorage.setItem('rag_session_id', sessionId);
+  document.querySelector('.app-subtitle').textContent = `会话: ${sessionId.slice(-12)}`;
+  chatContainer.innerHTML = '';
+  loadSessions();
+  try {
+    const res = await fetch('/api/sessions/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Trace-ID': generateTraceId() },
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+    const body = await res.json().catch(() => null);
+    const messages = (body && body.code === 'SUCCESS' && Array.isArray(body.data)) ? body.data : [];
+    messages.forEach(m => {
+      if (m.role === 'user') {
+        renderUserBubble(m.content || '');
+      } else if (m.role === 'assistant') {
+        renderAiAnswer(m.content || '');
+      }
+    });
+  } catch (e) { /* 历史加载失败静默 */ }
+  if (window.innerWidth < 768) toggleSidebar();
+}
+
+// 新建会话：生成新 session_id，清空当前对话
+function newSession() {
+  const sid = 'sess_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+  state.sessionId = sid;
+  localStorage.setItem('rag_session_id', sid);
+  document.querySelector('.app-subtitle').textContent = `会话: ${sid.slice(-12)}`;
+  chatContainer.innerHTML = '';
+  const empty = document.createElement('div');
+  empty.className = 'empty-state';
+  empty.id = 'emptyState';
+  empty.innerHTML = `
+    <div class="empty-state-icon">💬</div>
+    <div class="empty-state-title">有什么可以帮您？</div>
+    <div class="empty-state-desc">输入问题开始使用企业知识库查询</div>`;
+  chatContainer.appendChild(empty);
+  loadSessions();
+  if (window.innerWidth < 768) toggleSidebar();
+  chatInput.focus();
+}
+
+// ── User Area（登录/退出）──
+
+(async function checkAuth() {
+  try {
+    const r = await fetch('/api/auth/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Trace-ID': generateTraceId() },
+      body: JSON.stringify({}),
+    });
+    const d = await r.json().catch(() => null);
+    if (d && d.code === 'SUCCESS' && d.data && d.data.valid) {
+      updateUserArea(d.data.user_id);
+    } else {
+      updateUserArea(null);
+    }
+  } catch (e) {
+    updateUserArea(null);
+  }
+})();
+
+function updateUserArea(userId) {
+  const el = document.getElementById('userArea');
+  if (!el) return;
+  if (!userId) {
+    el.innerHTML = '<a href="/login.html?redirect=' + encodeURIComponent(location.pathname + location.search) + '" class="user-login-btn">登录</a>';
+    return;
+  }
+  el.innerHTML = `
+    <div class="user-menu">
+      <button class="user-avatar" type="button" onclick="toggleUserDropdown(event)" title="用户菜单">
+        <svg fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/></svg>
+      </button>
+      <div class="user-dropdown" id="userDropdown">
+        <button type="button" onclick="handleLogout()">
+          <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3h4a3 3 0 0 1 3 3v1"/></svg>
+          退出登录
+        </button>
+      </div>
+    </div>`;
+}
+
+function toggleUserDropdown(e) {
+  if (e) e.stopPropagation();
+  const dd = document.getElementById('userDropdown');
+  if (!dd) return;
+  const wasOpen = dd.classList.contains('show');
+  dd.classList.toggle('show', !wasOpen);
+  if (!wasOpen) {
+    document.addEventListener('click', closeOnClickOutside);
+  }
+}
+
+function closeOnClickOutside(e) {
+  const dd = document.getElementById('userDropdown');
+  const ua = document.getElementById('userArea');
+  if (dd && ua && !ua.contains(e.target)) {
+    dd.classList.remove('show');
+    document.removeEventListener('click', closeOnClickOutside);
+  }
+}
+
+async function handleLogout() {
+  try {
+    await fetch('/api/auth/logout', { method: 'POST' });
+  } catch (_) {}
+  document.cookie = 'token=; path=/; max-age=0';
+  location.href = '/login.html';
+}
+
 // ── Init ──
 state.sessionId = getOrCreateSessionId();
 state.kbId = new URLSearchParams(window.location.search).get('kb_id') || '';
@@ -1132,6 +1505,9 @@ if (!state.kbId) {
 
 // Show session ID in header subtitle
 document.querySelector('.app-subtitle').textContent = `会话: ${state.sessionId.slice(-12)}`;
+
+// 加载会话历史侧边栏
+loadSessions();
 
 console.log('RAG Chat initialized', {
   sessionId: state.sessionId,
