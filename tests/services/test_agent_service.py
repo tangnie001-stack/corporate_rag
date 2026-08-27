@@ -14,11 +14,7 @@ from src.agents.graph.state import (
     LangGraphKey,
     LangGraphNode,
 )
-from src.config.prompts import (
-    AGENT_STATUS_RETRIEVED,
-    AGENT_STATUS_RETRIEVING,
-    AGENT_STATUS_THINKING,
-)
+from src.config.const import SSEInteractionTexts
 from src.rag.context import RAGContext
 from src.services.agent_service import (
     AgentService,
@@ -163,7 +159,10 @@ class TestConvertEventStatus:
 
     def test_chat_model_start_agent_produces_thinking_status(self):
         assert _convert_event(_chat_model_start_item()) == [
-            SSEStatusEvent("agent", AGENT_STATUS_THINKING)
+            SSEStatusEvent(
+                SSEInteractionTexts.STAGE_AGENT,
+                SSEInteractionTexts.AGENT_STATUS_THINKING,
+            )
         ]
 
     def test_chat_model_start_non_agent_ignored(self):
@@ -173,7 +172,10 @@ class TestConvertEventStatus:
 
     def test_tool_start_retrieve_produces_retrieving_status(self):
         assert _convert_event(_tool_start_item("retrieve_kb")) == [
-            SSEStatusEvent("retrieve", AGENT_STATUS_RETRIEVING)
+            SSEStatusEvent(
+                SSEInteractionTexts.STAGE_RETRIEVE,
+                SSEInteractionTexts.AGENT_STATUS_RETRIEVING,
+            )
         ]
 
     def test_tool_start_ask_user_ignored(self):
@@ -181,7 +183,10 @@ class TestConvertEventStatus:
 
     def test_tool_end_retrieve_produces_retrieved_status(self):
         assert _convert_event(_tool_end_item("retrieve_kb")) == [
-            SSEStatusEvent("retrieve", AGENT_STATUS_RETRIEVED)
+            SSEStatusEvent(
+                SSEInteractionTexts.STAGE_RETRIEVE,
+                SSEInteractionTexts.AGENT_STATUS_RETRIEVED,
+            )
         ]
 
     def test_chat_model_end_captures_model_used(self):
@@ -237,12 +242,17 @@ async def test_stream_chat_emits_full_event_sequence():
     dones = [e for e in events if isinstance(e, SSEDoneEvent)]
 
     # 状态事件按事件类型接线：两次 agent 思考 + 检索开始/完成
-    assert [s.stage for s in statuses] == ["agent", "retrieve", "retrieve", "agent"]
+    assert [s.stage for s in statuses] == [
+        SSEInteractionTexts.STAGE_AGENT,
+        SSEInteractionTexts.STAGE_RETRIEVE,
+        SSEInteractionTexts.STAGE_RETRIEVE,
+        SSEInteractionTexts.STAGE_AGENT,
+    ]
     assert [s.message for s in statuses] == [
-        AGENT_STATUS_THINKING,
-        AGENT_STATUS_RETRIEVING,
-        AGENT_STATUS_RETRIEVED,
-        AGENT_STATUS_THINKING,
+        SSEInteractionTexts.AGENT_STATUS_THINKING,
+        SSEInteractionTexts.AGENT_STATUS_RETRIEVING,
+        SSEInteractionTexts.AGENT_STATUS_RETRIEVED,
+        SSEInteractionTexts.AGENT_STATUS_THINKING,
     ]
     assert tokens == [SSETokenEvent("这是回答")]
     assert [c.source for c in citations] == ["财报.pdf"]

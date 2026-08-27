@@ -18,13 +18,11 @@ from pydantic import BaseModel, Field
 
 from src.agents.graph.state import AgentState
 from src.config import TOP_K_RERANK
-from src.config.const import ASK_USER_TIMEOUT, MAX_ASK_PER_TURN
-from src.config.prompts import (
-    ASK_USER_ANSWER_CANCELLED,
-    ASK_USER_CTX_UNAVAILABLE,
-    ASK_USER_LIMIT_REACHED,
-    ASK_USER_REQUEST_CANCELLED,
-    ASK_USER_TIMEOUT_TEXT,
+from src.config.const import (
+    ASK_USER_TIMEOUT,
+    MAX_ASK_PER_TURN,
+    RERANK_TIMEOUT,
+    SSEInteractionTexts,
 )
 from src.infra.db.vector_store import VectorStore
 from src.infra.db.vector_store.types import ChunkResult
@@ -103,7 +101,20 @@ def make_rag_tools(
             else:
                 results = []  # 无匹配 KB → 空工具结果，模型自行决定 abstain/ask/转人工
 
-        contexts = retrieval.rerank_results(query, results, reranker)
+        # rerank 为同步 HTTP 调用（无内置超时），放线程池 + 超时兜底，避免阻塞事件循环；
+        # 超时降级为空结果，模型自行决定 abstain/ask/转人工
+        try:
+            contexts = await asyncio.wait_for(
+                asyncio.to_thread(retrieval.rerank_results, query, results, reranker),
+                timeout=RERANK_TIMEOUT,
+            )
+        except TimeoutError:
+            logger.warning(
+                "tool=retrieve_kb rerank timeout after {}s, contexts=[] query={}",
+                RERANK_TIMEOUT,
+                query,
+            )
+            contexts = []
         contexts = contexts[:top_k]
 
         if state is not None:
@@ -229,7 +240,7 @@ async def ask_user(
     """
     ctx = current_request_ctx.get()
     if ctx is None:
-        return ASK_USER_CTX_UNAVAILABLE
+        return SSEInteractionTexts.ASK_USER_CTX_UNAVAILABLE
     if state is not None:
         query_text = state.query
         iteration = state._agent_iterations
@@ -242,7 +253,7 @@ async def ask_user(
             ctx.session_id,
             query_text,
         )
-        return ASK_USER_LIMIT_REACHED
+        return SSEInteractionTexts.ASK_USER_LIMIT_REACHED
     ctx.ask_count += 1
     enriched = []
     for q in questions:
@@ -269,7 +280,7 @@ async def ask_user(
             ctx.session_id,
             query_text,
         )
-        return ASK_USER_LIMIT_REACHED
+        return SSEInteractionTexts.ASK_USER_LIMIT_REACHED
     # 先登记挂起 Future（进程级注册表）再推送问题事件，避免 POST /clarify-answer 在登记前到达
     loop = asyncio.get_running_loop()
     fut = loop.create_future()
@@ -281,9 +292,9 @@ async def ask_user(
             fut, ctx.abort_signal, ASK_USER_TIMEOUT
         )
         if str(answers) in (
-            ASK_USER_TIMEOUT_TEXT,
-            ASK_USER_REQUEST_CANCELLED,
-            ASK_USER_ANSWER_CANCELLED,
+            SSEInteractionTexts.ASK_USER_TIMEOUT_TEXT,
+            SSEInteractionTexts.ASK_USER_REQUEST_CANCELLED,
+            SSEInteractionTexts.ASK_USER_ANSWER_CANCELLED,
         ):
             logger.warning(
                 "ask_user ended session_id={} query={} outcome={}",
@@ -346,10 +357,10 @@ async def _wait_with_abort_and_timeout(
         )
         if fut in done:
             if fut.cancelled():
-                return ASK_USER_ANSWER_CANCELLED
+                return SSEInteractionTexts.ASK_USER_ANSWER_CANCELLED
             return fut.result()
         if abort_task in done:
-            return ASK_USER_REQUEST_CANCELLED
-        return ASK_USER_TIMEOUT_TEXT
+            return SSEInteractionTexts.ASK_USER_REQUEST_CANCELLED
+        return SSEInteractionTexts.ASK_USER_TIMEOUT_TEXT
     finally:
         abort_task.cancel()

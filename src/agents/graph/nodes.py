@@ -10,7 +10,7 @@ from collections.abc import Callable
 from loguru import logger
 
 from src.agents.graph.state import AgentState
-from src.config.prompts import ABSTENTION_MARKERS
+from src.config.const import SSEInteractionTexts
 
 
 def make_kb_router_node(embed_fn, llm) -> Callable:
@@ -57,7 +57,7 @@ def format_node(state: AgentState) -> dict:
     contexts = state.tool_contexts or []
 
     # 拒答检测：回答明确表示未找到数据时，不输出引用
-    if any(marker in answer for marker in ABSTENTION_MARKERS):
+    if any(marker in answer for marker in SSEInteractionTexts.ABSTENTION_MARKERS):
         logger.info("format_node: answer is abstention, citations=[]")
         return {"citations": []}
 

@@ -19,7 +19,7 @@ import asyncio
 import sys
 import uuid
 
-from src.config.prompts import ABSTENTION_MARKERS
+from src.config.const import SSEInteractionTexts
 from src.core.logging import setup_logging
 from src.infra.llm.chat_message import ChatMessage
 
@@ -106,7 +106,7 @@ SAMPLES: list[HardSample] = [
 
 def _fmt_verdict(s: HardSample, answer: str, hit: bool) -> str:
     """输出单个样本的判定。"""
-    is_abstain = any(m in answer for m in ABSTENTION_MARKERS)
+    is_abstain = any(m in answer for m in SSEInteractionTexts.ABSTENTION_MARKERS)
     if s.expect == "hit":
         if hit:
             return "PASS 命中目标数据"
@@ -215,7 +215,7 @@ async def main() -> None:
             n_pass += 1
         elif verdict.startswith("FAIL"):
             n_fail += 1
-        if any(m in answer for m in ABSTENTION_MARKERS):
+        if any(m in answer for m in SSEInteractionTexts.ABSTENTION_MARKERS):
             n_abstain += 1
         print(f"\n[{s.sid}] {s.query!r} (期望={s.expect}) -> {verdict}")
         print(f"  note: {s.note}")

@@ -74,7 +74,8 @@ class SSEAbstentionEvent:
     """abstention 标识事件 — 检索无达标 context 时提示转人工。"""
 
     type: str = "abstention"  # 事件类型标识，前端据此路由到转人工提示
-    # 转人工提示文案：与 prompts.ABSTENTION_TEXT（"更换问题表述"引导）语义不同，此处引导转人工，故不复用常量
+    # 转人工提示文案：检索无达标 context 时引导用户转人工（与 format_node 的
+    # ABSTENTION_MARKERS 拒答检测配套）
     message: str = "未在文档中找到相关数据，可尝试转人工咨询"
 
 

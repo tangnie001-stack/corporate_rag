@@ -32,7 +32,7 @@ DASHSCOPE_BASE_URL: str = os.getenv(
 
 # ====== 模型选择 ======
 # 大语言模型：用于生成最终回答
-LLM_MODEL: str = os.getenv("LLM_MODEL", "qwen3.7-max-2026-05-17")
+LLM_MODEL: str = os.getenv("LLM_MODEL", "qwen3.7-flash-2026-07-15")
 # LLM API Key（如未设置，自动 fallback 到 DASHSCOPE_API_KEY）
 LLM_API_KEY: str = os.getenv("LLM_API_KEY") or os.getenv("DASHSCOPE_API_KEY", "")
 # LLM API 地址（默认指向 LiteLLM Proxy，可改为直连地址）
@@ -84,7 +84,7 @@ RERANK_API_KEY: str = os.getenv("RERANK_API_KEY") or os.getenv("DASHSCOPE_API_KE
 # 「无思考/非推理模型」的限制属于上方 CLASSIFY_MODEL（分类/路由小模型），
 # 与 RAGAS 评估模型无关。RAGAS_LLM_MODEL 经 LangchainLLMWrapper(bypass_n=True)
 # 包装后强制 n=1，推理模型（如 qwen3.7-max）可正常使用（已实测）。
-RAGAS_LLM_MODEL: str = os.getenv("RAGAS_LLM_MODEL", "qwen3.7-max-preview")
+RAGAS_LLM_MODEL: str = os.getenv("RAGAS_LLM_MODEL", "qwen3.8-max")
 # RAGAS 测试集生成条数
 RAGAS_TEST_SIZE: int = int(os.getenv("RAGAS_TEST_SIZE", "20"))
 # RAGAS 测试集存储目录

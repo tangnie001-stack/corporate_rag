@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from src.api.dependencies import get_app_service
 from src.api.schema import ResponseModel
-from src.config.prompts import CLARIFY_ANSWER_NOT_FOUND_TEXT
+from src.config.const import SSEInteractionTexts
 from src.infra.llm.request_context import pending_asks
 from src.services.app_service import AppService
 
@@ -79,13 +79,17 @@ async def clarify_answer(
     """
     fut = pending_asks.pop(body.session_id, None)
     if fut is None or fut.done():
-        raise HTTPException(status_code=404, detail=CLARIFY_ANSWER_NOT_FOUND_TEXT)
+        raise HTTPException(
+            status_code=404, detail=SSEInteractionTexts.CLARIFY_ANSWER_NOT_FOUND_TEXT
+        )
     try:
         fut.set_result(body.answers)
     except asyncio.InvalidStateError:
         # 竞态：pop 与 set_result 之间 ask_user 侧已超时/取消 Future（set_result 对
         # 已结束 Future 抛 InvalidStateError），此时按已超时处理返回 404
-        raise HTTPException(status_code=404, detail=CLARIFY_ANSWER_NOT_FOUND_TEXT)
+        raise HTTPException(
+            status_code=404, detail=SSEInteractionTexts.CLARIFY_ANSWER_NOT_FOUND_TEXT
+        )
     text = _format_answers_text(body.answers)
     if text:
         await svc.chat_manager.add_message_async(body.session_id, "user", text)

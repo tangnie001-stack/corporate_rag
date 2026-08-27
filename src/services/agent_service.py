@@ -26,13 +26,7 @@ from src.agents.graph.state import (
 )
 from src.agents.graph.workflow import build_graph
 from src.chat.manager import ChatManager
-from src.config.prompts import (
-    ABSTENTION_MARKERS,
-    AGENT_STATUS_RETRIEVED,
-    AGENT_STATUS_RETRIEVING,
-    AGENT_STATUS_THINKING,
-    SSE_ERROR_PREFIX,
-)
+from src.config.const import SSEInteractionTexts
 from src.infra.db.vector_store import VectorStore
 from src.infra.llm.langfuse_tracing import LangfuseTracer, traced
 from src.infra.llm.prompt_manager import PromptManager
@@ -115,10 +109,12 @@ def _is_abstention(state: AgentState) -> bool:
         state: agent 循环结束后的最终状态
 
     Returns:
-        True 表示应提示转人工（answer 包含 ABSTENTION_MARKERS 任一标记）；
+        True 表示应提示转人工（answer 包含 SSEInteractionTexts.ABSTENTION_MARKERS 任一标记）；
         闲聊/概念问答等未触发检索但正常作答的场景不再误判
     """
-    return any(marker in state.answer for marker in ABSTENTION_MARKERS)
+    return any(
+        marker in state.answer for marker in SSEInteractionTexts.ABSTENTION_MARKERS
+    )
 
 
 def _convert_event(
@@ -171,7 +167,12 @@ def _convert_event(
 
     if kind == LangGraphEvent.CHAT_MODEL_START:
         if metadata.get("langgraph_node") == "agent":
-            return [SSEStatusEvent("agent", AGENT_STATUS_THINKING)]
+            return [
+                SSEStatusEvent(
+                    SSEInteractionTexts.STAGE_AGENT,
+                    SSEInteractionTexts.AGENT_STATUS_THINKING,
+                )
+            ]
         return []
 
     if kind == LangGraphEvent.CHAT_MODEL_END:
@@ -184,12 +185,22 @@ def _convert_event(
 
     if kind == LangGraphEvent.TOOL_START:
         if name == "retrieve_kb":
-            return [SSEStatusEvent("retrieve", AGENT_STATUS_RETRIEVING)]
+            return [
+                SSEStatusEvent(
+                    SSEInteractionTexts.STAGE_RETRIEVE,
+                    SSEInteractionTexts.AGENT_STATUS_RETRIEVING,
+                )
+            ]
         # ask_user 等其他工具不发状态（composer 接管输入区）
         return []
 
     if kind == LangGraphEvent.TOOL_END and name == "retrieve_kb":
-        return [SSEStatusEvent("retrieve", AGENT_STATUS_RETRIEVED)]
+        return [
+            SSEStatusEvent(
+                SSEInteractionTexts.STAGE_RETRIEVE,
+                SSEInteractionTexts.AGENT_STATUS_RETRIEVED,
+            )
+        ]
 
     if kind == LangGraphEvent.CHAIN_END:
         if name == LangGraphNode.Format.NAME:
@@ -260,7 +271,9 @@ async def _dual_stream(
             if isinstance(item, _EndMarker):
                 break
             if isinstance(item, _ErrorMarker):
-                yield SSEErrorEvent(f"{SSE_ERROR_PREFIX}{item.error}")
+                yield SSEErrorEvent(
+                    f"{SSEInteractionTexts.SSE_ERROR_PREFIX}{item.error}"
+                )
                 break
             for event in _convert_event(item, capture):
                 yield event
@@ -358,7 +371,7 @@ class AgentService:
                 yield event
         except Exception as e:  # noqa: BLE001
             logger.exception("AgentService stream_chat failed: {}", e)
-            yield SSEErrorEvent(f"{SSE_ERROR_PREFIX}{str(e)[:100]}")
+            yield SSEErrorEvent(f"{SSEInteractionTexts.SSE_ERROR_PREFIX}{str(e)[:100]}")
             yield SSEDoneEvent(trace_id=current_trace_id.get() or "")
         else:
             if full_answer:

@@ -19,15 +19,19 @@
 
 # ====== 系统指令 ======
 
-# 金融问答系统提示词 — 约束 LLM 在 RAG 场景下的回答行为。
-# 关键约束：禁止推算、要求标注年份、找不到时明确告知。
-# 适用于所有 RAG 问答场景，作为 SystemMessage 发送。
-FINANCIAL_SYSTEM_PROMPT: str = """你是一个专业金融文档分析师。请严格遵循以下规则：
+# 金融问答系统提示词 — agent 循环的 SystemMessage：约束 LLM 在 RAG 场景下的工具使用与回答行为。
+# 关键约束：先工具后作答（需要文档数据先检索、缺关键信息先澄清）、禁止推算、找不到时明确告知。
+FINANCIAL_SYSTEM_PROMPT: str = """你是一个专业金融文档分析师，通过工具检索企业知识库来回答用户问题。
 
-1. 仅根据提供的文档内容回答，不要计算文档中没有直接给出的比率或汇总数据
-2. 回答中必须标注数据对应的年份/报告期
-3. 如果文档中找不到相关信息，明确说明"未在文档中找到相关数据"
-4. 回答语言与用户提问语言一致"""
+工具使用规则：
+1. 需要文档数据才能回答的问题，必须先调用 retrieve_kb 检索知识库，不得凭记忆或常识作答
+2. 问题缺少关键信息（如年份、公司、报告期）且无法从对话历史或检索结果推断时，先调用 ask_user 向用户澄清
+3. 检索结果为空或文档中确实找不到相关信息时，才明确说明"未在文档中找到相关数据"
+
+回答规则：
+4. 仅根据提供的文档内容回答，不要计算文档中没有直接给出的比率或汇总数据
+5. 回答中必须标注数据对应的年份/报告期
+6. 回答语言与用户提问语言一致"""
 
 # ====== 用户消息模板 ======
 
@@ -48,7 +52,7 @@ USER_PROMPT_TEMPLATE: str = """请根据以下文档内容回答问题。
 【问题】
 {query}
 
-请基于以上文档内容回答。如果文档中没有相关信息，请说明"未在文档中找到相关数据"。
+【注意】若【参考文档】为空或不足以回答，请使用工具获取所需信息；若工具仍无法获得相关信息，再说明"未在文档中找到相关数据"。
 """
 
 # ====== Classifier Prompt ======
@@ -149,54 +153,6 @@ REWRITE_USER_TEMPLATE: str = """用户问题：{query}
   "sub_queries": ["仅 complex 时输出 2-4 条；medium 省略"]
 }}
 """
-
-
-# ====== Abstention / 拒答 ======
-
-# 拒答语检测关键词：回答命中任一关键词时，format_node 不输出引用
-ABSTENTION_MARKERS: tuple[str, ...] = ("未在文档中找到",)
-
-# abstention 出口的回答文案：检索无达标 context 时直接返回，不回 LLM
-ABSTENTION_TEXT: str = "未在文档中找到相关数据。请尝试更换问题表述或补充更多文档。"
-
-
-# ====== Agent 状态事件文案 ======
-
-# on_chat_model_start（agent 节点）→ SSEStatusEvent("agent")：模型开始思考
-AGENT_STATUS_THINKING: str = "正在思考..."
-
-# on_tool_start（retrieve_kb）→ SSEStatusEvent("retrieve")：开始检索
-AGENT_STATUS_RETRIEVING: str = "正在检索相关文档..."
-
-# on_tool_end（retrieve_kb）→ SSEStatusEvent("retrieve")：检索完成
-AGENT_STATUS_RETRIEVED: str = "检索完成，正在分析..."
-
-
-# ====== SSE 错误事件文案 ======
-
-# SSEErrorEvent 统一错误前缀：_dual_stream（事件源异常）与 stream_chat（外层兜底）共用
-SSE_ERROR_PREFIX: str = "暂时无法回答："
-
-
-# ====== ask_user 澄清工具文案 ======
-
-# ask_user 上下文不可用文案：current_request_ctx 未设置时直接返回给 LLM
-ASK_USER_CTX_UNAVAILABLE: str = "Error: 请求上下文不可用"
-
-# ask_user 达本回合询问上限文案：返回给 LLM 促其基于现有信息作答
-ASK_USER_LIMIT_REACHED: str = "Error: 已达本回合询问上限，请基于现有信息作答"
-
-# ask_user 等待期间答案 Future 被取消文案：POST 端取消挂起澄清时返回
-ASK_USER_ANSWER_CANCELLED: str = "Error: 等待用户回答被取消"
-
-# ask_user 等待期间请求被取消文案：abort 信号置位（客户端断开/取消）时返回
-ASK_USER_REQUEST_CANCELLED: str = "Error: 请求已取消"
-
-# ask_user 等待用户回答超时文案：超过 ASK_USER_TIMEOUT（const.py 秒数）未获答案时返回
-ASK_USER_TIMEOUT_TEXT: str = "Error: 等待用户回答超时"
-
-# /chat/clarify-answer 404 文案：POST 解析挂起澄清时查无该 session 或 Future 已结束（超时/取消）
-CLARIFY_ANSWER_NOT_FOUND_TEXT: str = "该澄清问题已超时或不存在"
 
 
 # ====== 实体抽取 ======
