@@ -424,6 +424,26 @@
     gap: 10px;
     align-items: center;
   }
+  .thinking-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 28px;
+    padding: 0 12px;
+    border: none;
+    border-radius: 24px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 500;
+    font-family: var(--font-body);
+    cursor: pointer;
+    transition: background var(--transition), color var(--transition);
+    flex-shrink: 0;
+  }
+  .thinking-chip:hover { background: var(--bg); color: var(--text); }
+  .thinking-chip.active { background: var(--primary); color: #fff; }
+  .thinking-chip:focus-visible { box-shadow: 0 0 0 3px rgba(59,130,246,0.3); outline: none; }
   .chat-footer input {
     flex: 1;
     padding: 10px 16px;
@@ -564,6 +584,10 @@
 <!-- Footer Input -->
 <div class="chat-footer" id="chatFooter">
   <div class="chat-footer-inner">
+    <button type="button" id="thinkingToggle" class="thinking-chip" aria-pressed="false" title="深度思考">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 1 1 7.072 0l-.548.547A3.374 3.374 0 0 0 14 18.469V19a2 2 0 1 1-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+      <span>深度思考</span>
+    </button>
     <input type="text" id="chatInput" placeholder="输入问题..." autocomplete="off" aria-label="消息输入框">
     <button class="chat-send" id="sendBtn" title="发送" aria-label="发送消息">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
@@ -586,6 +610,7 @@ const state = {
   kbId: '',        // 可配置
   abortController: null,
   traceId: '',     // 最近一次完成的 SSE 流的 trace_id（done 事件记录，反馈时回传）
+  deepThinking: false,
 };
 
 // 反馈 message_index 自增计数器
@@ -922,6 +947,7 @@ function startSSE(query) {
     session_id: state.sessionId,
     kb_id: state.kbId,
     query: query,
+    deep_thinking: state.deepThinking,
   });
 
   const url = `/api/chat/stream?${params}`;
@@ -1053,6 +1079,15 @@ chatInput.addEventListener('keydown', (e) => {
     sendMessage();
   }
 });
+
+const thinkingToggle = $('thinkingToggle');
+if (thinkingToggle) {
+  thinkingToggle.addEventListener('click', () => {
+    state.deepThinking = !state.deepThinking;
+    thinkingToggle.classList.toggle('active', state.deepThinking);
+    thinkingToggle.setAttribute('aria-pressed', String(state.deepThinking));
+  });
+}
 
 // ── Init ──
 state.sessionId = getOrCreateSessionId();
