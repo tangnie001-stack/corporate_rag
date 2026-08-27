@@ -21,6 +21,7 @@ class AgentState:
     trace_id: str = field(
         default_factory=lambda: current_trace_id.get() or "unknown"
     )  # 全链路追踪 ID（自动从 contextvar 读取）
+    deep_thinking: bool = False  # 深度思考开关（来源：/chat/stream?deep_thinking；用途：agent LLM enable_thinking 参数）
     # ── agent 循环 ──
     messages: Annotated[list[BaseMessage], add_messages] = field(
         default_factory=list
@@ -50,9 +51,23 @@ class AgentState:
     timings: dict = field(default_factory=dict)  # 各节点耗时统计
 
     @classmethod
-    def make_initial_state(cls, session_id, kb_id, query, history):
-        """创建图初始状态，只设输入字段，中间态/输出由各节点填充。"""
-        return cls(session_id=session_id, kb_id=kb_id, query=query, _history=history)
+    def make_initial_state(cls, session_id, kb_id, query, history, deep_thinking=False):
+        """创建图初始状态，只设输入字段，中间态/输出由各节点填充。
+
+        Args:
+            session_id: 会话 ID
+            kb_id: 知识库 ID
+            query: 用户查询文本
+            history: 对话历史列表
+            deep_thinking: 深度思考开关（默认 False），传给 agent LLM enable_thinking
+        """
+        return cls(
+            session_id=session_id,
+            kb_id=kb_id,
+            query=query,
+            _history=history,
+            deep_thinking=deep_thinking,
+        )
 
 
 class LangGraphNode:

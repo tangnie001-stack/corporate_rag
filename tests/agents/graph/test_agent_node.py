@@ -211,3 +211,15 @@ async def test_agent_model_astream_merges_chunks():
     result = out["messages"][-1]  # 首轮注入 system+user，模型输出在末尾
     assert result.content == "需要"
     assert result.tool_calls and result.tool_calls[0]["name"] == "retrieve_kb"
+
+
+def test_make_initial_state_deep_thinking_default_false():
+    """未传 deep_thinking 时默认 False。"""
+    state = AgentState.make_initial_state("s1", "kb1", "q", [])
+    assert state.deep_thinking is False
+
+
+def test_make_initial_state_deep_thinking_true():
+    """传 deep_thinking=True 时状态字段为 True。"""
+    state = AgentState.make_initial_state("s1", "kb1", "q", [], deep_thinking=True)
+    assert state.deep_thinking is True
