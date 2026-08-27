@@ -57,3 +57,13 @@
 - [ ] 7.6 更新 `tests/services/test_agent_service.py`（SSE 事件序列、并发锁 409、历史窗口截断）
 - [ ] 7.7 更新 `docs/agents/api_contract.md`（clarify-answer/feedback/SSEAskUserEvent 契约，SSEClarificationEvent 退役）
 - [ ] 7.8 归档 `query-rewrite-and-graph-simplification`：rerank 去阈值与 RRF 多查询融合逻辑吸收进 retrieve_kb 工具任务；rewrite/classify/grader/batch-clarification 任务作废
+
+## 8. 深度思考开关
+
+- [ ] 8.1 `state.py`：`AgentState` 加 `deep_thinking: bool = False`（输入字段），`make_initial_state` 加参数
+- [ ] 8.2 `api/chat.py`：`chat_stream` 加 `deep_thinking: bool = Query(False)`，`_stream_rag_response` 透传
+- [ ] 8.3 `agent_service.py`：`stream_chat` 加 `deep_thinking` 参数 → `make_initial_state`
+- [ ] 8.4 `agent_node.py`：`agent_model` 的 `model.astream(messages, extra_body={"enable_thinking": state.deep_thinking})`
+- [ ] 8.5 `chat.html`：输入区加"深度思考"开关（默认不选中），`state.deepThinking`，`/chat/stream` URL 加 `deep_thinking` 参数
+- [ ] 8.6 测试：`test_agent_service`/`test_agent_node`/`test_chat` 更新（stream_chat 签名、astream extra_body 断言、`deep_thinking` 参数）
+- [ ] 8.7 `api_contract.md`：`/chat/stream` 补 `deep_thinking` 参数契约

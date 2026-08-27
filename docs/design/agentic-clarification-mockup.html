@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>设计稿预览 — 企业知识库助手（agentic-clarification 前端改动）</title>
+<link href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600;700&family=Source+Sans+3:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* ═══ 设计系统基线（与 chat.html 保持一致）═══ */
+  :root {
+    --primary: #3B82F6;
+    --primary-hover: #2563EB;
+    --primary-light: #DBEAFE;
+    --accent: #F97316;
+    --accent-hover: #EA580C;
+    --accent-light: #FFF7ED;
+    --amber: #F59E0B;
+    --amber-light: #FFFBEB;
+    --bg: #F8FAFC;
+    --surface: #FFFFFF;
+    --text: #1E293B;
+    --text-secondary: #64748B;
+    --text-muted: #94A3B8;
+    --border: #E2E8F0;
+    --bubble-ai: #F8FAFC;
+    --bubble-user: #3B82F6;
+    --bubble-user-text: #FFFFFF;
+    --radius-lg: 12px;
+    --radius-sm: 8px;
+    --shadow: 0 1px 3px rgba(0,0,0,0.08);
+    --shadow-lg: 0 4px 12px rgba(0,0,0,0.06);
+    --transition: 150ms ease;
+    --max-width: 720px;
+    --font-display: 'Lexend', sans-serif;
+    --font-body: 'Source Sans 3', sans-serif;
+  }
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  html { font-size: 16px; }
+  body {
+    font-family: var(--font-body);
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ═══ 预览框架 ═══ */
+  .preview-page { max-width: 860px; margin: 0 auto; padding: 32px 16px 64px; }
+  .preview-header { margin-bottom: 28px; }
+  .preview-header h1 { font-family: var(--font-display); font-size: 22px; font-weight: 600; }
+  .preview-header p { color: var(--text-secondary); font-size: 13px; margin-top: 4px; }
+  .spec-note {
+    background: var(--primary-light);
+    border-left: 3px solid var(--primary);
+    padding: 10px 14px;
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    font-size: 13px;
+    color: var(--text);
+    margin-bottom: 24px;
+    line-height: 1.6;
+  }
+
+  .section {
+    margin-bottom: 36px;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+    background: var(--surface);
+  }
+  .section-title {
+    font-family: var(--font-display);
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .section-title .tag {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--primary);
+    background: var(--primary-light);
+    padding: 2px 8px;
+    border-radius: 999px;
+  }
+  .section-desc { color: var(--text-secondary); font-size: 13px; margin-bottom: 16px; }
+
+  /* ═══ 聊天界面 mockup ═══ */
+  .chat-window {
+    max-width: 720px;
+    margin: 0 auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    background: var(--surface);
+    box-shadow: var(--shadow-lg);
+  }
+  .chat-header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .app-icon {
+    width: 36px; height: 36px;
+    background: var(--primary);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff;
+    font-family: var(--font-display);
+    font-weight: 600; font-size: 16px;
+  }
+  .app-title { font-family: var(--font-display); font-weight: 600; font-size: 15px; }
+  .app-subtitle { font-size: 12px; color: var(--text-secondary); }
+
+  .chat-body {
+    padding: 20px 16px;
+    min-height: 480px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    background: var(--bg);
+  }
+
+  /* bubble */
+  .bubble-row { display: flex; gap: 10px; max-width: 85%; }
+  .bubble-row.ai { align-self: flex-start; }
+  .bubble-row.user { align-self: flex-end; flex-direction: row-reverse; }
+  .bubble-avatar {
+    width: 30px; height: 30px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; flex-shrink: 0;
+    background: var(--primary-light);
+  }
+  .bubble-avatar.user { background: var(--primary); }
+  .bubble-content {
+    padding: 10px 14px;
+    border-radius: var(--radius-lg);
+    font-size: 14px;
+    line-height: 1.65;
+  }
+  .bubble-row.ai .bubble-content { background: var(--bubble-ai); border: 1px solid var(--border); }
+  .bubble-row.user .bubble-content { background: var(--bubble-user); color: var(--bubble-user-text); }
+  .bubble-meta { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
+
+  /* ═══ 组件 1：状态标签 status-tag ═══ */
+  .status-tag {
+    align-self: flex-start;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 4px 12px;
+    border-radius: 999px;
+  }
+  .status-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--primary);
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+  /* ═══ 组件 2：引用卡片 citation ═══ */
+  .citation-card {
+    align-self: flex-start;
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 10px 14px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    display: flex;
+    gap: 10px;
+    cursor: pointer;
+    transition: border-color var(--transition), box-shadow var(--transition);
+  }
+  .citation-card:hover { border-color: var(--primary); box-shadow: var(--shadow); }
+  .citation-num {
+    flex-shrink: 0;
+    width: 22px; height: 22px;
+    border-radius: 6px;
+    background: var(--primary-light);
+    color: var(--primary);
+    font-weight: 600;
+    font-size: 12px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .citation-meta { font-weight: 500; color: var(--text); }
+  .citation-snippet { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
+
+  /* ═══ 组件 3：abstention 转人工 ═══ */
+  .abstention-card {
+    align-self: flex-start;
+    max-width: 85%;
+    background: var(--amber-light);
+    border: 1px solid #FDE68A;
+    border-radius: var(--radius-lg);
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: #92400E;
+  }
+  .abstention-btn {
+    margin-left: auto;
+    flex-shrink: 0;
+    font-size: 12px;
+    color: var(--accent);
+    background: transparent;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-sm);
+    padding: 5px 12px;
+    cursor: pointer;
+    transition: background var(--transition), color var(--transition);
+  }
+  .abstention-btn:hover { background: var(--accent); color: #fff; }
+
+  /* ═══ 组件 4：反馈 feedback ═══ */
+  .feedback-bar {
+    align-self: flex-start;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: -4px;
+  }
+  .feedback-btn {
+    width: 28px; height: 28px;
+    border: none;
+    background: transparent;
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background var(--transition), color var(--transition);
+  }
+  .feedback-btn:hover { background: var(--primary-light); color: var(--primary); }
+  .feedback-btn.active { color: var(--primary); background: var(--primary-light); }
+
+  /* ═══ 组件 5：model_info ═══ */
+  .model-info {
+    align-self: flex-start;
+    font-size: 11px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .model-fallback {
+    background: var(--amber-light);
+    color: #92400E;
+    border: 1px solid #FDE68A;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 999px;
+  }
+
+  /* ═══ 组件 6：追问卡片 composer ═══ */
+  .composer-card {
+    align-self: flex-start;
+    width: 100%;
+    max-width: 85%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+  }
+  .composer-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+  }
+  .composer-header svg { color: var(--primary); flex-shrink: 0; }
+  .composer-section { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .composer-section:last-of-type { border-bottom: none; }
+  .composer-question { font-size: 14px; font-weight: 500; margin-bottom: 10px; }
+  .composer-options { display: flex; flex-wrap: wrap; gap: 8px; }
+  .composer-option {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    color: var(--text);
+    cursor: pointer;
+    transition: border-color var(--transition), background var(--transition);
+  }
+  .composer-option:hover { border-color: var(--primary); }
+  .composer-option input { accent-color: var(--primary); }
+  .composer-option.checked { background: var(--primary-light); border-color: var(--primary); }
+  .composer-custom {
+    margin-top: 10px;
+    width: 100%;
+    padding: 8px 12px;
+    font-size: 13px;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--text);
+    outline: none;
+    transition: border-color var(--transition);
+  }
+  .composer-custom:focus { border-color: var(--primary); border-style: solid; }
+  .composer-footer { padding: 12px 16px; display: flex; justify-content: flex-end; background: var(--bg); }
+  .composer-submit {
+    font-size: 13px;
+    font-weight: 500;
+    color: #fff;
+    background: var(--primary);
+    border: none;
+    border-radius: var(--radius-sm);
+    padding: 8px 20px;
+    cursor: pointer;
+    transition: background var(--transition);
+  }
+  .composer-submit:hover { background: var(--primary-hover); }
+  .composer-submit:disabled { opacity: 0.6; cursor: not-allowed; }
+
+  /* ═══ 组件 7：深度思考开关（输入区）═══ */
+  .chat-footer-inner {
+    border-top: 1px solid var(--border);
+    padding: 12px 16px;
+    background: var(--surface);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .chat-input {
+    flex: 1;
+    height: 40px;
+    padding: 0 14px;
+    font-size: 14px;
+    font-family: var(--font-body);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    outline: none;
+    transition: border-color var(--transition), box-shadow var(--transition);
+  }
+  .chat-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(59,130,246,0.12); }
+
+  .thinking-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+    flex-shrink: 0;
+  }
+  .thinking-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .thinking-track {
+    width: 32px; height: 18px;
+    border-radius: 999px;
+    background: #CBD5E1;
+    position: relative;
+    transition: background var(--transition);
+    flex-shrink: 0;
+  }
+  .thinking-thumb {
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+    transition: transform var(--transition);
+  }
+  .thinking-toggle input:checked + .thinking-track { background: var(--primary); }
+  .thinking-toggle input:checked + .thinking-track .thinking-thumb { transform: translateX(14px); }
+  .thinking-toggle input:focus-visible + .thinking-track { box-shadow: 0 0 0 3px rgba(59,130,246,0.3); }
+  .thinking-label { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
+  .thinking-toggle:hover .thinking-label { color: var(--text); }
+
+  /* tooltip */
+  .thinking-tooltip {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    right: 0;
+    background: var(--text);
+    color: #fff;
+    font-size: 11px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--transition);
+    z-index: 20;
+  }
+  .thinking-toggle:hover .thinking-tooltip { opacity: 1; }
+
+  .chat-send {
+    width: 40px; height: 40px;
+    border: none;
+    border-radius: var(--radius-lg);
+    background: var(--primary);
+    color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    transition: background var(--transition);
+    flex-shrink: 0;
+  }
+  .chat-send:hover { background: var(--primary-hover); }
+  .chat-send:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* ═══ 规格标注 ═══ */
+  .annotations { margin-top: 10px; font-size: 12px; color: var(--text-muted); line-height: 1.7; }
+  .annotations code { background: var(--bg); padding: 1px 6px; border-radius: 4px; font-size: 11px; }
+</style>
+</head>
+<body>
+<div class="preview-page">
+  <div class="preview-header">
+    <h1>前端设计稿预览 — agentic-clarification 组件</h1>
+    <p>涵盖：深度思考开关 / 追问卡片 composer / abstention 转人工 / 答案反馈 / 模型信息 / 状态标签 / 引用卡片</p>
+  </div>
+  <div class="spec-note">
+    <strong>设计原则</strong>：沿用现有 Minimalism & Swiss 风格（primary #3B82F6 / accent #F97316 / 720px 布局 / Lexend + Source Sans 3）。
+    交互统一 150ms 过渡、所有可点击元素 <code>cursor:pointer</code>、悬停有视觉反馈（边框/底色变化）、控件支持键盘焦点环（<code>:focus-visible</code>）。
+  </div>
+
+  <!-- ═══ 聊天界面整体 mockup ═══ -->
+  <div class="section">
+    <div class="section-title">整体对话界面 <span class="tag">主视图</span></div>
+    <div class="section-desc">对话消息流 + 各组件在真实场景中的位置关系。消息流自上而下依次展示：用户提问 → 状态标签 → AI 回答（含引用）→ 反馈 → abstention 转人工 → 模型信息。</div>
+
+    <div class="chat-window">
+      <div class="chat-header">
+        <div class="app-icon">K</div>
+        <div>
+          <div class="app-title">企业知识库助手</div>
+          <div class="app-subtitle">会话: 10221_wmit36</div>
+        </div>
+      </div>
+      <div class="chat-body">
+        <!-- 用户消息 -->
+        <div class="bubble-row user">
+          <div class="bubble-avatar user">👤</div>
+          <div class="bubble-content">2024年公司的营收是多少</div>
+        </div>
+
+        <!-- 状态标签 -->
+        <div class="status-tag"><span class="status-dot"></span> 正在检索相关文档...</div>
+
+        <!-- AI 回答（带引用） -->
+        <div class="bubble-row ai">
+          <div class="bubble-avatar">🤖</div>
+          <div class="bubble-content">
+            <div class="bubble-meta">系统</div>
+            根据文档内容，腾讯2024年的总营收为人民币6,603亿元[2]，较2023年同比增长8%[2]。经审核的全年收入为660,257百万元人民币[1]。
+          </div>
+        </div>
+
+        <!-- 引用卡片 -->
+        <div class="citation-card">
+          <span class="citation-num">1</span>
+          <div>
+            <div class="citation-meta">📄 tencent_2024_annual.pdf · 第6页</div>
+            <div class="citation-snippet">金融科技及企业服务业务二零二四年第四季的收入同比增长3%至人民币561 亿元...</div>
+          </div>
+        </div>
+        <div class="citation-card">
+          <span class="citation-num">2</span>
+          <div>
+            <div class="citation-meta">📄 tencent_2024_annual.pdf · 第1页</div>
+            <div class="citation-snippet">即时发布 腾讯公布二零二四年年度及第四季业绩 收入高质量增长 运营效率持续提升...</div>
+          </div>
+        </div>
+
+        <!-- 反馈 -->
+        <div class="feedback-bar">
+          <button class="feedback-btn" title="有帮助">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
+          </button>
+          <button class="feedback-btn" title="无帮助">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7 0h3a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-3"/></svg>
+          </button>
+        </div>
+
+        <!-- abstention 转人工 -->
+        <div class="abstention-card">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span>未在文档中找到相关数据，可尝试转人工咨询</span>
+          <button class="abstention-btn">转人工咨询</button>
+        </div>
+
+        <!-- 模型信息 -->
+        <div class="model-info">
+          <span>模型: qwen3.7-flash-2026-07-15</span>
+        </div>
+      </div>
+
+      <!-- 输入区（含深度思考开关） -->
+      <div class="chat-footer-inner">
+        <label class="thinking-toggle">
+          <input type="checkbox">
+          <span class="thinking-track"><span class="thinking-thumb"></span></span>
+          <span class="thinking-label">深度思考</span>
+          <span class="thinking-tooltip">开启后模型先思考再回答，更准确但响应更慢</span>
+        </label>
+        <input class="chat-input" placeholder="输入问题...">
+        <button class="chat-send" title="发送">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ 组件：追问卡片 composer ═══ -->
+  <div class="section">
+    <div class="section-title">追问卡片 composer <span class="tag">澄清交互</span></div>
+    <div class="section-desc">
+      收到 <code>SSEAskUserEvent</code> 时渲染；<strong>不关闭 SSE 连接</strong>，输入区被表单接管，提交走 <code>POST /clarify-answer</code> 后同流续答。
+      <br>结构：卡片头（"需要补充信息" + SVG 图标）→ 每个问题一个 section（radio/checkbox 选项卡片 + 自定义输入）→ 底部提交按钮（primary，提交中 disabled）。
+    </div>
+
+    <div class="chat-window">
+      <div class="chat-header">
+        <div class="app-icon">K</div>
+        <div>
+          <div class="app-title">企业知识库助手</div>
+          <div class="app-subtitle">会话: 10221_wmit36</div>
+        </div>
+      </div>
+      <div class="chat-body">
+        <div class="bubble-row user">
+          <div class="bubble-avatar user">👤</div>
+          <div class="bubble-content">营收是多少</div>
+        </div>
+        <!-- 消息流保持干净：仅用户消息 + 状态标签，追问表单不进入对话内容 -->
+        <div class="status-tag"><span class="status-dot"></span> 正在思考...</div>
+      </div>
+      <!-- composer 接管输入区：隐藏输入框 + 发送按钮，表单出现在输入区位置 -->
+      <div class="chat-footer-inner" style="flex-wrap: wrap;">
+        <div class="composer-card" style="max-width: 100%; width: 100%; border: 1px solid var(--primary); box-shadow: var(--shadow-lg);">
+          <div class="composer-header">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            需要补充信息
+          </div>
+          <div class="composer-section">
+            <div class="composer-question">请问您想查询哪家公司的营收？</div>
+            <div class="composer-options">
+              <label class="composer-option"><input type="radio" name="company" checked> 东软集团股份有限公司</label>
+              <label class="composer-option"><input type="radio" name="company"> 腾讯控股有限公司</label>
+            </div>
+            <input class="composer-custom" placeholder="自定义输入…">
+          </div>
+          <div class="composer-section">
+            <div class="composer-question">请问您想查询哪个报告期的营收？</div>
+            <div class="composer-options">
+              <label class="composer-option"><input type="radio" name="period"> 2025年第一季度</label>
+              <label class="composer-option"><input type="radio" name="period"> 二零二四年年度</label>
+            </div>
+            <input class="composer-custom" placeholder="自定义输入…">
+          </div>
+          <div class="composer-footer">
+            <button class="composer-submit">提交</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="annotations">
+      规格：追问表单<strong>接管输入区</strong>（对应 dsh 的 QuestionComposer）——触发时隐藏输入框 + 发送按钮，表单出现在输入区；<strong>对话消息流保持干净</strong>（仅用户消息 + 状态标签），追问 UI 不进入对话内容。卡片 max-width 100% 占满输入区 / 白色 surface / 12px 圆角 / <code>--shadow-lg</code>；选项卡片选中态 <code>--primary-light</code> 底 + primary 边框；自定义输入虚线边框 focus 变实线；提交按钮 primary，hover <code>--primary-hover</code>。
+    </div>
+  </div>
+
+  <!-- ═══ 组件：深度思考开关 ═══ -->
+  <div class="section">
+    <div class="section-title">深度思考开关 <span class="tag">新增 · 输入区</span></div>
+    <div class="section-desc">
+      位于输入框左侧的 toggle 开关，默认不选中。选中 → 请求携带 <code>deep_thinking=true</code> → agent LLM <code>enable_thinking=true</code>（思考模式）；未选中 → <code>deep_thinking=false</code>（显式关闭，因 qwen3.7-flash 默认开启思考）。
+      <br>交互：hover 显示说明 tooltip；键盘可聚焦（<code>:focus-visible</code> 焦点环）；动画 150ms 平移。
+    </div>
+
+    <div class="chat-window">
+      <div class="chat-header">
+        <div class="app-icon">K</div>
+        <div>
+          <div class="app-title">企业知识库助手</div>
+          <div class="app-subtitle">会话: 10221_wmit36</div>
+        </div>
+      </div>
+      <div class="chat-body">
+        <div class="bubble-row ai">
+          <div class="bubble-avatar">🤖</div>
+          <div class="bubble-content">
+            <div class="bubble-meta">系统</div>
+            深度思考开启后，模型会先进行推理再回答，回答质量更高但响应时间明显变长。
+          </div>
+        </div>
+      </div>
+      <!-- 选中态示例 -->
+      <div class="chat-footer-inner">
+        <label class="thinking-toggle">
+          <input type="checkbox" checked>
+          <span class="thinking-track"><span class="thinking-thumb"></span></span>
+          <span class="thinking-label">深度思考</span>
+          <span class="thinking-tooltip">开启后模型先思考再回答，更准确但响应更慢</span>
+        </label>
+        <input class="chat-input" placeholder="输入问题...">
+        <button class="chat-send" title="发送">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="annotations">
+      规格：toggle 轨道 32×18px / 滑块 14px 圆 / 未选中轨道 <code>#CBD5E1</code> / 选中 <code>--primary</code> / 滑块 150ms translateX(14px)；label 12px <code>--text-secondary</code>；tooltip 深色 <code>--text</code> 底白字。
+    </div>
+  </div>
+
+  <!-- ═══ 组件：abstention 转人工 ═══ -->
+  <div class="section">
+    <div class="section-title">abstention 转人工入口 <span class="tag">拒答提示</span></div>
+    <div class="section-desc">
+      收到 <code>SSEAbstentionEvent</code> 时在消息流中渲染 amber 风格提示条：信息图标 + 提示文案 + "转人工咨询" 按钮（accent 橙 outline）。按钮点击记录会话标记（阶段一纯 UI）。
+    </div>
+
+    <div class="chat-window">
+      <div class="chat-header">
+        <div class="app-icon">K</div>
+        <div>
+          <div class="app-title">企业知识库助手</div>
+          <div class="app-subtitle">会话: 10221_wmit36</div>
+        </div>
+      </div>
+      <div class="chat-body">
+        <div class="bubble-row user">
+          <div class="bubble-avatar user">👤</div>
+          <div class="bubble-content">2024年公司的营收是多少</div>
+        </div>
+        <div class="bubble-row ai">
+          <div class="bubble-avatar">🤖</div>
+          <div class="bubble-content">
+            <div class="bubble-meta">系统</div>
+            未在文档中找到相关数据
+          </div>
+        </div>
+        <div class="abstention-card">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span>未在文档中找到相关数据，可尝试转人工咨询</span>
+          <button class="abstention-btn">转人工咨询</button>
+        </div>
+      </div>
+    </div>
+    <div class="annotations">
+      规格：背景 <code>--amber-light</code> (#FFFBEB) / 边框 <code>#FDE68A</code> / 文字 <code>#92400E</code> / 12px 圆角；"转人工咨询" accent 橙 outline，hover 填充 accent 白字。
+    </div>
+  </div>
+
+  <!-- ═══ 组件：反馈 + 模型信息 ═══ -->
+  <div class="section">
+    <div class="section-title">答案反馈 + 模型信息 <span class="tag">可观测性</span></div>
+    <div class="section-desc">
+      每条 AI 回答下渲染 👍/👎 反馈按钮（SVG 图标，选中 primary 高亮）；消息流末尾渲染模型信息（小字 muted，"模型: xxx"；fallback 时显示 amber 徽标）。
+    </div>
+
+    <div class="chat-window">
+      <div class="chat-header">
+        <div class="app-icon">K</div>
+        <div>
+          <div class="app-title">企业知识库助手</div>
+          <div class="app-subtitle">会话: 10221_wmit36</div>
+        </div>
+      </div>
+      <div class="chat-body">
+        <div class="bubble-row ai">
+          <div class="bubble-avatar">🤖</div>
+          <div class="bubble-content">
+            <div class="bubble-meta">系统</div>
+            腾讯2024年度总收入为人民币6,603亿元[1]。
+          </div>
+        </div>
+        <div class="citation-card">
+          <span class="citation-num">1</span>
+          <div>
+            <div class="citation-meta">📄 tencent_2024_annual.pdf · 第1页</div>
+            <div class="citation-snippet">腾讯控股有限公司今天公布截至二零二四年度经审核综合业绩...</div>
+          </div>
+        </div>
+        <div class="feedback-bar">
+          <button class="feedback-btn" title="有帮助">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
+          </button>
+          <button class="feedback-btn" title="无帮助">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7 0h3a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-3"/></svg>
+          </button>
+        </div>
+        <div class="model-info">
+          <span>模型: qwen3.7-flash-2026-07-15</span>
+          <span class="model-fallback">fallback</span>
+        </div>
+      </div>
+    </div>
+    <div class="annotations">
+      规格：反馈按钮 28×28px 透明底，hover <code>--primary-light</code> 底 + primary 图标，选中 <code>.active</code> 持色；模型信息 11px <code>--text-muted</code>，fallback 徽标 amber 胶囊。
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

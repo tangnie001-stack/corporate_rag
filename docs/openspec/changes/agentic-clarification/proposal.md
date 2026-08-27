@@ -22,6 +22,7 @@
 - **工程化补充**：全流程节点日志可查（每个图节点进出日志 + trace_id 还原执行链）、工具调用日志（iteration/tool/args/result/latency）、护栏命中告警（迭代上限/ask_user 超时/abort，含已耗 token）、循环内 token 用量聚合。**审计日志（澄清/转人工长期留存的独立记录）不在本 change 范围**，后续单独变更。
 - **历史写入时机**：user 消息（原 query + 澄清答案）**到达即写** Redis；assistant 消息**完成时写完整、abort 时有 token 写 interrupted 部分**（Redis+MySQL），不产生孤儿消息。
 - **删除 classify 节点与固定流水线（**BREAKING**）**：图简化为 `kb_router → agent 循环 → format`。闲聊/事实/澄清/转人工全由 agent 决定；classify 的三级路由、`skip_retrieval` 标记、确定性 abstention 分支一并删除（纯 agent 成本与保留闸门相当，且消除两条澄清源冲突）。
+- **深度思考开关**：前端输入区"深度思考"开关（默认不选中）→ `/chat/stream?deep_thinking=` → agent 主 LLM `enable_thinking`（经 per-call `extra_body`，已验证 langchain 动态透传）。qwen3.7-flash 混合思考模式默认开启，显式传 `false` 关闭；思考过程走 `reasoning_content`（langchain 丢弃，前端不展示思考文本）。qwen3.7-flash 不支持 `reasoning_effort` 档位，仅开关。
 
 ## Capabilities
 
@@ -33,6 +34,7 @@
 - `human-escalation`: 转人工工具（阶段二 escalate_to_human + 工单创建；阶段一 abstention 前端入口）
 - `answer-feedback`: 答案反馈采集（👍/👎 + 原因，落库对接 eval）
 - `agent-loop-observability`: agent 循环可观测性（全流程节点日志可查、工具调用日志、护栏告警、token 聚合）
+- `chat-thinking-toggle`: 前端"深度思考"开关 → `deep_thinking` 参数 → agent LLM `enable_thinking`（per-call extra_body；思考过程不展示）
 
 ### Modified Capabilities
 

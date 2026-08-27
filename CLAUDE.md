@@ -29,7 +29,7 @@ Python 3.11+ / FastAPI / ChromaDB / LangChain / DashScope / MySQL 8.0 / Redis 7 
 | docs/agents/glossary.md | 领域词汇表：核心标识符 / 响应信封 / RAG 流水线 / RAGAS 指标等规范术语 | 术语含义不确定、写文档或命名时查阅 |
 | docs/agents/chunking-issues.md | 分块问题排查与修复记录 | 遇到分块问题优先查阅 |
 | docs/agents/defensive-patterns.md | 防御性模式：并发 / SSE / 精排 / 实体 / prompt / DB / 部署的防复发规则 | 写相关领域代码前 |
-| docs/agents/ui-design-flow.md | UI 设计与前端验证 | 改 UI / 新增组件，改完用 playwright-cli 验证 |
+| docs/agents/ui-design-flow.md | UI 设计流程与产物路径：全局基线 `docs/design/MASTER.md` / 页面规格 `docs/design/pages/<name>.md` / 效果预览 `docs/design/<name>-mockup.html` | **改 UI / 新增组件前必读**；产出按此流程落 `docs/design/`，改完用 playwright-cli 验证 |
 | docs/agents/cookbook.md | 操作记录协议：什么该记、怎么记；条目按协议追加 | 遇到可复用操作流程时按协议记录；需要操作步骤时查阅 |
 | docs/agents/requirements_pool.md | 需求池（意向清单，非已确认需求） | 规划/排期时参考；不作为功能实现依据 |
 
@@ -39,7 +39,8 @@ Python 3.11+ / FastAPI / ChromaDB / LangChain / DashScope / MySQL 8.0 / Redis 7 
 src/
 ├── api/          # 纯路由层：请求校验→调 service→返回（不写业务逻辑）
 ├── services/     # 业务编排 app_service → kb / document / chat
-├── rag/          # RAG 流水线 chain → retrieval → rerank → prompt → stream
+├── agents/       # LangGraph agent 循环：graph（workflow/state/nodes/agent_node）+ tools（retrieve_kb / ask_user）
+├── rag/          # 检索与知识库路由：retrieval / kb_router / context / prompt
 ├── chat/         # 对话管理 manager(Redis) + persistence(MySQL)
 ├── core/         # Loguru 日志
 ├── config/       # settings / response_codes / prompts / queries
@@ -97,8 +98,8 @@ docker compose build --no-cache app    # 改依赖后重建
 - **显式类型检查**：类型不确定的值不用 `getattr(x, "attr", default)` 隐式兜底，用 `x.attr if x is not None else default` 或 `isinstance` 显式判断
 - **硬编码集中管理**：新增的常量/文案/阈值不得散落在业务代码中，统一放入 `src/config/`，按用途分工：
   - `settings.py` — 环境变量/运行参数（需可配置的阈值、开关等，走 `os.getenv`）
-  - `prompts.py` — LLM 提示词、给用户的文案（如拒答语、abstention 文案）
-  - `const.py` — 事件/节点常量、状态映射、固定阈值
+  - `prompts.py` — 仅 LLM 提示词（系统指令、消息模板）
+  - `const.py` — 事件/节点常量、状态映射、固定阈值；SSE 交互文案统一放 `SSEInteractionTexts` class
   - 业务模块内如已存在模块级常量，迁移归位到 `src/config/`（存量清理可单独变更，不混入功能改造）
 
 

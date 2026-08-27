@@ -14,13 +14,12 @@
 ## 链路 2：用户问答 → 检索 → 生成 ★
 
 ```
-用户提问 → SSE 建立 → 检索(search) → 精排(rerank)
-→ 流式生成(stream_answer) → 引用高亮(citations)
-→ 对话历史持久化(Redis + MySQL)
+用户提问 → SSE 建立 → kb_router 选库 → agent 循环（检索 / 追问 / 生成）
+→ 引用高亮(citations) → 对话历史持久化(Redis + MySQL)
 ```
 
 入口: `GET /api/chat/stream?session_id=&kb_id=&query=`
-输出: SSE 事件流 `status → token → citation → done`
+输出: SSE 事件流 `status → token → citation → model_info → done`（澄清时含 `ask_user`，拒答时含 `abstention`）
 
 ### 字段级生产-消费矩阵（StateGraph）
 
@@ -32,15 +31,14 @@
 | 节点 | 消费字段 | 生产字段 |
 |---|---|---|
 | `kb_router` | `kb_id`, `query` | `_resolved_kb_ids` |
-| `classify` | `query`, `_history` | `intent`, `extracted_entities`, `missing_entities`, `classification_confidence`, `skip_retrieval` |
-| `rewrite` | `query`, `intent` | `rewritten_queries`, `rewritten_query` |
-| `retrieve` | `rewritten_query`, `rewritten_queries`, `_resolved_kb_ids` | `retrieval_results` |
-| `rerank` | `rewritten_query`, `retrieval_results` | `contexts` |
-| `generate` | `query`, `contexts`, `_history` | `answer`, `model_used`, `is_fallback` |
-| `format` | `answer`, `contexts` | `citations` |
+| `agent` | `messages`, `_history`, `_resolved_kb_ids` | `messages`（LLM 输出含 tool_calls）, `_agent_iterations` |
+| `agent_tools` | `messages`（末条 tool_calls） | `messages`（ToolMessage 追加） |
+| `agent_finalize` | `messages` | `answer`, `tool_contexts` |
+| `format` | `answer`, `tool_contexts` | `citations` |
 
-SSE 消费侧另读 `LangGraphEvent.*`（事件类型）与 `LangGraphKey.*`（事件 dict key），
-用于 `astream_events` 流解析；`SSE_STATUS` 将节点名映射为前端状态提示文案。
+工具（retrieve_kb / ask_user）不写 state：检索上下文累积到 `RequestContext.tool_contexts`（contextvar），由 `agent_finalize` 读入 `state.tool_contexts`；ask_count / 澄清通道 / abort 信号均经 contextvar 传递。
+
+SSE 消费侧按事件类型接线（`LangGraphEvent.*`）：`on_chat_model_start` → "正在思考..."、`on_tool_start/end`（retrieve_kb）→ "正在检索.../检索完成..."；`SSE_STATUS` 节点名映射已删除。
 
 ## 链路 3：知识库管理
 

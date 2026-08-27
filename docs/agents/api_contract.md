@@ -151,22 +151,20 @@ Content-Type: `text/event-stream`
 | `session_id` | 会话 ID |
 | `kb_id` | 知识库 UUID（空字符串跨库搜索） |
 | `query` | 用户问题 |
+| `deep_thinking` | 深度思考开关（可选，默认 `false`）：`true` 时 agent 主 LLM 以思考模式调用（`enable_thinking=true`）；`false` 显式关闭。来自 `chat-thinking-toggle` capability |
 | `trace_id` | 链路追踪 ID（可选） |
 
 事件流（按推送顺序，不含追问路径）：
 
 ```json
 event: status
-data: {"stage": "classify", "message": "正在分析查询类型..."}
+data: {"stage": "agent", "message": "正在思考..."}
 
 event: status
-data: {"stage": "retrieving", "message": "正在检索相关文档..."}
+data: {"stage": "retrieve", "message": "正在检索相关文档..."}
 
 event: status
-data: {"stage": "reranking", "message": "已找到 N 个候选，正在精排..."}
-
-event: status
-data: {"stage": "generating", "message": "正在生成回答..."}
+data: {"stage": "retrieve", "message": "检索完成，正在分析..."}
 
 event: token
 data: {"token": "回答文本片段"}
@@ -199,13 +197,13 @@ data: {}
 
 | 事件 | 触发条件 | 说明 |
 |------|---------|------|
-| `status` | 节点开始 | 四阶段状态（classify / retrieving / reranking / generating） |
+| `status` | agent 循环按事件类型接线 | stage 取值：`agent`（on_chat_model_start "正在思考..."）、`retrieve`（on_tool_start/end "正在检索相关文档..." / "检索完成，正在分析..."） |
 | `token` | LLM 生成中 | LLM 生成文本片段，前端逐段追加 |
 | `citation` | rerank 节点完成 | 引用来源，按 source+page 去重 |
 | **`clarification`** | ~~classify 检测到缺失实体~~ | **已退役**：classify 已删，无预判来源，不再生产，前端已由 `ask_user` 接管 |
 | **`ask_user`** | **ask_user 工具被调用（agent 需要用户补充信息）** | **问题卡片事件，前端 composer 接管输入区；提交答案后同流续答** |
 | **`abstention`** | **模型输出命中拒答标记（如"未在文档中找到"）** | **abstention 标识 + 转人工提示文案，前端展示转人工入口；判定只看 answer 文案，与是否触发检索无关** |
-| `model_info` | generate 节点完成 | 实际使用的模型名和 fallback 状态 |
+| `model_info` | agent 循环末次 LLM 调用完成（on_chat_model_end 捕获） | 实际使用的模型名和 fallback 状态 |
 | `done` | 流结束 | 流结束标记；携带 `trace_id`（当前请求全链路追踪 ID），前端记录后随答案反馈回传 |
 | `error` | 异常 | 异常时推送，无 retry 机制 |
 
@@ -290,7 +288,7 @@ data: {"type": "abstention", "message": "未在文档中找到相关数据，可
 | `message` | str | 转人工提示文案（`SSEAbstentionEvent` 默认值） |
 
 > 触发：agent 迭代结束后检索上下文为空或答案命中拒答标记（`_is_abstention`）；
-> 文案与 `prompts.ABSTENTION_TEXT`（"更换问题表述"引导）语义不同，不混用。
+> 文案固定为转人工引导，与拒答检测（`SSEInteractionTexts.ABSTENTION_MARKERS`）配套。
 
 ### 追问流程关键约束
 
@@ -550,66 +548,55 @@ name = f"kb_{kb_id.replace('-', '')}"
 
 ### 5.1 节点定义与输出字段
 
-节点名称和输出字段常量定义在 `src/config/const.py` 的 `LangGraphNode` 类中。
+节点名称和输出字段常量定义在 `src/agents/graph/state.py` 的 `LangGraphNode` 类中。
 
 | 节点 | 节点名 (NAME) | 输出字段 | 说明 |
 |------|--------------|---------|------|
 | **kb_router** | `"kb_router"` | `_resolved_kb_ids: list[str] \| None` | KB 路由穿透/智能匹配 |
-| **classify** | `"classify"` | `intent`, `extracted_entities`, `missing_entities`, `classification_confidence` | 三层意图路由 |
-| **rewrite** | `"rewrite"` | `rewritten_queries: list[str]`, `rewritten_query: str` | 查询改写（仅 medium/complex） |
-| **retrieve** | `"retrieve"` | `retrieval_results: list[ChunkResult]` | 混合检索（Dense + BM25） |
-| **rerank** | `"rerank"` | `contexts: list[RAGContext]` | DashScope Reranker 精排 |
-| **generate** | `"generate"` | `answer: str`, `model_used: str` | LLM 流式生成 |
+| **agent** | `"agent"` | `messages`, `_agent_iterations` | agent 模型节点：bind_tools 调 LLM，可发起工具调用（retrieve_kb / ask_user） |
+| **agent_tools** | `"agent_tools"` | `messages`（ToolMessage 追加） | ToolNode 执行工具，错误回喂 |
+| **agent_finalize** | `"agent_finalize"` | `answer`, `tool_contexts` | 循环结束提取末次 AIMessage content → `answer`，读入 `tool_contexts` |
 | **format** | `"format"` | `citations: list[dict]` | 去重引用列表 |
 
-### 5.2 classify_node 三层路由架构
+### 5.2 agent 循环（model ↔ tools 条件循环）
 
-`make_classify_node(llm)` 创建的 classify 节点内部使用 `QueryRouter` 的三层架构：
+图结构为 `kb_router → agent → (agent_tools | agent_finalize) → format`：
 
 ```
-用户 query
-    │
-    ├── L0: 问候/长度检测
-    │   "你好/谢谢/≤2字符" → 直接返回 simple，不调用下游
-    │
-    ├── L1: EntityExtractor（正则实体提取，0 LLM 成本）
-    │   支持实体类型: year / quarter / month / metric / money / percentage / company
-    │   输出: list[ExtractedEntity]
-    │   源码: src/infra/search/entity_extractor.py
-    │
-    ├── L2: ComplexityScorer（关键词加权评分）
-    │   关键词按 LOW(1) / MEDIUM(2) / HIGH(3) / VERY_HIGH(4) 加权
-    │   实体数量 +0.5/个，多条件关键词 +2
-    │   输出: float 分数（仅作为 LLM hint，不做判决）
-    │   源码: src/infra/search/complexity_scorer.py
-    │
-    └── L3: LLM Classifier（一次 LLM 调用）
-       输入: query + entities + score + history
-       温度: CLASSIFIER_TEMPERATURE（默认 0.1）
-       输出 JSON:
-       {
-         "route": "simple|medium|complex",
-         "missing_entities": [{"type": "year", "question": "请问您想查询哪一年的数据？"}],
-         "confidence": 0.92
-       }
-       源码: src/infra/search/query_router.py
+kb_router → agent（LLM + bind_tools）
+              │ 有 tool_calls 且未超限
+              ▼
+         agent_tools（ToolNode 执行 retrieve_kb / ask_user）
+              │ 工具结果回填 messages
+              ▼
+            agent（下一轮 LLM）
+              │ 无 tool_calls / 达迭代上限
+              ▼
+         agent_finalize（提取 answer + tool_contexts）
+              ▼
+            format（引用去重）
 ```
 
-`route_by_intent` 条件边根据 state 决定下一步：
-- `missing_entities` 非空 → `"clarify"` → **END**（不走 rewrite/retrieve/generate）
-- `route == "simple"` → `LangGraphNode.Retrieve.NAME`
-- `route == "medium"` → `LangGraphNode.Rewrite.NAME`
-- `route == "complex"` → `LangGraphNode.Rewrite.NAME`
+- 迭代上限 `MAX_AGENT_ITERATIONS`（`src/config/const.py`），超限强制收尾
+- 工具不能写 state：检索上下文累积到 `RequestContext.tool_contexts`（contextvar），由 `agent_finalize` 读入 `state.tool_contexts`
+- per-request 对象（澄清通道 queue / abort 信号 / ask_count）经 contextvar（`current_request_ctx`）传递，并发 session 天然隔离
+- 终止条件：`route_agent` 判断末条消息无 `tool_calls` 或达迭代上限 → `agent_finalize`
 
-### 5.3 AgentState 新增字段（意图理解）
+### 5.3 AgentState 关键字段
 
-自 Phase 4 意图路由升级后，`AgentState` 新增以下字段：
+`AgentState`（`src/agents/graph/state.py`）为 agent 循环状态：
 
-| 字段 | 类型 | 默认值 | 来源 | 说明 |
-|------|------|--------|------|------|
-| `extracted_entities` | `list[dict]` | `[]` | EntityExtractor L1 | 正则提取的实体列表 |
-| `missing_entities` | `list[dict]` | `[]` | LLM L3 | LLM 标记的缺失实体（如 `[{"type": "year", "question": "请问您想查询哪一年的数据？"}]` |
-| `classification_confidence` | `float` | `0.0` | LLM L3 | LLM 置信度（LLM 输出 key="confidence"） |
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `session_id` / `kb_id` / `query` | str | 输入：会话 / 知识库 / 用户问题 |
+| `messages` | `list[BaseMessage]` | 模型可见消息（`add_messages` 追加语义） |
+| `tool_contexts` | `list[RAGContext]` | retrieve_kb 累积检索上下文（引用溯源） |
+| `_agent_iterations` | int | 循环迭代计数（护栏） |
+| `_max_agent_iterations` | int | 迭代上限（默认 `MAX_AGENT_ITERATIONS`） |
+| `answer` | str | LLM 生成的完整回答 |
+| `citations` | list[dict] | 去重引用列表 |
+| `_resolved_kb_ids` | list[str] \| None | kb_router 路由结果（None = 未路由/降级） |
+| `_history` | list[ChatMessage] | 对话历史（初始注入数据源，agent 节点入口截断） |
 
 ### 5.4 `RAGContext` 数据类
 
@@ -637,28 +624,23 @@ name = f"kb_{kb_id.replace('-', '')}"
 
 ## 6. 数据流全貌
 
-### 6.1 正常回答路径（无追问）
+### 6.1 正常回答路径（agent 循环）
 
 ```
 用户提问 "2024年公司营收多少" (query)
   → GET /api/chat/stream?session_id=xxx&kb_id=yyy&query=...&trace_id=zzz
     → kb_router: 穿透/跨库路由 → _resolved_kb_ids
-    → classify_node: QueryRouter 三层
-        L0: 问候拦截（跳过）
-        L1: EntityExtractor → [{year:2024, metric:营收}]
-        L2: ComplexityScorer → score=2.5 (medium)
-        L3: LLM → route=medium, missing=[], confidence=0.95
-    → route_by_intent: "medium" → rewrite
-    → rewrite_node: 查询改写（输出 rewritten_queries 多查询列表）
-    → retrieve_node: Hybrid Search (Dense + BM25 + RRF)
-    → rerank_node: DashScope Reranker 精排（retrieve → rerank 直连，grader 已删除）
-    → generate_node: LLM 流式生成
+    → agent 循环:
+        1. agent: LLM 思考 → 调用 retrieve_kb
+        2. agent_tools: 检索（hybrid Dense + BM25 + RRF 融合 → rerank 精排 → format_context）
+        3. agent: 基于检索上下文生成回答（含引用编号 [n]）
+           （信息不足时可在循环内调用 ask_user 追问，见 6.2）
+    → agent_finalize: 提取 answer + tool_contexts
     → format_node: 去重引用列表
     → SSE 事件流推送至前端:
-        event: status (classify)
-        event: status (retrieving)
-        event: status (reranking)
-        event: status (generating)
+        event: status (agent, "正在思考...")
+        event: status (retrieve, "正在检索相关文档...")
+        event: status (retrieve, "检索完成，正在分析...")
         event: token (逐片推送)
         event: citation (去重)
         event: model_info (模型名 + fallback 状态)
@@ -668,37 +650,27 @@ name = f"kb_{kb_id.replace('-', '')}"
       → chat_manager.save_messages_async()
 ```
 
-### 6.2 追问路径（缺失实体）
-
-> ⚠️ **已退役**：以下 classify 追问链路已删除（agent 化改造），
-> 缺失信息由 agent 循环中的 `ask_user` 工具 + `POST /chat/clarify-answer` 处理（见 2.3.2 / ask_user 事件详情）。
+### 6.2 澄清路径（ask_user 工具）
 
 ```
-用户提问 "营收多少"（缺年份，无历史上下文）
+用户提问 "营收多少"（缺关键信息，agent 判断需澄清）
   → GET /api/chat/stream?session_id=xxx&kb_id=yyy&query=营收多少&trace_id=zzz
-    → kb_router → classify_node: QueryRouter 三层
-        L0: 问候拦截（跳过）
-        L1: EntityExtractor → [{metric:营收}]
-        L2: ComplexityScorer → score=1.5
-        L3: LLM → route=medium,
-                    missing=[{type:"year", question:"请问您想查询哪一年的数据？"}],
-                    confidence=0.85
-    → route_by_intent: missing_entities 非空 → "clarify" → END
-    → 图不执行 rewrite/retrieve/generate，直接结束
-    → agent_service.stream_chat 在 classify CHAIN_END 捕获 missing_entities
-    → 循环结束后发送 SSEClarificationEvent
+    → kb_router → agent 循环:
+        1. agent: LLM 判断信息不足 → 调用 ask_user
+        2. agent_tools: ask_user 推送问题 → SSEAskUserEvent，挂起等待（ASK_USER_TIMEOUT）
+        3. 前端 composer 渲染问题表单（输入区接管），用户提交 POST /api/chat/clarify-answer
+        4. 答案 resolve 挂起 Future → 作为工具结果回喂 → 同一 turn 继续
+    → agent: 基于答案 + 检索上下文生成回答
     → SSE 事件流:
-        event: status (classify)
-        event: clarification (追问事件 + 快捷选项)
-        event: done
-
-用户补充信息 "2024年"（同 session_id）
-  → GET /api/chat/stream?session_id=xxx&kb_id=yyy&query=2024年&trace_id=zzz
-    → _history 包含上轮对话
-    → classify_node: LLM 从 history 推断 year=2024，metric=营收
-        missing=[], route=medium
-    → 正常路径（同 6.1）
+        event: status (agent)
+        event: ask_user (问题卡片，options 由 KB 实体注入)
+        event: status (retrieve, 用户回答后继续检索)
+        event: token / citation / model_info / done
 ```
+
+- 用户答案到达即写 Redis 历史（`POST /api/chat/clarify-answer`，见 2.3.2）
+- 超时/断连：ask_user Future 以超时/取消 resolve，agent 收尾；用户超时后提交返回 404
+- 澄清答案在模型上下文是 ToolMessage（同 turn），在历史是 user 消息（跨 turn 上下文），两轨并存
 
 ### 6.3 文档上传路径
   → POST /api/kbs/documents/upload (multipart)

@@ -155,6 +155,16 @@ agent 化后无节点，`SSE_STATUS` 节点名映射失效。状态事件改按�
 
 该 change 为 in-progress、0/31 完成、未合入。本 change 删除 classify/rewrite/retrieve/rerank/generate 节点后其大部分能力作废：**归档 `query-rewrite-and-graph-simplification`**，把仍有效部分吸收进本 change——rerank 去阈值逻辑并入 `retrieve_kb` 工具；RRF 多查询融合并入 `retrieve_kb`（若工具支持多查询参数）；rewrite/classify/grader/batch-clarification 任务作废。
 
+### D20. 深度思考开关（前端可选，per-call extra_body 控制 enable_thinking）
+
+前端输入区提供"深度思考"开关（默认不选中），控制 agent 主 LLM 的思考模式：
+- 选中 → `enable_thinking: true`；未选中 → `enable_thinking: false`（qwen3.7-flash 为混合思考模式且**默认开启**，必须显式传 `false` 才能关闭，故默认态也显式传）
+- 数据流：`/chat/stream?deep_thinking=`（Query 默认 false）→ `stream_chat(deep_thinking)` → `AgentState.deep_thinking` → agent 节点 `model.astream(messages, extra_body={"enable_thinking": state.deep_thinking})`
+- 可行性：已验证 langchain-openai 1.3.3 的 `_get_request_payload` 中 per-call kwargs 覆盖 `_default_params` 的 `extra_body`，动态透传生效（实测 True→content 全空思考生效、False→正常正文）
+- 思考过程走 `reasoning_content`，langchain 1.3.3 丢弃（content/additional_kwargs 均无），前端**不展示思考文本**——深度思考只影响回答质量，不改变 SSE 事件契约
+- 限制：qwen3.7-flash **不支持 `reasoning_effort` 档位**（千问 API 参考支持列表仅 qwen3.8-max/GLM/DeepSeek-V4/Kimi-K3），本 change 只做开关；强度档位需换模型（对应 dsh 的 Off/Low/High/Max，本模型无）
+- CLI（check_abstain/RAGAS）直连 graph 时 `AgentState.deep_thinking` 默认 `false`，不受影响
+
 ## Risks / Trade-offs
 
 - **ask_user 挂起泄漏** → Future 双绑定（abort 信号 + 超时），注册表 finally 清理

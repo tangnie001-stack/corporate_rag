@@ -35,3 +35,18 @@
 - 气泡间距: 16px
 - 选项按钮间距: 8px
 - 内容内边距: 16px
+
+## 组件规格
+按页登记于 `docs/design/pages/`，此处为组件索引：
+
+| 组件 | 页面文档 | 关键规格 |
+|------|---------|---------|
+| 状态标签 status-tag | `agentic-clarification.md` | 胶囊 + 蓝色呼吸圆点 |
+| 追问卡片 composer | `agentic-clarification.md` | **输入区接管**（不进消息流）、选项卡片选中 primary-light、提交 primary |
+| abstention 转人工 | `agentic-clarification.md` | amber 提示条 + accent 橙 outline 按钮 |
+| 答案反馈 feedback | `agentic-clarification.md` | 28×28 SVG 按钮、选中 primary 高亮 |
+| 模型信息 model_info | `agentic-clarification.md` | 11px muted、fallback amber 徽标 |
+| 引用卡片 citation | `agentic-clarification.md` | 编号 badge + 来源 + snippet、hover primary 边框 |
+| 深度思考开关 thinking-toggle | `agentic-clarification.md` | 输入区紧凑 chip、选中 primary、控制 `enable_thinking` |
+
+新组件/页面设计时：全局基线更新到本文件，页面级规格写入 `pages/<name>.md`，效果预览输出 `docs/design/<name>-mockup.html`。
