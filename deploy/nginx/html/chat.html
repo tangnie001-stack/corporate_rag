@@ -202,6 +202,9 @@
     border-bottom-left-radius: 4px;
   }
   .clarification-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
     font-size: 11px;
     color: var(--text-secondary);
     font-weight: 500;
@@ -230,7 +233,7 @@
     width: 100%;
     box-sizing: border-box;
     padding: 8px 14px;
-    border: 1px solid var(--border);
+    border: 1px dashed var(--border);
     border-radius: 10px;
     font-size: 14px;
     outline: none;
@@ -243,13 +246,14 @@
   .clarification-section .clarification-input:focus {
     box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
     border-color: var(--primary);
+    border-style: solid;
   }
   .clarification-submit {
     width: 100%;
     padding: 10px 0;
     border: none;
     border-radius: 10px;
-    background: var(--accent);
+    background: var(--primary);
     color: #fff;
     font-size: 14px;
     font-weight: 500;
@@ -257,7 +261,7 @@
     transition: background var(--transition);
     font-family: var(--font-body);
   }
-  .clarification-submit:hover { background: var(--accent-hover); }
+  .clarification-submit:hover { background: var(--primary-hover); }
 
   /* ── Composer（ask_user 输入区接管） ── */
   .composer-container {
@@ -295,21 +299,32 @@
   .composer-option-desc { font-size: 12px; color: var(--text-secondary); }
 
   /* ── Abstention（转人工入口） ── */
-  .abstention-tag { cursor: default; }
+  .abstention-tag {
+    align-self: flex-start;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    background: #FFFBEB;
+    border: 1px solid #FDE68A;
+    border-radius: var(--radius-lg);
+    padding: 12px 16px;
+    font-size: 13px;
+    color: #92400E;
+  }
   .abstention-btn {
-    margin-left: 8px;
-    padding: 2px 10px;
-    border: 1px solid var(--primary);
-    border-radius: 14px;
-    background: var(--surface);
-    color: var(--primary);
+    margin-left: auto;
+    padding: 5px 12px;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--accent);
     font-size: 12px;
     font-family: var(--font-body);
     cursor: pointer;
-    transition: all var(--transition);
+    transition: background var(--transition), color var(--transition);
     flex-shrink: 0;
   }
-  .abstention-btn:hover { background: var(--primary-light); }
+  .abstention-btn:hover { background: var(--accent); color: #fff; }
   .abstention-btn:disabled { opacity: 0.6; cursor: default; }
 
   /* ── Feedback（👍/👎） ── */
@@ -319,16 +334,17 @@
     margin-top: 10px;
   }
   .feedback-btn {
-    padding: 2px 10px;
-    border: 1px solid var(--border);
+    width: 28px; height: 28px;
+    padding: 0;
+    border: none;
+    background: transparent;
     border-radius: 6px;
-    background: var(--surface);
-    font-size: 13px;
-    font-family: var(--font-body);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-muted);
     cursor: pointer;
-    transition: border-color var(--transition), opacity var(--transition);
+    transition: background var(--transition), color var(--transition);
   }
-  .feedback-btn:hover { border-color: var(--primary); }
+  .feedback-btn:hover { background: var(--primary-light); color: var(--primary); }
   .feedback-btn-disabled { opacity: 0.45; cursor: default; }
 
   /* ── Highlighted Answer ── */
@@ -359,7 +375,9 @@
     max-width: 100%;
     line-height: 1.4;
     cursor: default;
+    transition: border-color var(--transition), box-shadow var(--transition);
   }
+  .citation-item:hover { border-color: var(--primary); box-shadow: var(--shadow); }
   .citation-source {
     font-weight: 600;
     color: var(--primary);
@@ -395,14 +413,19 @@
 
   /* ── Model Info ── */
   .model-info {
-    align-self: flex-end;
+    align-self: flex-start;
     font-size: 11px;
     color: var(--text-muted);
     margin-top: -8px;
   }
   .model-info .fallback-badge {
-    color: var(--accent);
-    font-weight: 500;
+    background: #FFFBEB;
+    border: 1px solid #FDE68A;
+    color: #92400E;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    margin-left: 6px;
   }
 
   /* ── Footer Input ── */
@@ -740,7 +763,7 @@ function renderModelInfo(model, isFallback) {
   div.className = 'model-info';
   div.textContent = `模型: ${model}`;
   if (isFallback) {
-    div.innerHTML += ' <span class="fallback-badge">⚡ 已降级</span>';
+    div.innerHTML += ' <span class="fallback-badge">fallback</span>';
   }
   chatContainer.appendChild(div);
   scrollToBottom();
@@ -802,7 +825,10 @@ function renderComposer(questions) {
 
   composer.innerHTML = `
     <div class="clarification-inner">
-      <div class="clarification-label">系统 · 需要补充信息</div>
+      <div class="clarification-label">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        需要补充信息
+      </div>
       ${sectionsHtml}
       <button class="clarification-submit" type="button">提交</button>
     </div>`;
@@ -875,6 +901,7 @@ function renderAbstention(message) {
   const div = document.createElement('div');
   div.className = 'status-tag abstention-tag';
   div.innerHTML = `
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
     <span>${escapeHtml(message)}</span>
     <button class="abstention-btn" type="button">转人工咨询</button>
   `;
@@ -899,8 +926,12 @@ function appendFeedback(bubble) {
   const row = document.createElement('div');
   row.className = 'feedback-row';
   row.innerHTML = `
-    <button class="feedback-btn" type="button" data-rating="positive" aria-label="有帮助">👍</button>
-    <button class="feedback-btn" type="button" data-rating="negative" aria-label="无帮助">👎</button>
+    <button class="feedback-btn" type="button" data-rating="positive" aria-label="有帮助">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
+    </button>
+    <button class="feedback-btn" type="button" data-rating="negative" aria-label="无帮助">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7 0h3a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-3"/></svg>
+    </button>
   `;
   row.querySelectorAll('.feedback-btn').forEach(btn => {
     btn.addEventListener('click', () => {
