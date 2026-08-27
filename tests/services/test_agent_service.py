@@ -267,6 +267,25 @@ async def test_stream_chat_emits_full_event_sequence():
 
 
 @pytest.mark.asyncio
+async def test_stream_chat_passes_deep_thinking():
+    """deep_thinking 参数应透传至初始 state（最终控制 agent LLM enable_thinking）。"""
+    service, _ = _make_service()
+    seen = {}
+
+    async def fake_astream(initial_state, version):
+        seen["deep_thinking"] = initial_state.deep_thinking
+        yield _chat_model_end_item("gpt-4o")
+        yield _finalize_end_item("答案", has_contexts=True)
+
+    service._graph = Mock()
+    service._graph.astream_events = fake_astream
+
+    async for _ in service.stream_chat("kb1", "session1", "q", deep_thinking=True):
+        pass
+    assert seen["deep_thinking"] is True
+
+
+@pytest.mark.asyncio
 async def test_stream_chat_emits_abstention_when_no_context():
     """检索无上下文 → 循环结束发 SSEAbstentionEvent（位于 model_info / done 之前）。"""
     service, _ = _make_service()

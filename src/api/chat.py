@@ -153,6 +153,7 @@ async def _stream_rag_response(
     session_id: str,
     query: str,
     user_id: str = "",
+    deep_thinking: bool = False,
 ) -> AsyncGenerator[str, None]:
     """以 SSE 事件流推送 RAG 响应 — 委托给 agent_service。
 
@@ -164,11 +165,15 @@ async def _stream_rag_response(
         session_id: 会话 ID
         query: 用户查询文本
         user_id: 当前用户 ID（用于会话归属，空串表示匿名）
+        deep_thinking: 深度思考开关（透传给 agent_service，最终控制
+            agent LLM 的 enable_thinking 参数，默认 False）
     """
     full_answer = ""
     sources: list[str] = []
     try:
-        async for event in svc.agent_service.stream_chat(kb_id, session_id, query):
+        async for event in svc.agent_service.stream_chat(
+            kb_id, session_id, query, deep_thinking
+        ):
             match event:
                 case SSETokenEvent(token=token):
                     full_answer += token
@@ -280,6 +285,7 @@ async def chat_stream(
         ..., description="Knowledge base ID (or empty for cross-KB search)"
     ),
     query: str = Query(..., description="User question"),
+    deep_thinking: bool = Query(False, description="深度思考开关（enable_thinking）"),
     svc: AppService = Depends(get_app_service),
 ):
     """流式 RAG 问答端点 — 返回 SSE 事件流。
@@ -288,6 +294,8 @@ async def chat_stream(
         session_id: 会话 ID，用于关联对话历史
         kb_id: 知识库 UUID（空字符串表示跨库搜索）
         query: 用户问题文本
+        deep_thinking: 深度思考开关（默认 False，true 时开启 agent LLM
+            enable_thinking）
         svc: AppService 实例（通过 FastAPI Depends 注入）
         request: FastAPI 请求对象（从中提取 user_id 用于会话归属）
 
@@ -319,7 +327,7 @@ async def chat_stream(
         """持有并发锁流式推送 RAG 响应，流结束或异常时在 finally 释放锁。"""
         try:
             async for event in _stream_rag_response(
-                svc, kb_id, session_id, query, user_id
+                svc, kb_id, session_id, query, user_id, deep_thinking
             ):
                 yield event
         finally:

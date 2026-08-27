@@ -327,6 +327,7 @@ class AgentService:
         kb_id: str,
         session_id: str,
         query: str,
+        deep_thinking: bool = False,
     ) -> AsyncGenerator[SSEEvent, None]:
         """执行图并流式返回 SSE 事件。
 
@@ -343,6 +344,8 @@ class AgentService:
             kb_id: 知识库 ID（空字符串表示跨库搜索）
             session_id: 会话 ID
             query: 用户查询文本
+            deep_thinking: 深度思考开关（默认 False）；为 True 时 agent LLM
+                以思考模式调用（enable_thinking）
 
         Yields:
             SSEEvent: 转换后的 SSE 事件（status / token / citation / ask_user /
@@ -351,7 +354,9 @@ class AgentService:
         history = await self._chat_manager.get_history_async(session_id) or []
         await self._chat_manager.add_message_async(session_id, "user", query)
 
-        initial_state = AgentState.make_initial_state(session_id, kb_id, query, history)
+        initial_state = AgentState.make_initial_state(
+            session_id, kb_id, query, history, deep_thinking
+        )
 
         ctx = RequestContext(session_id=session_id)
         ctx_token = current_request_ctx.set(ctx)

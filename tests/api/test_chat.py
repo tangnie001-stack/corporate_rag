@@ -68,6 +68,35 @@ def test_chat_stream_passes_user_id():
         app.dependency_overrides.pop(get_app_service, None)
 
 
+def test_chat_stream_passes_deep_thinking():
+    """deep_thinking 查询参数应透传至 agent_service.stream_chat。
+
+    回归场景：前端「深度思考」开关打开时，请求应携带 deep_thinking=true，
+    最终传递给 agent LLM 的 enable_thinking 参数；若断链则开关无效。
+    """
+    from src.utils.sse import SSETokenEvent
+
+    captured = {}
+
+    async def fake_stream_chat(kb_id, session_id, query, deep_thinking=False):
+        captured["deep_thinking"] = deep_thinking
+        yield SSETokenEvent("ok")
+
+    mock_svc = MagicMock()
+    mock_svc.agent_service.stream_chat = fake_stream_chat
+    app.dependency_overrides[get_app_service] = lambda: mock_svc
+
+    try:
+        with patch("src.api.chat._persist_conversation"):
+            response = client.get(
+                "/api/chat/stream?session_id=s1&kb_id=kb-1&query=hi&deep_thinking=true"
+            )
+        assert response.status_code == 200
+        assert captured["deep_thinking"] is True
+    finally:
+        app.dependency_overrides.pop(get_app_service, None)
+
+
 @pytest.mark.asyncio
 async def test_normal_answer_persisted():
     """正常回答（有 token 无澄清）时应持久化对话。"""
@@ -80,7 +109,7 @@ async def test_normal_answer_persisted():
         SSEDoneEvent(),
     ]
 
-    async def _stream(kb_id, session_id, query):
+    async def _stream(kb_id, session_id, query, deep_thinking=False):
         for e in events:
             yield e
 
