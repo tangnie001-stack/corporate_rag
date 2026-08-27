@@ -76,7 +76,10 @@ def make_agent_model_node(llm, tools, prompt_manager) -> Callable:
         logger.info("agent iteration={} msgs={}", iteration, len(messages))
         # 流式聚合：astream 逐块产出，经 AIMessageChunk 的 += 合并 content 与
         # tool_call_chunks，最终消息带 tool_calls（若模型发起工具调用），
-        # 同时驱动 on_chat_model_stream 事件把 token 流式下发前端
+        # 同时驱动 on_chat_model_stream 事件把 token 流式下发前端。
+        # 注意：per-call extra_body 在 langchain-openai 1.3.3 中整体覆盖构造时的
+        # extra_body（_get_request_payload 浅合并），故本模型不宜在 LLM_KWARGS
+        # 里配置其他 extra_body 参数（会被本处覆盖丢弃）。
         chunks = []
         async for chunk in model.astream(
             messages, extra_body={"enable_thinking": state.deep_thinking}
