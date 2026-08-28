@@ -4,6 +4,7 @@ from src.services.agent_service import _convert_event
 from src.utils.sse import (
     SSEAbstentionEvent,
     SSEAskUserEvent,
+    SSEReasoningDeltaEvent,
     to_sse,
 )
 
@@ -58,3 +59,8 @@ def test_convert_ask_user_item():
     assert isinstance(result[0], SSEAskUserEvent)
     assert result[0].questions == questions
     assert result[0].type == "ask_user"
+
+
+def test_sse_reasoning_delta_event():
+    text = to_sse(SSEReasoningDeltaEvent(reasoning_delta="思考片段"))
+    assert text == 'event: reasoning\ndata: {"delta": "思考片段"}\n\n'

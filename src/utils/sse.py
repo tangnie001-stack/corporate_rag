@@ -79,6 +79,13 @@ class SSEAbstentionEvent:
     message: str = "未在文档中找到相关数据，可尝试转人工咨询"
 
 
+@dataclass
+class SSEReasoningDeltaEvent:
+    """LLM 思考过程增量事件。"""
+
+    reasoning_delta: str  # 思考文本增量片段（前端累积渲染 Think 行）
+
+
 SSEEvent = (
     SSEStatusEvent
     | SSETokenEvent
@@ -88,6 +95,7 @@ SSEEvent = (
     | SSEModelInfoEvent
     | SSEAskUserEvent  # ask_user 问题卡片
     | SSEAbstentionEvent  # abstention 转人工提示
+    | SSEReasoningDeltaEvent  # reasoning 思考增量
 )
 
 
@@ -218,6 +226,19 @@ def sse_abstention(event: SSEAbstentionEvent) -> str:
     return f"event: abstention\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def sse_reasoning_delta(reasoning_delta: str) -> str:
+    """构建 reasoning 事件的 SSE 文本。
+
+    Args:
+        reasoning_delta: 思考文本增量片段
+
+    Returns:
+        SSE 格式文本（event: reasoning）
+    """
+    data: dict = {"delta": reasoning_delta}
+    return f"event: reasoning\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
 def to_sse(event: SSEEvent) -> str:
     """将结构化事件转为 SSE 格式字符串。
 
@@ -253,3 +274,5 @@ def to_sse(event: SSEEvent) -> str:
             return sse_ask_user(SSEAskUserEvent(t, questions))
         case SSEAbstentionEvent(type=t, message=message):
             return sse_abstention(SSEAbstentionEvent(t, message))
+        case SSEReasoningDeltaEvent(reasoning_delta=delta):
+            return sse_reasoning_delta(delta)
