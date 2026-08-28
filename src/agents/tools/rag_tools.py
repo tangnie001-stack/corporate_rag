@@ -30,6 +30,8 @@ from src.infra.llm.request_context import current_request_ctx, pending_asks
 from src.infra.search.bm25_index import BM25Index
 from src.infra.search.query_router import SUGGESTIONS_MAP, aggregate_kb_entities
 from src.rag import retrieval
+from src.rag.context import RAGContext
+from src.rag.retrieval import _ALL_ENTITY_KEYS
 
 
 class RetrieveKBArgs(BaseModel):
@@ -102,7 +104,7 @@ def make_rag_tools(
                 results = []  # 无匹配 KB → 空工具结果，模型自行决定 abstain/ask/转人工
 
         # rerank 为同步 HTTP 调用（无内置超时），放线程池 + 超时兜底，避免阻塞事件循环；
-        # 超时降级为空结果，模型自行决定 abstain/ask/转人工
+        # 超时后降级为检索原始顺序（distance 升序），避免空结果触发 abstain
         try:
             contexts = await asyncio.wait_for(
                 asyncio.to_thread(retrieval.rerank_results, query, results, reranker),
@@ -110,11 +112,33 @@ def make_rag_tools(
             )
         except TimeoutError:
             logger.warning(
-                "tool=retrieve_kb rerank timeout after {}s, contexts=[] query={}",
+                "tool=retrieve_kb rerank timeout after {}s, fallback to raw order query={}",
                 RERANK_TIMEOUT,
                 query,
             )
             contexts = []
+            for r in results:
+                pc = r.metadata.get("parent_content")
+                if pc:
+                    content = pc
+                else:
+                    content = r.content
+                contexts.append(
+                    RAGContext(
+                        content=content,
+                        source=r.metadata.get("source", ""),
+                        page=r.metadata.get("page", 0),
+                        doc_id=r.metadata.get("doc_id", ""),
+                        chunk_id=r.id,
+                        parent_content=pc,
+                        score=1 - r.distance if r.distance is not None else 0.0,
+                        entities={
+                            k: r.metadata.get(k)
+                            for k in _ALL_ENTITY_KEYS
+                            if r.metadata.get(k)
+                        },
+                    )
+                )
         contexts = contexts[:top_k]
 
         if state is not None:

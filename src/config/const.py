@@ -56,8 +56,9 @@ SESSION_LOCK_TTL = ASK_USER_TIMEOUT + 60
 
 # ── 检索精排超时 ──
 # Reranker 精排总超时秒数：rerank 为同步 HTTP 调用（dashscope 无默认超时），
-# 在事件循环内直连会永久挂起阻塞整个 worker，故经 to_thread + wait_for 兜底
-RERANK_TIMEOUT = 30
+# 在事件循环内直连会永久挂起阻塞整个 worker，故经 to_thread + wait_for 兜底；
+# 超时后降级为检索原始顺序（raw-order fallback），避免空结果触发 abstain
+RERANK_TIMEOUT = 5
 
 
 # ── SSE 交互事件文案与 stage 标识 ──
