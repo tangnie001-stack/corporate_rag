@@ -62,5 +62,6 @@ def test_convert_ask_user_item():
 
 
 def test_sse_reasoning_delta_event():
+    """reasoning 增量事件序列化为标准 SSE 文本。"""
     text = to_sse(SSEReasoningDeltaEvent(reasoning_delta="思考片段"))
     assert text == 'event: reasoning\ndata: {"delta": "思考片段"}\n\n'
