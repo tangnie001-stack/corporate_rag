@@ -1509,6 +1509,8 @@ async function handleLogout() {
 }
 
 // ── Init ──
+// 区分新/旧会话：localStorage 无 rag_session_id 说明是全新对话（新浏览器/未开过对话）
+const hadSavedSession = !!localStorage.getItem('rag_session_id');
 state.sessionId = getOrCreateSessionId();
 state.kbId = new URLSearchParams(window.location.search).get('kb_id') || '';
 if (!state.kbId) {
@@ -1518,9 +1520,14 @@ if (!state.kbId) {
 // Show session ID in header subtitle
 document.querySelector('.app-subtitle').textContent = `会话: ${state.sessionId.slice(-12)}`;
 
-// 加载会话历史侧边栏 + 当前会话的历史消息
+// 加载会话历史侧边栏
 loadSessions();
-loadSessionMessages(state.sessionId);
+// 仅已有会话才拉取历史消息（新对话无历史，不调用 /api/sessions/messages）
+if (hadSavedSession) {
+  loadSessionMessages(state.sessionId);
+} else {
+  showEmptyState();
+}
 
 console.log('RAG Chat initialized', {
   sessionId: state.sessionId,
