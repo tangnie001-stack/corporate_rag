@@ -36,6 +36,10 @@
 - **abstention**（拒答）：检索无达标 context 时直接返回拒答文案，不回 LLM
 - **clarification**（追问）：分类器发现缺失实体时向用户发起追问（`CLARIFICATION_ENABLED` 开关控制）
 
+## 推理思考文本
+
+- **reasoning_content**：模型的流式思考文本（chain-of-thought）。DashScope 等第三方把思考增量放在 `delta.reasoning_content`，OpenRouter 等用 `delta.reasoning`；`ChatQwenWithReasoning` 统一累积到 `AIMessageChunk.additional_kwargs["reasoning_content"]`，供上层读取与展示
+
 ## 评估指标（RAGAS）
 
 | 指标 | 含义 |
