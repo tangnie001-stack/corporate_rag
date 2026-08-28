@@ -41,6 +41,7 @@ from src.utils.sse import (
     SSEErrorEvent,
     SSEEvent,
     SSEModelInfoEvent,
+    SSEReasoningDeltaEvent,
     SSEStatusEvent,
     SSETokenEvent,
 )
@@ -128,7 +129,8 @@ def _convert_event(
     - LangGraph astream_events 事件 dict（按事件类型接线，不依赖节点名映射）：
       on_chat_model_start（metadata.langgraph_node == "agent"）→ SSEStatusEvent 思考中
       on_chat_model_stream（metadata.langgraph_node == "agent" 且 chunk 内容非空）
-      → SSETokenEvent（agent 节点对 LLM 的流式 token）
+      → SSETokenEvent（agent 节点对 LLM 的流式 token）；chunk 带
+      additional_kwargs.reasoning_content 时 → SSEReasoningDeltaEvent（思考增量）
       on_chat_model_end（metadata.langgraph_node == "agent"）→ 捕获 model_used 到 capture
       on_tool_start name == "retrieve_kb" → SSEStatusEvent 检索中；name == "ask_user" → 不发
       on_tool_end name == "retrieve_kb" → SSEStatusEvent 检索完成
@@ -159,10 +161,16 @@ def _convert_event(
             chunk = item.get(LangGraphKey.DATA, {}).get(LangGraphKey.CHUNK)
             if chunk is not None:
                 content = chunk.content
+                reasoning = (chunk.additional_kwargs or {}).get("reasoning_content", "")
             else:
                 content = ""
+                reasoning = ""
+            events = []
             if content:
-                return [SSETokenEvent(content)]
+                events.append(SSETokenEvent(content))
+            if reasoning:
+                events.append(SSEReasoningDeltaEvent(reasoning))
+            return events
         return []
 
     if kind == LangGraphEvent.CHAT_MODEL_START:

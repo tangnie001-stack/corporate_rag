@@ -201,6 +201,52 @@ class TestConvertEventStatus:
         assert len(capture.final_contexts) == 1
 
 
+def test_convert_event_extracts_reasoning():
+    """on_chat_model_stream 且 chunk 带 reasoning_content 时产出 reasoning 事件。"""
+    from langchain_core.messages import AIMessageChunk
+
+    from src.services.agent_service import _convert_event
+    from src.utils.sse import SSEReasoningDeltaEvent
+
+    chunk = AIMessageChunk(
+        content="",
+        additional_kwargs={"reasoning_content": "思考增量"},
+    )
+    item = {
+        "event": "on_chat_model_stream",
+        "name": "ChatModel",
+        "metadata": {"langgraph_node": "agent"},
+        "data": {"chunk": chunk},
+    }
+    events = _convert_event(item)
+    assert any(
+        isinstance(e, SSEReasoningDeltaEvent) and e.reasoning_delta == "思考增量"
+        for e in events
+    )
+
+
+def test_convert_event_content_and_reasoning_both():
+    """chunk 同时有 content 和 reasoning 时，产出 token + reasoning 两个事件。"""
+    from langchain_core.messages import AIMessageChunk
+
+    from src.services.agent_service import _convert_event
+    from src.utils.sse import SSEReasoningDeltaEvent, SSETokenEvent
+
+    chunk = AIMessageChunk(
+        content="正文",
+        additional_kwargs={"reasoning_content": "思考"},
+    )
+    item = {
+        "event": "on_chat_model_stream",
+        "name": "ChatModel",
+        "metadata": {"langgraph_node": "agent"},
+        "data": {"chunk": chunk},
+    }
+    events = _convert_event(item)
+    kinds = {type(e) for e in events}
+    assert SSETokenEvent in kinds and SSEReasoningDeltaEvent in kinds
+
+
 @pytest.mark.asyncio
 async def test_stream_chat_emits_full_event_sequence():
     """受控事件流 → 状态/token/citation/model_info/done 完整产出。"""
