@@ -41,7 +41,7 @@ class ChatQwenWithReasoning(ChatOpenAI):
 
         # 兼容两种外层 chunk 结构（普通流式 / beta stream）
         choices = chunk.get("choices", [])
-        if not choices and "chunk" in chunk:
+        if not choices and chunk.get("chunk"):
             choices = chunk["chunk"].get("choices", [])
         if not choices:
             return generation_chunk
