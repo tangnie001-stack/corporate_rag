@@ -265,6 +265,52 @@
   }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
 
+  /* ── Think 折叠行（dsh 风格，思考过程展示）── */
+  .think-row {
+    align-self: flex-start;
+    width: 100%;
+    max-width: 85%;
+    background: #F1F5F9;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+  }
+  .think-row summary {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    cursor: pointer;
+    list-style: none;
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+  .think-row summary::-webkit-details-marker { display: none; }
+  .think-row summary .think-icon { color: var(--text-muted); flex-shrink: 0; display: flex; }
+  .think-row summary .think-title { font-weight: 600; color: var(--text); flex-shrink: 0; }
+  .think-row summary .think-chevron {
+    margin-left: auto;
+    flex-shrink: 0;
+    transition: transform 150ms ease;
+    color: var(--text-muted);
+  }
+  .think-row[open] summary .think-chevron { transform: rotate(90deg); }
+  .think-row summary .think-summary {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-muted);
+  }
+  .think-row .think-body {
+    padding: 4px 12px 10px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+  }
+
   /* 引用卡片 */
   .citation-card {
     align-self: flex-start; width: 100%;
@@ -499,6 +545,30 @@
           </div>
           <div class="status-tag"><span class="status-dot"></span> 正在思考...</div>
           <div class="status-tag"><span class="status-dot"></span> 正在检索相关文档...</div>
+          <!-- Think 折叠行：展开态（思考过程完整可见） -->
+          <details class="think-row" open>
+            <summary>
+              <span class="think-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 1 1 7.072 0l-.548.547A3.374 3.374 0 0 0 14 18.469V19a2 2 0 1 1-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg></span>
+              <span class="think-title">Think</span>
+              <span class="think-summary">用户的问题是"腾讯2024年的营收是多少"…</span>
+              <span class="think-chevron"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></span>
+            </summary>
+            <div class="think-body">用户的问题是"腾讯2024年的营收是多少"，包含公司（腾讯）和期间（2024年）两个关键实体。
+根据规则，应先调用 retrieve_kb 检索相关文档获取数据，再基于检索上下文生成回答。
+我将调用检索工具获取腾讯 2024 年度的财务数据。</div>
+          </details>
+          <!-- Think 折叠行：折叠态（只显示摘要一行） -->
+          <details class="think-row">
+            <summary>
+              <span class="think-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 1 1 7.072 0l-.548.547A3.374 3.374 0 0 0 14 18.469V19a2 2 0 1 1-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg></span>
+              <span class="think-title">Think</span>
+              <span class="think-summary">用户问的是"营收是多少"，缺少关键实体，需要调用 ask_user 澄清…</span>
+              <span class="think-chevron"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></span>
+            </summary>
+            <div class="think-body">用户的问题是"营收是多少"，缺少关键实体（公司、期间），且提供的参考文档为空。
+根据规则，需要先调用 ask_user 向用户澄清缺失的信息。
+因此，我将构造一个 ask_user 工具调用，询问公司和报告期两个维度。</div>
+          </details>
           <div class="bubble-row ai">
             <div class="bubble-avatar">🤖</div>
             <div class="bubble-content">
