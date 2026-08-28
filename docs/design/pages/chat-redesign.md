@@ -32,6 +32,16 @@
 
 深度思考开关（chip，选中 ✓）、ask_user 澄清 composer（**输入区接管，不进消息流**）、abstention 转人工（amber 条 + 橙按钮）、反馈（SVG 👍/👎）、引用卡片、模型信息（fallback 徽标）、状态标签（呼吸圆点）——全部规格见 `pages/agentic-clarification.md`，此处不重复。
 
+## Think 折叠行（思考过程展示）
+
+`enable_thinking=true` 时，模型思考经 `ChatQwenWithReasoning` 提取 → SSE `reasoning` 增量事件 → 前端渲染：
+
+- **结构**：浅灰底（`#F1F5F9`）+ 1px 边框 + 8px 圆角；`<details>` 默认收起（脑电波图标 + "Think" 标题 + 单行省略摘要 + chevron，展开旋转 90°）；展开显示完整思考文本（13px secondary，保留换行）
+- **粒度**：每轮 agent LLM 调用一个 Think 行（检索决策/生成回答各自独立）
+- **流式**：增量累积到 `.think-body`，摘要跟随最新一行；收到正文 token / 状态（新一轮）/ ask_user / abstention / done 时定型（摘要固定为首行）
+- **数据源**：`SSEReasoningDeltaEvent`（`event: reasoning`，data `{"delta": "..."}`），契约见 `api_contract.md` 2.3.1
+- `enable_thinking=false` 时模型不返回 reasoning → 无 Think 行（零影响）
+
 ## 右上角 User Area
 
 chat-header 右侧（`margin-left: auto` 右对齐）常驻用户区：
