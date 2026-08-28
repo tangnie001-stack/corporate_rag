@@ -1376,38 +1376,8 @@ async function loadSessions() {
 }
 
 // 切换会话：更新 session_id 并加载该会话历史消息
-async function switchSession(sessionId) {
-  if (sessionId === state.sessionId) return;
-  state.sessionId = sessionId;
-  localStorage.setItem('rag_session_id', sessionId);
-  document.querySelector('.app-subtitle').textContent = `会话: ${sessionId.slice(-12)}`;
-  chatContainer.innerHTML = '';
-  loadSessions();
-  try {
-    const res = await fetch('/api/sessions/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Trace-ID': generateTraceId() },
-      body: JSON.stringify({ session_id: sessionId }),
-    });
-    const body = await res.json().catch(() => null);
-    const messages = (body && body.code === 'SUCCESS' && Array.isArray(body.data)) ? body.data : [];
-    messages.forEach(m => {
-      if (m.role === 'user') {
-        renderUserBubble(m.content || '');
-      } else if (m.role === 'assistant') {
-        renderAiAnswer(m.content || '');
-      }
-    });
-  } catch (e) { /* 历史加载失败静默 */ }
-  if (window.innerWidth < 768) toggleSidebar();
-}
-
-// 新建会话：生成新 session_id，清空当前对话
-function newSession() {
-  const sid = 'sess_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-  state.sessionId = sid;
-  localStorage.setItem('rag_session_id', sid);
-  document.querySelector('.app-subtitle').textContent = `会话: ${sid.slice(-12)}`;
+// 显示空状态（新会话/无历史）
+function showEmptyState() {
   chatContainer.innerHTML = '';
   const empty = document.createElement('div');
   empty.className = 'empty-state';
@@ -1417,6 +1387,53 @@ function newSession() {
     <div class="empty-state-title">有什么可以帮您？</div>
     <div class="empty-state-desc">输入问题开始使用企业知识库查询</div>`;
   chatContainer.appendChild(empty);
+}
+
+// 加载指定会话的历史消息并渲染（POST /api/sessions/messages）
+async function loadSessionMessages(sessionId) {
+  chatContainer.innerHTML = '';
+  try {
+    const res = await fetch('/api/sessions/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Trace-ID': generateTraceId() },
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+    const body = await res.json().catch(() => null);
+    const messages = (body && body.code === 'SUCCESS' && Array.isArray(body.data)) ? body.data : [];
+    if (!messages.length) {
+      showEmptyState();
+      return;
+    }
+    messages.forEach(m => {
+      if (m.role === 'user') {
+        renderUserBubble(m.content || '');
+      } else if (m.role === 'assistant') {
+        renderAiAnswer(m.content || '');
+      }
+    });
+  } catch (e) {
+    showEmptyState();
+  }
+}
+
+// 切换会话：更新 session_id 并加载该会话历史消息
+async function switchSession(sessionId) {
+  if (sessionId === state.sessionId) return;
+  state.sessionId = sessionId;
+  localStorage.setItem('rag_session_id', sessionId);
+  document.querySelector('.app-subtitle').textContent = `会话: ${sessionId.slice(-12)}`;
+  loadSessions();
+  await loadSessionMessages(sessionId);
+  if (window.innerWidth < 768) toggleSidebar();
+}
+
+// 新建会话：生成新 session_id，清空当前对话
+function newSession() {
+  const sid = 'sess_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+  state.sessionId = sid;
+  localStorage.setItem('rag_session_id', sid);
+  document.querySelector('.app-subtitle').textContent = `会话: ${sid.slice(-12)}`;
+  showEmptyState();
   loadSessions();
   if (window.innerWidth < 768) toggleSidebar();
   chatInput.focus();
@@ -1501,8 +1518,9 @@ if (!state.kbId) {
 // Show session ID in header subtitle
 document.querySelector('.app-subtitle').textContent = `会话: ${state.sessionId.slice(-12)}`;
 
-// 加载会话历史侧边栏
+// 加载会话历史侧边栏 + 当前会话的历史消息
 loadSessions();
+loadSessionMessages(state.sessionId);
 
 console.log('RAG Chat initialized', {
   sessionId: state.sessionId,
