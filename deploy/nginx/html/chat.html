@@ -757,6 +757,52 @@
     .hamburger { display: flex; }
     .chat-main { min-height: 100vh; }
   }
+
+  /* ── Think 折叠行（思考过程展示）── */
+  .think-row {
+    align-self: flex-start;
+    width: 100%;
+    max-width: 85%;
+    background: #F1F5F9;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+  }
+  .think-row summary {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    cursor: pointer;
+    list-style: none;
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+  .think-row summary::-webkit-details-marker { display: none; }
+  .think-row summary .think-icon { color: var(--text-muted); flex-shrink: 0; display: flex; }
+  .think-row summary .think-title { font-weight: 600; color: var(--text); flex-shrink: 0; }
+  .think-row summary .think-chevron {
+    margin-left: auto;
+    flex-shrink: 0;
+    transition: transform 150ms ease;
+    color: var(--text-muted);
+  }
+  .think-row[open] summary .think-chevron { transform: rotate(90deg); }
+  .think-row summary .think-summary {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-muted);
+  }
+  .think-row .think-body {
+    padding: 4px 12px 10px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+  }
 </style>
 </head>
 <body>
@@ -1177,6 +1223,54 @@ function removeStreamingState() {
   chatContainer.querySelectorAll('.status-tag').forEach(el => el.remove());
 }
 
+// ── Think 折叠行（reasoning 事件累积渲染，前端推断边界）──
+let currentThinkRow = null;
+
+// 取思考文本最新一行（流式中摘要跟随最新行）
+function latestReasoningLine(text) {
+  const visible = text.replace(/\s+$/, '');
+  const newline = visible.lastIndexOf('\n');
+  return newline === -1 ? visible : visible.slice(newline + 1);
+}
+
+// 定型当前 Think 行（折叠摘要固定为首行，不再累积）
+function closeThinkRow() {
+  if (currentThinkRow) {
+    const body = currentThinkRow.querySelector('.think-body');
+    const summary = currentThinkRow.querySelector('.think-summary');
+    if (body && summary) {
+      const full = body.textContent;
+      const newline = full.indexOf('\n');
+      summary.textContent = newline === -1 ? full : full.slice(0, newline);
+    }
+    currentThinkRow = null;
+  }
+}
+
+// 渲染思考增量（无活跃 Think 行则创建，默认折叠）
+function renderReasoningDelta(delta) {
+  if (!delta) return;
+  if (!currentThinkRow) {
+    const details = document.createElement('details');
+    details.className = 'think-row';
+    details.innerHTML = `
+      <summary>
+        <span class="think-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 1 1 7.072 0l-.548.547A3.374 3.374 0 0 0 14 18.469V19a2 2 0 1 1-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg></span>
+        <span class="think-title">Think</span>
+        <span class="think-summary"></span>
+        <span class="think-chevron"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></span>
+      </summary>
+      <div class="think-body"></div>`;
+    chatContainer.appendChild(details);
+    currentThinkRow = details;
+    scrollToBottom();
+  }
+  const body = currentThinkRow.querySelector('.think-body');
+  const summary = currentThinkRow.querySelector('.think-summary');
+  body.textContent += delta;
+  summary.textContent = latestReasoningLine(body.textContent);
+}
+
 function escapeHtml(str) {
   if (!str) return '';
   const div = document.createElement('div');
@@ -1204,13 +1298,22 @@ function startSSE(query) {
 
   source.addEventListener('status', (e) => {
     try {
+      closeThinkRow();
       const data = JSON.parse(e.data);
       renderStatusTag(data.stage, data.message);
     } catch (err) { /* ignore */ }
   });
 
+  source.addEventListener('reasoning', (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      renderReasoningDelta(data.delta || '');
+    } catch (err) { /* ignore */ }
+  });
+
   source.addEventListener('token', (e) => {
     try {
+      closeThinkRow();
       const data = JSON.parse(e.data);
       fullAnswer += data.token || '';
       renderAiAnswerStream(data.token || '');
@@ -1226,6 +1329,7 @@ function startSSE(query) {
 
   source.addEventListener('ask_user', (e) => {
     try {
+      closeThinkRow();
       const data = JSON.parse(e.data);
       // 不关流：SSE 保持连接，composer 接管输入区，提交后同流续答
       state.current = STATE.CLARIFYING;
@@ -1237,6 +1341,7 @@ function startSSE(query) {
 
   source.addEventListener('abstention', (e) => {
     try {
+      closeThinkRow();
       const data = JSON.parse(e.data);
       renderAbstention(data.message || '未在文档中找到相关数据，可尝试转人工咨询');
     } catch (err) { /* ignore */ }
@@ -1251,6 +1356,7 @@ function startSSE(query) {
 
   source.addEventListener('done', (e) => {
     try {
+      closeThinkRow();
       const data = JSON.parse(e.data);
       if (data.trace_id) state.traceId = data.trace_id;
     } catch (err) { /* ignore */ }
