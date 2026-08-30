@@ -1,11 +1,13 @@
 """SSE (Server-Sent Events) 格式化工具函数。
 
 提供统一的 SSE 事件文本构建函数，供流式聊天端点使用。
-所有函数仅依赖标准库 json，无业务依赖。
+仅依赖标准库 json 与 src.config.const 常量（无业务依赖）。
 """
 
 import json
 from dataclasses import dataclass, field
+
+from src.config.const import SSEInteractionTexts
 
 # ── 结构化事件 dataclass ─────────────────────────────────
 
@@ -35,7 +37,9 @@ class SSECitationEvent:
     score: float = 0.0  # Reranker 分数
     highlighted_snippet: str | None = None  # 高亮 HTML 片段
     index: int = 0  # 原文档编号（对应 format_context 的 [n]），0 表示兜底无编号
-    kind: str = "kb"  # 引用来源类型：kb（知识库文档） / web（网络搜索）
+    kind: str = (
+        SSEInteractionTexts.CITATION_KIND_KB
+    )  # 引用来源类型：kb（知识库文档） / web（网络搜索）
 
 
 @dataclass
@@ -139,7 +143,7 @@ def sse_citation(
     score: float = 0.0,
     highlighted_snippet: str | None = None,
     index: int = 0,
-    kind: str = "kb",
+    kind: str = SSEInteractionTexts.CITATION_KIND_KB,
 ) -> str:
     """构建 SSE citation 事件。
 

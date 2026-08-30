@@ -166,11 +166,17 @@ data: {"stage": "retrieve", "message": "正在检索相关文档..."}
 event: status
 data: {"stage": "retrieve", "message": "检索完成，正在分析..."}
 
+event: status
+data: {"stage": "web_search", "message": "正在联网搜索..."}
+
+event: status
+data: {"stage": "web_search", "message": "联网搜索完成，正在分析..."}
+
 event: token
 data: {"token": "回答文本片段"}
 
 event: citation
-data: {"source": "文件名.pdf", "page": 15, "snippet": "内容摘要...", "score": 0.95, "highlighted_snippet": "<mark>高亮</mark>内容"}
+data: {"source": "文件名.pdf", "page": 15, "snippet": "内容摘要...", "score": 0.95, "highlighted_snippet": "<mark>高亮</mark>内容", "kind": "kb"}
 
 event: model_info
 data: {"model": "模型名", "is_fallback": false}
@@ -197,10 +203,10 @@ data: {}
 
 | 事件 | 触发条件 | 说明 |
 |------|---------|------|
-| `status` | agent 循环按事件类型接线 | stage 取值：`agent`（on_chat_model_start "正在思考..."）、`retrieve`（on_tool_start/end "正在检索相关文档..." / "检索完成，正在分析..."） |
+| `status` | agent 循环按事件类型接线 | stage 取值：`agent`（on_chat_model_start "正在思考..."）、`retrieve`（on_tool_start/end "正在检索相关文档..." / "检索完成，正在分析..."）、`web_search`（on_tool_start/end "正在联网搜索..." / "联网搜索完成，正在分析..."，KB 不达标时走 search_web 兜底才出现） |
 | `token` | LLM 生成中 | LLM 生成文本片段，前端逐段追加 |
 | **`reasoning`** | **agent 节点 LLM 流式输出思考增量（enable_thinking=true 且模型返回 reasoning_content，经 ChatQwenWithReasoning 提取）** | **思考过程增量（data: {"delta": "..."}），前端累积渲染 Think 折叠行；每轮 LLM 调用一个，默认收起；收到正文 token/状态/ask_user/abstention/done 时定型** |
-| `citation` | rerank 节点完成 | 引用来源，按 source+page 去重 |
+| `citation` | format 节点完成 | 引用来源，按 source+page 去重；data 含 `kind`（`kb` 知识库 / `web` 网络搜索，默认 `kb`），前端按来源类型区分展示 |
 | **`clarification`** | ~~classify 检测到缺失实体~~ | **已退役**：classify 已删，无预判来源，不再生产，前端已由 `ask_user` 接管 |
 | **`ask_user`** | **ask_user 工具被调用（agent 需要用户补充信息）** | **问题卡片事件，前端 composer 接管输入区；提交答案后同流续答** |
 | **`abstention`** | **模型输出命中拒答标记（如"未在文档中找到"）** | **abstention 标识 + 转人工提示文案，前端展示转人工入口；判定只看 answer 文案，与是否触发检索无关** |
@@ -271,7 +277,7 @@ data: {"type": "ask_user", "questions": [{"id": "q1", "question": "您想查询�
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `type` | str | 固定 `"ask_user"`，前端据此路由到追问卡片 |
-| `questions` | list | 问题卡片列表；每条含 `id`（答案回显）/`question`（问题文本）/`options`（候选，KB 聚合或 `SUGGESTIONS_MAP` 兜底）/`multi_select`（是否多选） |
+| `questions` | list | 问题卡片列表；每条含 `id`（答案回显）/`question`（问题文本）/`options`（候选）/`multi_select`（是否多选）。`options` 来源随 `ASK_USER_MODE_DSH`：**默认 `true`（dsh 模式）系统不注入 KB dimension 候选，直接用模型自带的 options（可为空 = 纯文本问题）**；`false`（dual 模式）模型自带优先，无 options 时按 dimension 从 KB 聚合真实候选注入（防编造），KB 无候选时兜底 `SUGGESTIONS_MAP` |
 
 > 提交答案走 `POST /api/chat/clarify-answer`，提交后 SSE 保持连接、同流续答；
 > 单 turn 最多 `MAX_ASK_PER_TURN`（2）次调用，超时（`ASK_USER_TIMEOUT` 120s）返回超时文案继续。
@@ -554,8 +560,8 @@ name = f"kb_{kb_id.replace('-', '')}"
 | 节点 | 节点名 (NAME) | 输出字段 | 说明 |
 |------|--------------|---------|------|
 | **kb_router** | `"kb_router"` | `_resolved_kb_ids: list[str] \| None` | KB 路由穿透/智能匹配 |
-| **agent** | `"agent"` | `messages`, `_agent_iterations` | agent 模型节点：bind_tools 调 LLM，可发起工具调用（retrieve_kb / ask_user） |
-| **agent_tools** | `"agent_tools"` | `messages`（ToolMessage 追加） | ToolNode 执行工具，错误回喂 |
+| **agent** | `"agent"` | `messages`, `_agent_iterations` | agent 模型节点：bind_tools 调 LLM，可发起工具调用（retrieve_kb / ask_user / search_web） |
+| **agent_tools** | `"agent_tools"` | `messages`（ToolMessage 追加） | ToolNode 执行工具，错误回喂；工具集：`retrieve_kb`（KB 混合检索）/ `search_web`（Tavily 联网搜索兜底，KB 不达标时补充知识库外事实）/ `ask_user`（澄清追问） |
 | **agent_finalize** | `"agent_finalize"` | `answer`, `tool_contexts` | 循环结束提取末次 AIMessage content → `answer`，读入 `tool_contexts` |
 | **format** | `"format"` | `citations: list[dict]` | 去重引用列表 |
 
@@ -635,6 +641,7 @@ kb_router → agent（LLM + bind_tools）
         1. agent: LLM 思考 → 调用 retrieve_kb
         2. agent_tools: 检索（hybrid Dense + BM25 + RRF 融合 → rerank 精排 → format_context）
         3. agent: 基于检索上下文生成回答（含引用编号 [n]）
+           （检索不达标时可在循环内调用 search_web 联网兜底，产出 kind=web 引用）
            （信息不足时可在循环内调用 ask_user 追问，见 6.2）
     → agent_finalize: 提取 answer + tool_contexts
     → format_node: 去重引用列表
@@ -664,7 +671,8 @@ kb_router → agent（LLM + bind_tools）
     → agent: 基于答案 + 检索上下文生成回答
     → SSE 事件流:
         event: status (agent)
-        event: ask_user (问题卡片，options 由 KB 实体注入)
+        event: ask_user (问题卡片；options 来源随 ASK_USER_MODE_DSH：默认 true 用模型自带，
+              不做 KB dimension 注入；false 时由 KB 实体注入真实候选)
         event: status (retrieve, 用户回答后继续检索)
         event: token / citation / model_info / done
 ```

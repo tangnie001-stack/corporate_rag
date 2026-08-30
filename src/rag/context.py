@@ -2,7 +2,11 @@
 
 from dataclasses import dataclass, field
 
-from src.config.const import ENTITY_LABELS, ENTITY_RENDER_ORDER
+from src.config.const import (
+    ENTITY_LABELS,
+    ENTITY_RENDER_ORDER,
+    SSEInteractionTexts,
+)
 
 
 @dataclass(slots=True)
@@ -17,7 +21,9 @@ class RAGContext:
     parent_content: str | None = None
     score: float = 0.0
     entities: dict = field(default_factory=dict)  # 业务实体，来自 chunk.metadata
-    kind: str = "kb"  # 引用来源类型：kb（知识库） / web（网络搜索），默认 kb
+    kind: str = (
+        SSEInteractionTexts.CITATION_KIND_KB
+    )  # 引用来源类型：kb（知识库） / web（网络搜索），默认 kb
 
     def to_citation(self) -> str:
         """格式化为 Markdown 引用块。"""

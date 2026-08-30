@@ -49,19 +49,21 @@ async def tavily_search(
             resp = await client.post(_SEARCH_URL, json=payload)
             resp.raise_for_status()
             data = resp.json()
+        # 结果解析也在 try 内：data 非 dict（list/str）时 .get 抛 AttributeError
+        # 同样走熔断返回空列表，确保"所有异常返回 []"契约不被绕过
+        return [
+            {
+                "url": r.get("url", ""),
+                "title": r.get("title", ""),
+                "content": r.get("content", ""),
+                "score": r.get("score", 0.0),
+            }
+            for r in data.get("results", [])
+            if r.get("url")
+        ]
     except Exception:  # noqa: BLE001
         logger.exception("tavily_search failed query={}", query[:40])
         return []
-    return [
-        {
-            "url": r.get("url", ""),
-            "title": r.get("title", ""),
-            "content": r.get("content", ""),
-            "score": r.get("score", 0.0),
-        }
-        for r in data.get("results", [])
-        if r.get("url")
-    ]
 
 
 async def tavily_extract(
@@ -85,11 +87,12 @@ async def tavily_extract(
             resp = await client.post(_EXTRACT_URL, json=payload)
             resp.raise_for_status()
             data = resp.json()
+        # 结果解析在 try 内，data 非 dict 时同样熔断返回空列表（见 tavily_search）
+        return [
+            {"url": r.get("url", ""), "content": r.get("raw_content", "")}
+            for r in data.get("results", [])
+            if r.get("url")
+        ]
     except Exception:  # noqa: BLE001
         logger.exception("tavily_extract failed urls={}", len(urls))
         return []
-    return [
-        {"url": r.get("url", ""), "content": r.get("raw_content", "")}
-        for r in data.get("results", [])
-        if r.get("url")
-    ]

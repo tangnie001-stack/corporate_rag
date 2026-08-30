@@ -36,6 +36,12 @@
 - **abstention**（拒答）：检索无达标 context 时直接返回拒答文案，不回 LLM
 - **clarification**（追问）：分类器发现缺失实体时向用户发起追问（`CLARIFICATION_ENABLED` 开关控制）
 
+## Web 搜索兜底
+
+- **kind**：引用来源类型，取值 `kb`（知识库）/ `web`（网络搜索），默认 `kb`；承载于 `SSEInteractionTexts.CITATION_KIND_KB` / `CITATION_KIND_WEB`，贯穿 `RAGContext.kind` 与 citation 事件
+- **search_web**：联网搜索工具，KB 检索不达标时经 Tavily 兜底检索网页，结果与 retrieve_kb 共用 `tool_contexts` 编号（kind=web 区分来源）；受 `WEB_SEARCH_ENABLED` 开关与 `WEB_SEARCH_PER_TURN_LIMIT` 限次控制
+- **web_search**：SSE 状态阶段（`SSEStatusEvent.stage` 取值），联网搜索开始/完成状态提示（"正在联网搜索..." / "联网搜索完成，正在分析..."）
+
 ## 推理思考文本
 
 - **reasoning_content**：模型的流式思考文本（chain-of-thought）。DashScope 等第三方把思考增量放在 `delta.reasoning_content`，OpenRouter 等用 `delta.reasoning`；`ChatQwenWithReasoning` 统一累积到 `AIMessageChunk.additional_kwargs["reasoning_content"]`，供上层读取与展示

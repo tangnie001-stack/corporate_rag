@@ -8,6 +8,7 @@
 """
 
 import asyncio
+import re
 from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass, field
 from typing import TypeAlias
@@ -104,18 +105,25 @@ def _extract_model_name(output) -> str:
 
 
 def _is_abstention(state: AgentState) -> bool:
-    """abstention 判定：仅凭模型输出是否命中拒答标记。
+    """abstention 判定（防御式）：命中拒答标记 且 不含 [n] 引用标记 才视为纯拒答。
+
+    与 format_node 的拒答检测保持一致：web 兜底回答即使混入"未在文档中找到"
+    措辞，只要带了引用标记就保留引用，不触发 SSEAbstentionEvent（避免
+    "既发引用又发转人工"的矛盾 UX）。
 
     Args:
         state: agent 循环结束后的最终状态
 
     Returns:
-        True 表示应提示转人工（answer 包含 SSEInteractionTexts.ABSTENTION_MARKERS 任一标记）；
-        闲聊/概念问答等未触发检索但正常作答的场景不再误判
+        True 表示应提示转人工（answer 包含 SSEInteractionTexts.ABSTENTION_MARKERS
+        任一标记 且 不含 [n] 引用标记）；闲聊/概念问答等未触发检索但正常作答的
+        场景不再误判
     """
-    return any(
+    has_abstention_marker = any(
         marker in state.answer for marker in SSEInteractionTexts.ABSTENTION_MARKERS
     )
+    has_citation_marker = re.search(r"\[\d+\]", state.answer) is not None
+    return has_abstention_marker and not has_citation_marker
 
 
 def _convert_event(

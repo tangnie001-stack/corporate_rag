@@ -153,6 +153,22 @@ class TestIsAbstention:
         state.answer = "你好！这是概念解释……"
         assert not _is_abstention(state)
 
+    def test_marker_only_is_abstention(self):
+        """仅拒答标记（无 [n] 引用）→ 判定 abstention（纯拒答）。"""
+        state = AgentState.make_initial_state("s1", "kb1", "q", [])
+        state.answer = "未在文档中找到相关信息"
+        assert _is_abstention(state)
+
+    def test_marker_with_citation_reference_is_not_abstention(self):
+        """拒答标记 + [1] 引用 → 不判定 abstention（web 兜底回答保留引用）。
+
+        与 format_node 的防御式规则对齐：web 兜底回答即使混入拒答措辞，
+        只要带引用标记就保留引用，不发 SSEAbstentionEvent。
+        """
+        state = AgentState.make_initial_state("s1", "kb1", "q", [])
+        state.answer = "未在文档中找到该信息，网络搜索结果显示[1]..."
+        assert not _is_abstention(state)
+
 
 class TestConvertEventStatus:
     """_convert_event 状态事件接线测试。"""
