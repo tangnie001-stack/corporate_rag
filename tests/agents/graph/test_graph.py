@@ -137,6 +137,46 @@ def test_format_node_ignores_invalid_index():
     assert result["citations"] == []
 
 
+def test_format_node_keeps_citations_when_marker_and_ref():
+    """web 兜底回答混入拒答语但带 [n] 引用时，引用不被误删，kind=web。"""
+    state = AgentState(
+        answer="未在文档中找到该信息，该问题不在当前知识库范围内，网络结果[1]",
+        tool_contexts=[
+            RAGContext(
+                content="网页内容",
+                source="https://example.com",
+                page=0,
+                doc_id="u1",
+                chunk_id="u1",
+                kind="web",
+            ),
+        ],
+    )
+    result = format_node(state)
+    citations = result["citations"]
+    assert len(citations) == 1
+    assert citations[0]["kind"] == "web"
+    assert citations[0]["source"] == "https://example.com"
+
+
+def test_format_node_citation_kind_default_kb():
+    """知识库引用的 kind 默认 kb。"""
+    state = AgentState(
+        answer="营收184,980万元[1]",
+        tool_contexts=[
+            RAGContext(
+                content="报告期内营业收入184,980万元",
+                source="neusoft_2025_q1.pdf",
+                page=3,
+                doc_id="d1",
+                chunk_id="c1",
+            ),
+        ],
+    )
+    result = format_node(state)
+    assert result["citations"][0]["kind"] == "kb"
+
+
 def test_format_node_empty_when_abstention():
     """回答含拒答语时 citations 应为空。"""
     state = AgentState(

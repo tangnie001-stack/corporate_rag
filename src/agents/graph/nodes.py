@@ -102,8 +102,13 @@ def format_node(state: AgentState) -> dict:
     answer = state.answer or ""
     contexts = state.tool_contexts or []
 
-    # 拒答检测：回答明确表示未找到数据时，不输出引用
-    if any(marker in answer for marker in SSEInteractionTexts.ABSTENTION_MARKERS):
+    # 拒答检测（防御式）：命中拒答标记 且 不含 [n] 引用标记 才视为纯拒答。
+    # web 兜底回答即使混入"未在文档中找到"措辞，只要带了引用标记就保留引用。
+    has_abstention_marker = any(
+        marker in answer for marker in SSEInteractionTexts.ABSTENTION_MARKERS
+    )
+    has_citation_marker = re.search(r"\[\d+\]", answer) is not None
+    if has_abstention_marker and not has_citation_marker:
         logger.info("format_node: answer is abstention, citations=[]")
         return {"citations": []}
 
@@ -130,6 +135,7 @@ def format_node(state: AgentState) -> dict:
                 "page": ctx.page,
                 "snippet": _relevant_snippet(ctx.content, answer),
                 "score": ctx.score,
+                "kind": ctx.kind,
             }
         )
     logger.info("format_node: citations={}", len(citations))

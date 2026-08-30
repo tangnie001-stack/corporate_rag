@@ -46,6 +46,7 @@ async def test_search_web_appends_with_global_numbering(monkeypatch, ctx):
     assert len(ctx.tool_contexts) == 3
     web_ctx = ctx.tool_contexts[-1]
     assert web_ctx.source == "https://b.com"
+    assert web_ctx.kind == "web"
 
 
 @pytest.mark.asyncio

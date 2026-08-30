@@ -84,7 +84,7 @@ async def search_web(query: str, top_k: int = 5) -> str:
         content = snippet[:WEB_BODY_LIMIT]
         if not content:
             continue
-        # kind 字段（CITATION_KIND_WEB）由后续任务补入 RAGContext
+        # 带 kind=web 标记来源类型，format_node 据此保留 web 兜底引用
         collector.append(
             RAGContext(
                 content=content,
@@ -92,6 +92,7 @@ async def search_web(query: str, top_k: int = 5) -> str:
                 page=0,
                 doc_id=r["url"],
                 chunk_id=r["url"],
+                kind=SSEInteractionTexts.CITATION_KIND_WEB,
             )
         )
         blocks.append(f"[{offset + len(blocks) + 1}] 来源: {r['url']}\n内容: {content}")
