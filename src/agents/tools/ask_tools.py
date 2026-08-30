@@ -15,6 +15,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from src.agents.graph.state import AgentState
+from src.config import settings
 from src.config.const import MAX_ASK_PER_TURN, SSEInteractionTexts
 from src.infra.llm.request_context import current_request_ctx, pending_asks
 from src.infra.search.query_router import SUGGESTIONS_MAP
@@ -27,6 +28,10 @@ class AskQuestion(BaseModel):
     question: str = Field(description="问题文本")
     dimension: str = Field(
         default="free", description="缺失维度: company/period/metric/free"
+    )
+    options: list[str] | None = Field(
+        default=None,
+        description="自定义候选选项：知识库问题不要填（系统按 dimension 注入真实候选防编造）；非知识库问题由你自行提供",
     )
     multi_select: bool = Field(default=False, description="是否多选")
 
@@ -59,11 +64,12 @@ async def ask_user(
     """向用户询问补充信息后继续，返回用户答案文本。
 
     何时调用：问题缺失关键实体（公司/期间/指标）且无法从上下文推断时调用；
-    能回答就不要调用。问题选项由系统按维度从知识库注入真实候选（无候选时
-    兜底静态 SUGGESTIONS_MAP），模型只负责问题措辞与询问时机，不生成候选。
+    能回答就不要调用。选项解析随 ASK_USER_MODE_DSH 分支：dash 模式（默认）直接用
+    模型自带 options（可为空 = 纯文本问题）；dual 模式模型自带优先，无 options 时
+    按维度从知识库注入真实候选（无候选时兜底静态 SUGGESTIONS_MAP）。
 
     Args:
-        questions: 需要用户补充的问题列表（含 id/question/dimension/multi_select）
+        questions: 需要用户补充的问题列表（含 id/question/dimension/options/multi_select）
         state: LangGraph 注入的 AgentState，读取 kb_id/_resolved_kb_ids 确定 KB 候选来源
 
     Returns:
@@ -88,7 +94,12 @@ async def ask_user(
     ctx.ask_count += 1
     enriched = []
     for q in questions:
-        options = await _load_dimension_options(q.dimension, state)
+        if settings.ASK_USER_MODE_DSH:
+            options = q.options or []  # dash 模式：全部模型自带，可为空 = 纯文本问题
+        elif q.options:
+            options = q.options  # dual 模式：模型自带优先（非 KB 问题）
+        else:
+            options = await _load_dimension_options(q.dimension, state)  # dual：KB 注入
         enriched.append(
             {
                 "id": q.id,

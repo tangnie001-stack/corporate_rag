@@ -60,8 +60,14 @@ def _ask_args(session_id: str = "s1", kb_id: str = "kb1") -> dict:
 
 
 @pytest.mark.asyncio
-async def test_ask_user_blocks_and_resolves():
-    """未回答前工具阻塞；POST 端经 pending_asks 解析 Future 后返回答案，并清理注册表。"""
+async def test_ask_user_blocks_and_resolves(monkeypatch):
+    """未回答前工具阻塞；POST 端经 pending_asks 解析 Future 后返回答案，并清理注册表。
+
+    ASK_USER_MODE_DSH=False（dual 模式）：无模型自带 options 时按 dimension 注入 KB 候选。
+    """
+    from src.config import settings as s
+
+    monkeypatch.setattr(s, "ASK_USER_MODE_DSH", False)
     ctx = RequestContext(session_id="s1")
     token = current_request_ctx.set(ctx)
     try:
@@ -133,6 +139,67 @@ async def test_ask_user_concurrent_second_rejected():
         fut.set_result({"answers": [{"id": "q1", "selected": ["2024年"]}]})
         result1 = await asyncio.wait_for(t1, timeout=1)
         assert "2024年" in result1
+    finally:
+        current_request_ctx.reset(token)
+    assert "s1" not in pending_asks
+
+
+def _ask_args_with_options(session_id: str = "s1", kb_id: str = "kb1") -> dict:
+    """构造含模型自带 options 的 ask_user 入参（free 维度 + options）。"""
+    return {
+        "questions": [
+            {
+                "id": "q1",
+                "question": "您想要哪种方案？",
+                "dimension": "free",
+                "options": ["方案A", "方案B"],
+                "multi_select": False,
+            }
+        ],
+        "state": AgentState.make_initial_state(session_id, kb_id, "q", []),
+    }
+
+
+@pytest.mark.asyncio
+async def test_ask_user_dash_mode_uses_model_options(monkeypatch):
+    """ASK_USER_MODE_DSH=true（默认）：直接用模型自带 options，不加载 dimension 候选。"""
+    from src.config import settings as s
+
+    monkeypatch.setattr(s, "ASK_USER_MODE_DSH", True)
+    ctx = RequestContext(session_id="s1")
+    token = current_request_ctx.set(ctx)
+    try:
+        task = asyncio.create_task(ask_user.ainvoke(_ask_args_with_options()))
+        await asyncio.sleep(0.05)
+        event = await asyncio.wait_for(ctx.clarify_channel.get(), timeout=1)
+        assert event["questions"][0]["options"] == ["方案A", "方案B"]
+        fut = pending_asks.get("s1")
+        assert fut is not None
+        fut.set_result({"answers": [{"id": "q1", "selected": ["方案A"]}]})
+        result = await asyncio.wait_for(task, timeout=1)
+        assert "方案A" in result
+    finally:
+        current_request_ctx.reset(token)
+    assert "s1" not in pending_asks
+
+
+@pytest.mark.asyncio
+async def test_ask_user_dual_mode_injects_dimension(monkeypatch):
+    """ASK_USER_MODE_DSH=false：无 options 时按 dimension 注入 KB 真实候选。"""
+    from src.config import settings as s
+
+    monkeypatch.setattr(s, "ASK_USER_MODE_DSH", False)
+    ctx = RequestContext(session_id="s1")
+    token = current_request_ctx.set(ctx)
+    try:
+        task = asyncio.create_task(ask_user.ainvoke(_ask_args()))
+        await asyncio.sleep(0.05)
+        event = await asyncio.wait_for(ctx.clarify_channel.get(), timeout=1)
+        assert event["questions"][0]["options"] == ["2024年"]
+        fut = pending_asks.get("s1")
+        assert fut is not None
+        fut.set_result({"answers": [{"id": "q1", "selected": ["2024年"]}]})
+        await asyncio.wait_for(task, timeout=1)
     finally:
         current_request_ctx.reset(token)
     assert "s1" not in pending_asks
