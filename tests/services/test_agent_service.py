@@ -302,6 +302,9 @@ async def test_stream_chat_emits_full_event_sequence():
     ]
     assert tokens == [SSETokenEvent("这是回答")]
     assert [c.source for c in citations] == ["财报.pdf"]
+    assert [c.kind for c in citations] == [
+        "kb"
+    ]  # KB 检索引用默认 kind=kb（web 兜底为 web）
     assert len(model_infos) == 1
     assert model_infos[0].model == "gpt-4o"
     assert model_infos[0].is_fallback is False
