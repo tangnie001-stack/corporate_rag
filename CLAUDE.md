@@ -70,7 +70,7 @@ uvicorn src.main:app --reload          # 启动（热重载）
 pytest tests/ -v                       # 测试
 ruff format . && ruff check . --fix    # 格式化 + lint 修复
 docker compose up -d --build           # 部署
-docker compose restart app             # 改 .py 后重启
+docker compose restart app             # 改 .py 后重启（override 挂载 src/，无需 --build；详见 cookbook.md「部署」）
 docker compose up -d --force-recreate app  # 改环境配置后重创
 docker compose build --no-cache app    # 改依赖后重建
 ```

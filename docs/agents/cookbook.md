@@ -56,6 +56,22 @@
 **验证**：`pytest tests/chunking/ -v` 通过
 **注意事项**：分块结果受 embedding 2048 token 限制（见 defensive-patterns.md）
 
+## 部署
+
+### 让 .py 改动在本地容器生效
+
+**场景**：改了 Python 代码，需要本地容器运行新逻辑
+**步骤**：
+1. 确认 `docker-compose.override.yml` 存在——docker compose 默认自动加载它，无需 `-f` 指定
+2. 改完代码后执行 `docker compose restart app`，让进程重新 import（override 已挂载 `src/`，无需 `--build`）
+3. 改了环境配置（端口/环境变量）用 `docker compose up -d --force-recreate app`
+4. 改了依赖（requirements/pyproject）用 `docker compose build --no-cache app`
+**验证**：`curl http://localhost:8000/api/health` 返回 ok；或 `docker exec corporate-rag-app grep <新符号> /app/src/...` 确认容器文件已同步
+**注意事项**：
+- override 仅挂载 `src/` 和 `tests/`，其他目录改动不会进容器（如 pip 安装的包需重建镜像）
+- app 的 uvicorn 无 `--reload`（见 CLAUDE.md 常用命令），必须 restart 进程才能加载新代码
+- 判断"代码改动是否已生效"先看 override：挂了 `src/` 则文件已同步只需 restart；未挂载才需要 `--build`
+
 ## 分区命名
 
 按操作主题分区，例如：`## 评估`、`## 分块`、`## 部署`。新主题首次出现时新建分区。

@@ -83,6 +83,41 @@ def test_format_node_only_keeps_cited_sources():
     assert citations[1]["source"] == "灿坤.pdf"
 
 
+def test_format_node_snippet_targets_relevant_passage():
+    """snippet 应截取 chunk 中与回答最相关的片段，而非固定前 200 字符。"""
+    # 前缀为股东持股等无关内容，营收句子确保落在第 200 字符之后
+    prefix = (
+        "注：截至本报告期末，东软集团股份有限公司回购专用证券账户持有公司股份18,225,976股，"
+        "占公司总股本的1.5142%，未纳入前10名股东持股情况中列示。\n"
+        "持股5%以上股东、前10名股东及前10名无限售流通股股东参与转融通业务出借股份情况，"
+        "□适用√不适用。\n"
+        "前10名股东及前10名无限售流通股股东因转融通出借/归还原因导致较上期发生变化，"
+        "□适用√不适用。\n"
+        "根据《上海证券交易所股票上市规则》相关规定，公司应当披露报告期内的其他重要事项。\n"
+    )
+    revenue_sentence = "报告期内，公司实现营业收入184,980万元，同比增长1.06%。"
+    content = prefix + revenue_sentence
+    assert len(prefix) > 200  # 前置条件：营收句子确实在 200 字符之后
+
+    state = AgentState(
+        answer="2025年第一季度公司实现营业收入184,980万元，同比增长1.06% [1]。",
+        tool_contexts=[
+            RAGContext(
+                content=content,
+                source="neusoft_2025_q1.pdf",
+                page=3,
+                doc_id="d1",
+                chunk_id="c1",
+                score=0.9,
+            ),
+        ],
+    )
+    result = format_node(state)
+    snippet = result["citations"][0]["snippet"]
+    assert "营业收入184,980万元" in snippet
+    assert "同比增长1.06%" in snippet
+
+
 def test_format_node_ignores_invalid_index():
     """超出范围的引用编号应被忽略。"""
     state = AgentState(
