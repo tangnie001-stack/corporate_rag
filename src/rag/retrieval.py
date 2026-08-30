@@ -24,6 +24,32 @@ from src.rag.context import RAGContext
 _ALL_ENTITY_KEYS: tuple[str, ...] = tuple(ENTITY_TYPES) + tuple(ENTITY_OPTIONAL_TYPES)
 
 
+def _dedup_by_doc_id(results: list[ChunkResult]) -> list[ChunkResult]:
+    """按 doc_id 去重检索结果，保留每个文档最先出现的结果。
+
+    当前 KB 存在重复入库文档（如 neusoft_2025_q1.pdf×4），不去重会占满
+    top-K 候选、漏掉其他文档内容，破坏"模型读内容判定"的多样性前提。
+
+    Args:
+        results: 检索结果列表（RRF 融合后）
+
+    Returns:
+        去重后的结果列表，无 doc_id 的项按自身保留
+    """
+    seen: set[str] = set()
+    deduped = []
+    for r in results:
+        doc_id = r.metadata.get("doc_id")
+        if doc_id is None:
+            deduped.append(r)
+            continue
+        if doc_id in seen:
+            continue
+        seen.add(doc_id)
+        deduped.append(r)
+    return deduped
+
+
 async def search(
     query: str,
     kb_id: str,
@@ -63,6 +89,7 @@ async def search(
             len(query),
             len(results),
         )
+        results = _dedup_by_doc_id(results)
         return results
 
     if not kb_id:
@@ -80,7 +107,8 @@ async def search(
         len(results) if results else 0,
         "search_all" if not kb_id else "dense",
     )
-    return results or []
+    results = _dedup_by_doc_id(results or [])
+    return results
 
 
 def rerank_results(

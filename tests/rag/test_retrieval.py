@@ -57,7 +57,11 @@ class TestSearch:
     async def test_search_returns_results(self):
         """search() 应调用 vector_store.similarity_search 并返回结果。"""
         vs = MagicMock()
-        vs.similarity_search = MagicMock(return_value=[{"id": "1", "content": "test"}])
+        vs.similarity_search = MagicMock(
+            return_value=[
+                ChunkResult(id="1", content="test", metadata={"doc_id": "d1"})
+            ]
+        )
         with patch("src.rag.retrieval.HYBRID_SEARCH_ENABLED", False):
             results = await retrieval.search("query", "kb_123", vector_store=vs)
         assert len(results) == 1
@@ -68,7 +72,9 @@ class TestSearch:
         """无 kb_id 时应调用 similarity_search_all。"""
         vs = MagicMock()
         vs.similarity_search_all = MagicMock(
-            return_value=[{"id": "1", "content": "test"}]
+            return_value=[
+                ChunkResult(id="1", content="test", metadata={"doc_id": "d1"})
+            ]
         )
         with patch("src.rag.retrieval.HYBRID_SEARCH_ENABLED", False):
             results = await retrieval.search("query", "", vector_store=vs)
