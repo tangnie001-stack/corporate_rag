@@ -139,6 +139,7 @@ def sse_citation(
     score: float = 0.0,
     highlighted_snippet: str | None = None,
     index: int = 0,
+    kind: str = "kb",
 ) -> str:
     """构建 SSE citation 事件。
 
@@ -149,6 +150,7 @@ def sse_citation(
         score: Reranker 分数
         highlighted_snippet: 高亮 HTML 片段
         index: 原文档编号（对应 format_context 的 [n]），0 表示无编号
+        kind: 引用来源类型：kb（知识库文档） / web（网络搜索）
 
     Returns:
         SSE 格式的文本行
@@ -160,6 +162,7 @@ def sse_citation(
         "score": score,
         "highlighted_snippet": highlighted_snippet,
         "index": index,
+        "kind": kind,
     }
     return f"event: citation\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
@@ -261,8 +264,9 @@ def to_sse(event: SSEEvent) -> str:
             score=score,
             highlighted_snippet=hs,
             index=idx,
+            kind=k,
         ):
-            return sse_citation(s, p, snippet, score, hs, idx)
+            return sse_citation(s, p, snippet, score, hs, idx, k)
         case SSEStatusEvent(stage=stage, message=message):
             return sse_status(stage, message)
         case SSEErrorEvent(error=error):

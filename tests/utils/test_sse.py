@@ -19,6 +19,24 @@ def test_sse_citation_with_index():
     assert '"source": "a.pdf"' in text
 
 
+def test_sse_citation_kind_web():
+    """to_sse 应透传 kind=web 到 wire 格式。"""
+    from src.utils.sse import SSECitationEvent, to_sse
+
+    event = SSECitationEvent(source="https://a.com", page=0, snippet="x", kind="web")
+    text = to_sse(event)
+    assert '"kind": "web"' in text
+
+
+def test_sse_citation_kind_default_kb():
+    """sse_citation 未指定 kind 时默认序列化为 kb。"""
+    from src.utils.sse import SSECitationEvent, to_sse
+
+    event = SSECitationEvent(source="a.pdf", page=0, snippet="x")
+    text = to_sse(event)
+    assert '"kind": "kb"' in text
+
+
 def test_ask_user_event_serializes():
     """to_sse 应序列化 ask_user 事件及 questions 字段。"""
     ev = SSEAskUserEvent(
