@@ -35,6 +35,7 @@ class SSECitationEvent:
     score: float = 0.0  # Reranker 分数
     highlighted_snippet: str | None = None  # 高亮 HTML 片段
     index: int = 0  # 原文档编号（对应 format_context 的 [n]），0 表示兜底无编号
+    kind: str = "kb"  # 引用来源类型：kb（知识库文档） / web（网络搜索）
 
 
 @dataclass

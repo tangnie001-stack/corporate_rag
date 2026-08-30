@@ -407,3 +407,39 @@ async def test_stream_chat_no_abstention_without_final_state():
 
     assert [e for e in events if isinstance(e, SSEAbstentionEvent)] == []
     assert isinstance(events[-1], SSEDoneEvent)
+
+
+def test_search_web_tool_status_events():
+    """search_web 工具 start/end 映射为 STAGE_WEB_SEARCH 状态事件。"""
+    assert _convert_event(_tool_start_item("search_web")) == [
+        SSEStatusEvent(
+            SSEInteractionTexts.STAGE_WEB_SEARCH,
+            SSEInteractionTexts.WEB_SEARCH_STATUS_START,
+        )
+    ]
+    assert _convert_event(_tool_end_item("search_web")) == [
+        SSEStatusEvent(
+            SSEInteractionTexts.STAGE_WEB_SEARCH,
+            SSEInteractionTexts.WEB_SEARCH_STATUS_END,
+        )
+    ]
+
+
+def test_citation_event_passes_kind():
+    """format 输出 citations 的 kind 透传到 SSECitationEvent。"""
+    events = _convert_event(
+        _format_end_item(
+            [
+                {
+                    "index": 1,
+                    "source": "https://a.com",
+                    "page": 0,
+                    "snippet": "网页",
+                    "score": 0.9,
+                    "kind": "web",
+                }
+            ]
+        )
+    )
+    citations = [e for e in events if isinstance(e, SSECitationEvent)]
+    assert citations[0].kind == "web"

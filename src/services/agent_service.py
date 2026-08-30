@@ -192,6 +192,13 @@ def _convert_event(
         return []
 
     if kind == LangGraphEvent.TOOL_START:
+        if name == "search_web":
+            return [
+                SSEStatusEvent(
+                    SSEInteractionTexts.STAGE_WEB_SEARCH,
+                    SSEInteractionTexts.WEB_SEARCH_STATUS_START,
+                )
+            ]
         if name == "retrieve_kb":
             return [
                 SSEStatusEvent(
@@ -201,6 +208,14 @@ def _convert_event(
             ]
         # ask_user 等其他工具不发状态（composer 接管输入区）
         return []
+
+    if kind == LangGraphEvent.TOOL_END and name == "search_web":
+        return [
+            SSEStatusEvent(
+                SSEInteractionTexts.STAGE_WEB_SEARCH,
+                SSEInteractionTexts.WEB_SEARCH_STATUS_END,
+            )
+        ]
 
     if kind == LangGraphEvent.TOOL_END and name == "retrieve_kb":
         return [
@@ -221,6 +236,7 @@ def _convert_event(
                     snippet=c.get("snippet", ""),
                     score=c.get("score", 0.0),
                     index=c.get("index", 0),
+                    kind=c.get("kind", SSEInteractionTexts.CITATION_KIND_KB),
                 )
                 for c in citations
             ]
