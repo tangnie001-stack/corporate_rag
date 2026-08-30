@@ -62,3 +62,25 @@ Results SHALL include average relevance score and recall@K metrics per combinati
 #### Scenario: KB 未解析 → 语义选库检索
 - **WHEN** kb_router 未解析出知识库（如无 user_id）
 - **THEN** retrieve_kb 以语义匹配 query 与各 KB 的 name+description，选中相似度最高的 1 个知识库进行检索；匹配失败（无 KB 或相似度低于阈值）时返回空工具结果，模型按 abstain / ask_user / escalate 决策，不触发旧确定性 abstention 文案
+
+### Requirement: Context rendering includes entity metadata
+
+The system SHALL render entity metadata (company / report_period / sec_code / person / currency / report_type) into the retrieval context shown to the LLM, via `RAGContext.to_prompt_text()`. Only entities that exist SHALL be rendered, in the order defined by `ENTITY_RENDER_ORDER`.
+
+The rendered format SHALL be shared between production prompt generation and RAGAS NLI evaluation context, so both see identical context.
+
+#### Scenario: Context with entities
+- **WHEN** a retrieved chunk has `entities={company: 东软集团, report_period: 2025年第一季度}` and is included in `format_context`
+- **THEN** the resulting prompt context SHALL include both entity fields alongside source/page/content
+
+#### Scenario: Context without entities
+- **WHEN** a retrieved chunk has an empty entities dict
+- **THEN** the prompt context SHALL contain only source/page/content, matching the previous format exactly
+
+### Requirement: Rerank context passthrough
+
+The system SHALL carry entity metadata from ChromaDB chunk metadata through the rerank stage into `RAGContext.entities`.
+
+#### Scenario: Entities survive rerank
+- **WHEN** a chunk with `company`/`report_period` metadata is returned by rerank
+- **THEN** the corresponding `RAGContext` SHALL expose those values via its `entities` dict
