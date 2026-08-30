@@ -80,6 +80,28 @@ EMBEDDING_BATCH_SIZE: int = int(os.getenv("EMBEDDING_BATCH_SIZE", "20"))
 RERANK_MODEL: str = os.getenv("RERANK_MODEL", "qwen3-rerank")
 # Rerank API Key（fallback 到 DASHSCOPE_API_KEY，非 LLM_API_KEY）
 RERANK_API_KEY: str = os.getenv("RERANK_API_KEY") or os.getenv("DASHSCOPE_API_KEY", "")
+# Tavily 联网搜索（web-search-fallback）
+TAVILY_API_KEY: str = os.getenv(
+    "TAVILY_API_KEY", ""
+)  # Tavily API Key（仅 .env，gitignored）
+WEB_SEARCH_ENABLED: bool = os.getenv("WEB_SEARCH_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)  # 联网兜底总开关：false 时不注册 search_web 工具
+WEB_SEARCH_PER_TURN_LIMIT: int = int(
+    os.getenv("WEB_SEARCH_PER_TURN_LIMIT", "3")
+)  # 每轮对话 search_web 调用上限
+TAVILY_TIMEOUT: float = float(
+    os.getenv("TAVILY_TIMEOUT", "5")
+)  # Tavily 请求超时秒数，超时返回空走纯拒答
+ASK_USER_MODE_DSH: bool = os.getenv("ASK_USER_MODE_DSH", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)  # ask_user 澄清模式：true=dsh 全自由；false=KB dimension 注入 + 非 KB 自由
 # RAGAS 评估专用模型（独立于生产 LLM，temperature 固定为 0）
 # 「无思考/非推理模型」的限制属于上方 CLASSIFY_MODEL（分类/路由小模型），
 # 与 RAGAS 评估模型无关。RAGAS_LLM_MODEL 经 LangchainLLMWrapper(bypass_n=True)

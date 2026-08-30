@@ -40,6 +40,8 @@ ENTITY_LABELS: dict[str, str] = {
 ENTITY_OPTIONAL_TYPES: tuple[str, ...] = ("person", "currency", "report_type")
 # 实体抽取完整三层流水线的文件类型（其余如 txt 走文件名+LLM）
 ENTITY_FULL_PIPELINE_TYPES: tuple[str, ...] = ("pdf", "docx")
+# search_web extract 拉取的正文上限（字符），防长网页撑爆上下文窗口
+WEB_BODY_LIMIT: int = 2000
 
 
 # ── agent 循环护栏常量 ──
@@ -74,6 +76,19 @@ class SSEInteractionTexts:
     # ── Abstention / 拒答 ──
     # 拒答语检测关键词：回答命中任一关键词时，format_node 不输出引用
     ABSTENTION_MARKERS: tuple[str, ...] = ("未在文档中找到",)
+
+    # ── Web 搜索兜底 ──
+    # web 兜底回答文案：命中此文案但带 [n] 引用时保留引用（区别于纯拒答）
+    WEB_SEARCH_PHRASE: str = "该问题不在当前知识库范围内"
+    # search_web 达每轮限次提示（返回给 LLM，促其基于现有信息作答）
+    WEB_SEARCH_LIMIT_TEXT: str = "Error: 已达本轮联网搜索上限，请基于现有信息作答"
+    # 引用来源类型：RAGContext.kind 与 citation.kind 取值
+    CITATION_KIND_KB: str = "kb"
+    CITATION_KIND_WEB: str = "web"
+    # SSEStatusEvent.stage：search_web 工具阶段（start/end 双文案）
+    STAGE_WEB_SEARCH: str = "web_search"
+    WEB_SEARCH_STATUS_START: str = "正在联网搜索..."
+    WEB_SEARCH_STATUS_END: str = "联网搜索完成，正在分析..."
 
     # ── SSEStatusEvent.stage 标识 ──
     # on_chat_model_start（agent 节点）对应 stage：模型开始思考
