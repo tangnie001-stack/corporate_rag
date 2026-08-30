@@ -37,6 +37,9 @@ class RequestContext:
     ask_count: int = (
         0  # 澄清提问计数，范围：请求内累积，用途：限制单次请求的澄清轮数上限
     )
+    web_count: int = (
+        0  # search_web 调用计数，范围：请求内累积，用途：限制单轮联网搜索次数上限
+    )
 
 
 current_request_ctx: ContextVar[RequestContext | None] = ContextVar(

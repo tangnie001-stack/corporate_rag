@@ -17,7 +17,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from src.agents.graph.state import AgentState
-from src.config import TOP_K_RERANK
+from src.config import TOP_K_RERANK, settings
 from src.config.const import (
     ASK_USER_TIMEOUT,
     MAX_ASK_PER_TURN,
@@ -58,7 +58,7 @@ def make_rag_tools(
         embed_fn: 嵌入函数（闭包注入，_semantic_select_kb 语义选库使用，需实现 embed_query）
 
     Returns:
-        工具列表：retrieve_kb（知识库检索）与 ask_user（澄清追问）
+        工具列表：retrieve_kb（知识库检索）、ask_user（澄清追问）；开启 web 兜底时追加 search_web
     """
 
     @tool("retrieve_kb", args_schema=RetrieveKBArgs)
@@ -164,9 +164,20 @@ def make_rag_tools(
         blocks = [
             f"[{offset + i + 1}] {c.to_prompt_text()}" for i, c in enumerate(contexts)
         ]
+        logger.info(
+            "judge: query={} stage=retrieve iteration={} result_count={}",
+            query[:40],
+            iteration,
+            len(blocks),
+        )
         return "\n\n".join(blocks)
 
-    return [retrieve_kb, ask_user]
+    tools = [retrieve_kb, ask_user]
+    if settings.WEB_SEARCH_ENABLED:
+        from src.agents.tools.web_tools import search_web
+
+        tools.append(search_web)
+    return tools
 
 
 async def _semantic_select_kb(query: str, embed_fn) -> str | None:
