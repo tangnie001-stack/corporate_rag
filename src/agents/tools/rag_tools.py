@@ -9,7 +9,7 @@ RequestContext.tool_contexts，由后续节点读入 state；ask_user 的挂起 
 
 import asyncio
 import time
-from typing import Annotated, Any
+from typing import Annotated
 
 from langchain_core.tools import BaseTool, tool
 from langgraph.prebuilt import InjectedState
@@ -17,21 +17,29 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from src.agents.graph.state import AgentState
+from src.agents.tools.ask_tools import AskQuestion, AskUserArgs, ask_user
 from src.config import TOP_K_RERANK, settings
-from src.config.const import (
-    ASK_USER_TIMEOUT,
-    MAX_ASK_PER_TURN,
-    RERANK_TIMEOUT,
-    SSEInteractionTexts,
-)
+from src.config.const import ASK_USER_TIMEOUT, RERANK_TIMEOUT
 from src.infra.db.vector_store import VectorStore
 from src.infra.db.vector_store.types import ChunkResult
-from src.infra.llm.request_context import current_request_ctx, pending_asks
+from src.infra.llm.request_context import current_request_ctx
 from src.infra.search.bm25_index import BM25Index
-from src.infra.search.query_router import SUGGESTIONS_MAP, aggregate_kb_entities
+from src.infra.search.query_router import aggregate_kb_entities
 from src.rag import retrieval
 from src.rag.context import RAGContext
 from src.rag.retrieval import _ALL_ENTITY_KEYS
+
+# ASK_USER_TIMEOUT / aggregate_kb_entities 为 ask_tools 的 monkeypatch 入口（测试经
+# rag_tools 模块属性替换），并作为本模块对外 re-export 的一部分
+__all__ = [
+    "ASK_USER_TIMEOUT",
+    "AskQuestion",
+    "AskUserArgs",
+    "RetrieveKBArgs",
+    "aggregate_kb_entities",
+    "ask_user",
+    "make_rag_tools",
+]
 
 
 class RetrieveKBArgs(BaseModel):
@@ -236,166 +244,3 @@ def _merge_search_results(results_list: list[list[ChunkResult]]) -> list[ChunkRe
             seen.add(item.id)
             merged.append(item)
     return merged
-
-
-class AskQuestion(BaseModel):
-    """ask_user 单条澄清问题（LLM 可见的入参契约）。"""
-
-    id: str = Field(description="问题唯一 id，答案中回显")
-    question: str = Field(description="问题文本")
-    dimension: str = Field(
-        default="free", description="缺失维度: company/period/metric/free"
-    )
-    multi_select: bool = Field(default=False, description="是否多选")
-
-
-class AskUserArgs(BaseModel):
-    """ask_user 工具参数（LLM 可见的入参契约）。"""
-
-    questions: list[AskQuestion] = Field(description="需要用户补充的问题列表")
-
-
-@tool("ask_user", args_schema=AskUserArgs)
-async def ask_user(
-    questions: list[AskQuestion],
-    state: Annotated[AgentState | None, InjectedState()] = None,
-) -> str:
-    """向用户询问补充信息后继续，返回用户答案文本。
-
-    何时调用：问题缺失关键实体（公司/期间/指标）且无法从上下文推断时调用；
-    能回答就不要调用。问题选项由系统按维度从知识库注入真实候选（无候选时
-    兜底静态 SUGGESTIONS_MAP），模型只负责问题措辞与询问时机，不生成候选。
-
-    Args:
-        questions: 需要用户补充的问题列表（含 id/question/dimension/multi_select）
-        state: LangGraph 注入的 AgentState，读取 kb_id/_resolved_kb_ids 确定 KB 候选来源
-
-    Returns:
-        用户答案的 JSON 文本；超限/超时/取消时返回对应错误文本
-    """
-    ctx = current_request_ctx.get()
-    if ctx is None:
-        return SSEInteractionTexts.ASK_USER_CTX_UNAVAILABLE
-    if state is not None:
-        query_text = state.query
-        iteration = state._agent_iterations
-    else:
-        query_text = ""
-        iteration = 0
-    if ctx.ask_count >= MAX_ASK_PER_TURN:  # 同步检查+自增，无 await
-        logger.warning(
-            "ask_user limit reached session_id={} query={}",
-            ctx.session_id,
-            query_text,
-        )
-        return SSEInteractionTexts.ASK_USER_LIMIT_REACHED
-    ctx.ask_count += 1
-    enriched = []
-    for q in questions:
-        options = await _load_dimension_options(q.dimension, state)
-        enriched.append(
-            {
-                "id": q.id,
-                "question": q.question,
-                "options": options,
-                "multi_select": q.multi_select,
-            }
-        )
-    logger.info(
-        "tool=ask_user iteration={} questions={} session_id={}",
-        iteration,
-        len(questions),
-        ctx.session_id,
-    )
-    # 单槽保护：登记前检查同一 session 是否已有挂起澄清（并发 ask_user），
-    # 已存在则拒绝本次提问，避免覆盖前一个 Future（检查与登记间无 await，原子）
-    if ctx.session_id in pending_asks:
-        logger.warning(
-            "ask_user slot occupied session_id={} query={}",
-            ctx.session_id,
-            query_text,
-        )
-        return SSEInteractionTexts.ASK_USER_LIMIT_REACHED
-    # 先登记挂起 Future（进程级注册表）再推送问题事件，避免 POST /clarify-answer 在登记前到达
-    loop = asyncio.get_running_loop()
-    fut = loop.create_future()
-    pending_asks[ctx.session_id] = fut
-    try:
-        # 推送问题（经 channel → SSE 事件），随后等待答案
-        await ctx.clarify_channel.put({"type": "ask_user", "questions": enriched})
-        answers = await _wait_with_abort_and_timeout(
-            fut, ctx.abort_signal, ASK_USER_TIMEOUT
-        )
-        if str(answers) in (
-            SSEInteractionTexts.ASK_USER_TIMEOUT_TEXT,
-            SSEInteractionTexts.ASK_USER_REQUEST_CANCELLED,
-            SSEInteractionTexts.ASK_USER_ANSWER_CANCELLED,
-        ):
-            logger.warning(
-                "ask_user ended session_id={} query={} outcome={}",
-                ctx.session_id,
-                query_text,
-                answers,
-            )
-        return str(answers)
-    finally:
-        pending_asks.pop(ctx.session_id, None)
-        fut.cancel()
-
-
-async def _load_dimension_options(
-    dimension: str, state: AgentState | None
-) -> list[str]:
-    """按维度加载问题选项：company/period 优先取 KB 聚合候选，否则兜底静态映射。
-
-    Args:
-        dimension: 缺失维度（company/period/metric/free）
-        state: AgentState，提供 kb_id/_resolved_kb_ids 定位 KB 候选来源
-
-    Returns:
-        候选选项列表；KB 无候选且 dimension 不在 SUGGESTIONS_MAP 时为空列表
-    """
-    if dimension in ("company", "period"):
-        if state is not None and state._resolved_kb_ids:
-            kb_ids = state._resolved_kb_ids
-        elif state is not None and state.kb_id:
-            kb_ids = [state.kb_id]
-        else:
-            kb_ids = None
-        aggregate = await aggregate_kb_entities(kb_ids)
-        if dimension == "company":
-            candidates = aggregate.companies
-        else:
-            candidates = aggregate.periods
-        if candidates:
-            return list(candidates)
-    return SUGGESTIONS_MAP.get(dimension, [])
-
-
-async def _wait_with_abort_and_timeout(
-    fut: asyncio.Future, abort_signal: asyncio.Event, timeout: float
-) -> Any:
-    """等待答案 Future，与 abort 信号、超时三方竞争，先到者胜。
-
-    Args:
-        fut: 用户答案 Future（POST /clarify-answer 解析时 set_result）
-        abort_signal: 请求取消信号（客户端断开/取消时置位）
-        timeout: 等待用户回答的超时秒数（ASK_USER_TIMEOUT）
-
-    Returns:
-        答案内容（fut 先完成时）；取消/超时时返回对应错误文本
-    """
-    abort_task = asyncio.ensure_future(abort_signal.wait())
-    try:
-        done, _ = await asyncio.wait(
-            {fut, abort_task}, timeout=timeout, return_when=asyncio.FIRST_COMPLETED
-        )
-        if fut in done:
-            if fut.cancelled():
-                return SSEInteractionTexts.ASK_USER_ANSWER_CANCELLED
-            return fut.result()
-        if abort_task in done:
-            return SSEInteractionTexts.ASK_USER_REQUEST_CANCELLED
-        return SSEInteractionTexts.ASK_USER_TIMEOUT_TEXT
-    finally:
-        abort_task.cancel()

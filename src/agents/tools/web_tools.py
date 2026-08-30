@@ -79,7 +79,7 @@ async def search_web(query: str, top_k: int = 5) -> str:
     blocks = []
     for r in results:
         snippet = bodies.get(r["url"])
-        if snippet is None:
+        if not snippet:
             snippet = r.get("content", "")
         content = snippet[:WEB_BODY_LIMIT]
         if not content:

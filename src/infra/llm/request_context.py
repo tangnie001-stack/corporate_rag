@@ -5,7 +5,8 @@ graph 在同一 asyncio task 执行，contextvar 自动传播到工具与 async 
 因此用 ContextVar 承载单次 /chat/stream 请求的共享对象集合（RequestContext），
 请求入口 set、请求结束 reset，工具/节点经 current_request_ctx.get() 读取。
 
-注意：工具收集的上下文统一挂在 current_request_ctx.get().tool_contexts 上，
+注意：工具收集的上下文统一挂在 current_request_ctx.get().tool_contexts 上
+（retrieve_kb 与 search_web 共享，全局递增编号），
 不单独定义独立的 current_tool_contexts ContextVar —— ContextVar(default=list())
 的 default 在模块加载时求值一次，所有请求会共享同一个 list（并发污染陷阱）。
 """
@@ -33,7 +34,7 @@ class RequestContext:
     )  # [已弃用] session_id -> asyncio.Future（挂起澄清），范围：请求内共享；POST/SSE 是独立请求，contextvar 不跨请求，请改用模块级 pending_asks（保留字段避免破坏既有引用）
     tool_contexts: list[RAGContext] = field(
         default_factory=list
-    )  # retrieve_kb 累积上下文，范围：请求内累积，用途：按编号顺序拼装引用（编号顺序即引用顺序）
+    )  # retrieve_kb / search_web 共享累积上下文，范围：请求内累积，用途：按编号顺序拼装引用（编号顺序即引用顺序）
     ask_count: int = (
         0  # 澄清提问计数，范围：请求内累积，用途：限制单次请求的澄清轮数上限
     )
@@ -45,7 +46,7 @@ class RequestContext:
 current_request_ctx: ContextVar[RequestContext | None] = ContextVar(
     "current_request_ctx", default=None
 )
-"""当前请求共享对象；工具/节点经此读取 queue/abort/tool_contexts/ask_count。"""
+"""当前请求共享对象；工具/节点经此读取 queue/abort/tool_contexts/ask_count/web_count。"""
 
 pending_asks: dict[str, asyncio.Future] = {}
 """进程级挂起澄清注册表（session_id -> asyncio.Future）。
