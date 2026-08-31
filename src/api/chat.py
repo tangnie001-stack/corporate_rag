@@ -186,11 +186,9 @@ async def _stream_rag_response(
         yield to_sse(SSEDoneEvent(trace_id=current_trace_id.get() or ""))
         return
 
-    # 流结束后持久化对话
+    # 流结束后持久化 assistant 消息
     asyncio.create_task(
-        _persist_conversation(
-            svc, session_id, kb_id, query, full_answer, sources, user_id
-        )
+        _persist_conversation(svc, session_id, kb_id, full_answer, sources, user_id)
     )
 
 
@@ -198,30 +196,26 @@ async def _persist_conversation(
     svc: AppService,
     session_id: str,
     kb_id: str,
-    query: str,
     answer: str,
     sources: list[str],
     user_id: str = "",
 ) -> None:
-    """异步持久化对话到 MySQL，带重试。
+    """流结束后异步写 assistant 消息到 MySQL，带重试。
 
     在 SSE 流结束后非阻塞执行。
     如果 MySQL 不可用，重试 3 次后放弃（只记日志）。
     绝不会抛异常冒泡到 SSE 响应。
+    （session 与 user 消息已在请求开始时写入，见 chat_stream）
 
     Args:
         svc: AppService 实例
         session_id: 会话 ID
         kb_id: 知识库 UUID
-        query: 用户查询文本
         answer: LLM 生成的完整回答
         sources: 引用来源列表（去重后的 "文件名 (第x页)" 列表）
-        user_id: 当前用户 ID，写入会话记录用于按用户过滤
+        user_id: 当前用户 ID（保留签名，当前未使用）
     """
     await svc.set_chat_repo()
-
-    # 创建会话（如首次消息）。title = 首条消息前 20 字
-    title = query[:20]
 
     # 持久化重试 — 使用指数退避（与 models.py 的 with_retry 策略一致）
     async def retry(factory, max_retries=3, initial_interval=0.5, backoff=2.0):
@@ -238,12 +232,11 @@ async def _persist_conversation(
                         "Persist failed after {} retries: {}", max_retries, e
                     )
 
-    await retry(lambda: svc.save_session_async(session_id, title, kb_id, user_id))
     await retry(
-        lambda: svc.save_messages_async(session_id, kb_id, query, answer, sources)
+        lambda: svc.save_assistant_async(session_id, kb_id, answer, sources, "complete")
     )
     logger.info(
-        "Conversation persisted: session_id={} kb_id={} sources={}",
+        "Assistant message persisted: session_id={} kb_id={} sources={}",
         session_id,
         kb_id,
         len(sources),

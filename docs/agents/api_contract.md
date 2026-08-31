@@ -656,8 +656,7 @@ kb_router → agent（LLM + bind_tools）
         event: model_info (模型名 + fallback 状态)
         event: done
     → 后台持久化对话到 MySQL（含重试）
-      → chat_manager.save_session_async()
-      → chat_manager.save_messages_async()
+      → chat_manager.save_assistant_async()（仅写 assistant 消息；session + user 消息已在请求开始时写入，见上文「落库时机」）
 ```
 
 ### 6.2 澄清路径（ask_user 工具）

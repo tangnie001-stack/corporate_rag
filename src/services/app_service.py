@@ -201,6 +201,19 @@ class AppService:
         """请求开始时同步写入单条 user 消息到 MySQL。"""
         await self.chat_manager.save_user_async(session_id, kb_id, user_msg)
 
+    async def save_assistant_async(
+        self,
+        session_id: str,
+        kb_id: str,
+        assistant_msg: str,
+        sources: list[str] | None = None,
+        status: str = "complete",
+    ) -> None:
+        """流结束后异步写入单条 assistant 消息到 MySQL。"""
+        await self.chat_manager.save_assistant_async(
+            session_id, kb_id, assistant_msg, sources, status
+        )
+
     async def save_messages_async(
         self,
         session_id: str,
