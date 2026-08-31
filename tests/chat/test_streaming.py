@@ -72,3 +72,12 @@ async def test_buffer_cap_drops_oldest(mgr):
     for i in range(StreamingRunManager.MAX_ITEMS + 10):
         mgr.add_event("s1", "token", f"t{i}")
     assert len(mgr._stream_buffers["s1"]) <= StreamingRunManager.MAX_ITEMS
+
+
+@pytest.mark.asyncio
+async def test_buffer_ttl_sweep(mgr):
+    mgr.clear_buffer("s1")
+    mgr.add_event("s1", "done", {})
+    mgr._buffer_done_at["s1"] -= StreamingRunManager.TTL_SECONDS + 1
+    mgr.sweep_expired()
+    assert mgr.buffer_exists("s1") is False
