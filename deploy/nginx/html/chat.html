@@ -155,6 +155,71 @@
     border-bottom-right-radius: 4px;
   }
 
+  /* ── Markdown 渲染（.bubble-content.md 作用域，对齐 docs/design/pages/chat-markdown.md）── */
+  .bubble-content.md {
+    overflow-wrap: anywhere;
+  }
+  .bubble-content.md > *:first-child { margin-top: 0; }
+  .bubble-content.md > *:last-child { margin-bottom: 0; }
+  .bubble-content.md h1,
+  .bubble-content.md h2 { font-size: 16px; font-weight: 700; margin: 20px 0 8px; }
+  .bubble-content.md h3 { font-size: 15px; font-weight: 700; margin: 16px 0 6px; }
+  .bubble-content.md h4,
+  .bubble-content.md h5,
+  .bubble-content.md h6 { font-size: 14px; font-weight: 600; }
+  .bubble-content.md p { margin: 0 0 12px; }
+  .bubble-content.md strong { font-weight: 600; }
+  .bubble-content.md code {
+    font-family: 'Source Code Pro', ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 13px;
+    background: rgba(219, 234, 254, 0.25);
+    border-radius: 4px;
+    padding: 1px 5px;
+  }
+  .bubble-content.md pre {
+    background: #F1F5F9;
+    border-radius: 8px;
+    padding: 12px;
+    overflow-x: auto;
+    margin: 12px 0;
+  }
+  .bubble-content.md pre code {
+    background: transparent;
+    padding: 0;
+    border-radius: 0;
+  }
+  .bubble-content.md a { color: var(--primary); text-decoration: none; }
+  .bubble-content.md a:hover { text-decoration: underline; }
+  .bubble-content.md hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
+  .bubble-content.md ul,
+  .bubble-content.md ol { padding-left: 18px; margin: 8px 0; }
+  .bubble-content.md li { margin: 6px 0; }
+  .bubble-content.md li::marker { color: var(--text-secondary); }
+  .bubble-content.md blockquote {
+    border-left: 3px solid var(--primary);
+    padding-left: 12px;
+    margin: 8px 0;
+    color: var(--text-secondary);
+  }
+  .bubble-content.md table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    border-collapse: collapse;
+    margin: 12px 0;
+  }
+  .bubble-content.md table th {
+    font-weight: 600;
+    background: #F1F5F9;
+    border-bottom: 1px solid var(--border);
+    padding: 6px 10px;
+  }
+  .bubble-content.md table td {
+    border-bottom: 1px solid var(--border);
+    padding: 6px 10px;
+  }
+  .bubble-content.md input[type="checkbox"] { accent-color: var(--primary); }
+
   .bubble-meta {
     font-size: 11px;
     color: var(--text-secondary);
@@ -923,10 +988,19 @@ const errorToast = $('errorToast');
 const errorMessage = $('errorMessage');
 
 // ── Helpers ──
+let stickToBottom = true;
+
 function scrollToBottom() {
+  if (!stickToBottom) return;
   requestAnimationFrame(() => {
     window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
   });
+}
+
+// 用户上滑（距底 > 40px）暂停自动跟随；滑回底部恢复
+function onChatScroll() {
+  const distance = document.body.scrollHeight - window.innerHeight - window.scrollY;
+  stickToBottom = distance < 40;
 }
 
 function showError(msg) {
@@ -1037,7 +1111,7 @@ function renderAiAnswer(text) {
   div.className = 'bubble-row ai';
   div.innerHTML = `
     <div class="bubble-avatar">🤖</div>
-    <div class="bubble-content"><div class="bubble-meta">系统</div>${escapeHtml(text)}</div>
+    <div class="bubble-content md"><div class="bubble-meta">系统</div>${renderMarkdown(text)}</div>
   `;
   chatContainer.appendChild(div);
   scrollToBottom();
@@ -1720,6 +1794,8 @@ document.querySelector('.app-subtitle').textContent = `会话: ${state.sessionId
 
 // 加载会话历史侧边栏
 loadSessions();
+// stick 滚动：监听用户滚动，上滑暂停自动跟随
+window.addEventListener('scroll', onChatScroll);
 // 仅已有会话才拉取历史消息（新对话无历史，不调用 /api/sessions/messages）
 if (hadSavedSession) {
   loadSessionMessages(state.sessionId);
