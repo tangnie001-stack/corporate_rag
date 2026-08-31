@@ -1,9 +1,10 @@
 # chat-markdown-rendering Specification
 
 ## Purpose
-TBD - created by archiving change chat-markdown-rendering. Update Purpose after archive.
 
-## Requirements
+修复助手消息以纯文本平铺显示 LLM 输出 Markdown 的问题：助手消息气泡将 LLM 输出的 Markdown 渲染为富文本（经 sanitize 后插入 DOM），流式输出渐进显示格式，历史回放走同一渲染路径，样式限定作用域且不破坏现有 `[n]` 引用展示。
+
+## ADDED Requirements
 
 ### Requirement: 助手消息 Markdown 渲染
 
@@ -21,6 +22,10 @@ TBD - created by archiving change chat-markdown-rendering. Update Purpose after 
 - **WHEN** 流式中途消息含未闭合的 Markdown 标记（如未闭合的 `**` 或代码块）
 - **THEN** 渲染 SHALL 不崩溃、不显示异常字符，结束后恢复正常
 
+#### Scenario: 流式渲染不打断阅读
+- **WHEN** 流式重渲染期间用户向上翻阅历史消息
+- **THEN** 界面 SHALL 不因新 token 自动滚动而将用户拽回底部（仅当用户距底部 40px 以内才自动跟随）
+
 ### Requirement: 渲染安全
 
 助手消息内容（来自 LLM 与 web 搜索结果）SHALL 视为未信任内容，渲染前 SHALL 经白名单 sanitize（过滤 `<script>`、事件属性、`javascript:` 链接等 XSS 向量）。
@@ -32,6 +37,10 @@ TBD - created by archiving change chat-markdown-rendering. Update Purpose after 
 #### Scenario: 用户消息不渲染 markdown
 - **WHEN** 用户消息含 Markdown 或 HTML
 - **THEN** 用户消息 SHALL 保持纯文本（escapeHtml），不进入 markdown 渲染路径
+
+#### Scenario: 图片协议过滤
+- **WHEN** 消息含 markdown 图片（`![](url)`）
+- **THEN** 仅 `http:`/`https:` 图片 SHALL 被渲染，`javascript:`/`data:` 等不安全协议 SHALL 被过滤，图片加载失败 SHALL 不影响回答内容
 
 ### Requirement: 样式作用域
 

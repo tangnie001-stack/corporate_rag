@@ -85,6 +85,17 @@
 | F-08 | **在线 RAGAS 采样评估** | 当前 RAGAS 仅离线 CLI 运行。改为生产流量采样 5-10%，通过 Langfuse 记录后定时批量跑 RAGAS 评分，监控线上质量退化，触发告警 | P2 | 低 | 无 |
 | F-09 | **双路径检索升级为多变体生成** | 当前改写采用"约束补全"（medium 单条 standalone_query / complex 子查询分解）+ 双路径检索（改写 query + 原 query，RRF 融合），解决多轮省略缺实体与表述鸿沟。**升级方向**：在约束补全基础上叠加多变体生成（MultiQueryRetriever / RAG-Fusion 模式）——对补全后的完整查询生成 N 个同义变体，连同原 query（include_original）做 N+1 路检索 + RRF 融合。**触发条件**：用户问法口语化多样（"腾讯赚了多少" vs "腾讯盈利如何"）导致措辞差异检索 miss 时启用。**注意**：双路径是"多路径"的 2 路特例，多变体上线后双路径被泛化吞并（原 query 兜底由 include_original 保留），无需两套逻辑并存；"打分用原 query"策略与多路径正交，保留不变 | P2 | 中 | F-04 |
 
+## G. 前端与交互体验
+
+| 需求 | 描述 | 来源对比 | 优先级 | 预估成本 | 依赖 |
+|------|------|---------|--------|---------|------|
+| G-01 | **MCP 工具卡片（工具调用可视化）** | 模型调用工具时，对话流内以卡片展示工具调用过程：工具名、生命周期状态（running/success/failed/interrupted）、参数、结果折叠、按工具类型区分内容（检索/搜索/阅读）。参考 deepseek-harness `ui-tool`（ToolCallTree，经 `conversation.chat.node` 槽位注入对话流）。**现状**：已有雏形——`search_web` 发 `TOOL_START/TOOL_END` SSE 状态事件，前端 `renderStatusTag` 显示"正在联网搜索"。**接入时机**：接 MCP 时是刚需（工具数量爆炸、带参数与结构化结果）；当前仅 3 个 native 工具，状态标签够用，卡片收益在工具多后体现，可随 MCP 一起做。纯 HTML 折叠面板可实现，不强制框架化 | deepseek-harness 对比 | P2 | 中 | F-01 |
+| G-02 | **多 Agent 工作流可视化** | 引入多 Agent/子任务编排后，对话流内以可折叠面板展示 run → phase → member 执行树：run 行（状态点+状态文本+chevron）、phase 阶段分组（折叠行+成员数）、member 成员行（状态列）。参考 deepseek-harness `ui-workflow-run`（`WorkflowRunPanel`）。**接入时机**：必须等多 Agent 编排落地后——当前单 agent 循环（kb_router → agent → tools → format）无子任务/成员概念，无数据源，现在加是空壳 | deepseek-harness 对比 | P3 | 中 | F-02 |
+| G-03 | **记忆系统展示** | 三层记忆（Working/Episodic/Semantic）落地后，对话界面提供记忆查看/管理 UI：展示当前记忆条目、来源、置信度/衰退状态。参考 financial_rag 三层记忆体系与 deepseek-harness context/spill 机制。**接入时机**：记忆系统本身落地后才有数据可展示，当前项目无记忆层 | financial_rag / deepseek-harness 对比 | P3 | 中 | A-07、记忆系统落地 |
+| G-04 | **代码语法高亮** | chat-markdown-rendering 后置项。助手消息代码块语法高亮：Prism（轻量、适合实时高亮）或 Shiki（质量高但整块 re-highlight 重）。**流式策略**：流式中保持纯文本/轻量样式，代码块闭合后一次性高亮，避免每帧重高亮卡顿 | deepseek-harness 对比 | P2 | 低 | chat-markdown-rendering |
+| G-05 | **LaTeX 数学公式** | chat-markdown-rendering 后置项。助手消息中 KaTeX 渲染数学公式（dsh 用 micromark 数学扩展原生支持） | deepseek-harness 对比 | P3 | 低 | chat-markdown-rendering |
+| G-06 | **前端框架化评估（架构方向）** | 当前静态 HTML + 节流渲染可承载 G-01 工具卡片与简单工作流面板。**触发信号**：①需 AST 级增量渲染（流式中选中/复制文本、交互式代码块）——react-markdown/remark 的优势，Vue v-html 与 innerHTML 无异；②UI 复杂度超出静态页面可维护性（多组件状态/路由）；③G-01/G-02/G-03 同时上线。**原则**：最小改动，每次用当前架构渐进承载，信号出现再单独立 change 评估并连同构建链/部署一起规划 | 2026-08-31 调研 | P3 | 高 | G-01, G-02, G-03 |
+
 ## 标签说明
 
 **优先级：**

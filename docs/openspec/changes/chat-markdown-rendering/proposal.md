@@ -16,11 +16,12 @@
 
 - `chat.html` 的助手消息气泡改为 **Markdown 渲染**，替换纯文本 `createTextNode`
 - 渲染库选择（按项目约束：nginx 静态托管、无 node 构建，需 CDN 或 vendor 本地化）：
-  - 轻量方案：`marked` 或 `markdown-it`（单文件、易 vendor、够用）
-  - 对齐 dsh 方案：`micromark` + 增量解析（流式性能最优，但引入多个依赖文件，复杂度高）
-- **流式渲染策略**（参考 dsh `MarkdownText` 的"冻结块 + 尾部重解析"）：
-  - 流式进行中：已稳定的部分渲染为 markdown，尾部未闭合语法做容错（`marked`/`markdown-it` 对未闭合语法天然容错；`micromark` 则用增量解析）
-  - 简化可行方案：流式时按纯文本实时追加，**结束后整段 markdown 渲染**（体验略降但实现简单，作为备选）
+  - **已决策：`marked` + `DOMPurify`**（单文件、易 vendor、对未闭合语法天然容错；见 design D1）
+  - 备选：`markdown-it`（功能等价，需配 sanitize 策略）；`micromark` + 增量解析（对齐 dsh，流式性能最优但多文件依赖，本项目过度）
+- **流式渲染策略**（最终决策见 design D2）：
+  - 流式进行中：**节流（rAF/~60ms）重渲染**整段消息，渲染前做**中间态闭合补全**（`normalizePartialMarkdown`：围栏/行内反引号奇数补齐），避免未闭合代码块/表格导致 DOM 结构反复变化（闪烁）
+  - 流式结束：在 `done` SSE 事件用**原始全文（不补全）一次全量渲染**，收尾引用编号/完整表格
+  - 备选：dsh 的"冻结块 + 尾部重解析"增量解析——性能最优但对本项目过度；流式纯文本、结束才渲染——体验打折
 - **XSS 安全**：LLM 输出是未信任内容，渲染必须 sanitize——`marked`/`markdown-it` 需配 DOMPurify 或白名单过滤；dsh 方案内置 sanitize URI
 - **引用展示兼容**：现有 `[n]` 引用标记与 citation 事件保持不变，Markdown 渲染不能破坏引用编号文本
 
