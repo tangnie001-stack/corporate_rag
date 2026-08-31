@@ -65,10 +65,10 @@ cp /mnt/d/code/demo/AIAgent/corporate_rag/docs/design/vendor/purify.min.js \
 起本地静态服务后（`cd deploy/nginx/html && python3 -m http.server 8741`），用 playwright-cli goto `http://127.0.0.1:8741/chat.html` 并 eval：
 
 ```js
-typeof window.marked === 'function' && typeof window.DOMPurify === 'function'
+typeof window.marked?.parse === 'function' && typeof window.DOMPurify?.sanitize === 'function'
 ```
 
-预期：返回 `true`（两个库都加载成功）。若失败，检查 `<script>` 路径相对 chat.html 是否正确。
+预期：返回 `true`（两个库都加载成功；marked v12 的 `window.marked` 是命名空间对象，必须检查 `.parse` 方法）。若失败，检查 `<script>` 路径相对 chat.html 是否正确。
 
 - [ ] **Step 4: 提交**
 
