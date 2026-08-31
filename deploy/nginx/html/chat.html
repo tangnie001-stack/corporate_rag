@@ -1049,14 +1049,15 @@ marked.use({
 });
 
 // DOMPurify v3 对 img/audio/video 等 DATA_URI_TAGS 的 data: 恒放行（ALLOWED_URI_REGEXP 管不到），
-// 此处用钩子补一刀：src/href/xlink:href/poster 一律禁止 data:（D7 纵深）；
+// 但 src 的 data: 大小写变体（DATA:）会被 DOMPurify 自身的 URI 校验提前剥离，afterSanitizeAttributes 钩子
+// 看不到原值，故在 beforeSanitizeAttributes 属性校验前拦截，大小写不敏感（D7 纵深）；
 // data: 图片剥离 src 后不留空 img 占位，整元素移除，避免残留无意义占位
-DOMPurify.addHook('afterSanitizeAttributes', function (node) {
+DOMPurify.addHook('beforeSanitizeAttributes', function (node) {
   if (!node.getAttribute) return;
   let strippedDataUri = false;
   ['src', 'href', 'xlink:href', 'poster'].forEach(function (name) {
     const value = node.getAttribute(name);
-    if (value && value.indexOf('data:') === 0) {
+    if (value && value.toLowerCase().indexOf('data:') === 0) {
       node.removeAttribute(name);
       strippedDataUri = true;
     }
