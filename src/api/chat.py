@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 
 from src.api.dependencies import get_app_service
+from src.chat.streaming import streaming_manager
 from src.config.const import SESSION_LOCK_TTL
 from src.infra.llm.trace_context import current_trace_id
 from src.services.app_service import AppService
@@ -298,9 +299,15 @@ async def chat_stream(
 
     Raises:
         HTTPException 422: 参数校验失败（FastAPI 自动处理）
-        HTTPException 409: 同一会话已有进行中的请求（并发锁冲突）
+        HTTPException 409: 同一会话已有进行中的请求（进程内注册表或 Redis 并发锁冲突）
     """
     user_id = getattr(request.state, "user_id", "") if request else ""
+
+    # 并发防护顺序：先查进程内注册表（is_running），再取 Redis 锁。
+    # 注册表是权威状态——Redis 锁 TTL（SESSION_LOCK_TTL）可能短于
+    # 含 ask_user 的一轮生成，锁过期不代表生成结束。
+    if streaming_manager.is_running(session_id):
+        raise HTTPException(409, "当前会话正在处理中")
 
     # per-session 并发锁：Redis 可用时加锁，冲突直接返回 409
     lock_held = False

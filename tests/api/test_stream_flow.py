@@ -1,12 +1,17 @@
 """/api/chat/stream 流程改造测试 — user 同步落库（保持 GET）。
 
 验证：流式请求开始即同步写 user（MySQL），端点方法仍为 GET，
-不破坏前端 EventSource 依赖。
+不破坏前端 EventSource 依赖；并发防护先查进程内注册表再取 Redis 锁。
 """
 
+import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import HTTPException, Request
+
+from src.api.chat import chat_stream
+from src.chat.streaming import streaming_manager
 
 
 def test_chat_stream_persists_user_before_stream(auth_client, mock_app_service):
@@ -40,3 +45,31 @@ async def test_persist_conversation_writes_only_assistant(
     await _persist_conversation(mock_app_service, "s1", "kb1", "完整回答", [], "u1")
     mock_app_service.save_assistant_async.assert_awaited_once()
     mock_app_service.save_user_async.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_conflict_returns_409(mock_app_service):
+    """注册表已有活跃任务 → chat_stream 先查注册表返回 409（不依赖 Redis 锁）。
+
+    在模块级 streaming_manager 单例上登记一个未完成的任务，端点必须
+    在取 Redis 锁之前被 is_running 拦下。用唯一 session_id 并在
+    teardown 注销/取消，避免污染其它测试。
+    """
+    session_id = "s-conflict-409"
+    task = asyncio.create_task(asyncio.sleep(10))
+    streaming_manager.register(session_id, task, asyncio.Event())
+    try:
+        assert streaming_manager.is_running(session_id) is True
+        with pytest.raises(HTTPException) as exc_info:
+            await chat_stream(
+                request=Request({"type": "http", "method": "GET"}),
+                session_id=session_id,
+                kb_id="kb1",
+                query="营收多少",
+                deep_thinking=False,
+                svc=mock_app_service,
+            )
+        assert exc_info.value.status_code == 409
+    finally:
+        streaming_manager.unregister(session_id)
+        task.cancel()
