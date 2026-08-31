@@ -264,6 +264,20 @@
     align-items: center;
     gap: 6px;
   }
+  /* 409 恢复查看：status-tag 内的「继续查看」按钮 */
+  .resume-btn {
+    margin-left: 8px;
+    padding: 2px 10px;
+    border: 1px solid var(--primary);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--primary);
+    font-size: 12px;
+    font-family: var(--font-body);
+    cursor: pointer;
+    transition: background var(--transition), color var(--transition);
+  }
+  .resume-btn:hover { background: var(--primary); color: #fff; }
 
   /* ── Clarification Bubble ── */
   .clarification-inner {
@@ -578,6 +592,24 @@
     outline-offset: 2px;
   }
   .chat-send svg { width: 20px; height: 20px; }
+
+  /* ── 停止生成按钮（STREAMING 时显示）── */
+  .stop-btn {
+    height: 40px;
+    padding: 0 14px;
+    border: 1px solid #FECACA;
+    border-radius: 10px;
+    background: #FEF2F2;
+    color: #991B1B;
+    font-size: 13px;
+    font-weight: 500;
+    font-family: var(--font-body);
+    cursor: pointer;
+    transition: background var(--transition), color var(--transition);
+    flex-shrink: 0;
+  }
+  .stop-btn:hover { background: #DC2626; color: #fff; }
+  .stop-btn:focus-visible { outline: 2px solid #DC2626; outline-offset: 2px; }
 
   /* ── Empty State ── */
   .empty-state {
@@ -944,6 +976,7 @@
       <span>深度思考</span>
     </button>
     <input type="text" id="chatInput" placeholder="输入问题..." autocomplete="off" aria-label="消息输入框">
+    <button type="button" id="stopBtn" class="stop-btn" style="display:none" title="停止生成">停止</button>
     <button class="chat-send" id="sendBtn" title="发送" aria-label="发送消息">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
     </button>
@@ -992,6 +1025,7 @@ const chatContainer = $('chatContainer');
 const emptyState = $('emptyState');
 const chatInput = $('chatInput');
 const sendBtn = $('sendBtn');
+const stopBtn = $('stopBtn');
 const errorToast = $('errorToast');
 const errorMessage = $('errorMessage');
 
@@ -1026,7 +1060,20 @@ function setInputState(enabled, placeholder) {
   chatInput.disabled = !enabled;
   chatInput.placeholder = placeholder || '输入问题...';
   sendBtn.disabled = !enabled;
-  if (enabled) chatInput.focus();
+  if (enabled) {
+    hideStopBtn();
+    chatInput.focus();
+  } else {
+    showStopBtn();
+  }
+}
+
+// 停止按钮：生成中（STREAMING）在输入区旁显示，恢复输入后隐藏
+function showStopBtn() {
+  if (stopBtn) stopBtn.style.display = '';
+}
+function hideStopBtn() {
+  if (stopBtn) stopBtn.style.display = 'none';
 }
 
 function removeEmptyState() {
@@ -1465,7 +1512,9 @@ function fetchStream(url, options, handlers) {
   const start = async () => {
     const resp = await fetch(url, { ...options, signal: controller.signal });
     if (!resp.ok || !resp.body) {
-      handlers.onError && handlers.onError(new Error('HTTP ' + resp.status));
+      const err = new Error('HTTP ' + resp.status);
+      err.status = resp.status;
+      handlers.onError && handlers.onError(err);
       return;
     }
     const reader = resp.body.getReader();
@@ -1544,6 +1593,7 @@ function buildStreamHandlers() {
         state.current = STATE.CLARIFYING;
         removeStreamingState();
         hideInputArea();
+        hideStopBtn();
         renderComposer(data.questions || []);
       } catch (err) { /* ignore */ }
     },
@@ -1617,6 +1667,19 @@ function resumeStream(sessionId, afterSeq) {
 
 // 网络断开：指数退避（1s/2s/4s，最多 3 次）调 resume 续接，超过提示刷新
 function onStreamError(e) {
+  // 本地 abort（用户停止 / 新请求替换旧流 / 切换会话）：不视为错误，不重连
+  if (e && (e.name === 'AbortError' || e.code === 20)) {
+    return;
+  }
+  // 409：同一会话已有生成任务在跑（并发冲突），提示并转为查看状态（可 resume）
+  if (e && e.status === 409) {
+    state.abortController = null;
+    state.current = STATE.IDLE;
+    setInputState(true, '输入问题...');
+    showHint('当前会话正在处理中');
+    renderResumePrompt();
+    return;
+  }
   if (state.current === STATE.CLARIFYING) {
     // ask_user 澄清期间断连：不重连（composer 交互在途），恢复输入并提示
     state.current = STATE.IDLE;
@@ -1680,8 +1743,75 @@ function sendMessage() {
   startStream(query);
 }
 
+// ── 停止生成：POST /api/sessions/cancel（置位后端 abort_signal，M4 消费）+ 本地 abort ──
+function stopGeneration() {
+  if (state.current !== STATE.STREAMING) return;
+  // 通知后端置位 abort_signal；本地流先停，cancel 失败不阻塞本地停止
+  try {
+    fetch('/api/sessions/cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: state.sessionId }),
+    }).catch(() => { /* cancel 失败不阻塞本地停止 */ });
+  } catch (err) { /* ignore */ }
+  if (state.abortController) {
+    state.abortController.abort();
+    state.abortController = null;
+  }
+  finalizeAnswer();
+  closeThinkRow();
+  state.current = STATE.IDLE;
+  setInputState(true, '输入问题...');
+  renderStoppedNotice();
+}
+
+// 已停止提示：标记本段回答为中断（下次发送时随 removeStreamingState 清理）
+function renderStoppedNotice() {
+  const div = document.createElement('div');
+  div.className = 'status-tag';
+  div.innerHTML = escapeHtml('已停止');
+  chatContainer.appendChild(div);
+  scrollToBottom();
+}
+
+// 切换/新建会话时的流式复位：终止本地流，不渲染残留 buffer
+function resetStreamingState() {
+  if (state.abortController) {
+    state.abortController.abort();
+    state.abortController = null;
+  }
+  if (streamTimer !== null) {
+    clearTimeout(streamTimer);
+    streamTimer = null;
+  }
+  streamBuffer = '';
+  streamBubble = null;
+  state.current = STATE.IDLE;
+  setInputState(true, '输入问题...');
+}
+
+// 409 提示：当前会话已有生成任务在跑，提供「继续查看」接回原流（从缓冲开头续接）
+function renderResumePrompt() {
+  const div = document.createElement('div');
+  div.className = 'status-tag';
+  div.innerHTML = `
+    <span class="status-dot"></span> 当前会话正在处理中
+    <button type="button" class="resume-btn">继续查看</button>`;
+  div.querySelector('.resume-btn').addEventListener('click', () => {
+    state.current = STATE.STREAMING;
+    setInputState(false, '正在恢复生成...');
+    resumeStream(state.sessionId, state.lastSeq);
+    div.remove();
+  });
+  chatContainer.appendChild(div);
+  scrollToBottom();
+}
+
 // ── Events ──
 sendBtn.addEventListener('click', sendMessage);
+if (stopBtn) {
+  stopBtn.addEventListener('click', stopGeneration);
+}
 chatInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     e.preventDefault();
@@ -1781,6 +1911,7 @@ async function loadSessionMessages(sessionId) {
 // 切换会话：更新 session_id 并加载该会话历史消息
 async function switchSession(sessionId) {
   if (sessionId === state.sessionId) return;
+  resetStreamingState();
   state.sessionId = sessionId;
   localStorage.setItem('rag_session_id', sessionId);
   document.querySelector('.app-subtitle').textContent = `会话: ${sessionId.slice(-12)}`;
@@ -1791,6 +1922,7 @@ async function switchSession(sessionId) {
 
 // 新建会话：生成新 session_id，清空当前对话
 function newSession() {
+  resetStreamingState();
   const sid = 'sess_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
   state.sessionId = sid;
   localStorage.setItem('rag_session_id', sid);
