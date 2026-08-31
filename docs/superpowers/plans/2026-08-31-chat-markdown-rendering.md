@@ -13,7 +13,7 @@
 （以下精确值来自 `docs/openspec/changes/chat-markdown-rendering/` 的 design.md D1-D7 与 spec.md，实现必须逐字遵守）
 
 - 渲染管线：`marked.parse(text, {gfm:true, breaks:true})` → `DOMPurify.sanitize(html, {ALLOWED_URI_REGEXP: STRICT_URI_REGEXP})` → `innerHTML`
-- **marked 层先转义原生 HTML**（D3）：自定义 `html` renderer 把 `token.text || token.raw` 的 `<`/`>` 转义为 `&lt;`/`&gt;`——仅靠 DOMPurify 不够（解析期 `img onerror` 会先触发）
+- **marked 层先转义原生 HTML**（D3）：自定义 `html` renderer 把 `token.text || token.raw` 的 `<`/`>` 转义为 `&lt;`/`&gt;`——DOMPurify 3.1.6 主路径用 DOMParser 解析不会触发 `img onerror`，但 legacy 回退路径存在解析期执行风险，marked 层转义保留作纵深防御
 - 链接统一 `target="_blank" rel="noopener noreferrer"`
 - 图片严格白名单（D7）：`img` 仅允许 http(s)/相对路径/`#`，**禁止一切 `data:`**（含 `data:image`）——`STRICT_URI_REGEXP = /^(?:https?:)?(?:\/\/|\/|#|\.\.?\/)/i`
 - `renderMarkdown` 函数内 try/catch，任何异常回退 `escapeHtml(text)` 纯文本（D1 异常兜底）

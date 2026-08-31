@@ -47,7 +47,7 @@
 
 ### D3: XSS 安全策略（纵深防御）
 
-LLM/web 内容一律视为未信任内容。**验证发现的关键点**：仅靠 `DOMPurify.sanitize` 不够——DOMPurify 解析含 `onerror` 的 `<img>` 时，浏览器会在属性剥离**之前**执行一次 handler（实测 `alert(1)` 触发）。因此必须**先在 marked 侧中性化原生 HTML**，再让 DOMPurify 兜底：
+LLM/web 内容一律视为未信任内容。**验证发现的关键点**：DOMPurify 3.1.6 主路径用 DOMParser 解析不会触发 `img onerror`，但 legacy `createHTMLDocument`+`innerHTML` 回退路径存在解析期执行风险；marked 层转义保留作纵深防御。因此必须**先在 marked 侧中性化原生 HTML**，再让 DOMPurify 兜底：
 
 - **第一层**：marked 自定义 `html` renderer，把原生 HTML（`token.text || token.raw`）转义为 `&lt;`/`&gt;`（实测 marked v12 会丢弃 inline html 返回，行为等同中性化；防御式 `||` 防 renderer 抛异常）
 - **第二层**：`DOMPurify.sanitize(html)` 白名单过滤（剥 `onerror`/`javascript:` 等）
@@ -92,4 +92,4 @@ LLM/web 内容一律视为未信任内容。**验证发现的关键点**：仅�
 2. vendor `marked.min.js` / `purify.min.js` 到 `deploy/nginx/html/vendor/`
 3. `chat.html`：引入库 → 改 `renderAiAnswerStream` 走 markdown 渲染（节流 + 闭合补全 + 结束全量）→ `scrollToBottom` 改 stick 跟随 → 新增 `.md` CSS → 历史回放同路径
 4. 验证：playwright 真实对话（含 web 兜底长文 markdown）、XSS 用例（注入 `<img onerror>`/`<script>` 应被过滤）
-5. `docker compose restart` 或刷新 nginx 静态（chat.html 是静态文件，nginx 直接服务，改文件即生效，无需重启 app）
+5. 部署生效：dev（docker-compose.yml 卷挂载 deploy/nginx/html）改文件即生效，无需重启；**生产（docker-compose.prod.yml 构建时 COPY）需 `docker compose -f docker-compose.prod.yml build nginx`（或 `up -d --build`）后生效**，且新 vendor/ 目录随镜像一起打包

@@ -167,6 +167,12 @@
   .bubble-content.md h4,
   .bubble-content.md h5,
   .bubble-content.md h6 { font-size: 14px; font-weight: 600; }
+  .bubble-content.md h1 + ul,
+  .bubble-content.md h1 + ol,
+  .bubble-content.md h2 + ul,
+  .bubble-content.md h2 + ol,
+  .bubble-content.md h3 + ul,
+  .bubble-content.md h3 + ol { margin-top: 6px; }
   .bubble-content.md p { margin: 0 0 12px; }
   .bubble-content.md strong { font-weight: 600; }
   .bubble-content.md code {
@@ -1035,37 +1041,40 @@ const STRICT_URI_REGEXP = /^(?:https?:)?(?:\/\/|\/|#|\.\.?\/)/i;
 
 // marked 安全配置（D3）：原生 HTML 先转义中性化，DOMPurify 只做纵深兜底
 // 注意：marked v12 渲染器为位置参数签名（html(html, block) / link(href, title, text)），非 token 对象
-marked.use({
-  renderer: {
-    html(html, block) {
-      const s = html || '';
-      return s.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    },
-    link(href, title, text) {
-      const h = href || '#';
-      return `<a href="${escapeHtml(h)}" target="_blank" rel="noopener noreferrer">${escapeHtml(text)}</a>`;
-    }
-  }
-});
-
-// DOMPurify v3 对 img/audio/video 等 DATA_URI_TAGS 的 data: 恒放行（ALLOWED_URI_REGEXP 管不到），
-// 但 src 的 data: 大小写变体（DATA:）会被 DOMPurify 自身的 URI 校验提前剥离，afterSanitizeAttributes 钩子
-// 看不到原值，故在 beforeSanitizeAttributes 属性校验前拦截，大小写不敏感（D7 纵深）；
-// data: 图片剥离 src 后不留空 img 占位，整元素移除，避免残留无意义占位
-DOMPurify.addHook('beforeSanitizeAttributes', function (node) {
-  if (!node.getAttribute) return;
-  let strippedDataUri = false;
-  ['src', 'href', 'xlink:href', 'poster'].forEach(function (name) {
-    const value = node.getAttribute(name);
-    if (value && value.toLowerCase().indexOf('data:') === 0) {
-      node.removeAttribute(name);
-      strippedDataUri = true;
+// 守卫：vendor 库加载失败（404/不完整拷贝）时跳过顶层配置，renderMarkdown 的 try/catch 回退纯文本，避免整脚本中断白屏
+if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
+  marked.use({
+    renderer: {
+      html(html, block) {
+        const s = html || '';
+        return s.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      },
+      link(href, title, text) {
+        const h = href || '#';
+        return `<a href="${escapeHtml(h)}" target="_blank" rel="noopener noreferrer">${escapeHtml(text)}</a>`;
+      }
     }
   });
-  if (strippedDataUri && node.nodeName === 'IMG') {
-    node.remove();
-  }
-});
+
+  // DOMPurify v3 对 img/audio/video 等 DATA_URI_TAGS 的 data: 恒放行（ALLOWED_URI_REGEXP 管不到），
+  // 但 src 的 data: 大小写变体（DATA:）会被 DOMPurify 自身的 URI 校验提前剥离，afterSanitizeAttributes 钩子
+  // 看不到原值，故在 beforeSanitizeAttributes 属性校验前拦截，大小写不敏感（D7 纵深）；
+  // data: 图片剥离 src 后不留空 img 占位，整元素移除，避免残留无意义占位
+  DOMPurify.addHook('beforeSanitizeAttributes', function (node) {
+    if (!node.getAttribute) return;
+    let strippedDataUri = false;
+    ['src', 'href', 'xlink:href', 'poster'].forEach(function (name) {
+      const value = node.getAttribute(name);
+      if (value && value.toLowerCase().indexOf('data:') === 0) {
+        node.removeAttribute(name);
+        strippedDataUri = true;
+      }
+    });
+    if (strippedDataUri && node.nodeName === 'IMG') {
+      node.remove();
+    }
+  });
+}
 
 function renderMarkdown(text) {
   try {

@@ -76,7 +76,7 @@
 ## 安全约束
 
 - 渲染管线：`marked.parse(text, {gfm:true, breaks:true})` → `DOMPurify.sanitize(html)` → `innerHTML`
-- **纵深防御（验证结论）**：仅靠 DOMPurify 不够——解析含 `onerror` 的 `<img>` 时，浏览器在剥离属性前会执行一次 handler（mockup 实测 alert 触发）。必须先用 marked `html` renderer 把原生 HTML 转义/中性化（`token.text || token.raw`），再交给 DOMPurify 兜底
+- **纵深防御（验证结论）**：DOMPurify 3.1.6 主路径用 DOMParser 解析不会触发 `img onerror`，但 legacy `createHTMLDocument`+`innerHTML` 回退路径存在解析期执行风险，marked 层转义保留作纵深防御。先用 marked `html` renderer 把原生 HTML 转义/中性化（`token.text || token.raw`），再交给 DOMPurify 兜底
 - 过滤 `<script>`、事件属性、`javascript:` 链接等 XSS 向量（DOMPurify 默认白名单）
 - 用户消息/系统消息不进 Markdown 路径（保持 escapeHtml）
 
