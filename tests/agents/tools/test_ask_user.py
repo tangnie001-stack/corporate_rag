@@ -109,16 +109,32 @@ async def test_ask_user_ask_limit():
 
 @pytest.mark.asyncio
 async def test_ask_user_timeout(monkeypatch):
-    """不 resolve 时在 ASK_USER_TIMEOUT 后返回超时错误，并清理注册表。"""
+    """不 resolve 时在 ASK_USER_TIMEOUT 后返回超时引导文案，并清理注册表。"""
     monkeypatch.setattr(rag_tools, "ASK_USER_TIMEOUT", 0.1)
     ctx = RequestContext(session_id="s1")
     token = current_request_ctx.set(ctx)
     try:
         result = await ask_user.ainvoke(_ask_args())
-        assert "超时" in result
+        assert "推荐方案" in result
     finally:
         current_request_ctx.reset(token)
     assert "s1" not in pending_asks
+
+
+@pytest.mark.asyncio
+async def test_ask_user_timeout_text_is_guidance():
+    """超时文案是引导 LLM 给推荐的文本，而非 Error 前缀。"""
+    from src.agents.tools import ask_tools
+    from src.config.const import SSEInteractionTexts
+
+    # 直接验证超时文案是引导而非 Error 前缀
+    assert not SSEInteractionTexts.ASK_USER_TIMEOUT_TEXT.startswith("Error:")
+    assert "推荐方案" in SSEInteractionTexts.ASK_USER_TIMEOUT_TEXT
+    # ask_user 超时路径返回的正是该常量（ask_tools 引入以锁定引用一致性）
+    assert (
+        ask_tools.SSEInteractionTexts.ASK_USER_TIMEOUT_TEXT
+        == SSEInteractionTexts.ASK_USER_TIMEOUT_TEXT
+    )
 
 
 @pytest.mark.asyncio

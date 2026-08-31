@@ -124,8 +124,11 @@ class SSEInteractionTexts:
     # ask_user 等待期间请求被取消文案：abort 信号置位（客户端断开/取消）时返回
     ASK_USER_REQUEST_CANCELLED: str = "Error: 请求已取消"
 
-    # ask_user 等待用户回答超时文案：超过 ASK_USER_TIMEOUT（const.py 秒数）未获答案时返回
-    ASK_USER_TIMEOUT_TEXT: str = "Error: 等待用户回答超时"
+    # ask_user 等待用户回答超时文案：超过 ASK_USER_TIMEOUT（const.py 秒数）未获答案时作为工具结果
+    # 给 LLM，引导其基于已有上下文给出推荐方案（而非报错）
+    ASK_USER_TIMEOUT_TEXT: str = (
+        "（用户因超时未填写内容）请基于已有上下文给出推荐方案。"
+    )
 
     # /chat/clarify-answer 404 文案：POST 解析挂起澄清时查无该 session 或 Future 已结束（超时/取消）
     CLARIFY_ANSWER_NOT_FOUND_TEXT: str = "该澄清问题已超时或不存在"
