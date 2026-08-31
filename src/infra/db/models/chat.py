@@ -34,6 +34,9 @@ class MessageModel(Base):
     completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
     total_tokens: Mapped[int] = mapped_column(Integer, default=0)
     model_name: Mapped[str | None] = mapped_column(String(64), comment="模型名称")
+    status: Mapped[str] = mapped_column(
+        String(16), default="complete", nullable=False, comment="complete/interrupted"
+    )
     created_at: Mapped[datetime] = mapped_column(
         UTCDateTime(), server_default=func.now(), nullable=False
     )

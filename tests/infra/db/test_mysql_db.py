@@ -165,3 +165,17 @@ async def test_create_session_idempotent():
     found = await chat_repo.get_session_by_id(session_id)
     assert found is not None
     assert found.title == "测试会话"
+
+
+@pytest.mark.asyncio
+async def test_message_status_default_complete():
+    from src.infra.db.models.chat import MessageModel
+    from src.infra.db.mysql_db import ChatRepo
+
+    chat_repo = ChatRepo(session_factory)
+    session_id = f"sess-status-{uuid.uuid4().hex[:8]}"
+    await chat_repo.save_message(
+        MessageModel(session_id=session_id, kb_id="", role="user", content="q")
+    )
+    msgs = await chat_repo.get_messages(session_id)
+    assert msgs[0].status == "complete"
