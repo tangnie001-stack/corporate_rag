@@ -955,6 +955,64 @@ function removeEmptyState() {
 
 // ── Render Functions ──
 
+// ── Markdown 渲染（chat-markdown-rendering）──
+// 图片严格白名单：仅 http(s)/相对路径/#，禁止一切 data:（D7）
+const STRICT_URI_REGEXP = /^(?:https?:)?(?:\/\/|\/|#|\.\.?\/)/i;
+
+// marked 安全配置（D3）：原生 HTML 先转义中性化，DOMPurify 只做纵深兜底
+// 注意：marked v12 渲染器为位置参数签名（html(html, block) / link(href, title, text)），非 token 对象
+marked.use({
+  renderer: {
+    html(html, block) {
+      const s = html || '';
+      return s.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    },
+    link(href, title, text) {
+      const h = href || '#';
+      return `<a href="${escapeHtml(h)}" target="_blank" rel="noopener noreferrer">${escapeHtml(text)}</a>`;
+    }
+  }
+});
+
+// DOMPurify v3 对 img/audio/video 等 DATA_URI_TAGS 的 data: 恒放行（ALLOWED_URI_REGEXP 管不到），
+// 此处用钩子补一刀：src/href/xlink:href/poster 一律禁止 data:（D7 纵深）
+DOMPurify.addHook('afterSanitizeAttributes', function (node) {
+  if (!node.getAttribute) return;
+  ['src', 'href', 'xlink:href', 'poster'].forEach(function (name) {
+    const value = node.getAttribute(name);
+    if (value && value.indexOf('data:') === 0) {
+      node.removeAttribute(name);
+    }
+  });
+});
+
+function renderMarkdown(text) {
+  try {
+    const html = marked.parse(text, { gfm: true, breaks: true });
+    return DOMPurify.sanitize(html, {
+      ALLOWED_URI_REGEXP: STRICT_URI_REGEXP,
+      ADD_ATTR: ['target'],
+      ADD_URI_SAFE_ATTR: ['rel', 'target']
+    });
+  } catch (err) {
+    return escapeHtml(text);
+  }
+}
+
+// 流式中间态闭合补全：围栏/行内反引号奇数则补齐，避免未闭合代码块导致 DOM 结构反复变化（D2）
+function normalizePartialMarkdown(text) {
+  let result = text;
+  const fenceCount = (result.match(/```/g) || []).length;
+  if (fenceCount % 2 === 1) {
+    result += '\n```';
+  }
+  const inlineTicks = (result.replace(/```/g, '').match(/`/g) || []).length;
+  if (inlineTicks % 2 === 1) {
+    result += '`';
+  }
+  return result;
+}
+
 function renderUserBubble(text) {
   const div = document.createElement('div');
   div.className = 'bubble-row user';
