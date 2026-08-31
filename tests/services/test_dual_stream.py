@@ -135,6 +135,35 @@ class TestDualStream:
         ]
 
 
+class TestSubscribeBuffer:
+    """_subscribe_buffer 缓冲回放消费者测试。"""
+
+    @pytest.mark.asyncio
+    async def test_subscribe_buffer_replays_then_tails(self):
+        """缓冲中已有事件全部回放为 SSE 帧，遇 done 终态自然结束（不产生超时 error）。"""
+        from src.api.chat import _subscribe_buffer
+        from src.chat.streaming import StreamingRunManager
+
+        mgr = StreamingRunManager()
+        mgr.clear_buffer("s1")
+        mgr.add_event("s1", "token", {"token": "a"})
+        mgr.add_event("s1", "token", {"token": "b"})
+        mgr.add_event("s1", "done", {"trace_id": ""})
+
+        collected = []
+        async for event in _subscribe_buffer("s1", mgr, after_seq=0, max_idle=0.2):
+            collected.append(event)
+
+        # 回放 token a/b（done 帧一并回放），由 has_terminal 结束而非空闲超时
+        assert len(collected) == 3
+        assert "event: token" in collected[0]
+        assert '"token": "a"' in collected[0]
+        assert "event: token" in collected[1]
+        assert '"token": "b"' in collected[1]
+        assert "event: done" in collected[2]
+        assert not any("event: error" in e for e in collected)
+
+
 class TestConvertEvent:
     """_convert_event 转换规则测试。"""
 

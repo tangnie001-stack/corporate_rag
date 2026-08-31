@@ -9,7 +9,8 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 
 from src.api.dependencies import get_app_service
-from src.config.const import SESSION_LOCK_TTL
+from src.chat.streaming import StreamingRunManager
+from src.config.const import SESSION_LOCK_TTL, SSEInteractionTexts
 from src.infra.llm.trace_context import current_trace_id
 from src.services.app_service import AppService
 from src.utils.sse import (
@@ -17,6 +18,7 @@ from src.utils.sse import (
     SSEDoneEvent,
     SSEErrorEvent,
     SSETokenEvent,
+    from_payload,
     to_sse,
 )
 
@@ -145,6 +147,39 @@ def _build_highlighted_snippet(qbs: dict) -> str:
     if pos < len(snippet):
         parts.append(escape(snippet[pos:]))
     return "".join(parts)
+
+
+async def _subscribe_buffer(
+    session_id: str,
+    manager: StreamingRunManager,
+    after_seq: int = 0,
+    max_idle: float = 180.0,
+) -> AsyncGenerator[str, None]:
+    """SSE 消费者：回放缓冲中 seq>after_seq 的事件并 tail 新事件直到终态。
+
+    Args:
+        session_id: 会话 ID
+        manager: StreamingRunManager
+        after_seq: 起始 seq（刷新后 0，同页重连为 lastSeq）
+        max_idle: tail 空闲超时秒数（无新事件超时返回续传超时 error）
+    """
+    emitted = after_seq
+    idle_loops = 0
+    while True:
+        pending = manager.get_events_since(session_id, emitted)
+        if pending:
+            idle_loops = 0
+            for seq, etype, payload in pending:
+                emitted = max(emitted, seq)
+                yield to_sse(from_payload(etype, payload))
+        else:
+            if manager.has_terminal(session_id):
+                return
+            idle_loops += 1
+            if idle_loops * 0.3 > max_idle:
+                yield to_sse(SSEErrorEvent(SSEInteractionTexts.RESUME_TIMEOUT_TEXT))
+                return
+            await asyncio.sleep(0.3)
 
 
 async def _stream_rag_response(

@@ -111,6 +111,10 @@ class SSEInteractionTexts:
     # SSEErrorEvent 统一错误前缀：_dual_stream（事件源异常）与 stream_chat（外层兜底）共用
     SSE_ERROR_PREFIX: str = "暂时无法回答："
 
+    # ── 缓冲续传（_subscribe_buffer）──
+    # tail 空闲超时文案：超过 max_idle 无新事件时以 error 事件返回，提示刷新页面
+    RESUME_TIMEOUT_TEXT: str = "续传超时，请刷新页面"
+
     # ── ask_user 澄清工具文案 ──
     # ask_user 上下文不可用文案：current_request_ctx 未设置时直接返回给 LLM
     ASK_USER_CTX_UNAVAILABLE: str = "Error: 请求上下文不可用"
