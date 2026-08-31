@@ -37,9 +37,12 @@ async def lifespan(app: FastAPI):
     启动阶段预热 ChromaDB：将首次打开持久化数据的初始化风险从
     首个用户请求移到启动阶段，避免请求侧出现
     'RustBindingsAPI' object has no attribute 'bindings' 冷启动异常。
+    同时清空残留的 chat_lock:* 键：重启后进程内无任何生成任务，
+    残留锁（来自被杀进程，TTL 兜底 180s）会阻塞新请求的并发锁获取。
     """
     logger.info("财务问答 API 正在启动")
     _warmup_chromadb()
+    await _clear_stale_chat_locks()
     yield
     logger.info("财务问答 API 正在关闭")
 
@@ -61,6 +64,25 @@ def _warmup_chromadb() -> None:
         logger.info("ChromaDB warmed up: collections={}", len(collections))
     except Exception as e:  # noqa: BLE001
         logger.warning("ChromaDB warmup failed (will retry lazily): {}", e)
+
+
+async def _clear_stale_chat_locks() -> None:
+    """启动时清空 chat_lock:* 键：重启后进程内无任何生成任务，残留锁必然过期。
+
+    Redis 的 chat_lock 由 chat_stream 用 SETNX + TTL 设置，进程被杀时
+    可能残留（TTL 兜底 180s），若不清理会阻塞重启后首个新请求的并发锁获取。
+    清理失败不阻塞启动：Redis 不可用或超时都只记录 warning。
+    """
+    try:
+        from src.infra.redis_client import get_redis_client
+
+        redis = get_redis_client()
+        keys = await redis.keys("chat_lock:*")
+        if keys:
+            await redis.delete(*keys)
+            logger.info("cleared {} stale chat locks at startup", len(keys))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("clear stale chat locks failed: {}", e)
 
 
 app = FastAPI(
