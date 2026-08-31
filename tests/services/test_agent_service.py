@@ -157,6 +157,8 @@ async def _collect_events(
     ctx = launch_ctx["ctx"]
     fake_svc = Mock()
     fake_svc.save_assistant_async = AsyncMock()
+    fake_svc.chat_manager = Mock()
+    fake_svc.chat_manager.add_message_async = AsyncMock()
 
     async def answer_builder() -> str:
         return await _run_generation(
@@ -469,6 +471,10 @@ async def test_stream_chat_persists_assistant_via_background_task():
     args = fake_svc.save_assistant_async.await_args.args
     assert args[2] == "你好，世界"
     assert args[4] == "complete"
+    # 完整回答同时写 Redis 对话历史（跨 turn 上下文）
+    fake_svc.chat_manager.add_message_async.assert_any_call(
+        "session-assist", "assistant", "你好，世界"
+    )
 
 
 @pytest.mark.asyncio

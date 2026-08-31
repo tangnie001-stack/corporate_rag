@@ -171,13 +171,15 @@ async def _run_with_finalize(
     一致（单一事实来源）。
 
     收尾分三支：
-    - 正常结束：完整回答落 complete，写 done 终态事件（含 trace_id）
-    - 被取消（abort 触达 task.cancel）：已产出 token 落 interrupted，
+    - 正常结束：完整回答落 complete（MySQL）+ 写 Redis 对话历史（供下一轮
+      prompt 上下文），写 done 终态事件（含 trace_id）
+    - 被取消（abort 触达 task.cancel）：已产出 token 落 interrupted（仅 MySQL），
       写 done(cancelled) 终态事件，随后 re-raise 保持取消语义
-    - 异常：已产出 token 落 interrupted，写 error 终态事件
+    - 异常：已产出 token 落 interrupted（仅 MySQL），写 error 终态事件
 
     Args:
-        svc: AppService 实例（save_assistant_async 落库）
+        svc: AppService 实例（save_assistant_async 落 MySQL；
+            chat_manager.add_message_async 写 Redis 对话历史）
         session_id: 会话 ID
         kb_id: 知识库 ID
         partial_holder: 生产者写入的 {"text": 已产出 token, "sources": 引用来源列表}
@@ -231,6 +233,9 @@ async def _run_with_finalize(
             partial_holder.get("sources", []),
             "complete",
         )
+        # 完整回答写 Redis 对话历史（get_history_async 供下一轮 prompt 上下文）；
+        # 取消/异常的部分回答保持仅 MySQL，不写 Redis
+        await svc.chat_manager.add_message_async(session_id, "assistant", full_answer)
         manager.add_event(session_id, "done", {"trace_id": trace_id or ""})
     finally:
         current_request_ctx.reset(ctx_token)
@@ -253,6 +258,11 @@ async def _stream_rag_response(
     由 stream_chat 取订阅生成器与启动上下文后，启动 _run_with_finalize
     后台任务（跑 _run_generation 并负责 assistant 落库 / 终态事件 /
     锁释放 / 任务注销），随后订阅事件缓冲转换为 SSE 帧产出。
+
+    本函数创建请求级 abort_signal 并注入任务（经 _run_with_finalize /
+    _run_generation 消费），同时把它接到 ctx.abort_signal——ask_user 的
+    _wait_with_abort_and_timeout 等待的是后者，cancel 端点置位时才能
+    即时唤醒澄清等待而非干等超时。
 
     Args:
         svc: AppService 实例
@@ -283,6 +293,10 @@ async def _stream_rag_response(
     partial_holder: dict = {"text": "", "sources": []}
     abort_signal = asyncio.Event()
     ctx = launch_ctx["ctx"]
+    # 将 cancel 端点置位的 abort_signal 接到请求上下文：ask_user 的
+    # _wait_with_abort_and_timeout 等待的是 ctx.abort_signal，不接线则取消
+    # 唤不醒澄清等待，会干等 ASK_USER_TIMEOUT 超时
+    ctx.abort_signal = abort_signal
 
     async def answer_builder() -> str:
         return await _run_generation(

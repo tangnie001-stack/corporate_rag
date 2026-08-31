@@ -19,7 +19,8 @@
 ## 2. 接口层：FastAPI Routes ↔ AppService
 
 路由统一挂载在 `/api` 前缀下。
-除 `/api/health` 外，所有端点使用 POST 方法。
+除以下 GET 端点外，其余端点使用 POST 方法：`/api/health`（健康检查）、
+`/api/sessions/events`（SSE 断点续接）、`/api/sessions/task-status`（任务状态查询）。
 请求头 `X-Trace-ID` 可选传，响应头含 `X-Trace-ID`。
 
 ### 2.1 知识库

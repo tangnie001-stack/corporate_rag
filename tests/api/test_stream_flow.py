@@ -85,6 +85,8 @@ async def test_background_task_finalizes_assistant_on_complete():
     fake_svc.save_assistant_async = AsyncMock(
         side_effect=lambda *a, **k: calls.append(("assistant", a[4]))
     )
+    fake_svc.chat_manager = MagicMock()
+    fake_svc.chat_manager.add_message_async = AsyncMock()
     partial_holder = {"text": ""}
     mgr = StreamingRunManager()
 
@@ -108,6 +110,85 @@ async def test_background_task_finalizes_assistant_on_complete():
 
 
 @pytest.mark.asyncio
+async def test_complete_path_writes_assistant_to_redis():
+    """正常结束：完整回答除落 MySQL 外，还写 Redis 对话历史（跨 turn 上下文）。
+
+    C1 回归：get_history_async（Redis）供下一轮 prompt 上下文，此前完整回答
+    只落 MySQL 未写 Redis，多轮对话退化。中断/异常的部分回答保持仅 MySQL。
+    """
+    from src.api.chat import _run_with_finalize
+    from src.chat.streaming import StreamingRunManager
+    from src.infra.llm.request_context import RequestContext
+
+    redis_calls = []
+    fake_svc = MagicMock()
+    fake_svc.save_assistant_async = AsyncMock()
+    fake_svc.chat_manager = MagicMock()
+    fake_svc.chat_manager.add_message_async = AsyncMock(
+        side_effect=lambda *a, **k: redis_calls.append(a)
+    )
+    partial_holder = {"text": ""}
+    mgr = StreamingRunManager()
+
+    async def answer_builder():
+        partial_holder["text"] = "完整回答"
+        return "完整回答"
+
+    await _run_with_finalize(
+        fake_svc,
+        "s1",
+        "kb1",
+        partial_holder,
+        answer_builder,
+        mgr,
+        asyncio.Event(),
+        lambda: None,
+        RequestContext(session_id="s1"),
+    )
+    assert redis_calls == [("s1", "assistant", "完整回答")]
+    assert mgr.has_terminal("s1") is True
+
+
+@pytest.mark.asyncio
+async def test_cancelled_path_skips_redis_assistant():
+    """取消/部分回答路径：不写 Redis 对话历史（仅落 MySQL interrupted）。
+
+    C1 回归：中断的部分回答是残片，不进入下一轮 prompt 上下文。
+    """
+    from src.api.chat import _run_with_finalize
+    from src.chat.streaming import StreamingRunManager
+    from src.infra.llm.request_context import RequestContext
+
+    redis_calls = []
+    fake_svc = MagicMock()
+    fake_svc.save_assistant_async = AsyncMock()
+    fake_svc.chat_manager = MagicMock()
+    fake_svc.chat_manager.add_message_async = AsyncMock(
+        side_effect=lambda *a, **k: redis_calls.append(a)
+    )
+    partial_holder = {"text": "部分回答"}
+    mgr = StreamingRunManager()
+
+    async def answer_builder():
+        raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await _run_with_finalize(
+            fake_svc,
+            "s1",
+            "kb1",
+            partial_holder,
+            answer_builder,
+            mgr,
+            asyncio.Event(),
+            lambda: None,
+            RequestContext(session_id="s1"),
+        )
+    assert redis_calls == []
+    fake_svc.save_assistant_async.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_background_task_done_event_carries_explicit_trace_id():
     """后台任务显式传递 trace_id：任务内 contextvar 被 set，done 终态事件携带该 trace_id。
 
@@ -123,6 +204,8 @@ async def test_background_task_done_event_carries_explicit_trace_id():
     trace_id = "trace_task_4_3"
     fake_svc = MagicMock()
     fake_svc.save_assistant_async = AsyncMock()
+    fake_svc.chat_manager = MagicMock()
+    fake_svc.chat_manager.add_message_async = AsyncMock()
     partial_holder = {"text": ""}
     mgr = StreamingRunManager()
     seen_in_task = []
@@ -281,3 +364,67 @@ async def test_chat_stream_conflict_returns_409(mock_app_service):
     finally:
         streaming_manager.unregister(session_id)
         task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_stream_rag_response_wires_ctx_abort_signal(monkeypatch):
+    """_stream_rag_response 把 cancel 端点置位的 abort_signal 接到 ctx.abort_signal。
+
+    C2 回归：ask_user 的 _wait_with_abort_and_timeout 等待 ctx.abort_signal，
+    若与注册表里的 abort 信号不是同一事件，取消唤不醒澄清等待，会干等
+    ASK_USER_TIMEOUT。断言接线后 ctx.abort_signal 即 cancel 端点 set_abort
+    置位的对象，且 set_abort 能直接置位它。
+    """
+    import src.api.chat as chat_module
+    from src.api.chat import _stream_rag_response
+    from src.chat.streaming import streaming_manager
+    from src.infra.llm.request_context import RequestContext
+    from src.utils.sse import SSEStatusEvent
+
+    session_id = "s-abort-wiring"
+    ctx = RequestContext(session_id=session_id)
+    launch_ctx = {
+        "session_id": session_id,
+        "kb_id": "kb1",
+        "query": "营收多少",
+        "history": [],
+        "deep_thinking": False,
+        "ctx": ctx,
+        "graph": None,
+    }
+
+    async def fake_subscription():
+        yield SSEStatusEvent(stage="agent", message="正在思考...")
+
+    fake_svc = MagicMock()
+    fake_svc.save_assistant_async = AsyncMock()
+    fake_svc.chat_manager = MagicMock()
+    fake_svc.chat_manager.add_message_async = AsyncMock()
+    fake_svc.agent_service.stream_chat = AsyncMock(
+        return_value=(fake_subscription(), launch_ctx)
+    )
+
+    async def fake_run_generation(*args, **kwargs):
+        return "完整回答"
+
+    monkeypatch.setattr(chat_module, "_run_generation", fake_run_generation)
+
+    gen = _stream_rag_response(fake_svc, "kb1", session_id, "营收多少")
+    try:
+        first_frame = await anext(gen)
+        assert "正在思考" in first_frame
+        registered = streaming_manager.get_abort_signal(session_id)
+        assert registered is not None
+        assert ctx.abort_signal is registered
+        # cancel 端点经 set_abort 置位的就是 ctx.abort_signal
+        streaming_manager.set_abort(session_id)
+        assert ctx.abort_signal.is_set()
+    finally:
+        await gen.aclose()
+        streaming_manager.clear_buffer(session_id)
+        # 等待后台任务收尾注销（_run_generation 已 mock，立即完成）
+        for _ in range(50):
+            if not streaming_manager.is_running(session_id):
+                break
+            await asyncio.sleep(0.05)
+        streaming_manager.unregister(session_id)

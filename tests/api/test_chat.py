@@ -14,6 +14,7 @@ client = TestClient(app)
 
 def test_chat_stream_returns_sse():
     """POST /api/chat/stream returns SSE event stream."""
+    from src.infra.llm.request_context import RequestContext
     from src.utils.sse import SSEDoneEvent, SSETokenEvent
 
     async def _sub():
@@ -25,7 +26,7 @@ def test_chat_stream_returns_sse():
             _sub(),
             {
                 "history": [],
-                "ctx": None,
+                "ctx": RequestContext(session_id=session_id),
                 "graph": None,
                 "session_id": session_id,
                 "kb_id": kb_id,
@@ -84,6 +85,7 @@ def test_chat_stream_passes_deep_thinking():
     回归场景：前端「深度思考」开关打开时，请求应携带 deep_thinking=true，
     最终传递给 agent LLM 的 enable_thinking 参数；若断链则开关无效。
     """
+    from src.infra.llm.request_context import RequestContext
     from src.utils.sse import SSEDoneEvent, SSETokenEvent
 
     captured = {}
@@ -98,7 +100,7 @@ def test_chat_stream_passes_deep_thinking():
             _sub(),
             {
                 "history": [],
-                "ctx": None,
+                "ctx": RequestContext(session_id=session_id),
                 "graph": None,
                 "session_id": session_id,
                 "kb_id": kb_id,
@@ -141,6 +143,8 @@ async def test_normal_answer_persisted():
     svc.save_assistant_async = AsyncMock(
         side_effect=lambda *a, **k: statuses.append(a[4])
     )
+    svc.chat_manager = MagicMock()
+    svc.chat_manager.add_message_async = AsyncMock()
     partial_holder = {"text": ""}
 
     async def answer_builder():

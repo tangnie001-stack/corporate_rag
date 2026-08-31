@@ -370,6 +370,8 @@ def _launch_finalize(launch_ctx: dict, svc=None) -> asyncio.Task:
     if svc is None:
         svc = Mock()
         svc.save_assistant_async = AsyncMock()
+        svc.chat_manager = Mock()
+        svc.chat_manager.add_message_async = AsyncMock()
     partial_holder = {"text": ""}
     abort_signal = asyncio.Event()
     ctx = launch_ctx["ctx"]
