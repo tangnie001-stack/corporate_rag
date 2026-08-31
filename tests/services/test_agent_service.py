@@ -411,15 +411,15 @@ async def test_stream_chat_passes_deep_thinking():
 
 
 @pytest.mark.asyncio
-async def test_stream_chat_full_path_emits_no_abstention_or_model_info():
-    """全链路无引用上下文时只产出 token + done，不产出 abstention / model_info 事件。"""
+async def test_stream_chat_full_path_emits_model_info_without_abstention():
+    """正常作答链路：捕获到 model_used 则补发 model_info，不产出 abstention 事件。"""
     service, _ = _make_service()
 
     async def fake_astream(*args, **kwargs):
         yield _chat_model_start_item()
-        yield _chat_model_stream_item("未在文档中找到相关数据")
+        yield _chat_model_stream_item("这是回答")
         yield _chat_model_end_item("qwen-max")
-        yield _finalize_end_item("未在文档中找到相关数据", has_contexts=False)
+        yield _finalize_end_item("这是回答", has_contexts=True)
         yield _format_end_item([])
 
     service._graph = Mock()
@@ -427,13 +427,15 @@ async def test_stream_chat_full_path_emits_no_abstention_or_model_info():
 
     events, _ = await _collect_events(service, "kb1", "session-abst", "营收多少")
 
-    # 生产链路 capture=None：abstention / model_info 仅捕获不产出
+    # 正常回答不触发 abstention；model_info 由捕获的 model_used 补发
     abstentions = [e for e in events if isinstance(e, SSEAbstentionEvent)]
     model_infos = [e for e in events if isinstance(e, SSEModelInfoEvent)]
     assert abstentions == []
-    assert model_infos == []
+    assert len(model_infos) == 1
+    assert model_infos[0].model == "qwen-max"
+    assert model_infos[0].is_fallback is False
     tokens = [e for e in events if isinstance(e, SSETokenEvent)]
-    assert [t.token for t in tokens] == ["未在文档中找到相关数据"]
+    assert [t.token for t in tokens] == ["这是回答"]
     assert isinstance(events[-1], SSEDoneEvent)
 
 
@@ -549,6 +551,8 @@ async def test_run_generation_writes_events_to_buffer(monkeypatch):
     assert answer == "你好"
     events = mgr.get_events_since("s1", 0)
     assert any(et == "token" for _, et, _ in events)
+    # 未捕获 model_used / final_answer → 不补发 abstention / model_info
+    assert not any(et in ("abstention", "model_info") for _, et, _ in events)
 
 
 @pytest.mark.asyncio
@@ -608,6 +612,65 @@ async def test_run_generation_buffers_reasoning_event(monkeypatch):
     assert any(et == "reasoning" for _, et, _ in events)
     payload = next(payload for _, et, payload in events if et == "reasoning")
     assert payload == {"delta": "思考增量"}
+
+
+@pytest.mark.asyncio
+async def test_run_generation_buffers_abstention_from_captured_final_answer():
+    """agent_finalize 产物命中拒答标记 → 循环结束后 abstention 事件入缓冲（位于 model_info 之前）。"""
+    from src.chat.streaming import StreamingRunManager
+    from src.infra.llm.request_context import RequestContext
+    from src.services.agent_service import _run_generation
+
+    mgr = StreamingRunManager()
+
+    async def fake_astream(*args, **kwargs):
+        yield _chat_model_start_item()
+        yield _chat_model_stream_item("未在文档中找到相关数据")
+        yield _chat_model_end_item("qwen-max")
+        yield _finalize_end_item("未在文档中找到相关数据", has_contexts=False)
+
+    fake_graph = Mock()
+    fake_graph.astream_events = fake_astream
+    ctx = RequestContext(session_id="s1")
+    ctx.clarify_channel = asyncio.Queue()
+
+    answer = await _run_generation(
+        "s1", "kb1", "q", [], False, ctx, mgr, graph=fake_graph
+    )
+    assert answer == "未在文档中找到相关数据"
+    events = mgr.get_events_since("s1", 0)
+    abstention_payloads = [payload for _, et, payload in events if et == "abstention"]
+    assert abstention_payloads == [SSEAbstentionEvent().payload_for_buffer()]
+    # 收尾顺序复刻旧语义：abstention 在 model_info 之前
+    tail_kinds = [et for _, et, _ in events if et in ("abstention", "model_info")]
+    assert tail_kinds == ["abstention", "model_info"]
+
+
+@pytest.mark.asyncio
+async def test_run_generation_buffers_model_info_when_model_captured():
+    """agent 节点 on_chat_model_end 捕获 model_used → 循环结束后 model_info 事件入缓冲。"""
+    from src.chat.streaming import StreamingRunManager
+    from src.infra.llm.request_context import RequestContext
+    from src.services.agent_service import _run_generation
+
+    mgr = StreamingRunManager()
+
+    async def fake_astream(*args, **kwargs):
+        yield _chat_model_start_item()
+        yield _chat_model_stream_item("你好")
+        yield _chat_model_end_item("qwen-max")
+        yield _finalize_end_item("你好", has_contexts=True)
+
+    fake_graph = Mock()
+    fake_graph.astream_events = fake_astream
+    ctx = RequestContext(session_id="s1")
+    ctx.clarify_channel = asyncio.Queue()
+
+    await _run_generation("s1", "kb1", "q", [], False, ctx, mgr, graph=fake_graph)
+
+    events = mgr.get_events_since("s1", 0)
+    model_info_payloads = [payload for _, et, payload in events if et == "model_info"]
+    assert model_info_payloads == [{"model": "qwen-max", "is_fallback": False}]
 
 
 @pytest.mark.asyncio

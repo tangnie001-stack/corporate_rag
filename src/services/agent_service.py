@@ -39,10 +39,12 @@ from src.infra.llm.prompt_manager import PromptManager
 from src.infra.llm.request_context import RequestContext
 from src.infra.search.bm25_index import BM25Index
 from src.utils.sse import (
+    SSEAbstentionEvent,
     SSEAskUserEvent,
     SSECitationEvent,
     SSEErrorEvent,
     SSEEvent,
+    SSEModelInfoEvent,
     SSEReasoningDeltaEvent,
     SSEStatusEvent,
     SSETokenEvent,
@@ -335,7 +337,11 @@ async def _run_generation(
     事件，逐个以 (seq, event.type, event.payload_for_buffer()) 写入
     manager 的 per-session 缓冲（缓冲 payload 与 to_sse 的 data: 同构）；
     token 事件同步累积 full_answer，并可选写入 partial_holder 供取消/出错
-    时回读部分回答。clarify_channel 的合并不在本任务范围（由后续任务负责），
+    时回读部分回答。转换期间经 _StreamCapture 捕获 model_used（agent 节点
+    on_chat_model_end）与 final_answer/tool_contexts（agent_finalize 节点
+    on_chain_end）；循环结束后按捕获结果补发 abstention / model_info 事件
+    到缓冲（复刻旧 stream_chat 语义，供前端拒答提示与模型名展示）。
+    clarify_channel 的合并不在本任务范围（由后续任务负责），
     本函数只消费 graph 事件源。
 
     Args:
@@ -367,11 +373,12 @@ async def _run_generation(
     initial_state = AgentState.make_initial_state(
         session_id, kb_id, query, history, deep_thinking
     )
+    capture = _StreamCapture()
     full_answer = ""
     if abort_signal is not None and abort_signal.is_set():
         raise asyncio.CancelledError
     async for item in graph.astream_events(initial_state, version=LangGraph.VERSION):
-        for event in _convert_event(item, None):
+        for event in _convert_event(item, capture):
             manager.add_event(session_id, event.type, event.payload_for_buffer())
             if isinstance(event, SSETokenEvent):
                 full_answer += event.token
@@ -383,6 +390,29 @@ async def _run_generation(
                 )
         if abort_signal is not None and abort_signal.is_set():
             raise asyncio.CancelledError
+    # 收尾：复刻旧 stream_chat 语义，按捕获结果补发 abstention / model_info
+    # 事件（capture 在循环内经 _convert_event 填充 model_used / final_answer）
+    if capture.final_answer is not None:
+        final_state = AgentState(
+            answer=capture.final_answer,
+            tool_contexts=capture.final_contexts,
+        )
+        if _is_abstention(final_state):
+            abstention_event = SSEAbstentionEvent()
+            manager.add_event(
+                session_id,
+                abstention_event.type,
+                abstention_event.payload_for_buffer(),
+            )
+    if capture.model_used:
+        model_info_event = SSEModelInfoEvent(
+            model=capture.model_used, is_fallback=False
+        )
+        manager.add_event(
+            session_id,
+            model_info_event.type,
+            model_info_event.payload_for_buffer(),
+        )
     return full_answer
 
 
