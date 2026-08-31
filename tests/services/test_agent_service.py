@@ -552,6 +552,65 @@ async def test_run_generation_writes_events_to_buffer(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_generation_buffers_abstention_event(monkeypatch):
+    """生产者将 _convert_event 产出的 abstention 事件写入缓冲。"""
+    from src.chat.streaming import StreamingRunManager
+    from src.infra.llm.request_context import RequestContext
+    from src.services import agent_service
+    from src.services.agent_service import _run_generation
+    from src.utils.sse import SSEAbstentionEvent
+
+    mgr = StreamingRunManager()
+    seen = []
+
+    def fake_convert(item, capture):
+        seen.append(item)
+        return [SSEAbstentionEvent()]
+
+    monkeypatch.setattr(agent_service, "_convert_event", fake_convert)
+
+    async def fake_astream(*args, **kwargs):
+        yield {"event": "on_chain_end", "data": {}}
+
+    fake_graph = Mock()
+    fake_graph.astream_events = fake_astream
+    ctx = RequestContext(session_id="s1")
+    await _run_generation("s1", "kb1", "q", [], False, ctx, mgr, graph=fake_graph)
+
+    assert any(et == "abstention" for _, et, _ in mgr.get_events_since("s1", 0))
+
+
+@pytest.mark.asyncio
+async def test_run_generation_buffers_reasoning_event(monkeypatch):
+    """生产者将 _convert_event 产出的 reasoning（SSEReasoningDeltaEvent）事件写入缓冲。"""
+    from src.chat.streaming import StreamingRunManager
+    from src.infra.llm.request_context import RequestContext
+    from src.services import agent_service
+    from src.services.agent_service import _run_generation
+    from src.utils.sse import SSEReasoningDeltaEvent
+
+    mgr = StreamingRunManager()
+
+    def fake_convert(item, capture):
+        return [SSEReasoningDeltaEvent("思考增量")]
+
+    monkeypatch.setattr(agent_service, "_convert_event", fake_convert)
+
+    async def fake_astream(*args, **kwargs):
+        yield {"event": "on_chain_end", "data": {}}
+
+    fake_graph = Mock()
+    fake_graph.astream_events = fake_astream
+    ctx = RequestContext(session_id="s1")
+    await _run_generation("s1", "kb1", "q", [], False, ctx, mgr, graph=fake_graph)
+
+    events = mgr.get_events_since("s1", 0)
+    assert any(et == "reasoning" for _, et, _ in events)
+    payload = next(payload for _, et, payload in events if et == "reasoning")
+    assert payload == {"delta": "思考增量"}
+
+
+@pytest.mark.asyncio
 async def test_run_generation_accumulates_citation_sources():
     """生产者流经 SSECitationEvent 时，partial_holder["sources"] 累积 "文件名 (第x页)"。"""
     from src.chat.streaming import StreamingRunManager
