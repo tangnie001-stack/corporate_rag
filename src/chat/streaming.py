@@ -2,12 +2,80 @@
 
 后台生成任务由本管理器持有强引用，防止被 GC；同时维护
 session_id → abort_signal 映射，供 POST /api/sessions/cancel 触达任务。
+本模块还承载 SSE 消费者（缓冲 → SSE 事件/帧）与共享单例 streaming_manager：
+stream_chat 启动后台任务与 cancel 端点共用同一实例（进程内，见
+docs/agents/defensive-patterns.md「流式生成状态必须留在进程内」）。
 """
 
+from __future__ import annotations
+
 import asyncio
+from collections.abc import AsyncGenerator
 from typing import Any
 
 from loguru import logger
+
+from src.config.const import SSEInteractionTexts
+from src.utils.sse import SSEErrorEvent, SSEEvent, from_payload, to_sse
+
+
+async def _subscribe_events(
+    session_id: str,
+    manager: StreamingRunManager,
+    after_seq: int = 0,
+    max_idle: float = 180.0,
+) -> AsyncGenerator[SSEEvent, None]:
+    """SSE 消费者（事件对象版）：回放缓冲中 seq>after_seq 的事件并 tail 新事件直到终态。
+
+    Args:
+        session_id: 会话 ID
+        manager: StreamingRunManager
+        after_seq: 起始 seq（新一轮 POST 为 0，同页重连为 lastSeq）
+        max_idle: tail 空闲超时秒数（无新事件超时返回续传超时 error）
+
+    Yields:
+        SSEEvent: 从缓冲还原的事件对象（token / citation / status / error / done）
+    """
+    emitted = after_seq
+    idle_loops = 0
+    while True:
+        pending = manager.get_events_since(session_id, emitted)
+        if pending:
+            idle_loops = 0
+            for seq, etype, payload in pending:
+                emitted = max(emitted, seq)
+                yield from_payload(etype, payload)
+        else:
+            if manager.has_terminal(session_id):
+                return
+            idle_loops += 1
+            if idle_loops * 0.3 > max_idle:
+                yield SSEErrorEvent(SSEInteractionTexts.RESUME_TIMEOUT_TEXT)
+                return
+            await asyncio.sleep(0.3)
+
+
+async def _subscribe_buffer(
+    session_id: str,
+    manager: StreamingRunManager,
+    after_seq: int = 0,
+    max_idle: float = 180.0,
+) -> AsyncGenerator[str, None]:
+    """SSE 消费者（帧文本版）：回放缓冲事件并 tail 新事件直到终态，产出 SSE 帧。
+
+    与 _subscribe_events 同构，仅将事件对象格式化为 SSE 文本帧（resume 回放用）。
+
+    Args:
+        session_id: 会话 ID
+        manager: StreamingRunManager
+        after_seq: 起始 seq（新一轮 POST 为 0，同页重连为 lastSeq）
+        max_idle: tail 空闲超时秒数（无新事件超时返回续传超时 error）
+
+    Yields:
+        str: SSE 格式文本帧（event: <type>\\ndata: {...}\\n\\n）
+    """
+    async for event in _subscribe_events(session_id, manager, after_seq, max_idle):
+        yield to_sse(event)
 
 
 class StreamingRunManager:
@@ -115,3 +183,9 @@ class StreamingRunManager:
         ]
         for sid in expired:
             self.clear_buffer(sid)
+
+
+# 模块级共享运行管理器：AgentService.stream_chat 与 cancel 端点共用。
+# 单 worker 部署假设下，进程内模块单例即可满足跨请求共享；若放 app 级，
+# 会导致 service 层反向依赖 api 层（循环导入），故置于本模块。
+streaming_manager = StreamingRunManager()

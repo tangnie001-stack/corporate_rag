@@ -27,7 +27,11 @@ from src.agents.graph.state import (
 )
 from src.agents.graph.workflow import build_graph
 from src.chat.manager import ChatManager
-from src.chat.streaming import StreamingRunManager
+from src.chat.streaming import (
+    StreamingRunManager,
+    _subscribe_events,
+    streaming_manager,
+)
 from src.config.const import SSEInteractionTexts
 from src.infra.db.vector_store import VectorStore
 from src.infra.llm.langfuse_tracing import LangfuseTracer, traced
@@ -36,13 +40,11 @@ from src.infra.llm.request_context import RequestContext, current_request_ctx
 from src.infra.llm.trace_context import current_trace_id
 from src.infra.search.bm25_index import BM25Index
 from src.utils.sse import (
-    SSEAbstentionEvent,
     SSEAskUserEvent,
     SSECitationEvent,
     SSEDoneEvent,
     SSEErrorEvent,
     SSEEvent,
-    SSEModelInfoEvent,
     SSEReasoningDeltaEvent,
     SSEStatusEvent,
     SSETokenEvent,
@@ -272,13 +274,14 @@ async def _dual_stream(
     break；正常结束 → _EndMarker 后 break。
 
     本生成器（Task B）无论正常结束还是被取消（客户端断连触发 aclose），
-    finally 都会置位 abort_signal、取消 Task A 并 gather 等待其退出，
-    保证事件源不再滞留。
+    finally 都会取消 Task A 并 gather 等待其退出，保证事件源不再滞留。
+    abort_signal 不再由断连置位——仅 cancel 端点经 StreamingRunManager.set_abort
+    置位，断连只停止消费（事件源由生产者任务自行管理）。
 
     Args:
         event_source: 事件源异步迭代器（graph.astream_events 返回值）
         queue: 双路事件合并队列（graph 事件 + clarify_channel 澄清 item）
-        abort_signal: 请求级中止信号（置位后 ask_user 等待被唤醒并中断）
+        abort_signal: 请求级中止信号（由 cancel 端点置位，本函数不再写）
         capture: 可选的流捕获容器，透传给 _convert_event 收集 model_used / 最终 state
 
     Yields:
@@ -311,7 +314,7 @@ async def _dual_stream(
             for event in _convert_event(item, capture):
                 yield event
     finally:
-        abort_signal.set()
+        # 断连只停止消费，不置位 abort（仅 cancel 经 manager 置位）
         task_a.cancel()
         await asyncio.gather(task_a, return_exceptions=True)
 
@@ -371,6 +374,80 @@ async def _run_generation(
     return full_answer
 
 
+async def _run_generation_task(
+    session_id: str,
+    kb_id: str,
+    query: str,
+    history: list,
+    deep_thinking: bool,
+    ctx: RequestContext,
+    manager: StreamingRunManager,
+    graph: CompiledStateGraph | None = None,
+    partial_holder: dict | None = None,
+) -> str:
+    """后台生成任务包装：设置请求上下文、运行 _run_generation、写终态事件。
+
+    后台任务与调用方处于不同 asyncio task，contextvars 不会自动传播，因此本
+    包装在入口显式 set current_request_ctx / current_trace_id（工具与节点经
+    contextvar 读取 clarify_channel / tool_contexts 等），finally 中 reset。
+    生成正常结束写 done 终态事件到缓冲；异常写 error + done 终态事件
+    （订阅方经 StreamingRunManager.has_terminal 收尾）。
+
+    Args:
+        session_id: 会话 ID
+        kb_id: 知识库 ID
+        query: 用户查询
+        history: 对话历史（不含当前 query）
+        deep_thinking: 深度思考开关
+        ctx: 请求上下文（含 clarify_channel / abort_signal）
+        manager: StreamingRunManager（事件缓冲写入）
+        graph: 图实例（同 _run_generation，None 时抛 ValueError）
+        partial_holder: 可选的 {"text": str} 共享 dict，随 token 产出更新，
+            供取消/出错时写 interrupted 部分回答
+
+    Returns:
+        完整回答（全部 token 累积结果）
+    """
+    trace_id = current_trace_id.get()
+    ctx_token = current_request_ctx.set(ctx)
+    trace_token = current_trace_id.set(trace_id)
+    full_answer = ""
+    try:
+        full_answer = await _run_generation(
+            session_id,
+            kb_id,
+            query,
+            history,
+            deep_thinking,
+            ctx,
+            manager,
+            graph=graph,
+            partial_holder=partial_holder,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:  # noqa: BLE001
+        logger.exception("后台生成任务异常: session_id={}", session_id)
+        manager.add_event(
+            session_id,
+            "error",
+            SSEErrorEvent(
+                f"{SSEInteractionTexts.SSE_ERROR_PREFIX}{str(e)[:100]}"
+            ).payload_for_buffer(),
+        )
+        if partial_holder is not None:
+            full_answer = partial_holder["text"]
+    finally:
+        current_request_ctx.reset(ctx_token)
+        current_trace_id.reset(trace_token)
+    manager.add_event(
+        session_id,
+        "done",
+        SSEDoneEvent(trace_id=trace_id or "").payload_for_buffer(),
+    )
+    return full_answer
+
+
 class AgentService:
     """图生命周期管理服务。"""
 
@@ -394,9 +471,6 @@ class AgentService:
         self._chat_manager = chat_manager
         self._prompt_manager = prompt_manager or PromptManager()
         self._tracer = LangfuseTracer()
-        self._last_model_used: str | None = (
-            None  # 最近一次流式执行的模型名（on_chat_model_end 捕获）
-        )
 
         self._graph: CompiledStateGraph = build_graph(
             vector_store,
@@ -417,16 +491,14 @@ class AgentService:
         query: str,
         deep_thinking: bool = False,
     ) -> AsyncGenerator[SSEEvent, None]:
-        """执行图并流式返回 SSE 事件。
+        """启动后台生成任务并订阅事件缓冲，流式返回 SSE 事件。
 
-        graph 事件与 ask_user 澄清经 _dual_stream 双路合并产出；本方法创建
-        RequestContext 并 set 到 current_request_ctx（工具/节点经 contextvar
-        读取 queue/abort/tool_contexts），finally 中 reset。循环正常结束后
-        将累积的 assistant 文本写入 chat_manager（Redis 历史，供多轮对话
-        构建 prompt）；MySQL 持久化由 api 层（_stream_rag_response 流结束后
-        create_task）负责。最终 state 取自 agent_finalize 节点 on_chain_end
-        的产物（经 capture 收集），据此判定 abstention；model_used 取自
-        on_chat_model_end 捕获值。
+        生成不再由 SSE 连接生命周期驱动：本方法先按固定顺序取历史（不含当前
+        query）、写 user 消息到 Redis，再启动后台任务（_run_generation_task
+        内跑 _run_generation，经 streaming_manager 写入事件缓冲），随后订阅
+        缓冲将事件转换为 SSE 事件产出。客户端断连只退出订阅（aclose 终止
+        async for），不中止后台生成；仅 cancel 端点经 streaming_manager.set_abort
+        置位中止信号。
 
         Args:
             kb_id: 知识库 ID（空字符串表示跨库搜索）
@@ -437,53 +509,33 @@ class AgentService:
 
         Yields:
             SSEEvent: 转换后的 SSE 事件（status / token / citation / ask_user /
-                abstention / model_info / error / done）
+                error / done）
         """
+        # 顺序约束（prompt 上下文正确性关键）：先取历史（不含当前 query），
+        # 再写 Redis user，再启动后台任务
         history = await self._chat_manager.get_history_async(session_id) or []
         await self._chat_manager.add_message_async(session_id, "user", query)
 
-        initial_state = AgentState.make_initial_state(
-            session_id, kb_id, query, history, deep_thinking
-        )
+        # 新一轮生成前清空该 session 缓冲，避免同一会话二次提问回放上一轮事件
+        streaming_manager.clear_buffer(session_id)
 
         ctx = RequestContext(session_id=session_id)
-        ctx_token = current_request_ctx.set(ctx)
-        full_answer = ""
-        self._last_model_used = None
-        capture = _StreamCapture()
-        stream = _dual_stream(
-            self._graph.astream_events(initial_state, version=LangGraph.VERSION),
-            ctx.clarify_channel,
-            ctx.abort_signal,
-            capture,
+        partial_holder = {"text": ""}
+        task = asyncio.create_task(
+            _run_generation_task(
+                session_id,
+                kb_id,
+                query,
+                history,
+                deep_thinking,
+                ctx,
+                streaming_manager,
+                graph=self._graph,
+                partial_holder=partial_holder,
+            )
         )
-        try:
-            async for event in stream:
-                if isinstance(event, SSETokenEvent):
-                    full_answer += event.token
-                yield event
-        except Exception as e:  # noqa: BLE001
-            logger.exception("AgentService stream_chat failed: {}", e)
-            yield SSEErrorEvent(f"{SSEInteractionTexts.SSE_ERROR_PREFIX}{str(e)[:100]}")
-            yield SSEDoneEvent(trace_id=current_trace_id.get() or "")
-        else:
-            if full_answer:
-                await self._chat_manager.add_message_async(
-                    session_id, "assistant", full_answer
-                )
-            if capture.final_answer is not None:
-                final_state = AgentState(
-                    answer=capture.final_answer,
-                    tool_contexts=capture.final_contexts,
-                )
-                if _is_abstention(final_state):
-                    yield SSEAbstentionEvent()
-            model_used = capture.model_used
-            self._last_model_used = model_used
-            yield SSEModelInfoEvent(model=model_used, is_fallback=False)
-            yield SSEDoneEvent(trace_id=current_trace_id.get() or "")
-        finally:
-            current_request_ctx.reset(ctx_token)
-            # 显式关闭事件源：本生成器被 aclose 时 async for 不传播关闭，
-            # 需手动触发 _dual_stream finally（abort 置位 + 取消 Task A）
-            await stream.aclose()
+        streaming_manager.register(session_id, task, ctx.abort_signal)
+        task.add_done_callback(lambda _task: streaming_manager.unregister(session_id))
+
+        async for event in _subscribe_events(session_id, streaming_manager):
+            yield event

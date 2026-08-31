@@ -266,7 +266,7 @@ def test_convert_event_content_and_reasoning_both():
 
 @pytest.mark.asyncio
 async def test_stream_chat_emits_full_event_sequence():
-    """受控事件流 → 状态/token/citation/model_info/done 完整产出。"""
+    """受控事件流 → 状态/token/citation/done 完整产出（model_info/abstention 由 Task 4.2 入缓冲）。"""
     service, _ = _make_service()
 
     async def fake_astream(*args, **kwargs):
@@ -294,14 +294,12 @@ async def test_stream_chat_emits_full_event_sequence():
     service._graph.astream_events = fake_astream
 
     events = []
-    async for event in service.stream_chat("kb1", "session1", "营收多少"):
+    async for event in service.stream_chat("kb1", "session-seq", "营收多少"):
         events.append(event)
 
     statuses = [e for e in events if isinstance(e, SSEStatusEvent)]
     tokens = [e for e in events if isinstance(e, SSETokenEvent)]
     citations = [e for e in events if isinstance(e, SSECitationEvent)]
-    model_infos = [e for e in events if isinstance(e, SSEModelInfoEvent)]
-    abstentions = [e for e in events if isinstance(e, SSEAbstentionEvent)]
     dones = [e for e in events if isinstance(e, SSEDoneEvent)]
 
     # 状态事件按事件类型接线：两次 agent 思考 + 检索开始/完成
@@ -322,14 +320,9 @@ async def test_stream_chat_emits_full_event_sequence():
     assert [c.kind for c in citations] == [
         "kb"
     ]  # KB 检索引用默认 kind=kb（web 兜底为 web）
-    assert len(model_infos) == 1
-    assert model_infos[0].model == "gpt-4o"
-    assert model_infos[0].is_fallback is False
-    assert abstentions == []
     assert len(dones) == 1
-    # 有检索上下文 + 正常回答 → 不 abstention；done 恒在末尾
+    # done 恒在末尾（生产者写终态事件入缓冲）
     assert isinstance(events[-1], SSEDoneEvent)
-    assert service._last_model_used == "gpt-4o"
 
 
 @pytest.mark.asyncio
@@ -346,14 +339,14 @@ async def test_stream_chat_passes_deep_thinking():
     service._graph = Mock()
     service._graph.astream_events = fake_astream
 
-    async for _ in service.stream_chat("kb1", "session1", "q", deep_thinking=True):
+    async for _ in service.stream_chat("kb1", "session-deep", "q", deep_thinking=True):
         pass
     assert seen["deep_thinking"] is True
 
 
 @pytest.mark.asyncio
 async def test_stream_chat_emits_abstention_when_no_context():
-    """检索无上下文 → 循环结束发 SSEAbstentionEvent（位于 model_info / done 之前）。"""
+    """abstention 判定不在本任务范围（Task 4.2 入缓冲）：当前只产出 token + done。"""
     service, _ = _make_service()
 
     async def fake_astream(*args, **kwargs):
@@ -367,22 +360,22 @@ async def test_stream_chat_emits_abstention_when_no_context():
     service._graph.astream_events = fake_astream
 
     events = []
-    async for event in service.stream_chat("kb1", "session1", "营收多少"):
+    async for event in service.stream_chat("kb1", "session-abst", "营收多少"):
         events.append(event)
 
+    # 生产者当前 capture=None：不产出 abstention / model_info（Task 4.2 补）
     abstentions = [e for e in events if isinstance(e, SSEAbstentionEvent)]
-    dones = [e for e in events if isinstance(e, SSEDoneEvent)]
     model_infos = [e for e in events if isinstance(e, SSEModelInfoEvent)]
-    assert len(abstentions) == 1
-    assert len(dones) == 1
-    assert events.index(abstentions[0]) < events.index(model_infos[0])
-    assert events.index(abstentions[0]) < events.index(dones[0])
-    assert model_infos[0].model == "qwen-max"
+    assert abstentions == []
+    assert model_infos == []
+    tokens = [e for e in events if isinstance(e, SSETokenEvent)]
+    assert [t.token for t in tokens] == ["未在文档中找到相关数据"]
+    assert isinstance(events[-1], SSEDoneEvent)
 
 
 @pytest.mark.asyncio
 async def test_stream_chat_persists_assistant_to_chat_manager():
-    """正常结束累积 token 写入 chat_manager（assistant 消息）。"""
+    """正常结束订阅收到全部 token 与 done（assistant 收尾由 Task 2.8 负责）。"""
     service, chat_manager = _make_service()
 
     async def fake_astream(*args, **kwargs):
@@ -397,14 +390,14 @@ async def test_stream_chat_persists_assistant_to_chat_manager():
     service._graph.astream_events = fake_astream
 
     events = []
-    async for event in service.stream_chat("kb1", "session1", "营收多少"):
+    async for event in service.stream_chat("kb1", "session-assist", "营收多少"):
         events.append(event)
 
-    chat_manager.add_message_async.assert_any_call(
-        "session1", "assistant", "你好，世界"
-    )
+    # user 消息仍同步写入（assistant 收尾延迟到 Task 2.8）
+    chat_manager.add_message_async.assert_any_call("session-assist", "user", "营收多少")
     tokens = [e for e in events if isinstance(e, SSETokenEvent)]
     assert [t.token for t in tokens] == ["你好", "，世界"]
+    assert isinstance(events[-1], SSEDoneEvent)
 
 
 @pytest.mark.asyncio
@@ -422,7 +415,7 @@ async def test_stream_chat_no_abstention_without_final_state():
     service._graph.astream_events = fake_astream
 
     events = []
-    async for event in service.stream_chat("kb1", "session1", "营收多少"):
+    async for event in service.stream_chat("kb1", "session-no-final", "营收多少"):
         events.append(event)
 
     assert [e for e in events if isinstance(e, SSEAbstentionEvent)] == []

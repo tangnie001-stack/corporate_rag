@@ -7,7 +7,7 @@ import pytest
 from langchain_core.messages import AIMessageChunk
 
 from src.agents.graph.state import LangGraphEvent, LangGraphKey, LangGraphNode
-from src.infra.llm.request_context import current_request_ctx
+from src.chat.streaming import _subscribe_buffer, streaming_manager
 from src.services.agent_service import AgentService, _convert_event, _dual_stream
 from src.utils.sse import (
     SSEAskUserEvent,
@@ -58,8 +58,24 @@ class TestDualStream:
         assert "boom" in errors[0].error
 
     @pytest.mark.asyncio
+    async def test_disconnect_does_not_set_abort(self):
+        """断连（aclose）不置位 abort_signal —— 仅 cancel 端点经 manager 置位。"""
+        abort_signal = asyncio.Event()
+
+        async def fake_events():
+            yield _make_token_item("a")
+            await asyncio.sleep(5)
+
+        gen = _dual_stream(fake_events(), asyncio.Queue(), abort_signal)
+        ait = gen.__aiter__()
+        first = await ait.__anext__()
+        assert first == SSETokenEvent("a")
+        await gen.aclose()  # 模拟客户端断开
+        assert abort_signal.is_set() is False  # 断连不得置位 abort
+
+    @pytest.mark.asyncio
     async def test_dual_stream_cancel_propagates(self):
-        """Task B 被 aclose 取消 → finally 置位 abort 并取消事件源（Task A）。"""
+        """Task B 被 aclose 取消 → 取消事件源（Task A），但不置位 abort。"""
         cancelled = asyncio.Event()
         entered_sleep = asyncio.Event()
 
@@ -81,7 +97,7 @@ class TestDualStream:
         await asyncio.wait_for(entered_sleep.wait(), timeout=2)
         await gen.aclose()
         assert cancelled.is_set()
-        assert abort_signal.is_set()
+        assert abort_signal.is_set() is False  # 断连不置位 abort（仅 cancel 置位）
 
     @pytest.mark.asyncio
     async def test_dual_stream_normal_end(self):
@@ -141,7 +157,6 @@ class TestSubscribeBuffer:
     @pytest.mark.asyncio
     async def test_subscribe_buffer_replays_then_tails(self):
         """缓冲中已有事件全部回放为 SSE 帧，遇 done 终态自然结束（不产生超时 error）。"""
-        from src.api.chat import _subscribe_buffer
         from src.chat.streaming import StreamingRunManager
 
         mgr = StreamingRunManager()
@@ -270,38 +285,80 @@ def _make_service() -> tuple[AgentService, AsyncMock]:
 
 
 class TestStreamChatWrapper:
-    """stream_chat 外层生命周期测试（断连清理 / assistant Redis 写入）。"""
+    """stream_chat 外层生命周期测试（后台任务启动 / 订阅消费 / 断连不中止生成）。"""
 
     @pytest.mark.asyncio
-    async def test_stream_chat_aclose_clean(self):
-        """客户端断连：aclose 不抛 RuntimeError，ctx 已 reset，abort_signal 已置位。"""
-        service, _ = _make_service()
+    async def test_stream_chat_history_excludes_current_query(self):
+        """stream_chat 固定顺序：先取历史（不含当前 query）再写 user 消息再启动任务。
 
-        entered_block = asyncio.Event()  # 事件源已进入阻塞的标志
+        P3 顺序约束：若先写 user 再取历史，当前 query 会作为历史进入下一轮
+        prompt 上下文，造成 prompt 上下文污染。
+        """
+        from src.services.agent_service import AgentService
+
+        svc = AgentService.__new__(AgentService)
+        svc._chat_manager = Mock()
+        calls = []
+
+        async def fake_get_history(session_id):
+            calls.append(("history", session_id))
+            return []
+
+        async def fake_add(session_id, role, content, **kwargs):
+            calls.append(("add", role, content))
+
+        svc._chat_manager.get_history_async = fake_get_history
+        svc._chat_manager.add_message_async = fake_add
+        svc._tracer = Mock()  # @traced 装饰器读取 self._tracer
+
+        # 后台任务所需最小图：零事件，避免任务异常噪音
+        async def empty_astream(*args, **kwargs):
+            return
+            yield  # pragma: no cover
+
+        svc._graph = Mock()
+        svc._graph.astream_events = empty_astream
+
+        agen = svc.stream_chat("kb1", "session-order", "营收多少", False)
+        it = agen.__aiter__()
+        await it.__anext__()  # 启动生成器至首个 yield 点：此时 history/add 已按序执行
+        # 先 history 后 add（否则当前 query 会作为历史进 prompt）
+        assert [c[0] for c in calls] == ["history", "add"]
+        await agen.aclose()
+
+    @pytest.mark.asyncio
+    async def test_stream_chat_aclose_does_not_abort_generation(self):
+        """客户端断连：aclose 不置位 abort，后台任务继续生成并写缓冲。"""
+        service, _ = _make_service()
+        resume = asyncio.Event()
 
         async def fake_astream(*args, **kwargs):
             yield _make_token_item("你好")
-            entered_block.set()
-            await asyncio.sleep(60)  # 阻塞直至被 Task A 取消
+            await resume.wait()
+            yield _make_token_item("，世界")
 
         service._graph = Mock()
         service._graph.astream_events = fake_astream
 
-        agen = service.stream_chat("kb1", "session1", "营收多少")
+        agen = service.stream_chat("kb1", "session-aclose", "营收多少")
         it = agen.__aiter__()
         first = await it.__anext__()
         assert first == SSETokenEvent("你好")
-        ctx = current_request_ctx.get()
-        assert ctx is not None
-        # 等待事件源进入阻塞后再断连，确保取消落在挂起的 Task A 上
-        await asyncio.wait_for(entered_block.wait(), timeout=2)
-        await agen.aclose()
-        assert current_request_ctx.get() is None
-        assert ctx.abort_signal.is_set()
+        abort_signal = streaming_manager.get_abort_signal("session-aclose")
+        assert abort_signal is not None
+        await agen.aclose()  # 模拟客户端断开
+        assert abort_signal.is_set() is False  # 断连不得置位 abort
+        # 后台任务继续运行：解除阻塞后仍产出事件到缓冲（生成未被中断）
+        resume.set()
+        await asyncio.sleep(0.3)
+        events = streaming_manager.get_events_since("session-aclose", 0)
+        token_texts = [payload["token"] for _, et, payload in events if et == "token"]
+        assert token_texts == ["你好", "，世界"]
+        assert streaming_manager.has_terminal("session-aclose") is True
 
     @pytest.mark.asyncio
-    async def test_stream_chat_persists_assistant_to_redis(self):
-        """正常结束后累积的 assistant 文本写入 chat_manager（Redis 历史）。"""
+    async def test_stream_chat_subscribes_tokens_and_done(self):
+        """正常结束后订阅收到全部 token 与 done 终态（assistant 写入由 Task 2.8 负责）。"""
         service, chat_manager = _make_service()
 
         async def fake_astream(*args, **kwargs):
@@ -312,21 +369,21 @@ class TestStreamChatWrapper:
         service._graph.astream_events = fake_astream
 
         events = []
-        async for event in service.stream_chat("kb1", "session1", "营收多少"):
+        async for event in service.stream_chat("kb1", "session-persist", "营收多少"):
             events.append(event)
 
         tokens = [e for e in events if isinstance(e, SSETokenEvent)]
         assert [t.token for t in tokens] == ["你好", "，世界"]
         done_events = [e for e in events if isinstance(e, SSEDoneEvent)]
         assert len(done_events) == 1
-        # user 消息先写，assistant 消息后写（含全部累积 token）
+        # user 消息仍同步写入（assistant 收尾延迟到 Task 2.8）
         chat_manager.add_message_async.assert_any_call(
-            "session1", "assistant", "你好，世界"
+            "session-persist", "user", "营收多少"
         )
 
     @pytest.mark.asyncio
-    async def test_stream_chat_no_assistant_write_when_empty(self):
-        """无任何 token 产出时（full_answer 为空）不写 assistant 到 chat_manager。"""
+    async def test_stream_chat_empty_output_still_terminates(self):
+        """无 token 产出时订阅仍以 done 终态结束（不悬挂，且不写 assistant）。"""
         service, chat_manager = _make_service()
 
         async def fake_astream(*args, **kwargs):
@@ -336,11 +393,14 @@ class TestStreamChatWrapper:
         service._graph.astream_events = fake_astream
 
         events = []
-        async for event in service.stream_chat("kb1", "session1", "营收多少"):
+        async for event in service.stream_chat("kb1", "session-empty", "营收多少"):
             events.append(event)
 
         done_events = [e for e in events if isinstance(e, SSEDoneEvent)]
         assert len(done_events) == 1
-        chat_manager.add_message_async.assert_any_call("session1", "user", "营收多少")
+        chat_manager.add_message_async.assert_any_call(
+            "session-empty", "user", "营收多少"
+        )
+        # assistant 写入不在本任务范围（Task 2.8 收尾），防止回归旧行为
         for call in chat_manager.add_message_async.await_args_list:
             assert call.args[1] != "assistant"
