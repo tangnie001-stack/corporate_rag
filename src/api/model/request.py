@@ -62,3 +62,9 @@ class SessionDeleteRequest(BaseModel):
     """会话删除请求体。"""
 
     session_id: str  # 会话 UUID
+
+
+class SessionCancelRequest(BaseModel):
+    """会话取消请求体。"""
+
+    session_id: str  # 会话 UUID

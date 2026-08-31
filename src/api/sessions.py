@@ -9,7 +9,11 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 
 from src.api.dependencies import get_app_service
-from src.api.model.request import SessionDeleteRequest, SessionMessagesRequest
+from src.api.model.request import (
+    SessionCancelRequest,
+    SessionDeleteRequest,
+    SessionMessagesRequest,
+)
 from src.api.model.response import MessageItem, SessionDeleteResponse, SessionItem
 from src.api.schema import ResponseModel
 from src.chat.streaming import _subscribe_buffer, streaming_manager
@@ -241,3 +245,46 @@ async def get_task_status(
     if has_assistant:
         return ResponseModel(data={"status": "completed"})
     return ResponseModel(data={"status": "idle"})
+
+
+@router.post("/sessions/cancel", response_model=ResponseModel)
+async def cancel_session(
+    request: Request,
+    body: SessionCancelRequest,
+    svc: AppService = Depends(get_app_service),
+) -> ResponseModel:
+    """主动停止某会话正在进行的生成：置位 abort_signal。
+
+    仅当该 session 在进程内注册表中有活跃 abort 信号时置位并返回
+    cancelled=True；无活跃任务返回 cancelled=False（reason=no_active_task）。
+    会话不存在或无权访问返回 404。注意：信号置位后，后台任务要真正中断
+    还需生成路径消费该信号（M4 接线，本端点只负责置位）。
+
+    Args:
+        request: FastAPI 请求（从中提取 user_id）
+        body: 会话取消请求体，含 session_id
+        svc: 应用服务实例（由 FastAPI 注入）
+
+    Returns:
+        ResponseModel: data 含 cancelled（是否置位成功）与 session_id；
+            无活跃任务时含 reason=no_active_task
+
+    Raises:
+        BusinessError: 会话不存在或无权访问时返回 404
+    """
+    user_id = getattr(request.state, "user_id", "")
+    session_id = body.session_id
+    session = await svc.get_session_by_id(session_id)
+    if not session or (session.get("user_id") and session["user_id"] != user_id):
+        raise BusinessError(Code.SESSION_NOT_FOUND, Code.SESSION_NOT_FOUND_MSG, 404)
+
+    if streaming_manager.get_abort_signal(session_id) is not None:
+        streaming_manager.set_abort(session_id)
+        return ResponseModel(data={"cancelled": True, "session_id": session_id})
+    return ResponseModel(
+        data={
+            "cancelled": False,
+            "session_id": session_id,
+            "reason": "no_active_task",
+        }
+    )

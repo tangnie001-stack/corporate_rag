@@ -6,6 +6,7 @@
 finally 清理，避免污染其它测试。
 """
 
+import asyncio
 from unittest.mock import AsyncMock
 
 from src.chat.streaming import streaming_manager
@@ -87,5 +88,34 @@ def test_task_status_session_not_found(auth_client, mock_app_service):
     resp = auth_client.get(
         "/api/sessions/task-status", params={"session_id": "missing"}
     )
+
+    assert resp.status_code == 404
+
+
+def test_cancel_sets_abort(auth_client, mock_app_service):
+    """POST /api/sessions/cancel 置位 abort_signal；无活跃任务返回 cancelled=False。"""
+    mock_app_service.get_session_by_id = AsyncMock(
+        side_effect=lambda sid: make_session(sid)
+    )
+    signal = asyncio.Event()
+    streaming_manager._abort_signals["s1"] = signal
+    try:
+        resp = auth_client.post("/api/sessions/cancel", json={"session_id": "s1"})
+        assert resp.status_code == 200
+        assert resp.json()["data"]["cancelled"] is True
+        assert signal.is_set() is True
+
+        resp2 = auth_client.post("/api/sessions/cancel", json={"session_id": "nope"})
+        assert resp2.json()["data"]["cancelled"] is False
+        assert resp2.json()["data"]["reason"] == "no_active_task"
+    finally:
+        streaming_manager._abort_signals.pop("s1", None)
+
+
+def test_cancel_session_not_found(auth_client, mock_app_service):
+    """POST /api/sessions/cancel session 不存在或无权访问返回 404。"""
+    mock_app_service.get_session_by_id = AsyncMock(return_value=None)
+
+    resp = auth_client.post("/api/sessions/cancel", json={"session_id": "missing"})
 
     assert resp.status_code == 404

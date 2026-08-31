@@ -416,6 +416,29 @@ Success:
 （`svc.get_messages` 是否存在 `role=assistant`）。会话不存在或无权访问返回 404
 （`SESSION_NOT_FOUND`），与 2.4.2/2.4.3 一致。
 
+#### 2.4.6 `POST /api/sessions/cancel`
+
+主动停止某会话正在进行的生成（前端停止按钮）：置位该 session 的 abort_signal。
+Body: `{"session_id": "sid"}`
+
+有活跃任务（进程内注册表存在 abort 信号）时置位并返回 `cancelled=true`：
+
+```json
+{"code": "SUCCESS", "message": "操作成功", "data": {"cancelled": true, "session_id": "sid"}}
+```
+
+无活跃任务时返回 `cancelled=false`（`reason=no_active_task`）：
+
+```json
+{"code": "SUCCESS", "message": "操作成功", "data": {"cancelled": false, "session_id": "sid", "reason": "no_active_task"}}
+```
+
+会话不存在或无权访问返回 404（`SESSION_NOT_FOUND`），与 2.4.2/2.4.3 一致。
+
+> ⚠️ 本端点只置位 abort_signal，后台任务真正中断还需生成路径消费该信号
+> （M4 接线）。信号置位后由 `_run_with_finalize` 的取消分支写 interrupted
+> 部分回答与 `done(cancelled)` 终态。
+
 ### 2.5 评估报告
 
 #### 2.5.1 `POST /api/kbs/eval/latest → dict | null`
