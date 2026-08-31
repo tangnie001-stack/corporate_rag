@@ -179,3 +179,23 @@ async def test_message_status_default_complete():
     )
     msgs = await chat_repo.get_messages(session_id)
     assert msgs[0].status == "complete"
+
+
+@pytest.mark.asyncio
+async def test_save_message_passthrough_status():
+    from src.infra.db.models.chat import MessageModel
+    from src.infra.db.mysql_db import ChatRepo
+
+    chat_repo = ChatRepo(session_factory)
+    session_id = f"sess-st-{uuid.uuid4().hex[:8]}"
+    await chat_repo.save_message(
+        MessageModel(
+            session_id=session_id,
+            kb_id="",
+            role="assistant",
+            content="partial",
+            status="interrupted",
+        )
+    )
+    msgs = await chat_repo.get_messages(session_id)
+    assert msgs[0].status == "interrupted"

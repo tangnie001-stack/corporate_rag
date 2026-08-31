@@ -100,6 +100,7 @@ class ChatRepo:
                 role=msg.role,
                 content=msg.content,
                 sources=sources_json,
+                status=getattr(msg, "status", "complete"),
                 prompt_tokens=getattr(msg, "prompt_tokens", 0),
                 completion_tokens=getattr(msg, "completion_tokens", 0),
                 total_tokens=getattr(msg, "total_tokens", 0),
