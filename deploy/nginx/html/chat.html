@@ -1634,10 +1634,15 @@ function buildStreamHandlers() {
       } catch (err) { /* ignore */ }
       streamRetryCount = 0; // 流正常结束，重置断线重连计数
       if (state.current === STATE.CLARIFYING) {
-        // ask_user 期间流结束（后端等待超时）：关闭 composer 恢复输入
+        // ask_user 期间流终止：取消（done+cancelled）或后端等待超时续答（done 正常结束），
+        // 挂起的澄清输入均已失效，关闭 composer 恢复输入
         state.current = STATE.IDLE;
         restoreInputArea();
-        showHint('该问题已超时，请重新提问');
+        if (data.cancelled === true) {
+          showHint('澄清已失效，请重新提问');
+        } else {
+          showHint('该问题已超时，请重新提问');
+        }
       } else {
         state.current = STATE.IDLE;
         setInputState(true, '输入问题...');
@@ -1657,10 +1662,10 @@ function buildStreamHandlers() {
         state.current = STATE.IDLE;
         setInputState(true, '输入问题...');
       } else if (state.current === STATE.CLARIFYING) {
-        // ask_user 期间断连：关闭 composer 恢复输入
+        // ask_user 期间服务端终态 error（续传超时/生成异常）：挂起澄清已失效，关闭 composer 恢复输入
         state.current = STATE.IDLE;
         restoreInputArea();
-        showError('连接异常，请重试');
+        showHint('澄清已失效，请重新提问');
       }
     },
     onError: (e) => {
