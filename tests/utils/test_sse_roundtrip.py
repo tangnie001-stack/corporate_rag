@@ -35,6 +35,7 @@ CASES = [
         kind="kb",
     ),
     SSEDoneEvent(trace_id="trace_x"),
+    SSEDoneEvent(trace_id="trace_x", cancelled=True),
     SSEErrorEvent(error="boom"),
     # 注意：type 须等于事件名 "ask_user"（from_payload 以事件名路由），
     # 不能用 data 内的子类型（如 "clarify"）——brief 原值在此处需修正。

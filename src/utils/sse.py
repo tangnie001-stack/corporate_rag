@@ -98,6 +98,9 @@ class SSEDoneEvent:
     """流结束事件。"""
 
     trace_id: str = ""  # 全链路追踪 ID（前端收到 done 时记录，随答案反馈回传）
+    cancelled: bool = (
+        False  # 是否因取消而终止（cancel 端点置位，前端据此提示"已停止生成"）
+    )
     type: str = "done"  # SSE 事件名（event: done）
     seq: int | None = field(
         default=None, compare=False, repr=False
@@ -105,7 +108,7 @@ class SSEDoneEvent:
 
     def payload_for_buffer(self) -> dict:
         """返回与 to_sse 的 data: 同构的缓冲 payload。"""
-        return {"trace_id": self.trace_id}
+        return {"trace_id": self.trace_id, "cancelled": self.cancelled}
 
 
 @dataclass
@@ -266,14 +269,20 @@ def sse_citation(
     return f"event: citation\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def sse_done(trace_id: str = "", seq: int | None = None) -> str:
+def sse_done(
+    trace_id: str = "", cancelled: bool = False, seq: int | None = None
+) -> str:
     """构建 SSE done 事件（标记流式响应结束，携带 trace_id 供前端反馈还原链路）。
 
     Args:
         trace_id: 全链路追踪 ID（空串 = 未捕获到，前端忽略）
+        cancelled: 是否因取消而终止（true 表示用户停止生成，前端提示"已停止"）
         seq: SSE 帧序列号（消费者注入，None 不序列化）
     """
-    data: dict[str, str | int] = {"trace_id": trace_id}
+    data: dict[str, str | int | bool] = {
+        "trace_id": trace_id,
+        "cancelled": cancelled,
+    }
     if seq is not None:
         data["seq"] = seq
     return f"event: done\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
@@ -387,8 +396,8 @@ def to_sse(event: SSEEvent) -> str:
             return sse_status(stage, message, detail, seq)
         case SSEErrorEvent(error=error, seq=seq):
             return sse_error(error, seq)
-        case SSEDoneEvent(trace_id=trace_id, seq=seq):
-            return sse_done(trace_id, seq)
+        case SSEDoneEvent(trace_id=trace_id, cancelled=cancelled, seq=seq):
+            return sse_done(trace_id, cancelled, seq)
         case SSEModelInfoEvent(model=model, is_fallback=is_fallback, seq=seq):
             return sse_model_info(model, is_fallback, seq)
         case SSEAskUserEvent(type=t, questions=questions, seq=seq):
@@ -431,7 +440,10 @@ def from_payload(etype: str, payload: dict) -> "SSEEvent":
             kind=payload["kind"],
         )
     if etype == "done":
-        return SSEDoneEvent(trace_id=payload.get("trace_id", ""))
+        return SSEDoneEvent(
+            trace_id=payload.get("trace_id", ""),
+            cancelled=payload.get("cancelled", False),
+        )
     if etype == "error":
         return SSEErrorEvent(error=payload["error"])
     if etype == "ask_user":

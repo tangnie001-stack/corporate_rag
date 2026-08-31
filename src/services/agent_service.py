@@ -327,6 +327,7 @@ async def _run_generation(
     manager: StreamingRunManager,
     graph: CompiledStateGraph | None = None,
     partial_holder: dict | None = None,
+    abort_signal: asyncio.Event | None = None,
 ) -> str:
     """后台生成任务：迭代图事件转换为带 seq 事件写入缓冲，返回完整回答。
 
@@ -351,12 +352,15 @@ async def _run_generation(
             随 token 产出更新 text，随 citation 事件累积 sources
             （"文件名 (第x页)" 列表），供取消/出错时写 interrupted 部分回答、
             收尾落库引用来源
+        abort_signal: 可选的请求级中止信号（cancel 端点置位）；置位后本任务
+            在循环内尽快抛 CancelledError 中断生成，交由调用方收尾落库
 
     Returns:
         完整回答（全部 token 累积结果）
 
     Raises:
         ValueError: graph 未传入（默认图需调用方显式注入）
+        asyncio.CancelledError: abort_signal 置位时抛出（中断生成）
     """
     if graph is None:
         raise ValueError("_run_generation 需显式传 graph（默认图由调用方注入）")
@@ -364,6 +368,8 @@ async def _run_generation(
         session_id, kb_id, query, history, deep_thinking
     )
     full_answer = ""
+    if abort_signal is not None and abort_signal.is_set():
+        raise asyncio.CancelledError
     async for item in graph.astream_events(initial_state, version=LangGraph.VERSION):
         for event in _convert_event(item, None):
             manager.add_event(session_id, event.type, event.payload_for_buffer())
@@ -375,6 +381,8 @@ async def _run_generation(
                 partial_holder.setdefault("sources", []).append(
                     f"{event.source} (第{event.page}页)"
                 )
+        if abort_signal is not None and abort_signal.is_set():
+            raise asyncio.CancelledError
     return full_answer
 
 

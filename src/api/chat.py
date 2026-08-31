@@ -290,6 +290,7 @@ async def _stream_rag_response(
             streaming_manager,
             graph=launch_ctx["graph"],
             partial_holder=partial_holder,
+            abort_signal=abort_signal,
         )
 
     task = asyncio.create_task(

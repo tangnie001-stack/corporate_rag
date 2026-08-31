@@ -155,6 +155,59 @@ async def test_background_task_error_event_round_trips_from_payload():
 
 
 @pytest.mark.asyncio
+async def test_background_task_done_cancelled_round_trips():
+    """answer_builder 抛 CancelledError（abort 触达生产者）→ 落 interrupted + done(cancelled) 入缓冲。
+
+    验证 F1+F2 链路：生产者 abort 抛 CancelledError → _run_with_finalize 捕获 →
+    部分回答落 interrupted → 写 done 终态事件 payload {"cancelled": True} →
+    from_payload 还原保留 cancelled 标记 → to_sse 序列化 "cancelled": true。
+    """
+    from src.api.chat import _run_with_finalize
+    from src.chat.streaming import StreamingRunManager
+    from src.infra.llm.request_context import RequestContext
+    from src.utils.sse import SSEDoneEvent, from_payload, to_sse
+
+    calls = []
+    fake_svc = MagicMock()
+    fake_svc.save_assistant_async = AsyncMock(
+        side_effect=lambda *a, **k: calls.append(("assistant", a[4]))
+    )
+    partial_holder = {"text": "部分回答"}
+    mgr = StreamingRunManager()
+
+    async def answer_builder():
+        raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await _run_with_finalize(
+            fake_svc,
+            "s1",
+            "kb1",
+            partial_holder,
+            answer_builder,
+            mgr,
+            asyncio.Event(),
+            lambda: None,
+            RequestContext(session_id="s1"),
+        )
+
+    assert ("assistant", "interrupted") in calls
+    assert mgr.has_terminal("s1") is True
+    done_events = [
+        (seq, etype, payload)
+        for seq, etype, payload in mgr.get_events_since("s1", 0)
+        if etype == "done"
+    ]
+    assert len(done_events) == 1
+    _, etype, payload = done_events[0]
+    assert payload == {"cancelled": True}
+    restored = from_payload(etype, payload)
+    assert isinstance(restored, SSEDoneEvent)
+    assert restored.cancelled is True
+    assert '"cancelled": true' in to_sse(restored)
+
+
+@pytest.mark.asyncio
 async def test_chat_stream_conflict_returns_409(mock_app_service):
     """注册表已有活跃任务 → chat_stream 先查注册表返回 409（不依赖 Redis 锁）。
 

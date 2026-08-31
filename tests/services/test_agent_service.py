@@ -653,6 +653,84 @@ async def test_run_generation_accumulates_citation_sources():
 
 
 @pytest.mark.asyncio
+async def test_run_generation_aborts_when_signal_set():
+    """abort_signal 在循环中置位后，生产者处理完当前事件即抛 CancelledError 中断生成。"""
+    from src.chat.streaming import StreamingRunManager
+    from src.infra.llm.request_context import RequestContext
+    from src.services.agent_service import _run_generation
+
+    mgr = StreamingRunManager()
+    abort_signal = asyncio.Event()
+    consumed = []
+
+    async def fake_astream(*args, **kwargs):
+        consumed.append("a")
+        yield _chat_model_stream_item("你好")
+        abort_signal.set()
+        consumed.append("b")
+        yield _chat_model_stream_item("世界")
+        consumed.append("c")
+        yield _chat_model_stream_item("!")
+
+    fake_graph = Mock()
+    fake_graph.astream_events = fake_astream
+    ctx = RequestContext(session_id="s1")
+
+    with pytest.raises(asyncio.CancelledError):
+        await _run_generation(
+            "s1",
+            "kb1",
+            "q",
+            [],
+            False,
+            ctx,
+            mgr,
+            graph=fake_graph,
+            abort_signal=abort_signal,
+        )
+    # 置位后处理完当前事件即中断：第二个事件仍入缓冲，第三个事件未被消费
+    assert consumed == ["a", "b"]
+    events = mgr.get_events_since("s1", 0)
+    assert [et for _, et, _ in events] == ["token", "token"]
+
+
+@pytest.mark.asyncio
+async def test_run_generation_aborts_before_loop_when_signal_pre_set():
+    """abort_signal 在进入循环前已置位 → 直接抛 CancelledError，不消费事件源。"""
+    from src.chat.streaming import StreamingRunManager
+    from src.infra.llm.request_context import RequestContext
+    from src.services.agent_service import _run_generation
+
+    mgr = StreamingRunManager()
+    abort_signal = asyncio.Event()
+    abort_signal.set()
+    consumed = []
+
+    async def fake_astream(*args, **kwargs):
+        consumed.append(1)
+        yield _chat_model_stream_item("你好")
+
+    fake_graph = Mock()
+    fake_graph.astream_events = fake_astream
+    ctx = RequestContext(session_id="s1")
+
+    with pytest.raises(asyncio.CancelledError):
+        await _run_generation(
+            "s1",
+            "kb1",
+            "q",
+            [],
+            False,
+            ctx,
+            mgr,
+            graph=fake_graph,
+            abort_signal=abort_signal,
+        )
+    assert consumed == []
+    assert mgr.get_events_since("s1", 0) == []
+
+
+@pytest.mark.asyncio
 async def test_stream_chat_persists_citation_sources_on_complete():
     """完整路径收尾时 save_assistant_async 携带生产者累积的引用来源。"""
     service, _ = _make_service()
