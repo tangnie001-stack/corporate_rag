@@ -14,7 +14,7 @@ client = TestClient(app)
 
 
 def test_chat_stream_returns_sse():
-    """GET /api/chat/stream returns SSE event stream."""
+    """POST /api/chat/stream returns SSE event stream."""
     mock_svc = AsyncMock()
     mock_chain = mock_svc.rag_chain
 
@@ -34,8 +34,9 @@ def test_chat_stream_returns_sse():
     app.dependency_overrides[get_app_service] = lambda: mock_svc
 
     try:
-        response = client.get(
-            "/api/chat/stream?session_id=s1&kb_id=kb-1&query=净利润多少"
+        response = client.post(
+            "/api/chat/stream",
+            json={"session_id": "s1", "kb_id": "kb-1", "query": "净利润多少"},
         )
 
         assert response.status_code == 200
@@ -58,8 +59,9 @@ def test_chat_stream_passes_user_id():
                 yield b""
 
             mock_gen.return_value = _ag()
-            client.get(
-                "/api/chat/stream?session_id=s1&kb_id=kb-1&query=hi",
+            client.post(
+                "/api/chat/stream",
+                json={"session_id": "s1", "kb_id": "kb-1", "query": "hi"},
                 cookies={"user_id": "user-123"},
             )
             # 第 5 个位置参数应为 user_id（auth middleware 从 user_id cookie 提取）
@@ -70,7 +72,7 @@ def test_chat_stream_passes_user_id():
 
 
 def test_chat_stream_passes_deep_thinking():
-    """deep_thinking 查询参数应透传至 agent_service.stream_chat。
+    """deep_thinking 请求体字段应透传至 agent_service.stream_chat。
 
     回归场景：前端「深度思考」开关打开时，请求应携带 deep_thinking=true，
     最终传递给 agent LLM 的 enable_thinking 参数；若断链则开关无效。
@@ -105,8 +107,14 @@ def test_chat_stream_passes_deep_thinking():
     try:
         # 后台任务（_run_with_finalize）mock 掉，本用例只验证 deep_thinking 透传
         with patch("src.api.chat._run_with_finalize", new=AsyncMock()):
-            response = client.get(
-                "/api/chat/stream?session_id=s1&kb_id=kb-1&query=hi&deep_thinking=true"
+            response = client.post(
+                "/api/chat/stream",
+                json={
+                    "session_id": "s1",
+                    "kb_id": "kb-1",
+                    "query": "hi",
+                    "deep_thinking": True,
+                },
             )
         assert response.status_code == 200
         assert captured["deep_thinking"] is True

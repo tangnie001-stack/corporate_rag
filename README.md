@@ -31,7 +31,7 @@ Langfuse (:3000) → PostgreSQL (Tracing 存储)
 → 流式生成(stream_answer) → 引用高亮(citations)
 → 对话历史持久化(Redis + MySQL)
 ```
-入口: `GET /api/chat/stream?session_id=&kb_id=&query=`
+入口: `POST /api/chat/stream`（body: `ChatStreamRequest`）
 输出: SSE 事件流 `status → token → citation → done`
 
 ### 链路 3：知识库管理

@@ -1,7 +1,7 @@
-"""/api/chat/stream 流程改造测试 — user 同步落库（保持 GET）。
+"""/api/chat/stream 流程改造测试 — user 同步落库（POST）。
 
-验证：流式请求开始即同步写 user（MySQL），端点方法仍为 GET，
-不破坏前端 EventSource 依赖；并发防护先查进程内注册表再取 Redis 锁。
+验证：流式请求开始即同步写 user（MySQL），端点方法为 POST（body 为
+ChatStreamRequest）；并发防护先查进程内注册表再取 Redis 锁。
 """
 
 import asyncio
@@ -11,6 +11,7 @@ import pytest
 from fastapi import HTTPException, Request
 
 from src.api.chat import chat_stream
+from src.api.model.request import ChatStreamRequest
 from src.chat.streaming import streaming_manager
 
 
@@ -22,9 +23,9 @@ def test_chat_stream_persists_user_before_stream(auth_client, mock_app_service):
     mock_app_service.save_user_async = AsyncMock()
     mock_app_service.save_session_async = AsyncMock()
 
-    resp = auth_client.get(
+    resp = auth_client.post(
         "/api/chat/stream",
-        params={"session_id": "s1", "kb_id": "kb1", "query": "营收多少"},
+        json={"session_id": "s1", "kb_id": "kb1", "query": "营收多少"},
     )
     assert resp.status_code == 200
     mock_app_service.save_session_async.assert_called_once()
@@ -168,11 +169,10 @@ async def test_chat_stream_conflict_returns_409(mock_app_service):
         assert streaming_manager.is_running(session_id) is True
         with pytest.raises(HTTPException) as exc_info:
             await chat_stream(
-                request=Request({"type": "http", "method": "GET"}),
-                session_id=session_id,
-                kb_id="kb1",
-                query="营收多少",
-                deep_thinking=False,
+                request=Request({"type": "http", "method": "POST"}),
+                body=ChatStreamRequest(
+                    session_id=session_id, kb_id="kb1", query="营收多少"
+                ),
                 svc=mock_app_service,
             )
         assert exc_info.value.status_code == 409

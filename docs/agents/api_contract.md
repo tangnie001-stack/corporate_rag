@@ -19,7 +19,7 @@
 ## 2. 接口层：FastAPI Routes ↔ AppService
 
 路由统一挂载在 `/api` 前缀下。
-除 `/api/health` 和 `/api/chat/stream` 外，所有端点使用 POST 方法。
+除 `/api/health` 外，所有端点使用 POST 方法。
 请求头 `X-Trace-ID` 可选传，响应头含 `X-Trace-ID`。
 
 ### 2.1 知识库
@@ -142,19 +142,20 @@ Response:
 
 ### 2.3 SSE 流式问答
 
-#### 2.3.1 `GET /api/chat/stream?session_id={sid}&kb_id={kb_id}&query={question}&trace_id={traceId}`
+#### 2.3.1 `POST /api/chat/stream`
 
 Content-Type: `text/event-stream`
 
-| 参数 | 说明 |
+请求体 `ChatStreamRequest`（`src/api/model/request.py`）：
+
+| 字段 | 说明 |
 |------|------|
 | `session_id` | 会话 ID |
 | `kb_id` | 知识库 UUID（空字符串跨库搜索） |
 | `query` | 用户问题 |
 | `deep_thinking` | 深度思考开关（可选，默认 `false`）：`true` 时 agent 主 LLM 以思考模式调用（`enable_thinking=true`）；`false` 显式关闭。来自 `chat-thinking-toggle` capability |
-| `trace_id` | 链路追踪 ID（可选） |
 
-> **落库时机（streaming-decouple M1）**：请求开始（per-session Redis 锁获取后）即同步写 user 消息到 MySQL（`svc.save_user_async`），session 创建幂等；端点方法**保持 GET**（GET→POST 迁移推迟到 streaming-decouple M3.4，届时与前端 fetchStream 一同落地，避免 M1 破坏 EventSource）。Redis 的 user 写入仍保留在 `agent_service.stream_chat` 内（发生在 `get_history_async()` 之后，避免当前 query 作为历史进 prompt）。
+> **落库时机（streaming-decouple M1）**：请求开始（per-session Redis 锁获取后）即同步写 user 消息到 MySQL（`svc.save_user_async`），session 创建幂等。端点方法自 streaming-decouple M3.4 起为 **POST**（GET→POST 迁移与前端传输层替换 EventSource 一同落地），前端经 `fetchStream`（fetch + getReader 手动解析 SSE）调用，不再依赖原生 EventSource。Redis 的 user 写入仍保留在 `agent_service.stream_chat` 内（发生在 `get_history_async()` 之后，避免当前 query 作为历史进 prompt）。
 
 事件流（按推送顺序，不含追问路径）：
 
@@ -711,7 +712,7 @@ kb_router → agent（LLM + bind_tools）
 
 ```
 用户提问 "2024年公司营收多少" (query)
-  → GET /api/chat/stream?session_id=xxx&kb_id=yyy&query=...&trace_id=zzz
+  → POST /api/chat/stream（body: ChatStreamRequest）
     → kb_router: 穿透/跨库路由 → _resolved_kb_ids
     → agent 循环:
         1. agent: LLM 思考 → 调用 retrieve_kb
@@ -737,7 +738,7 @@ kb_router → agent（LLM + bind_tools）
 
 ```
 用户提问 "营收多少"（缺关键信息，agent 判断需澄清）
-  → GET /api/chat/stream?session_id=xxx&kb_id=yyy&query=营收多少&trace_id=zzz
+  → POST /api/chat/stream（body: ChatStreamRequest）
     → kb_router → agent 循环:
         1. agent: LLM 判断信息不足 → 调用 ask_user
         2. agent_tools: ask_user 推送问题 → SSEAskUserEvent，挂起等待（ASK_USER_TIMEOUT）

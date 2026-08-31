@@ -1458,136 +1458,163 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-// ── SSE ──
-function startSSE(query) {
+// ── SSE 传输层：fetch + getReader 手动解析（替代原生 EventSource）──
+function fetchStream(url, options, handlers) {
+  const controller = new AbortController();
+  const start = async () => {
+    const resp = await fetch(url, { ...options, signal: controller.signal });
+    if (!resp.ok || !resp.body) {
+      handlers.onError && handlers.onError(new Error('HTTP ' + resp.status));
+      return;
+    }
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf('\n\n')) !== -1) {
+        const frame = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        parseSSE(frame, handlers);
+      }
+    }
+    handlers.onClose && handlers.onClose();
+  };
+  start().catch((e) => handlers.onError && handlers.onError(e));
+  return { controller, url };
+}
+
+function parseSSE(frame, handlers) {
+  const lines = frame.split('\n');
+  let eventName = 'message';
+  let data = '';
+  for (const line of lines) {
+    if (line.startsWith('event:')) eventName = line.slice(6).trim();
+    else if (line.startsWith('data:')) data += line.slice(5).trim();
+  }
+  if (!data) return;
+  const payload = JSON.parse(data);
+  const h = handlers[eventName];
+  h && h(payload);
+}
+
+// ── 流式聊天：POST /api/chat/stream + fetchStream ──
+function startStream(query) {
   if (state.abortController) {
     state.abortController.abort();
   }
 
-  const params = new URLSearchParams({
-    session_id: state.sessionId,
-    kb_id: state.kbId,
-    query: query,
-    deep_thinking: state.deepThinking,
-  });
-
-  const url = `/api/chat/stream?${params}`;
-  const source = new EventSource(url);
+  const url = '/api/chat/stream';
   let currentBubble = null;
   let fullAnswer = '';
 
-  source.addEventListener('status', (e) => {
-    try {
-      closeThinkRow();
-      const data = JSON.parse(e.data);
-      renderStatusTag(data.stage, data.message);
-    } catch (err) { /* ignore */ }
-  });
-
-  source.addEventListener('reasoning', (e) => {
-    try {
-      const data = JSON.parse(e.data);
-      renderReasoningDelta(data.delta || '');
-    } catch (err) { /* ignore */ }
-  });
-
-  source.addEventListener('token', (e) => {
-    try {
-      closeThinkRow();
-      const data = JSON.parse(e.data);
-      fullAnswer += data.token || '';
-      renderAiAnswerStream(data.token || '');
-    } catch (err) { /* ignore */ }
-  });
-
-  source.addEventListener('citation', (e) => {
-    try {
-      const data = JSON.parse(e.data);
-      renderCitation(data.source, data.page, data.snippet || '', data.index || 0);
-    } catch (err) { /* ignore */ }
-  });
-
-  source.addEventListener('ask_user', (e) => {
-    try {
-      closeThinkRow();
-      const data = JSON.parse(e.data);
-      // 不关流：SSE 保持连接，composer 接管输入区，提交后同流续答
-      state.current = STATE.CLARIFYING;
-      removeStreamingState();
-      hideInputArea();
-      renderComposer(data.questions || []);
-    } catch (err) { /* ignore */ }
-  });
-
-  source.addEventListener('abstention', (e) => {
-    try {
-      closeThinkRow();
-      const data = JSON.parse(e.data);
-      renderAbstention(data.message || '未在文档中找到相关数据，可尝试转人工咨询');
-    } catch (err) { /* ignore */ }
-  });
-
-  source.addEventListener('model_info', (e) => {
-    try {
-      const data = JSON.parse(e.data);
-      renderModelInfo(data.model || '', !!data.is_fallback);
-    } catch (err) { /* ignore */ }
-  });
-
-  source.addEventListener('done', (e) => {
-    try {
+  const handlers = {
+    status: (data) => {
+      try {
+        closeThinkRow();
+        renderStatusTag(data.stage, data.message);
+      } catch (err) { /* ignore */ }
+    },
+    reasoning: (data) => {
+      try {
+        renderReasoningDelta(data.delta || '');
+      } catch (err) { /* ignore */ }
+    },
+    token: (data) => {
+      try {
+        closeThinkRow();
+        fullAnswer += data.token || '';
+        renderAiAnswerStream(data.token || '');
+      } catch (err) { /* ignore */ }
+    },
+    citation: (data) => {
+      try {
+        renderCitation(data.source, data.page, data.snippet || '', data.index || 0);
+      } catch (err) { /* ignore */ }
+    },
+    ask_user: (data) => {
+      try {
+        closeThinkRow();
+        // 不关流：SSE 保持连接，composer 接管输入区，提交后同流续答
+        state.current = STATE.CLARIFYING;
+        removeStreamingState();
+        hideInputArea();
+        renderComposer(data.questions || []);
+      } catch (err) { /* ignore */ }
+    },
+    abstention: (data) => {
+      try {
+        closeThinkRow();
+        renderAbstention(data.message || '未在文档中找到相关数据，可尝试转人工咨询');
+      } catch (err) { /* ignore */ }
+    },
+    model_info: (data) => {
+      try {
+        renderModelInfo(data.model || '', !!data.is_fallback);
+      } catch (err) { /* ignore */ }
+    },
+    done: (data) => {
+      try {
+        finalizeAnswer();
+        closeThinkRow();
+        if (data.trace_id) state.traceId = data.trace_id;
+      } catch (err) { /* ignore */ }
+      if (state.current === STATE.CLARIFYING) {
+        // ask_user 期间流结束（后端等待超时）：关闭 composer 恢复输入
+        state.current = STATE.IDLE;
+        restoreInputArea();
+        showHint('该问题已超时，请重新提问');
+      } else {
+        state.current = STATE.IDLE;
+        setInputState(true, '输入问题...');
+        // 取最后一个 AI 气泡（不能用 :last-child：citation/model_info 在气泡之后）
+        const aiRows = chatContainer.querySelectorAll('.bubble-row.ai');
+        const lastAi = aiRows.length ? aiRows[aiRows.length - 1] : null;
+        appendFeedback(lastAi ? lastAi.querySelector('.bubble-content') : null);
+      }
+      chatInput.focus();
+    },
+    error: (data) => {
       finalizeAnswer();
-      closeThinkRow();
-      const data = JSON.parse(e.data);
-      if (data.trace_id) state.traceId = data.trace_id;
-    } catch (err) { /* ignore */ }
-    source.close();
-    if (state.current === STATE.CLARIFYING) {
-      // ask_user 期间流结束（后端等待超时）：关闭 composer 恢复输入
-      state.current = STATE.IDLE;
-      restoreInputArea();
-      showHint('该问题已超时，请重新提问');
-    } else {
-      state.current = STATE.IDLE;
-      setInputState(true, '输入问题...');
-      // 取最后一个 AI 气泡（不能用 :last-child：citation/model_info 在气泡之后）
-      const aiRows = chatContainer.querySelectorAll('.bubble-row.ai');
-      const lastAi = aiRows.length ? aiRows[aiRows.length - 1] : null;
-      appendFeedback(lastAi ? lastAi.querySelector('.bubble-content') : null);
-    }
-    chatInput.focus();
-  });
-
-  source.addEventListener('error', (e) => {
-    source.close();
-    finalizeAnswer();
-    if (state.current === STATE.STREAMING) {
-      showError('连接异常，请重试');
-      state.current = STATE.IDLE;
-      setInputState(true, '输入问题...');
-    } else if (state.current === STATE.CLARIFYING) {
-      // ask_user 期间断连：关闭 composer 恢复输入
-      state.current = STATE.IDLE;
-      restoreInputArea();
-      showError('连接异常，请重试');
-    }
-  });
-
-  // Fallback error listener
-  source.onerror = () => {
-    finalizeAnswer();
-    if (state.current === STATE.STREAMING) {
-      source.close();
-      showError('连接断开，请重试');
-      state.current = STATE.IDLE;
-      setInputState(true, '输入问题...');
-    } else if (state.current === STATE.CLARIFYING) {
-      source.close();
-      state.current = STATE.IDLE;
-      restoreInputArea();
-      showError('连接断开，请重试');
-    }
+      if (state.current === STATE.STREAMING) {
+        showError('连接异常，请重试');
+        state.current = STATE.IDLE;
+        setInputState(true, '输入问题...');
+      } else if (state.current === STATE.CLARIFYING) {
+        // ask_user 期间断连：关闭 composer 恢复输入
+        state.current = STATE.IDLE;
+        restoreInputArea();
+        showError('连接异常，请重试');
+      }
+    },
+    onError: (e) => {
+      finalizeAnswer();
+      if (state.current === STATE.STREAMING) {
+        showError('连接断开，请重试');
+        state.current = STATE.IDLE;
+        setInputState(true, '输入问题...');
+      } else if (state.current === STATE.CLARIFYING) {
+        state.current = STATE.IDLE;
+        restoreInputArea();
+        showError('连接断开，请重试');
+      }
+    },
   };
+
+  const result = fetchStream(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      session_id: state.sessionId,
+      kb_id: state.kbId,
+      query: query,
+      deep_thinking: state.deepThinking,
+    }),
+  }, handlers);
+  state.abortController = result.controller;
 }
 
 // ── Send Message ──
@@ -1604,7 +1631,7 @@ function sendMessage() {
 
   state.current = STATE.STREAMING;
   setInputState(false, '正在检索...');
-  startSSE(query);
+  startStream(query);
 }
 
 // ── Events ──

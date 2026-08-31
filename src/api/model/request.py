@@ -68,3 +68,12 @@ class SessionCancelRequest(BaseModel):
     """会话取消请求体。"""
 
     session_id: str  # 会话 UUID
+
+
+class ChatStreamRequest(BaseModel):
+    """流式问答请求体（POST /api/chat/stream）。"""
+
+    session_id: str  # 会话 ID
+    kb_id: str  # 知识库 UUID（空串表示跨库搜索）
+    query: str  # 用户问题
+    deep_thinking: bool = False  # 深度思考开关

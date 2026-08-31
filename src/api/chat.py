@@ -4,11 +4,12 @@ import asyncio
 from collections.abc import AsyncGenerator, Callable
 
 import jieba
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
 from src.api.dependencies import get_app_service
+from src.api.model.request import ChatStreamRequest
 from src.chat.streaming import StreamingRunManager, streaming_manager
 from src.config.const import SESSION_LOCK_TTL
 from src.infra.llm.request_context import RequestContext, current_request_ctx
@@ -348,25 +349,16 @@ async def _release_session_lock(redis, session_id: str) -> None:
     await redis.delete(f"chat_lock:{session_id}")
 
 
-@router.get("/chat/stream")
+@router.post("/chat/stream")
 async def chat_stream(
     request: Request,
-    session_id: str = Query(..., description="Session ID for conversation history"),
-    kb_id: str = Query(
-        ..., description="Knowledge base ID (or empty for cross-KB search)"
-    ),
-    query: str = Query(..., description="User question"),
-    deep_thinking: bool = Query(False, description="深度思考开关（enable_thinking）"),
+    body: ChatStreamRequest,
     svc: AppService = Depends(get_app_service),
 ):
     """流式 RAG 问答端点 — 返回 SSE 事件流。
 
     Args:
-        session_id: 会话 ID，用于关联对话历史
-        kb_id: 知识库 UUID（空字符串表示跨库搜索）
-        query: 用户问题文本
-        deep_thinking: 深度思考开关（默认 False，true 时开启 agent LLM
-            enable_thinking）
+        body: 流式问答请求体（含 session_id / kb_id / query / deep_thinking）
         svc: AppService 实例（通过 FastAPI Depends 注入）
         request: FastAPI 请求对象（从中提取 user_id 用于会话归属）
 
@@ -378,6 +370,10 @@ async def chat_stream(
         HTTPException 422: 参数校验失败（FastAPI 自动处理）
         HTTPException 409: 同一会话已有进行中的请求（进程内注册表或 Redis 并发锁冲突）
     """
+    session_id = body.session_id
+    kb_id = body.kb_id
+    query = body.query
+    deep_thinking = body.deep_thinking
     user_id = getattr(request.state, "user_id", "") if request else ""
 
     # 并发防护顺序：先查进程内注册表（is_running），再取 Redis 锁。

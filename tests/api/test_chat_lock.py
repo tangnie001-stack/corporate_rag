@@ -58,8 +58,9 @@ def test_stream_conflict_returns_409():
     mock_svc.chat_manager._redis = redis
     app.dependency_overrides[get_app_service] = lambda: mock_svc
     try:
-        response = TestClient(app).get(
-            "/api/chat/stream?session_id=s1&kb_id=kb-1&query=hi"
+        response = TestClient(app).post(
+            "/api/chat/stream",
+            json={"session_id": "s1", "kb_id": "kb-1", "query": "hi"},
         )
         assert response.status_code == 409
     finally:
