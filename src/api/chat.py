@@ -324,9 +324,15 @@ async def chat_stream(
                 raise HTTPException(409, "当前会话正在处理中")
 
     # M1：请求开始同步落 user（session 创建幂等，写入成功后才启动生成）
-    await svc.set_chat_repo()
-    await svc.save_session_async(session_id, query[:20], kb_id, user_id)
-    await svc.save_user_async(session_id, kb_id, query)
+    try:
+        await svc.set_chat_repo()
+        await svc.save_session_async(session_id, query[:20], kb_id, user_id)
+        await svc.save_user_async(session_id, kb_id, query)
+    except Exception:
+        # 落库失败（编程错误等非吞掉路径）：先释放锁，避免 session 锁挂到 TTL
+        if lock_held:
+            await _release_session_lock(redis, session_id)
+        raise
     logger.info("user message persisted at request start: session_id={}", session_id)
 
     async def _stream_with_lock() -> AsyncGenerator[str, None]:
