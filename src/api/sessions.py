@@ -4,16 +4,19 @@
 会话持久化在 MySQL 中，并缓存于 Redis。
 """
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import StreamingResponse
 from loguru import logger
 
 from src.api.dependencies import get_app_service
 from src.api.model.request import SessionDeleteRequest, SessionMessagesRequest
 from src.api.model.response import MessageItem, SessionDeleteResponse, SessionItem
 from src.api.schema import ResponseModel
+from src.chat.streaming import _subscribe_buffer, streaming_manager
 from src.config.response_codes import Code
 from src.services.app_service import AppService
 from src.utils.errors import BusinessError
+from src.utils.sse import SSEDoneEvent, to_sse
 
 router = APIRouter()
 
@@ -145,3 +148,44 @@ async def delete_session(
 
     logger.info("Deleted session: {} (user={})", session_id, user_id)
     return ResponseModel(data=SessionDeleteResponse(success=True))
+
+
+@router.get("/sessions/events")
+async def resume_session_events(
+    request: Request,
+    session_id: str = Query(...),
+    after_seq: int = Query(0),
+    svc: AppService = Depends(get_app_service),
+):
+    """SSE 断点续接：回放缓冲 seq>after_seq 事件并 tail 到终态。
+
+    前端刷新页面后通过本端点恢复进行中的生成流：先回放缓冲中
+    seq>after_seq 的事件，再持续 tail 新事件直到 done/error 终态；
+    无新事件超时（默认 180s）推送续传超时 error。
+
+    Args:
+        request: FastAPI 请求（从中提取 user_id）
+        session_id: 会话 ID
+        after_seq: 起始 seq（刷新页面传入已消费的最大 seq，默认 0）
+        svc: 应用服务实例（由 FastAPI 注入）
+
+    Returns:
+        StreamingResponse: SSE 事件流（与实时流事件格式一致）
+
+    Raises:
+        BusinessError: 会话不存在或无权访问时返回 404
+    """
+    user_id = getattr(request.state, "user_id", "")
+    session = await svc.get_session_by_id(session_id)
+    if not session or (session.get("user_id") and session["user_id"] != user_id):
+        raise BusinessError(Code.SESSION_NOT_FOUND, Code.SESSION_NOT_FOUND_MSG, 404)
+    if not streaming_manager.buffer_exists(session_id):
+        return StreamingResponse(
+            to_sse(SSEDoneEvent(trace_id="")) + "\n",
+            media_type="text/event-stream",
+        )
+    return StreamingResponse(
+        _subscribe_buffer(session_id, streaming_manager, after_seq),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

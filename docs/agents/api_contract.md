@@ -370,6 +370,30 @@ Success:
 {"code": "NOT_FOUND", "message": "会话不存在", "data": null}
 ```
 
+#### 2.4.4 `GET /api/sessions/events?session_id={sid}&after_seq={seq}`
+
+SSE 断点续接：前端刷新页面后重放进行中生成的未消费事件，再 tail 新事件直到终态。
+
+| 参数 | 说明 |
+|------|------|
+| `session_id` | 会话 ID |
+| `after_seq` | 起始 seq（已消费的最大 seq，默认 0 = 从头回放） |
+
+Content-Type: `text/event-stream`。事件格式与实时流（2.3.1）一致：
+先回放缓冲中 `seq > after_seq` 的事件，随后 tail 新事件直到 `done` / `error`
+终态；tail 期间无新事件超过 180s（`_subscribe_buffer` 默认 `max_idle`）
+推送续传超时 `error` 事件后结束。缓冲不存在时立即返回单个 `done` 事件。
+
+```json
+event: token
+data: {"token": "回答文本片段"}
+
+event: done
+data: {"trace_id": "trace_xxx"}
+```
+
+会话不存在或无权访问返回 404（`SESSION_NOT_FOUND`），与 2.4.2/2.4.3 一致。
+
 ### 2.5 评估报告
 
 #### 2.5.1 `POST /api/kbs/eval/latest → dict | null`
