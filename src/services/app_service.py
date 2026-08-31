@@ -172,6 +172,7 @@ class AppService:
                 "completion_tokens": m.completion_tokens,
                 "total_tokens": m.total_tokens,
                 "model_name": m.model_name,
+                "status": m.status,
                 "created_at": m.created_at,
             }
             for m in msgs

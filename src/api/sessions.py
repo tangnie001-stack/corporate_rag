@@ -94,6 +94,7 @@ async def get_session_messages(
                 role=row["role"],
                 content=row["content"],
                 sources=row.get("sources"),
+                status=row.get("status", "complete"),
                 created_at=row["created_at"].isoformat()
                 if row.get("created_at")
                 else None,

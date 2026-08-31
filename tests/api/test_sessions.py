@@ -51,6 +51,20 @@ def test_session_messages(auth_client, mock_app_service):
     assert data[1]["role"] == "assistant"
 
 
+def test_session_messages_include_status(auth_client, mock_app_service):
+    """POST /api/sessions/messages 返回消息 status 字段。"""
+    mock_app_service.get_session_by_id = AsyncMock(return_value=make_session("s1"))
+    mock_app_service.get_messages = AsyncMock(
+        return_value=[
+            make_message("user", "q"),
+            make_message("assistant", "a", status="interrupted"),
+        ]
+    )
+    resp = auth_client.post("/api/sessions/messages", json={"session_id": "s1"})
+    data = resp.json()["data"]
+    assert data[1]["status"] == "interrupted"
+
+
 def test_session_messages_not_found(auth_client, mock_app_service):
     """POST /api/sessions/messages session 不存在返回 404。"""
     mock_app_service.get_session_by_id = AsyncMock(return_value=None)

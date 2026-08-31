@@ -175,6 +175,7 @@ class MessageItem(BaseModel):
     role: str  # 角色（user / assistant）
     content: str  # 消息内容
     sources: str | None = None  # 引用来源（JSON 字符串）
+    status: str = "complete"  # complete / interrupted — 消息状态
     created_at: str | None = None  # 发送时间
 
 

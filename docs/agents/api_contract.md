@@ -336,15 +336,20 @@ Success:
     "role": "user",
     "content": "问题文本",
     "sources": null,
+    "status": "complete",
     "created_at": "2026-07-03T12:00:00"
   },
   {
     "role": "assistant",
     "content": "回答文本",
     "sources": ["文件名.pdf (第3页)", "文件2.docx (第5页)"],
+    "status": "interrupted",
     "created_at": "2026-07-03T12:00:05"
   }
 ]}
+```
+
+`status` 取值 `complete` / `interrupted`，标识消息是否完整生成（前端据此标记被中断的回答）。
 
 404:
 ```json

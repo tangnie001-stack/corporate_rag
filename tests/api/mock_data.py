@@ -55,12 +55,13 @@ def make_session(id="s1", title="财报问答", **kw):
     return base
 
 
-def make_message(role="user", content="hello", **kw):
+def make_message(role="user", content="hello", status="complete", **kw):
     """创建模拟消息数据。"""
     base = {
         "role": role,
         "content": content,
         "sources": None,
+        "status": status,
         "created_at": datetime(2026, 1, 1, tzinfo=UTC),
     }
     base.update(kw)
