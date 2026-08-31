@@ -7,7 +7,7 @@ import pytest
 from langchain_core.messages import AIMessageChunk
 
 from src.agents.graph.state import LangGraphEvent, LangGraphKey, LangGraphNode
-from src.chat.streaming import _subscribe_buffer, streaming_manager
+from src.chat.streaming import _subscribe_buffer, _subscribe_events, streaming_manager
 from src.services.agent_service import AgentService, _convert_event, _dual_stream
 from src.utils.sse import (
     SSEAskUserEvent,
@@ -177,6 +177,72 @@ class TestSubscribeBuffer:
         assert '"token": "b"' in collected[1]
         assert "event: done" in collected[2]
         assert not any("event: error" in e for e in collected)
+
+
+class TestSubscribeSeqInjection:
+    """seq 注入测试：realtime（_subscribe_events）与 resume（_subscribe_buffer）帧一致携带 seq。
+
+    缓冲 payload 契约不变（payload_for_buffer/from_payload/to_sse round-trip 由
+    tests/utils/test_sse_roundtrip.py 保证），seq 仅在帧序列化时附加。
+    """
+
+    @pytest.mark.asyncio
+    async def test_subscribe_events_injects_seq_on_events(self):
+        """_subscribe_events 回放时给每个事件注入缓冲 seq。"""
+        from src.chat.streaming import StreamingRunManager
+
+        mgr = StreamingRunManager()
+        mgr.clear_buffer("s2")
+        mgr.add_event("s2", "token", {"token": "a"})
+        mgr.add_event("s2", "status", {"stage": "retrieving", "message": "检索中"})
+        mgr.add_event("s2", "done", {"trace_id": ""})
+
+        events = []
+        async for event in _subscribe_events("s2", mgr, after_seq=0, max_idle=0.2):
+            events.append(event)
+
+        assert [e.seq for e in events] == [1, 2, 3]
+
+    @pytest.mark.asyncio
+    async def test_subscribe_events_respects_after_seq(self):
+        """after_seq 之后的事件仍带正确 seq（断线续接从 lastSeq 起）。"""
+        from src.chat.streaming import StreamingRunManager
+
+        mgr = StreamingRunManager()
+        mgr.clear_buffer("s3")
+        mgr.add_event("s3", "token", {"token": "a"})
+        mgr.add_event("s3", "token", {"token": "b"})
+        mgr.add_event("s3", "done", {"trace_id": ""})
+
+        events = []
+        async for event in _subscribe_events("s3", mgr, after_seq=1, max_idle=0.2):
+            events.append(event)
+
+        assert [e.seq for e in events] == [2, 3]
+
+    @pytest.mark.asyncio
+    async def test_realtime_and_resume_frames_both_carry_seq(self):
+        """realtime 帧（to_sse(事件)）与 resume 帧（_subscribe_buffer）都含 seq。"""
+        from src.chat.streaming import StreamingRunManager
+        from src.utils.sse import to_sse
+
+        mgr = StreamingRunManager()
+        mgr.clear_buffer("s4")
+        mgr.add_event("s4", "token", {"token": "a"})
+        mgr.add_event("s4", "done", {"trace_id": ""})
+
+        # resume 帧
+        resume_frames = []
+        async for frame in _subscribe_buffer("s4", mgr, after_seq=0, max_idle=0.2):
+            resume_frames.append(frame)
+        assert '"seq": 1' in resume_frames[0]
+        assert '"seq": 2' in resume_frames[1]
+
+        # realtime 帧：_subscribe_events 事件经 to_sse 序列化同样携带 seq
+        realtime_frames = []
+        async for event in _subscribe_events("s4", mgr, after_seq=0, max_idle=0.2):
+            realtime_frames.append(to_sse(event))
+        assert realtime_frames == resume_frames
 
 
 class TestConvertEvent:

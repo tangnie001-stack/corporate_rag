@@ -968,6 +968,7 @@ const state = {
   sessionId: '',
   kbId: '',        // 可配置
   abortController: null,
+  lastSeq: 0,      // 最近收到的 SSE 帧序列号（断线续接 after_seq 基准，新轮生成归零）
   traceId: '',     // 最近一次完成的 SSE 流的 trace_id（done 事件记录，反馈时回传）
   deepThinking: false,
 };
@@ -1502,41 +1503,42 @@ function parseSSE(frame, handlers) {
 }
 
 // ── 流式聊天：POST /api/chat/stream + fetchStream ──
-function startStream(query) {
-  if (state.abortController) {
-    state.abortController.abort();
-  }
+// 断线重连计数（指数退避 1s/2s/4s，最多 3 次；新提问/流正常结束时归零）
+let streamRetryCount = 0;
 
-  const url = '/api/chat/stream';
-  let currentBubble = null;
-  let fullAnswer = '';
-
-  const handlers = {
+// 统一事件渲染 handlers：startStream 与 resumeStream 复用同一套
+// （各事件回调记录 lastSeq，作为断线续接 after_seq 基准；seq 由后端注入帧 data）
+function buildStreamHandlers() {
+  return {
     status: (data) => {
       try {
+        state.lastSeq = (data.seq !== undefined) ? data.seq : state.lastSeq;
         closeThinkRow();
         renderStatusTag(data.stage, data.message);
       } catch (err) { /* ignore */ }
     },
     reasoning: (data) => {
       try {
+        state.lastSeq = (data.seq !== undefined) ? data.seq : state.lastSeq;
         renderReasoningDelta(data.delta || '');
       } catch (err) { /* ignore */ }
     },
     token: (data) => {
       try {
+        state.lastSeq = (data.seq !== undefined) ? data.seq : state.lastSeq;
         closeThinkRow();
-        fullAnswer += data.token || '';
         renderAiAnswerStream(data.token || '');
       } catch (err) { /* ignore */ }
     },
     citation: (data) => {
       try {
+        state.lastSeq = (data.seq !== undefined) ? data.seq : state.lastSeq;
         renderCitation(data.source, data.page, data.snippet || '', data.index || 0);
       } catch (err) { /* ignore */ }
     },
     ask_user: (data) => {
       try {
+        state.lastSeq = (data.seq !== undefined) ? data.seq : state.lastSeq;
         closeThinkRow();
         // 不关流：SSE 保持连接，composer 接管输入区，提交后同流续答
         state.current = STATE.CLARIFYING;
@@ -1547,21 +1549,25 @@ function startStream(query) {
     },
     abstention: (data) => {
       try {
+        state.lastSeq = (data.seq !== undefined) ? data.seq : state.lastSeq;
         closeThinkRow();
         renderAbstention(data.message || '未在文档中找到相关数据，可尝试转人工咨询');
       } catch (err) { /* ignore */ }
     },
     model_info: (data) => {
       try {
+        state.lastSeq = (data.seq !== undefined) ? data.seq : state.lastSeq;
         renderModelInfo(data.model || '', !!data.is_fallback);
       } catch (err) { /* ignore */ }
     },
     done: (data) => {
       try {
+        state.lastSeq = (data.seq !== undefined) ? data.seq : state.lastSeq;
         finalizeAnswer();
         closeThinkRow();
         if (data.trace_id) state.traceId = data.trace_id;
       } catch (err) { /* ignore */ }
+      streamRetryCount = 0; // 流正常结束，重置断线重连计数
       if (state.current === STATE.CLARIFYING) {
         // ask_user 期间流结束（后端等待超时）：关闭 composer 恢复输入
         state.current = STATE.IDLE;
@@ -1578,7 +1584,9 @@ function startStream(query) {
       chatInput.focus();
     },
     error: (data) => {
+      state.lastSeq = (data.seq !== undefined) ? data.seq : state.lastSeq;
       finalizeAnswer();
+      streamRetryCount = 0; // 服务端终态 error，不再重连
       if (state.current === STATE.STREAMING) {
         showError('连接异常，请重试');
         state.current = STATE.IDLE;
@@ -1591,18 +1599,56 @@ function startStream(query) {
       }
     },
     onError: (e) => {
-      finalizeAnswer();
-      if (state.current === STATE.STREAMING) {
-        showError('连接断开，请重试');
-        state.current = STATE.IDLE;
-        setInputState(true, '输入问题...');
-      } else if (state.current === STATE.CLARIFYING) {
-        state.current = STATE.IDLE;
-        restoreInputArea();
-        showError('连接断开，请重试');
-      }
+      onStreamError(e);
     },
   };
+}
+
+// 断点续接：GET /api/sessions/events?session_id=&after_seq=，复用同一套渲染 handlers
+// 断线（onStreamError 退避）与刷新恢复（resumeIfGenerating）共用此入口
+function resumeStream(sessionId, afterSeq) {
+  if (state.abortController) {
+    state.abortController.abort();
+  }
+  const url = '/api/sessions/events?session_id=' + encodeURIComponent(sessionId) + '&after_seq=' + afterSeq;
+  const result = fetchStream(url, { method: 'GET' }, buildStreamHandlers());
+  state.abortController = result.controller;
+}
+
+// 网络断开：指数退避（1s/2s/4s，最多 3 次）调 resume 续接，超过提示刷新
+function onStreamError(e) {
+  if (state.current === STATE.CLARIFYING) {
+    // ask_user 澄清期间断连：不重连（composer 交互在途），恢复输入并提示
+    state.current = STATE.IDLE;
+    restoreInputArea();
+    showError('连接断开，请重试');
+    return;
+  }
+  if (streamRetryCount < 3) {
+    const delay = [1000, 2000, 4000][streamRetryCount];
+    streamRetryCount++;
+    state.current = STATE.STREAMING;
+    showHint('连接已断开，正在自动重连...');
+    setTimeout(() => {
+      resumeStream(state.sessionId, state.lastSeq);
+    }, delay);
+    return;
+  }
+  // 重试耗尽：定型已渲染的部分答案，提示刷新恢复
+  finalizeAnswer();
+  state.current = STATE.IDLE;
+  setInputState(true, '输入问题...');
+  showError('连接已断开，多次重试失败，请刷新页面恢复');
+}
+
+function startStream(query) {
+  if (state.abortController) {
+    state.abortController.abort();
+  }
+  streamRetryCount = 0;
+  state.lastSeq = 0; // 新一轮生成后端缓冲清空，seq 从 1 重计
+
+  const url = '/api/chat/stream';
 
   const result = fetchStream(url, {
     method: 'POST',
@@ -1613,7 +1659,7 @@ function startStream(query) {
       query: query,
       deep_thinking: state.deepThinking,
     }),
-  }, handlers);
+  }, buildStreamHandlers());
   state.abortController = result.controller;
 }
 
@@ -1833,6 +1879,22 @@ if (!state.kbId) {
   console.warn('未指定 kb_id，请在 URL 中添加 ?kb_id=xxx');
 }
 
+// 刷新恢复：加载历史后查任务状态，generating 时从缓冲开头续接当前轮（seq 0 回放）
+async function resumeIfGenerating(sessionId) {
+  try {
+    const res = await fetch('/api/sessions/task-status?session_id=' + encodeURIComponent(sessionId), {
+      method: 'GET',
+      headers: { 'X-Trace-ID': generateTraceId() },
+    });
+    const body = await res.json().catch(() => null);
+    if (body && body.code === 'SUCCESS' && body.data && body.data.status === 'generating') {
+      state.current = STATE.STREAMING;
+      setInputState(false, '正在恢复生成...');
+      resumeStream(sessionId, 0);
+    }
+  } catch (e) { /* 状态查询失败静默，不打断页面 */ }
+}
+
 // Show session ID in header subtitle
 document.querySelector('.app-subtitle').textContent = `会话: ${state.sessionId.slice(-12)}`;
 
@@ -1842,7 +1904,9 @@ loadSessions();
 window.addEventListener('scroll', onChatScroll);
 // 仅已有会话才拉取历史消息（新对话无历史，不调用 /api/sessions/messages）
 if (hadSavedSession) {
-  loadSessionMessages(state.sessionId);
+  loadSessionMessages(state.sessionId).then(() => {
+    resumeIfGenerating(state.sessionId);
+  });
 } else {
   showEmptyState();
 }

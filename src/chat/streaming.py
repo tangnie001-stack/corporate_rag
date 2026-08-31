@@ -34,7 +34,8 @@ async def _subscribe_events(
         max_idle: tail 空闲超时秒数（无新事件超时返回续传超时 error）
 
     Yields:
-        SSEEvent: 从缓冲还原的事件对象（token / citation / status / error / done）
+        SSEEvent: 从缓冲还原的事件对象（token / citation / status / error / done），
+            已注入 seq 属性，序列化时 to_sse 会将其写入 data（缓冲 payload 不变）
     """
     emitted = after_seq
     idle_loops = 0
@@ -44,7 +45,10 @@ async def _subscribe_events(
             idle_loops = 0
             for seq, etype, payload in pending:
                 emitted = max(emitted, seq)
-                yield from_payload(etype, payload)
+                event = from_payload(etype, payload)
+                # 注入帧序列号，to_sse 序列化进 data（缓冲 payload 不变）
+                event.seq = seq
+                yield event
         else:
             if manager.has_terminal(session_id):
                 return

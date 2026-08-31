@@ -20,6 +20,9 @@ class SSEStatusEvent:
     message: str  # 前端展示的状态描述文本
     detail: str | None = None  # 可选详细说明（sse_status 的 detail，仅非空时序列化）
     type: str = "status"  # SSE 事件名（event: status）
+    seq: int | None = field(
+        default=None, compare=False, repr=False
+    )  # SSE 帧序列号（消费者注入；None 不序列化，不参与相等比较）
 
     def payload_for_buffer(self) -> dict:
         """返回与 to_sse 的 data: 同构的缓冲 payload（含可选 detail）。"""
@@ -35,6 +38,9 @@ class SSETokenEvent:
 
     token: str  # LLM 生成的文本片段
     type: str = "token"  # SSE 事件名（event: token）
+    seq: int | None = field(
+        default=None, compare=False, repr=False
+    )  # SSE 帧序列号（消费者注入；None 不序列化，不参与相等比较）
 
     def payload_for_buffer(self) -> dict:
         """返回与 to_sse 的 data: 同构的缓冲 payload。"""
@@ -55,6 +61,9 @@ class SSECitationEvent:
         SSEInteractionTexts.CITATION_KIND_KB
     )  # 引用来源类型：kb（知识库文档） / web（网络搜索）
     type: str = "citation"  # SSE 事件名（event: citation）
+    seq: int | None = field(
+        default=None, compare=False, repr=False
+    )  # SSE 帧序列号（消费者注入；None 不序列化，不参与相等比较）
 
     def payload_for_buffer(self) -> dict:
         """返回与 to_sse 的 data: 同构的缓冲 payload。"""
@@ -75,6 +84,9 @@ class SSEErrorEvent:
 
     error: str  # 错误描述文本
     type: str = "error"  # SSE 事件名（event: error）
+    seq: int | None = field(
+        default=None, compare=False, repr=False
+    )  # SSE 帧序列号（消费者注入；None 不序列化，不参与相等比较）
 
     def payload_for_buffer(self) -> dict:
         """返回与 to_sse 的 data: 同构的缓冲 payload。"""
@@ -87,6 +99,9 @@ class SSEDoneEvent:
 
     trace_id: str = ""  # 全链路追踪 ID（前端收到 done 时记录，随答案反馈回传）
     type: str = "done"  # SSE 事件名（event: done）
+    seq: int | None = field(
+        default=None, compare=False, repr=False
+    )  # SSE 帧序列号（消费者注入；None 不序列化，不参与相等比较）
 
     def payload_for_buffer(self) -> dict:
         """返回与 to_sse 的 data: 同构的缓冲 payload。"""
@@ -100,6 +115,9 @@ class SSEModelInfoEvent:
     model: str  # 实际使用的模型名
     is_fallback: bool  # 是否触发了 fallback
     type: str = "model_info"  # SSE 事件名（event: model_info）
+    seq: int | None = field(
+        default=None, compare=False, repr=False
+    )  # SSE 帧序列号（消费者注入；None 不序列化，不参与相等比较）
 
     def payload_for_buffer(self) -> dict:
         """返回与 to_sse 的 data: 同构的缓冲 payload。"""
@@ -114,6 +132,9 @@ class SSEAskUserEvent:
     questions: list = field(
         default_factory=list
     )  # [{id, question, options, multi_select}]
+    seq: int | None = field(
+        default=None, compare=False, repr=False
+    )  # SSE 帧序列号（消费者注入；None 不序列化，不参与相等比较）
 
     def payload_for_buffer(self) -> dict:
         """返回与 to_sse 的 data: 同构的缓冲 payload。"""
@@ -128,6 +149,9 @@ class SSEAbstentionEvent:
     # 转人工提示文案：检索无达标 context 时引导用户转人工（与 format_node 的
     # ABSTENTION_MARKERS 拒答检测配套）
     message: str = "未在文档中找到相关数据，可尝试转人工咨询"
+    seq: int | None = field(
+        default=None, compare=False, repr=False
+    )  # SSE 帧序列号（消费者注入；None 不序列化，不参与相等比较）
 
     def payload_for_buffer(self) -> dict:
         """返回与 to_sse 的 data: 同构的缓冲 payload。"""
@@ -140,6 +164,9 @@ class SSEReasoningDeltaEvent:
 
     reasoning_delta: str  # 思考文本增量片段（前端累积渲染 Think 行）
     type: str = "reasoning"  # SSE 事件名（event: reasoning）
+    seq: int | None = field(
+        default=None, compare=False, repr=False
+    )  # SSE 帧序列号（消费者注入；None 不序列化，不参与相等比较）
 
     def payload_for_buffer(self) -> dict:
         """返回与 to_sse 的 data: 同构的缓冲 payload。"""
@@ -162,33 +189,42 @@ SSEEvent = (
 # ── SSE 格式化函数 ─────────────────────────────────
 
 
-def sse_status(stage: str, message: str, detail: str | None = None) -> str:
+def sse_status(
+    stage: str, message: str, detail: str | None = None, seq: int | None = None
+) -> str:
     """构建 SSE status 事件。
 
     Args:
         stage: 阶段标识（retrieving / reranking / generating）
         message: 阶段描述文本
         detail: 可选详细说明
+        seq: SSE 帧序列号（消费者注入，None 不序列化）
 
     Returns:
         SSE 格式的文本行
     """
-    data: dict[str, str] = {"stage": stage, "message": message}
+    data: dict[str, str | int] = {"stage": stage, "message": message}
     if detail:
         data["detail"] = detail
+    if seq is not None:
+        data["seq"] = seq
     return f"event: status\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def sse_token(token: str) -> str:
+def sse_token(token: str, seq: int | None = None) -> str:
     """构建 SSE token 事件。
 
     Args:
         token: LLM 生成的文本片段
+        seq: SSE 帧序列号（消费者注入，None 不序列化）
 
     Returns:
         SSE 格式的文本行
     """
-    return f"event: token\ndata: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
+    data: dict[str, str | int] = {"token": token}
+    if seq is not None:
+        data["seq"] = seq
+    return f"event: token\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
 def sse_citation(
@@ -199,6 +235,7 @@ def sse_citation(
     highlighted_snippet: str | None = None,
     index: int = 0,
     kind: str = SSEInteractionTexts.CITATION_KIND_KB,
+    seq: int | None = None,
 ) -> str:
     """构建 SSE citation 事件。
 
@@ -210,11 +247,12 @@ def sse_citation(
         highlighted_snippet: 高亮 HTML 片段
         index: 原文档编号（对应 format_context 的 [n]），0 表示无编号
         kind: 引用来源类型：kb（知识库文档） / web（网络搜索）
+        seq: SSE 帧序列号（消费者注入，None 不序列化）
 
     Returns:
         SSE 格式的文本行
     """
-    data = {
+    data: dict[str, str | int | float | bool | None] = {
         "source": source,
         "page": page,
         "snippet": snippet,
@@ -223,38 +261,49 @@ def sse_citation(
         "index": index,
         "kind": kind,
     }
+    if seq is not None:
+        data["seq"] = seq
     return f"event: citation\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def sse_done(trace_id: str = "") -> str:
+def sse_done(trace_id: str = "", seq: int | None = None) -> str:
     """构建 SSE done 事件（标记流式响应结束，携带 trace_id 供前端反馈还原链路）。
 
     Args:
         trace_id: 全链路追踪 ID（空串 = 未捕获到，前端忽略）
+        seq: SSE 帧序列号（消费者注入，None 不序列化）
     """
-    return f"event: done\ndata: {json.dumps({'trace_id': trace_id}, ensure_ascii=False)}\n\n"
+    data: dict[str, str | int] = {"trace_id": trace_id}
+    if seq is not None:
+        data["seq"] = seq
+    return f"event: done\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def sse_error(error: str) -> str:
+def sse_error(error: str, seq: int | None = None) -> str:
     """构建 SSE error 事件。
 
     Args:
         error: 错误描述文本
+        seq: SSE 帧序列号（消费者注入，None 不序列化）
     """
-    return f"event: error\ndata: {json.dumps({'error': error}, ensure_ascii=False)}\n\n"
+    data: dict[str, str | int] = {"error": error}
+    if seq is not None:
+        data["seq"] = seq
+    return f"event: error\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def sse_model_info(model: str, is_fallback: bool) -> str:
+def sse_model_info(model: str, is_fallback: bool, seq: int | None = None) -> str:
     """构建 SSE model_info 事件。
 
     Args:
         model: 实际使用的模型名
         is_fallback: 是否触发了 fallback
+        seq: SSE 帧序列号（消费者注入，None 不序列化）
     """
-    return (
-        f"event: model_info\n"
-        f"data: {json.dumps({'model': model, 'is_fallback': is_fallback}, ensure_ascii=False)}\n\n"
-    )
+    data: dict[str, str | int | bool] = {"model": model, "is_fallback": is_fallback}
+    if seq is not None:
+        data["seq"] = seq
+    return f"event: model_info\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
 def sse_ask_user(event: SSEAskUserEvent) -> str:
@@ -270,6 +319,8 @@ def sse_ask_user(event: SSEAskUserEvent) -> str:
         "type": event.type,
         "questions": event.questions,
     }
+    if event.seq is not None:
+        data["seq"] = event.seq
     return f"event: ask_user\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
@@ -286,19 +337,24 @@ def sse_abstention(event: SSEAbstentionEvent) -> str:
         "type": event.type,
         "message": event.message,
     }
+    if event.seq is not None:
+        data["seq"] = event.seq
     return f"event: abstention\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def sse_reasoning_delta(reasoning_delta: str) -> str:
+def sse_reasoning_delta(reasoning_delta: str, seq: int | None = None) -> str:
     """构建 reasoning 事件的 SSE 文本。
 
     Args:
         reasoning_delta: 思考文本增量片段
+        seq: SSE 帧序列号（消费者注入，None 不序列化）
 
     Returns:
         SSE 格式文本（event: reasoning）
     """
-    data: dict = {"delta": reasoning_delta}
+    data: dict[str, str | int] = {"delta": reasoning_delta}
+    if seq is not None:
+        data["seq"] = seq
     return f"event: reasoning\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
@@ -314,8 +370,8 @@ def to_sse(event: SSEEvent) -> str:
         SSE 格式的文本行
     """
     match event:
-        case SSETokenEvent(token=token):
-            return sse_token(token)
+        case SSETokenEvent(token=token, seq=seq):
+            return sse_token(token, seq)
         case SSECitationEvent(
             source=s,
             page=p,
@@ -324,22 +380,23 @@ def to_sse(event: SSEEvent) -> str:
             highlighted_snippet=hs,
             index=idx,
             kind=k,
+            seq=seq,
         ):
-            return sse_citation(s, p, snippet, score, hs, idx, k)
-        case SSEStatusEvent(stage=stage, message=message, detail=detail):
-            return sse_status(stage, message, detail)
-        case SSEErrorEvent(error=error):
-            return sse_error(error)
-        case SSEDoneEvent(trace_id=trace_id):
-            return sse_done(trace_id)
-        case SSEModelInfoEvent(model=model, is_fallback=is_fallback):
-            return sse_model_info(model, is_fallback)
-        case SSEAskUserEvent(type=t, questions=questions):
-            return sse_ask_user(SSEAskUserEvent(t, questions))
-        case SSEAbstentionEvent(type=t, message=message):
-            return sse_abstention(SSEAbstentionEvent(t, message))
-        case SSEReasoningDeltaEvent(reasoning_delta=delta):
-            return sse_reasoning_delta(delta)
+            return sse_citation(s, p, snippet, score, hs, idx, k, seq)
+        case SSEStatusEvent(stage=stage, message=message, detail=detail, seq=seq):
+            return sse_status(stage, message, detail, seq)
+        case SSEErrorEvent(error=error, seq=seq):
+            return sse_error(error, seq)
+        case SSEDoneEvent(trace_id=trace_id, seq=seq):
+            return sse_done(trace_id, seq)
+        case SSEModelInfoEvent(model=model, is_fallback=is_fallback, seq=seq):
+            return sse_model_info(model, is_fallback, seq)
+        case SSEAskUserEvent(type=t, questions=questions, seq=seq):
+            return sse_ask_user(SSEAskUserEvent(t, questions, seq))
+        case SSEAbstentionEvent(type=t, message=message, seq=seq):
+            return sse_abstention(SSEAbstentionEvent(t, message, seq))
+        case SSEReasoningDeltaEvent(reasoning_delta=delta, seq=seq):
+            return sse_reasoning_delta(delta, seq)
 
 
 def from_payload(etype: str, payload: dict) -> "SSEEvent":
