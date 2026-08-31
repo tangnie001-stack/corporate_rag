@@ -154,6 +154,8 @@ Content-Type: `text/event-stream`
 | `deep_thinking` | 深度思考开关（可选，默认 `false`）：`true` 时 agent 主 LLM 以思考模式调用（`enable_thinking=true`）；`false` 显式关闭。来自 `chat-thinking-toggle` capability |
 | `trace_id` | 链路追踪 ID（可选） |
 
+> **落库时机（streaming-decouple M1）**：请求开始（per-session Redis 锁获取后）即同步写 user 消息到 MySQL（`svc.save_user_async`），session 创建幂等；端点方法**保持 GET**（GET→POST 迁移推迟到 streaming-decouple M3.4，届时与前端 fetchStream 一同落地，避免 M1 破坏 EventSource）。Redis 的 user 写入仍保留在 `agent_service.stream_chat` 内（发生在 `get_history_async()` 之后，避免当前 query 作为历史进 prompt）。
+
 事件流（按推送顺序，不含追问路径）：
 
 ```json

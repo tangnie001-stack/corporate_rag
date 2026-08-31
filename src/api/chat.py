@@ -323,6 +323,12 @@ async def chat_stream(
             if not lock_held:
                 raise HTTPException(409, "当前会话正在处理中")
 
+    # M1：请求开始同步落 user（session 创建幂等，写入成功后才启动生成）
+    await svc.set_chat_repo()
+    await svc.save_session_async(session_id, query[:20], kb_id, user_id)
+    await svc.save_user_async(session_id, kb_id, query)
+    logger.info("user message persisted at request start: session_id={}", session_id)
+
     async def _stream_with_lock() -> AsyncGenerator[str, None]:
         """持有并发锁流式推送 RAG 响应，流结束或异常时在 finally 释放锁。"""
         try:

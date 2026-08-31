@@ -1,6 +1,6 @@
 """Tests for SSE streaming chat endpoint."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,7 +14,7 @@ client = TestClient(app)
 
 def test_chat_stream_returns_sse():
     """GET /api/chat/stream returns SSE event stream."""
-    mock_svc = MagicMock()
+    mock_svc = AsyncMock()
     mock_chain = mock_svc.rag_chain
 
     async def fake_search(query, kb_id):
@@ -48,7 +48,7 @@ def test_chat_stream_passes_user_id():
 
     回归场景：会话持久化时未传 user_id，导致会话列表按用户过滤后为空。
     """
-    mock_svc = MagicMock()
+    mock_svc = AsyncMock()
     app.dependency_overrides[get_app_service] = lambda: mock_svc
     try:
         with patch("src.api.chat._stream_rag_response") as mock_gen:
@@ -82,7 +82,7 @@ def test_chat_stream_passes_deep_thinking():
         captured["deep_thinking"] = deep_thinking
         yield SSETokenEvent("ok")
 
-    mock_svc = MagicMock()
+    mock_svc = AsyncMock()
     mock_svc.agent_service.stream_chat = fake_stream_chat
     app.dependency_overrides[get_app_service] = lambda: mock_svc
 

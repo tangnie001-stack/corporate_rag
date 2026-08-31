@@ -197,6 +197,10 @@ class AppService:
         """持久化保存会话。"""
         await self.chat_manager.save_session_async(session_id, title, kb_id, user_id)
 
+    async def save_user_async(self, session_id: str, kb_id: str, user_msg: str) -> None:
+        """请求开始时同步写入单条 user 消息到 MySQL。"""
+        await self.chat_manager.save_user_async(session_id, kb_id, user_msg)
+
     async def save_messages_async(
         self,
         session_id: str,
