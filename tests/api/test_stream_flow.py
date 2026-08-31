@@ -108,6 +108,55 @@ async def test_background_task_finalizes_assistant_on_complete():
 
 
 @pytest.mark.asyncio
+async def test_background_task_done_event_carries_explicit_trace_id():
+    """后台任务显式传递 trace_id：任务内 contextvar 被 set，done 终态事件携带该 trace_id。
+
+    验证 M4：调用方在启动前捕获 current_trace_id.get() 显式传入 _run_with_finalize，
+    任务入口 set 到 current_trace_id（跨任务不依赖自动传播），answer_builder 内读取
+    到的即为请求 trace_id，done 事件 payload {"trace_id": ...} 与之相等。
+    """
+    from src.api.chat import _run_with_finalize
+    from src.chat.streaming import StreamingRunManager
+    from src.infra.llm.request_context import RequestContext
+    from src.infra.llm.trace_context import current_trace_id
+
+    trace_id = "trace_task_4_3"
+    fake_svc = MagicMock()
+    fake_svc.save_assistant_async = AsyncMock()
+    partial_holder = {"text": ""}
+    mgr = StreamingRunManager()
+    seen_in_task = []
+
+    async def answer_builder():
+        seen_in_task.append(current_trace_id.get())
+        return "完整回答"
+
+    await _run_with_finalize(
+        fake_svc,
+        "s1",
+        "kb1",
+        partial_holder,
+        answer_builder,
+        mgr,
+        asyncio.Event(),
+        lambda: None,
+        RequestContext(session_id="s1"),
+        trace_id=trace_id,
+    )
+
+    # 任务内（answer_builder 执行时）current_trace_id 已显式 set
+    assert seen_in_task == [trace_id]
+    done_events = [
+        (seq, etype, payload)
+        for seq, etype, payload in mgr.get_events_since("s1", 0)
+        if etype == "done"
+    ]
+    assert len(done_events) == 1
+    _, _, payload = done_events[0]
+    assert payload == {"trace_id": trace_id}
+
+
+@pytest.mark.asyncio
 async def test_background_task_error_event_round_trips_from_payload():
     """answer_builder 抛异常时，error 终态事件 payload 可被 from_payload 正常回放。
 

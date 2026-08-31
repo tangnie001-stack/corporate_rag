@@ -159,12 +159,16 @@ async def _run_with_finalize(
     abort_signal: asyncio.Event,
     release_lock: Callable[[], None],
     ctx: RequestContext,
+    trace_id: str = "",
 ) -> None:
     """后台任务主体：跑生成，完成后按结果收尾落库，finally 释放锁并注销。
 
     后台任务与调用方处于不同 asyncio task，contextvars 不会自动传播，因此本
     函数在入口显式 set current_request_ctx / current_trace_id（工具与节点经
     contextvar 读取 clarify_channel / tool_contexts 等），finally 中 reset。
+    trace_id 由调用方在 create_task 前从 current_trace_id.get() 捕获并显式
+    传入，任务内据此 set contextvar 并写 done 终态事件，保证与请求 trace_id
+    一致（单一事实来源）。
 
     收尾分三支：
     - 正常结束：完整回答落 complete，写 done 终态事件（含 trace_id）
@@ -184,14 +188,15 @@ async def _run_with_finalize(
         abort_signal: 请求级中止信号（由 cancel 端点置位，任务内当前不消费）
         release_lock: per-session 并发锁释放回调（幂等，任务完成时调用）
         ctx: 请求上下文（含 clarify_channel），任务入口 set 到 current_request_ctx
+        trace_id: 请求级 trace_id（调用方启动任务前捕获），任务入口 set 到
+            current_trace_id，done 终态事件据此写入
     """
     task = asyncio.current_task()
     assert task is not None, (
         "_run_with_finalize 须由 create_task 启动（注销需任务引用）"
     )
-    trace_id = current_trace_id.get()
     ctx_token = current_request_ctx.set(ctx)
-    trace_token = current_trace_id.set(trace_id)
+    trace_token = current_trace_id.set(trace_id or None)
     try:
         full_answer = await answer_builder()
     except asyncio.CancelledError:
@@ -293,6 +298,7 @@ async def _stream_rag_response(
             abort_signal=abort_signal,
         )
 
+    trace_id = current_trace_id.get() or ""
     task = asyncio.create_task(
         _run_with_finalize(
             svc,
@@ -304,6 +310,7 @@ async def _stream_rag_response(
             abort_signal,
             release_lock,
             ctx,
+            trace_id=trace_id,
         )
     )
     streaming_manager.register(launch_ctx["session_id"], task, abort_signal)
