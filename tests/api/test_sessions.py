@@ -1,7 +1,9 @@
 """Sessions 端点测试 — list / messages / delete。"""
 
+import asyncio
 from unittest.mock import AsyncMock
 
+from src.chat.streaming import streaming_manager
 from tests.api.mock_data import make_message, make_session
 
 
@@ -98,3 +100,25 @@ def test_delete_session_not_found(auth_client, mock_app_service):
     response = auth_client.post("/api/sessions/delete", json={"session_id": "missing"})
 
     assert response.status_code == 404
+
+
+def test_delete_session_cancels_running_task(auth_client, mock_app_service):
+    """POST /api/sessions/delete 清理运行态：置位 abort 信号、清空缓冲。"""
+    signal = asyncio.Event()
+    streaming_manager._abort_signals["s1"] = signal
+    streaming_manager.clear_buffer("s1")
+    streaming_manager.add_event("s1", "token", {"token": "a"})
+
+    mock_app_service.get_session_by_id = AsyncMock(
+        return_value=make_session("s1", user_id="test-user-id")
+    )
+    mock_app_service.delete_session_and_messages = AsyncMock(return_value=True)
+
+    try:
+        resp = auth_client.post("/api/sessions/delete", json={"session_id": "s1"})
+        assert resp.status_code == 200
+        assert signal.is_set() is True  # 任务被取消
+        assert streaming_manager.buffer_exists("s1") is False  # 缓冲被清
+    finally:
+        streaming_manager.unregister("s1")
+        streaming_manager.clear_buffer("s1")

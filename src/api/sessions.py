@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
+from src.api.chat import _release_session_lock
 from src.api.dependencies import get_app_service
 from src.api.model.request import (
     SessionCancelRequest,
@@ -119,9 +120,10 @@ async def delete_session(
     """删除会话及其所有消息。
 
     执行顺序:
-    1. 清理 Redis key（尽力而为，失败只记日志）
-    2. 删除 MySQL sessions 记录
-    3. 级联删除 conversation_history 消息
+    1. 清理运行态：置位 abort 信号、注销后台任务、清空流缓冲、释放并发锁
+    2. 清理 Redis key（尽力而为，失败只记日志）
+    3. 删除 MySQL sessions 记录
+    4. 级联删除 conversation_history 消息
     事务保证 MySQL 操作的原子性。
 
     Args:
@@ -144,6 +146,15 @@ async def delete_session(
         raise BusinessError(Code.SESSION_NOT_FOUND, Code.SESSION_NOT_FOUND_MSG, 404)
     if session.get("user_id") and session["user_id"] != user_id:
         raise BusinessError(Code.SESSION_NOT_FOUND, Code.SESSION_NOT_FOUND_MSG, 404)
+
+    # 清理运行态：置位 abort 信号、注销任务、清空缓冲、释放 Redis 并发锁
+    streaming_manager.set_abort(session_id)
+    streaming_manager.unregister(session_id)
+    streaming_manager.clear_buffer(session_id)
+    try:
+        await _release_session_lock(svc.chat_manager._redis, session_id)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Session lock release failed on delete: {}", e)
 
     # 清理 Redis + 删除 MySQL 记录
     ok = await svc.delete_session_and_messages(session_id)
