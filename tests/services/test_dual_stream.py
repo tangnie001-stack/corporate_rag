@@ -488,7 +488,7 @@ class TestStreamChatWrapper:
 
     @pytest.mark.asyncio
     async def test_stream_chat_subscribes_tokens_and_done(self):
-        """正常结束后订阅收到全部 token 与 done 终态（assistant 写入由 Task 2.8 负责）。"""
+        """正常结束后订阅收到全部 token 与 done 终态（assistant 落库由后台任务完成）。"""
         service, chat_manager = _make_service()
 
         async def fake_astream(*args, **kwargs):
@@ -510,7 +510,7 @@ class TestStreamChatWrapper:
         assert [t.token for t in tokens] == ["你好", "，世界"]
         done_events = [e for e in events if isinstance(e, SSEDoneEvent)]
         assert len(done_events) == 1
-        # user 消息仍同步写入（assistant 收尾延迟到 Task 2.8）
+        # user 消息仍同步写入（assistant 落库由后台任务完成）
         chat_manager.add_message_async.assert_any_call(
             "session-persist", "user", "营收多少"
         )
@@ -537,6 +537,6 @@ class TestStreamChatWrapper:
         chat_manager.add_message_async.assert_any_call(
             "session-empty", "user", "营收多少"
         )
-        # assistant 写入不在本任务范围（Task 2.8 收尾），防止回归旧行为
+        # assistant 不写 Redis 历史（由后台任务落 MySQL），防止回归旧行为
         for call in chat_manager.add_message_async.await_args_list:
             assert call.args[1] != "assistant"

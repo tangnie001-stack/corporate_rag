@@ -335,7 +335,7 @@ def test_convert_event_content_and_reasoning_both():
 
 @pytest.mark.asyncio
 async def test_stream_chat_emits_full_event_sequence():
-    """受控事件流 → 状态/token/citation/done 完整产出（model_info/abstention 由 Task 4.2 入缓冲）。"""
+    """受控事件流 → 状态/token/citation/done 完整产出。"""
     service, _ = _make_service()
 
     async def fake_astream(*args, **kwargs):
@@ -411,8 +411,8 @@ async def test_stream_chat_passes_deep_thinking():
 
 
 @pytest.mark.asyncio
-async def test_stream_chat_emits_abstention_when_no_context():
-    """abstention 判定不在本任务范围（Task 4.2 入缓冲）：当前只产出 token + done。"""
+async def test_stream_chat_full_path_emits_no_abstention_or_model_info():
+    """全链路无引用上下文时只产出 token + done，不产出 abstention / model_info 事件。"""
     service, _ = _make_service()
 
     async def fake_astream(*args, **kwargs):
@@ -427,7 +427,7 @@ async def test_stream_chat_emits_abstention_when_no_context():
 
     events, _ = await _collect_events(service, "kb1", "session-abst", "营收多少")
 
-    # 生产者当前 capture=None：不产出 abstention / model_info（Task 4.2 补）
+    # 生产链路 capture=None：abstention / model_info 仅捕获不产出
     abstentions = [e for e in events if isinstance(e, SSEAbstentionEvent)]
     model_infos = [e for e in events if isinstance(e, SSEModelInfoEvent)]
     assert abstentions == []
@@ -438,8 +438,8 @@ async def test_stream_chat_emits_abstention_when_no_context():
 
 
 @pytest.mark.asyncio
-async def test_stream_chat_persists_assistant_to_chat_manager():
-    """正常结束订阅收到全部 token 与 done（assistant 收尾由 Task 2.8 负责）。"""
+async def test_stream_chat_persists_assistant_via_background_task():
+    """正常结束订阅收到全部 token 与 done；assistant 由后台任务落库为 complete。"""
     service, chat_manager = _make_service()
 
     async def fake_astream(*args, **kwargs):

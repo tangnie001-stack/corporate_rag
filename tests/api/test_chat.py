@@ -8,39 +8,46 @@ from fastapi.testclient import TestClient
 
 from src.api.dependencies import get_app_service
 from src.main import app
-from tests.api.mock_data import make_chunk
 
 client = TestClient(app)
 
 
 def test_chat_stream_returns_sse():
     """POST /api/chat/stream returns SSE event stream."""
+    from src.utils.sse import SSEDoneEvent, SSETokenEvent
+
+    async def _sub():
+        yield SSETokenEvent("净利润")
+        yield SSEDoneEvent(trace_id="")
+
+    async def fake_stream_chat(kb_id, session_id, query, deep_thinking=False):
+        return (
+            _sub(),
+            {
+                "history": [],
+                "ctx": None,
+                "graph": None,
+                "session_id": session_id,
+                "kb_id": kb_id,
+                "query": query,
+                "deep_thinking": deep_thinking,
+            },
+        )
+
     mock_svc = AsyncMock()
-    mock_chain = mock_svc.rag_chain
-
-    async def fake_search(query, kb_id):
-        return [make_chunk("1", "test", page=1)]
-
-    def fake_stream(query, contexts, history, trace_id=None):
-        yield "净利润"
-        yield "为"
-        yield "100亿"
-        yield "元"
-
-    mock_chain.search = fake_search
-    mock_chain.rerank = MagicMock(return_value=[])
-    mock_chain.stream_answer = fake_stream
-
+    mock_svc.agent_service.stream_chat = fake_stream_chat
     app.dependency_overrides[get_app_service] = lambda: mock_svc
 
     try:
-        response = client.post(
-            "/api/chat/stream",
-            json={"session_id": "s1", "kb_id": "kb-1", "query": "净利润多少"},
-        )
+        with patch("src.api.chat._run_with_finalize", new=AsyncMock()):
+            response = client.post(
+                "/api/chat/stream",
+                json={"session_id": "s1", "kb_id": "kb-1", "query": "净利润多少"},
+            )
 
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("text/event-stream")
+        assert "净利润" in response.text
     finally:
         app.dependency_overrides.pop(get_app_service, None)
 
