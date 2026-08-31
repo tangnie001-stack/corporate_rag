@@ -128,6 +128,75 @@ def _make_service() -> tuple[AgentService, AsyncMock]:
     return service, chat_manager
 
 
+async def _collect_events(
+    service: AgentService,
+    kb_id: str,
+    session_id: str,
+    query: str,
+    deep_thinking: bool = False,
+) -> tuple[list, Mock]:
+    """模拟 API 层接线：启动 _run_with_finalize 后台任务并收集订阅到的全部 SSE 事件。
+
+    stream_chat 只返回 (订阅生成器, 启动上下文)，生成任务由 API 层启动；
+    本 helper 复刻 _stream_rag_response 的启动逻辑，供服务层测试直接验证
+    完整的事件流与收尾落库。
+
+    Returns:
+        (events, fake_svc)：events 为订阅到的 SSE 事件列表；
+        fake_svc 的 save_assistant_async 供断言收尾落库
+    """
+    from src.api.chat import _run_with_finalize
+    from src.chat.streaming import streaming_manager
+    from src.services.agent_service import _run_generation
+
+    agen, launch_ctx = await service.stream_chat(
+        kb_id, session_id, query, deep_thinking
+    )
+    partial_holder = {"text": ""}
+    abort_signal = asyncio.Event()
+    ctx = launch_ctx["ctx"]
+    fake_svc = Mock()
+    fake_svc.save_assistant_async = AsyncMock()
+
+    async def answer_builder() -> str:
+        return await _run_generation(
+            launch_ctx["session_id"],
+            launch_ctx["kb_id"],
+            launch_ctx["query"],
+            launch_ctx["history"],
+            launch_ctx["deep_thinking"],
+            ctx,
+            streaming_manager,
+            graph=launch_ctx["graph"],
+            partial_holder=partial_holder,
+        )
+
+    task = asyncio.create_task(
+        _run_with_finalize(
+            fake_svc,
+            launch_ctx["session_id"],
+            launch_ctx["kb_id"],
+            partial_holder,
+            answer_builder,
+            streaming_manager,
+            abort_signal,
+            lambda: None,
+            ctx,
+        )
+    )
+    streaming_manager.register(launch_ctx["session_id"], task, abort_signal)
+    task.add_done_callback(
+        lambda _t: streaming_manager.unregister_if_current(
+            launch_ctx["session_id"], task
+        )
+    )
+
+    events = []
+    async for event in agen:
+        events.append(event)
+    return events, fake_svc
+
+
 class TestIsAbstention:
     """_is_abstention 判定逻辑。"""
 
@@ -293,9 +362,7 @@ async def test_stream_chat_emits_full_event_sequence():
     service._graph = Mock()
     service._graph.astream_events = fake_astream
 
-    events = []
-    async for event in service.stream_chat("kb1", "session-seq", "营收多少"):
-        events.append(event)
+    events, _ = await _collect_events(service, "kb1", "session-seq", "营收多少")
 
     statuses = [e for e in events if isinstance(e, SSEStatusEvent)]
     tokens = [e for e in events if isinstance(e, SSETokenEvent)]
@@ -339,8 +406,7 @@ async def test_stream_chat_passes_deep_thinking():
     service._graph = Mock()
     service._graph.astream_events = fake_astream
 
-    async for _ in service.stream_chat("kb1", "session-deep", "q", deep_thinking=True):
-        pass
+    await _collect_events(service, "kb1", "session-deep", "q", deep_thinking=True)
     assert seen["deep_thinking"] is True
 
 
@@ -359,9 +425,7 @@ async def test_stream_chat_emits_abstention_when_no_context():
     service._graph = Mock()
     service._graph.astream_events = fake_astream
 
-    events = []
-    async for event in service.stream_chat("kb1", "session-abst", "营收多少"):
-        events.append(event)
+    events, _ = await _collect_events(service, "kb1", "session-abst", "营收多少")
 
     # 生产者当前 capture=None：不产出 abstention / model_info（Task 4.2 补）
     abstentions = [e for e in events if isinstance(e, SSEAbstentionEvent)]
@@ -389,15 +453,20 @@ async def test_stream_chat_persists_assistant_to_chat_manager():
     service._graph = Mock()
     service._graph.astream_events = fake_astream
 
-    events = []
-    async for event in service.stream_chat("kb1", "session-assist", "营收多少"):
-        events.append(event)
+    events, fake_svc = await _collect_events(
+        service, "kb1", "session-assist", "营收多少"
+    )
 
-    # user 消息仍同步写入（assistant 收尾延迟到 Task 2.8）
+    # user 消息仍同步写入（assistant 收尾由后台任务完成）
     chat_manager.add_message_async.assert_any_call("session-assist", "user", "营收多少")
     tokens = [e for e in events if isinstance(e, SSETokenEvent)]
     assert [t.token for t in tokens] == ["你好", "，世界"]
     assert isinstance(events[-1], SSEDoneEvent)
+    # 后台任务将完整回答落库为 complete
+    fake_svc.save_assistant_async.assert_awaited_once()
+    args = fake_svc.save_assistant_async.await_args.args
+    assert args[2] == "你好，世界"
+    assert args[4] == "complete"
 
 
 @pytest.mark.asyncio
@@ -414,9 +483,7 @@ async def test_stream_chat_no_abstention_without_final_state():
     service._graph = Mock()
     service._graph.astream_events = fake_astream
 
-    events = []
-    async for event in service.stream_chat("kb1", "session-no-final", "营收多少"):
-        events.append(event)
+    events, _ = await _collect_events(service, "kb1", "session-no-final", "营收多少")
 
     assert [e for e in events if isinstance(e, SSEAbstentionEvent)] == []
     assert isinstance(events[-1], SSEDoneEvent)

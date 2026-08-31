@@ -5,7 +5,7 @@
 """
 
 import asyncio
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException, Request
@@ -32,19 +32,78 @@ def test_chat_stream_persists_user_before_stream(auth_client, mock_app_service):
 
 
 @pytest.mark.asyncio
-async def test_persist_conversation_writes_only_assistant(
-    auth_client, mock_app_service
-):
-    """流结束后 _persist_conversation 仅写 assistant，不再写 user/session。"""
-    from src.api.chat import _persist_conversation
+async def test_background_task_finalizes_assistant_on_cancel():
+    """后台任务收到 abort（task.cancel）后，已产出 token 落 interrupted 并写 done 终态。"""
+    from src.api.chat import _run_with_finalize
+    from src.chat.streaming import StreamingRunManager
+    from src.infra.llm.request_context import RequestContext
 
-    mock_app_service.set_chat_repo = AsyncMock()
-    mock_app_service.save_assistant_async = AsyncMock()
-    mock_app_service.save_user_async = AsyncMock()
+    calls = []
+    fake_svc = MagicMock()
+    fake_svc.save_assistant_async = AsyncMock(
+        side_effect=lambda *a, **k: calls.append(("assistant", a[4]))
+    )
+    partial_holder = {"text": "部分回答"}
+    mgr = StreamingRunManager()
+    entered = asyncio.Event()
 
-    await _persist_conversation(mock_app_service, "s1", "kb1", "完整回答", [], "u1")
-    mock_app_service.save_assistant_async.assert_awaited_once()
-    mock_app_service.save_user_async.assert_not_called()
+    async def answer_builder():
+        entered.set()
+        await asyncio.sleep(10)
+
+    task = asyncio.create_task(
+        _run_with_finalize(
+            fake_svc,
+            "s1",
+            "kb1",
+            partial_holder,
+            answer_builder,
+            mgr,
+            asyncio.Event(),
+            lambda: None,
+            RequestContext(session_id="s1"),
+        )
+    )
+    await entered.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert ("assistant", "interrupted") in calls
+    assert mgr.has_terminal("s1") is True
+
+
+@pytest.mark.asyncio
+async def test_background_task_finalizes_assistant_on_complete():
+    """后台任务正常结束：完整回答落 complete 并写 done 终态。"""
+    from src.api.chat import _run_with_finalize
+    from src.chat.streaming import StreamingRunManager
+    from src.infra.llm.request_context import RequestContext
+
+    calls = []
+    fake_svc = MagicMock()
+    fake_svc.save_assistant_async = AsyncMock(
+        side_effect=lambda *a, **k: calls.append(("assistant", a[4]))
+    )
+    partial_holder = {"text": ""}
+    mgr = StreamingRunManager()
+
+    async def answer_builder():
+        partial_holder["text"] = "完整回答"
+        return "完整回答"
+
+    await _run_with_finalize(
+        fake_svc,
+        "s1",
+        "kb1",
+        partial_holder,
+        answer_builder,
+        mgr,
+        asyncio.Event(),
+        lambda: None,
+        RequestContext(session_id="s1"),
+    )
+    assert ("assistant", "complete") in calls
+    assert mgr.has_terminal("s1") is True
 
 
 @pytest.mark.asyncio

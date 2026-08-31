@@ -1,7 +1,7 @@
 """流式聊天 SSE 端点 — 支持分阶段状态推送和引用高亮。"""
 
 import asyncio
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 
 import jieba
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -9,15 +9,15 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 
 from src.api.dependencies import get_app_service
-from src.chat.streaming import streaming_manager
+from src.chat.streaming import StreamingRunManager, streaming_manager
 from src.config.const import SESSION_LOCK_TTL
+from src.infra.llm.request_context import RequestContext, current_request_ctx
 from src.infra.llm.trace_context import current_trace_id
+from src.services.agent_service import _run_generation
 from src.services.app_service import AppService
 from src.utils.sse import (
-    SSECitationEvent,
     SSEDoneEvent,
     SSEErrorEvent,
-    SSETokenEvent,
     to_sse,
 )
 
@@ -148,6 +148,77 @@ def _build_highlighted_snippet(qbs: dict) -> str:
     return "".join(parts)
 
 
+async def _run_with_finalize(
+    svc: AppService,
+    session_id: str,
+    kb_id: str,
+    partial_holder: dict,
+    answer_builder,
+    manager: StreamingRunManager,
+    abort_signal: asyncio.Event,
+    release_lock: Callable[[], None],
+    ctx: RequestContext,
+) -> None:
+    """后台任务主体：跑生成，完成后按结果收尾落库，finally 释放锁并注销。
+
+    后台任务与调用方处于不同 asyncio task，contextvars 不会自动传播，因此本
+    函数在入口显式 set current_request_ctx / current_trace_id（工具与节点经
+    contextvar 读取 clarify_channel / tool_contexts 等），finally 中 reset。
+
+    收尾分三支：
+    - 正常结束：完整回答落 complete，写 done 终态事件（含 trace_id）
+    - 被取消（abort 触达 task.cancel）：已产出 token 落 interrupted，
+      写 done(cancelled) 终态事件，随后 re-raise 保持取消语义
+    - 异常：已产出 token 落 interrupted，写 error 终态事件
+
+    Args:
+        svc: AppService 实例（save_assistant_async 落库）
+        session_id: 会话 ID
+        kb_id: 知识库 ID
+        partial_holder: 生产者写入的 {"text": 已产出 token} 共享 dict，
+            取消/出错时据此写 interrupted 部分回答
+        answer_builder: 可调用对象，执行生成并更新 partial_holder["text"]，
+            返回完整回答
+        manager: StreamingRunManager（终态事件写入缓冲）
+        abort_signal: 请求级中止信号（由 cancel 端点置位，任务内当前不消费）
+        release_lock: per-session 并发锁释放回调（幂等，任务完成时调用）
+        ctx: 请求上下文（含 clarify_channel），任务入口 set 到 current_request_ctx
+    """
+    task = asyncio.current_task()
+    assert task is not None, (
+        "_run_with_finalize 须由 create_task 启动（注销需任务引用）"
+    )
+    trace_id = current_trace_id.get()
+    ctx_token = current_request_ctx.set(ctx)
+    trace_token = current_trace_id.set(trace_id)
+    try:
+        full_answer = await answer_builder()
+    except asyncio.CancelledError:
+        partial = partial_holder["text"]
+        if partial:
+            await svc.save_assistant_async(
+                session_id, kb_id, partial, [], "interrupted"
+            )
+        manager.add_event(session_id, "done", {"cancelled": True})
+        raise
+    except Exception as e:  # noqa: BLE001
+        logger.exception("generation failed: {}", e)
+        partial = partial_holder["text"]
+        if partial:
+            await svc.save_assistant_async(
+                session_id, kb_id, partial, [], "interrupted"
+            )
+        manager.add_event(session_id, "error", str(e))
+    else:
+        await svc.save_assistant_async(session_id, kb_id, full_answer, [], "complete")
+        manager.add_event(session_id, "done", {"trace_id": trace_id or ""})
+    finally:
+        current_request_ctx.reset(ctx_token)
+        current_trace_id.reset(trace_token)
+        release_lock()
+        manager.unregister_if_current(session_id, task)
+
+
 async def _stream_rag_response(
     svc: AppService,
     kb_id: str,
@@ -155,93 +226,85 @@ async def _stream_rag_response(
     query: str,
     user_id: str = "",
     deep_thinking: bool = False,
+    release_lock: Callable[[], None] | None = None,
 ) -> AsyncGenerator[str, None]:
     """以 SSE 事件流推送 RAG 响应 — 委托给 agent_service。
 
-    流结束后异步持久化对话到 MySQL。
+    由 stream_chat 取订阅生成器与启动上下文后，启动 _run_with_finalize
+    后台任务（跑 _run_generation 并负责 assistant 落库 / 终态事件 /
+    锁释放 / 任务注销），随后订阅事件缓冲转换为 SSE 帧产出。
 
     Args:
         svc: AppService 实例
         kb_id: 知识库 UUID（空字符串表示跨库搜索）
         session_id: 会话 ID
         query: 用户查询文本
-        user_id: 当前用户 ID（用于会话归属，空串表示匿名）
+        user_id: 当前用户 ID（保留签名供契约对齐，收尾已并入后台任务）
         deep_thinking: 深度思考开关（透传给 agent_service，最终控制
             agent LLM 的 enable_thinking 参数，默认 False）
+        release_lock: 后台任务完成时释放 per-session 并发锁的同步回调
+            （由 chat_stream 注入，幂等）；无锁场景（测试直调）传 None
     """
-    full_answer = ""
-    sources: list[str] = []
+    if release_lock is None:
+        release_lock = lambda: None
+
     try:
-        async for event in svc.agent_service.stream_chat(
+        subscription, launch_ctx = await svc.agent_service.stream_chat(
             kb_id, session_id, query, deep_thinking
-        ):
-            match event:
-                case SSETokenEvent(token=token):
-                    full_answer += token
-                case SSECitationEvent(source=src, page=page):
-                    sources.append(f"{src} (第{page}页)")
+        )
+    except Exception as e:  # noqa: BLE001
+        # 任务未启动，锁无后台任务可释放，本路径直接释放避免挂到 TTL
+        logger.exception("Chat stream setup failed: {}", str(e))
+        release_lock()
+        yield to_sse(SSEErrorEvent(str(e)))
+        yield to_sse(SSEDoneEvent(trace_id=current_trace_id.get() or ""))
+        return
+
+    partial_holder: dict = {"text": ""}
+    abort_signal = asyncio.Event()
+    ctx = launch_ctx["ctx"]
+
+    async def answer_builder() -> str:
+        return await _run_generation(
+            launch_ctx["session_id"],
+            launch_ctx["kb_id"],
+            launch_ctx["query"],
+            launch_ctx["history"],
+            launch_ctx["deep_thinking"],
+            ctx,
+            streaming_manager,
+            graph=launch_ctx["graph"],
+            partial_holder=partial_holder,
+        )
+
+    task = asyncio.create_task(
+        _run_with_finalize(
+            svc,
+            launch_ctx["session_id"],
+            launch_ctx["kb_id"],
+            partial_holder,
+            answer_builder,
+            streaming_manager,
+            abort_signal,
+            release_lock,
+            ctx,
+        )
+    )
+    streaming_manager.register(launch_ctx["session_id"], task, abort_signal)
+    task.add_done_callback(lambda _t: release_lock())
+    task.add_done_callback(
+        lambda _t: streaming_manager.unregister_if_current(
+            launch_ctx["session_id"], task
+        )
+    )
+
+    try:
+        async for event in subscription:
             yield to_sse(event)
     except Exception as e:  # noqa: BLE001
         logger.exception("Chat stream unhandled error: {}", str(e))
         yield to_sse(SSEErrorEvent(str(e)))
         yield to_sse(SSEDoneEvent(trace_id=current_trace_id.get() or ""))
-        return
-
-    # 流结束后持久化 assistant 消息
-    asyncio.create_task(
-        _persist_conversation(svc, session_id, kb_id, full_answer, sources, user_id)
-    )
-
-
-async def _persist_conversation(
-    svc: AppService,
-    session_id: str,
-    kb_id: str,
-    answer: str,
-    sources: list[str],
-    user_id: str = "",
-) -> None:
-    """流结束后异步写 assistant 消息到 MySQL，带重试。
-
-    在 SSE 流结束后非阻塞执行。
-    如果 MySQL 不可用，重试 3 次后放弃（只记日志）。
-    绝不会抛异常冒泡到 SSE 响应。
-    （session 与 user 消息已在请求开始时写入，见 chat_stream）
-
-    Args:
-        svc: AppService 实例
-        session_id: 会话 ID
-        kb_id: 知识库 UUID
-        answer: LLM 生成的完整回答
-        sources: 引用来源列表（去重后的 "文件名 (第x页)" 列表）
-        user_id: 当前用户 ID（保留签名，当前未使用）
-    """
-    await svc.set_chat_repo()
-
-    # 持久化重试 — 使用指数退避（与 models.py 的 with_retry 策略一致）
-    async def retry(factory, max_retries=3, initial_interval=0.5, backoff=2.0):
-        for i in range(max_retries):
-            try:
-                await factory()
-                return
-            except Exception as e:  # noqa: BLE001
-                if i < max_retries - 1:
-                    wait = initial_interval * (backoff**i)
-                    await asyncio.sleep(wait)
-                else:
-                    logger.warning(
-                        "Persist failed after {} retries: {}", max_retries, e
-                    )
-
-    await retry(
-        lambda: svc.save_assistant_async(session_id, kb_id, answer, sources, "complete")
-    )
-    logger.info(
-        "Assistant message persisted: session_id={} kb_id={} sources={}",
-        session_id,
-        kb_id,
-        len(sources),
-    )
 
 
 async def _acquire_session_lock(redis, session_id: str) -> bool:
@@ -335,20 +398,32 @@ async def chat_stream(
         raise
     logger.info("user message persisted at request start: session_id={}", session_id)
 
-    async def _stream_with_lock() -> AsyncGenerator[str, None]:
-        """持有并发锁流式推送 RAG 响应，流结束或异常时在 finally 释放锁。"""
+    async def _release_lock_async() -> None:
+        """异步释放 per-session 并发锁（异常只记日志，锁有 TTL 兜底）。"""
         try:
-            async for event in _stream_rag_response(
-                svc, kb_id, session_id, query, user_id, deep_thinking
-            ):
-                yield event
-        finally:
-            if lock_held:
-                try:
-                    await _release_session_lock(redis, session_id)
-                except Exception as e:  # noqa: BLE001
-                    # 释放失败只记日志：锁有 TTL 兜底过期，不影响响应
-                    logger.warning("Session lock release failed: {}", e)
+            await _release_session_lock(redis, session_id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Session lock release failed: {}", e)
+
+    def release_lock_cb() -> None:
+        """同步释放回调：调度异步释放 Redis 锁（幂等）。
+
+        锁由后台任务持有到完成——SSE 断连不提前释放（进程内注册表
+        is_running 才是并发防护的权威状态）。_run_with_finalize finally 与
+        task done_callback 双路径调用，靠 lock_held 标志保证只释放一次。
+        """
+        nonlocal lock_held
+        if not lock_held:
+            return
+        lock_held = False
+        asyncio.create_task(_release_lock_async())
+
+    async def _stream_with_lock() -> AsyncGenerator[str, None]:
+        """持有并发锁流式推送 RAG 响应（锁由后台任务完成时释放，SSE 断连不提前释放）。"""
+        async for event in _stream_rag_response(
+            svc, kb_id, session_id, query, user_id, deep_thinking, release_lock_cb
+        ):
+            yield event
 
     return StreamingResponse(
         _stream_with_lock(),

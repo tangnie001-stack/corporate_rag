@@ -59,8 +59,9 @@ class ChatManager:
     def set_chat_repo(self, chat_repo: ChatRepo) -> None:
         """注入 ChatRepo 实例（包装为 PersistenceService）。
 
-        在 SSE 流结束后由 _persist_conversation() 调用，
-        确保 ChatManager 可以异步写入 MySQL。
+        在请求开始时由 chat_stream 调用（M1 user 落库前置），
+        确保 ChatManager 的 save_user_async / save_assistant_async
+        可以异步写入 MySQL。
         """
         self._persistence = PersistenceService(chat_repo)
 

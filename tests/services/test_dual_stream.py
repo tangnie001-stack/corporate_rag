@@ -284,6 +284,65 @@ def _make_service() -> tuple[AgentService, AsyncMock]:
     return service, chat_manager
 
 
+def _launch_finalize(launch_ctx: dict, svc=None) -> asyncio.Task:
+    """模拟 API 层：启动 _run_with_finalize 后台任务并注册到 streaming_manager。
+
+    stream_chat 只返回 (订阅生成器, 启动上下文)，生成任务由 API 层启动；
+    本 helper 复刻 _stream_rag_response 的启动逻辑（graph 取自 launch_ctx）。
+
+    Args:
+        launch_ctx: stream_chat 返回的启动上下文 dict
+        svc: 收尾落库用 AppService 替身（缺省时自动构造 save_assistant_async mock）
+
+    Returns:
+        已创建并注册的后台任务
+    """
+    from src.api.chat import _run_with_finalize
+    from src.chat.streaming import streaming_manager
+    from src.services.agent_service import _run_generation
+
+    if svc is None:
+        svc = Mock()
+        svc.save_assistant_async = AsyncMock()
+    partial_holder = {"text": ""}
+    abort_signal = asyncio.Event()
+    ctx = launch_ctx["ctx"]
+
+    async def answer_builder() -> str:
+        return await _run_generation(
+            launch_ctx["session_id"],
+            launch_ctx["kb_id"],
+            launch_ctx["query"],
+            launch_ctx["history"],
+            launch_ctx["deep_thinking"],
+            ctx,
+            streaming_manager,
+            graph=launch_ctx["graph"],
+            partial_holder=partial_holder,
+        )
+
+    task = asyncio.create_task(
+        _run_with_finalize(
+            svc,
+            launch_ctx["session_id"],
+            launch_ctx["kb_id"],
+            partial_holder,
+            answer_builder,
+            streaming_manager,
+            abort_signal,
+            lambda: None,
+            ctx,
+        )
+    )
+    streaming_manager.register(launch_ctx["session_id"], task, abort_signal)
+    task.add_done_callback(
+        lambda _t: streaming_manager.unregister_if_current(
+            launch_ctx["session_id"], task
+        )
+    )
+    return task
+
+
 class TestStreamChatWrapper:
     """stream_chat 外层生命周期测试（后台任务启动 / 订阅消费 / 断连不中止生成）。"""
 
@@ -309,7 +368,6 @@ class TestStreamChatWrapper:
 
         svc._chat_manager.get_history_async = fake_get_history
         svc._chat_manager.add_message_async = fake_add
-        svc._tracer = Mock()  # @traced 装饰器读取 self._tracer
 
         # 后台任务所需最小图：零事件，避免任务异常噪音
         async def empty_astream(*args, **kwargs):
@@ -319,11 +377,14 @@ class TestStreamChatWrapper:
         svc._graph = Mock()
         svc._graph.astream_events = empty_astream
 
-        agen = svc.stream_chat("kb1", "session-order", "营收多少", False)
-        it = agen.__aiter__()
-        await it.__anext__()  # 启动生成器至首个 yield 点：此时 history/add 已按序执行
+        agen, launch_ctx = await svc.stream_chat(
+            "kb1", "session-order", "营收多少", False
+        )
         # 先 history 后 add（否则当前 query 会作为历史进 prompt）
         assert [c[0] for c in calls] == ["history", "add"]
+        # launch_context 携带后台任务启动所需字段（API 层据此 create_task）
+        assert launch_ctx["session_id"] == "session-order"
+        assert launch_ctx["deep_thinking"] is False
         await agen.aclose()
 
     @pytest.mark.asyncio
@@ -340,7 +401,10 @@ class TestStreamChatWrapper:
         service._graph = Mock()
         service._graph.astream_events = fake_astream
 
-        agen = service.stream_chat("kb1", "session-aclose", "营收多少")
+        agen, launch_ctx = await service.stream_chat(
+            "kb1", "session-aclose", "营收多少"
+        )
+        _launch_finalize(launch_ctx)
         it = agen.__aiter__()
         first = await it.__anext__()
         assert first == SSETokenEvent("你好")
@@ -368,8 +432,12 @@ class TestStreamChatWrapper:
         service._graph = Mock()
         service._graph.astream_events = fake_astream
 
+        agen, launch_ctx = await service.stream_chat(
+            "kb1", "session-persist", "营收多少"
+        )
+        _launch_finalize(launch_ctx)
         events = []
-        async for event in service.stream_chat("kb1", "session-persist", "营收多少"):
+        async for event in agen:
             events.append(event)
 
         tokens = [e for e in events if isinstance(e, SSETokenEvent)]
@@ -392,8 +460,10 @@ class TestStreamChatWrapper:
         service._graph = Mock()
         service._graph.astream_events = fake_astream
 
+        agen, launch_ctx = await service.stream_chat("kb1", "session-empty", "营收多少")
+        _launch_finalize(launch_ctx)
         events = []
-        async for event in service.stream_chat("kb1", "session-empty", "营收多少"):
+        async for event in agen:
             events.append(event)
 
         done_events = [e for e in events if isinstance(e, SSEDoneEvent)]

@@ -34,15 +34,13 @@ from src.chat.streaming import (
 )
 from src.config.const import SSEInteractionTexts
 from src.infra.db.vector_store import VectorStore
-from src.infra.llm.langfuse_tracing import LangfuseTracer, traced
+from src.infra.llm.langfuse_tracing import LangfuseTracer
 from src.infra.llm.prompt_manager import PromptManager
-from src.infra.llm.request_context import RequestContext, current_request_ctx
-from src.infra.llm.trace_context import current_trace_id
+from src.infra.llm.request_context import RequestContext
 from src.infra.search.bm25_index import BM25Index
 from src.utils.sse import (
     SSEAskUserEvent,
     SSECitationEvent,
-    SSEDoneEvent,
     SSEErrorEvent,
     SSEEvent,
     SSEReasoningDeltaEvent,
@@ -374,80 +372,6 @@ async def _run_generation(
     return full_answer
 
 
-async def _run_generation_task(
-    session_id: str,
-    kb_id: str,
-    query: str,
-    history: list,
-    deep_thinking: bool,
-    ctx: RequestContext,
-    manager: StreamingRunManager,
-    graph: CompiledStateGraph | None = None,
-    partial_holder: dict | None = None,
-) -> str:
-    """后台生成任务包装：设置请求上下文、运行 _run_generation、写终态事件。
-
-    后台任务与调用方处于不同 asyncio task，contextvars 不会自动传播，因此本
-    包装在入口显式 set current_request_ctx / current_trace_id（工具与节点经
-    contextvar 读取 clarify_channel / tool_contexts 等），finally 中 reset。
-    生成正常结束写 done 终态事件到缓冲；异常写 error + done 终态事件
-    （订阅方经 StreamingRunManager.has_terminal 收尾）。
-
-    Args:
-        session_id: 会话 ID
-        kb_id: 知识库 ID
-        query: 用户查询
-        history: 对话历史（不含当前 query）
-        deep_thinking: 深度思考开关
-        ctx: 请求上下文（含 clarify_channel / abort_signal）
-        manager: StreamingRunManager（事件缓冲写入）
-        graph: 图实例（同 _run_generation，None 时抛 ValueError）
-        partial_holder: 可选的 {"text": str} 共享 dict，随 token 产出更新，
-            供取消/出错时写 interrupted 部分回答
-
-    Returns:
-        完整回答（全部 token 累积结果）
-    """
-    trace_id = current_trace_id.get()
-    ctx_token = current_request_ctx.set(ctx)
-    trace_token = current_trace_id.set(trace_id)
-    full_answer = ""
-    try:
-        full_answer = await _run_generation(
-            session_id,
-            kb_id,
-            query,
-            history,
-            deep_thinking,
-            ctx,
-            manager,
-            graph=graph,
-            partial_holder=partial_holder,
-        )
-    except asyncio.CancelledError:
-        raise
-    except Exception as e:  # noqa: BLE001
-        logger.exception("后台生成任务异常: session_id={}", session_id)
-        manager.add_event(
-            session_id,
-            "error",
-            SSEErrorEvent(
-                f"{SSEInteractionTexts.SSE_ERROR_PREFIX}{str(e)[:100]}"
-            ).payload_for_buffer(),
-        )
-        if partial_holder is not None:
-            full_answer = partial_holder["text"]
-    finally:
-        current_request_ctx.reset(ctx_token)
-        current_trace_id.reset(trace_token)
-    manager.add_event(
-        session_id,
-        "done",
-        SSEDoneEvent(trace_id=trace_id or "").payload_for_buffer(),
-    )
-    return full_answer
-
-
 class AgentService:
     """图生命周期管理服务。"""
 
@@ -483,22 +407,20 @@ class AgentService:
         )
         logger.info("AgentService initialized with compiled graph")
 
-    @traced("chat_stream_agent")
     async def stream_chat(
         self,
         kb_id: str,
         session_id: str,
         query: str,
         deep_thinking: bool = False,
-    ) -> AsyncGenerator[SSEEvent, None]:
-        """启动后台生成任务并订阅事件缓冲，流式返回 SSE 事件。
+    ) -> tuple[AsyncGenerator[SSEEvent, None], dict]:
+        """准备一轮生成的订阅生成器与启动上下文，不再启动后台任务。
 
-        生成不再由 SSE 连接生命周期驱动：本方法先按固定顺序取历史（不含当前
-        query）、写 user 消息到 Redis，再启动后台任务（_run_generation_task
-        内跑 _run_generation，经 streaming_manager 写入事件缓冲），随后订阅
-        缓冲将事件转换为 SSE 事件产出。客户端断连只退出订阅（aclose 终止
-        async for），不中止后台生成；仅 cancel 端点经 streaming_manager.set_abort
-        置位中止信号。
+        固定顺序（prompt 上下文正确性关键）：先取历史（不含当前 query）、
+        再写 user 消息到 Redis，然后清空该 session 缓冲。生成任务的启动与
+        assistant 收尾由 API 层负责（_run_with_finalize + _run_generation）：
+        本方法只返回 (subscription_generator, launch_context)，让 API 层
+        拿到启动上下文后再 create_task，避免任务生命周期与 SSE 消费耦合。
 
         Args:
             kb_id: 知识库 ID（空字符串表示跨库搜索）
@@ -507,12 +429,15 @@ class AgentService:
             deep_thinking: 深度思考开关（默认 False）；为 True 时 agent LLM
                 以思考模式调用（enable_thinking）
 
-        Yields:
-            SSEEvent: 转换后的 SSE 事件（status / token / citation / ask_user /
-                error / done）
+        Returns:
+            (subscription_generator, launch_context)：
+            - subscription_generator：订阅事件缓冲的 SSE 消费者生成器
+              （status / token / citation / ask_user / error / done 事件）
+            - launch_context：启动后台任务所需的上下文 dict，键包括
+              history / ctx / graph / session_id / kb_id / query / deep_thinking
         """
         # 顺序约束（prompt 上下文正确性关键）：先取历史（不含当前 query），
-        # 再写 Redis user，再启动后台任务
+        # 再写 Redis user
         history = await self._chat_manager.get_history_async(session_id) or []
         await self._chat_manager.add_message_async(session_id, "user", query)
 
@@ -520,24 +445,13 @@ class AgentService:
         streaming_manager.clear_buffer(session_id)
 
         ctx = RequestContext(session_id=session_id)
-        partial_holder = {"text": ""}
-        task = asyncio.create_task(
-            _run_generation_task(
-                session_id,
-                kb_id,
-                query,
-                history,
-                deep_thinking,
-                ctx,
-                streaming_manager,
-                graph=self._graph,
-                partial_holder=partial_holder,
-            )
-        )
-        streaming_manager.register(session_id, task, ctx.abort_signal)
-        task.add_done_callback(
-            lambda _task: streaming_manager.unregister_if_current(session_id, task)
-        )
-
-        async for event in _subscribe_events(session_id, streaming_manager):
-            yield event
+        launch_context = {
+            "history": history,
+            "ctx": ctx,
+            "graph": self._graph,
+            "session_id": session_id,
+            "kb_id": kb_id,
+            "query": query,
+            "deep_thinking": deep_thinking,
+        }
+        return _subscribe_events(session_id, streaming_manager), launch_context

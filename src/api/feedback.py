@@ -1,7 +1,7 @@
 """答案反馈端点 — POST /feedback。
 
 接收前端对单条答案的评分（positive/negative）与可选评论，写入 MySQL
-feedback 表。落库失败仅记日志不报错（与对话持久化 _persist_conversation
+feedback 表。落库失败仅记日志不报错（与对话持久化 save_assistant_async
 的容错模式一致），保证反馈动作不阻塞、不影响前端交互。
 """
 

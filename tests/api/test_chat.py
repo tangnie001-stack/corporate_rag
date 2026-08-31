@@ -1,5 +1,6 @@
 """Tests for SSE streaming chat endpoint."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -74,20 +75,36 @@ def test_chat_stream_passes_deep_thinking():
     回归场景：前端「深度思考」开关打开时，请求应携带 deep_thinking=true，
     最终传递给 agent LLM 的 enable_thinking 参数；若断链则开关无效。
     """
-    from src.utils.sse import SSETokenEvent
+    from src.utils.sse import SSEDoneEvent, SSETokenEvent
 
     captured = {}
 
+    async def _sub():
+        yield SSETokenEvent("ok")
+        yield SSEDoneEvent(trace_id="")
+
     async def fake_stream_chat(kb_id, session_id, query, deep_thinking=False):
         captured["deep_thinking"] = deep_thinking
-        yield SSETokenEvent("ok")
+        return (
+            _sub(),
+            {
+                "history": [],
+                "ctx": None,
+                "graph": None,
+                "session_id": session_id,
+                "kb_id": kb_id,
+                "query": query,
+                "deep_thinking": deep_thinking,
+            },
+        )
 
     mock_svc = AsyncMock()
     mock_svc.agent_service.stream_chat = fake_stream_chat
     app.dependency_overrides[get_app_service] = lambda: mock_svc
 
     try:
-        with patch("src.api.chat._persist_conversation"):
+        # 后台任务（_run_with_finalize）mock 掉，本用例只验证 deep_thinking 透传
+        with patch("src.api.chat._run_with_finalize", new=AsyncMock()):
             response = client.get(
                 "/api/chat/stream?session_id=s1&kb_id=kb-1&query=hi&deep_thinking=true"
             )
@@ -99,22 +116,32 @@ def test_chat_stream_passes_deep_thinking():
 
 @pytest.mark.asyncio
 async def test_normal_answer_persisted():
-    """正常回答（有 token 无澄清）时应持久化对话。"""
-    from src.api.chat import _stream_rag_response
-    from src.utils.sse import SSEDoneEvent, SSETokenEvent
+    """正常回答（有 token 无澄清）时后台任务将完整回答落库为 complete。"""
+    from src.api.chat import _run_with_finalize
+    from src.chat.streaming import StreamingRunManager
+    from src.infra.llm.request_context import RequestContext
 
+    statuses = []
     svc = MagicMock()
-    events = [
-        SSETokenEvent("净利润100亿"),
-        SSEDoneEvent(),
-    ]
+    svc.save_assistant_async = AsyncMock(
+        side_effect=lambda *a, **k: statuses.append(a[4])
+    )
+    partial_holder = {"text": ""}
 
-    async def _stream(kb_id, session_id, query, deep_thinking=False):
-        for e in events:
-            yield e
+    async def answer_builder():
+        partial_holder["text"] = "净利润100亿"
+        return "净利润100亿"
 
-    with patch("src.api.chat._persist_conversation") as mock_persist:
-        svc.agent_service.stream_chat = _stream
-        async for _ in _stream_rag_response(svc, "", "s1", "净利润多少"):
-            pass
-    mock_persist.assert_called_once()
+    await _run_with_finalize(
+        svc,
+        "s1",
+        "kb1",
+        partial_holder,
+        answer_builder,
+        StreamingRunManager(),
+        asyncio.Event(),
+        lambda: None,
+        RequestContext(session_id="s1"),
+    )
+    assert statuses == ["complete"]
+    svc.save_assistant_async.assert_awaited_once()
