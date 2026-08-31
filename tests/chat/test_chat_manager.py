@@ -184,3 +184,30 @@ class TestChatManagerAsync:
         h_b = await cm.get_history_async("s_b")
         assert len(h_a) == 1 and h_a[0].content == "from_a"
         assert len(h_b) == 1 and h_b[0].content == "from_b"
+
+
+@pytest.mark.asyncio
+async def test_save_user_and_assistant_async(monkeypatch):
+    from src.chat.manager import ChatManager
+
+    calls = []
+
+    async def fake_save_user(session_id, kb_id, user_msg):
+        calls.append(("user", session_id, kb_id, user_msg))
+
+    async def fake_save_assistant(session_id, kb_id, assistant_msg, sources, status):
+        calls.append(("assistant", session_id, kb_id, assistant_msg, status))
+
+    cm = ChatManager.__new__(ChatManager)
+    cm._persistence = type(
+        "P",
+        (),
+        {
+            "save_user_message": staticmethod(fake_save_user),
+            "save_assistant_message": staticmethod(fake_save_assistant),
+        },
+    )()  # type: ignore[assignment]  # 测试用匿名 fake 对象，接口与 PersistenceService 对齐即可
+    await cm.save_user_async("s1", "kb1", "q")
+    await cm.save_assistant_async("s1", "kb1", "a", None, "interrupted")
+    assert calls[0] == ("user", "s1", "kb1", "q")
+    assert calls[1] == ("assistant", "s1", "kb1", "a", "interrupted")

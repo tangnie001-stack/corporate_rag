@@ -68,5 +68,46 @@ class PersistenceService:
         except Exception as e:  # noqa: BLE001
             logger.warning("Failed to save messages async: {}", e)
 
+    async def save_user_message(
+        self, session_id: str, kb_id: str, user_msg: str
+    ) -> None:
+        """写入一条 user 消息（请求开始时调用）。"""
+        try:
+            from src.infra.db.models.chat import MessageModel
+
+            await self._chat_repo.save_message(
+                MessageModel(
+                    session_id=session_id, kb_id=kb_id, role="user", content=user_msg
+                )
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Failed to save user message async: {}", e)
+
+    async def save_assistant_message(
+        self,
+        session_id: str,
+        kb_id: str,
+        assistant_msg: str,
+        sources: list[str] | None = None,
+        status: str = "complete",
+    ) -> None:
+        """写入一条 assistant 消息（完成/中止时调用，status 区分完整与中断）。"""
+        try:
+            from src.infra.db.models.chat import MessageModel
+
+            sources_json = json.dumps(sources, ensure_ascii=False) if sources else None
+            await self._chat_repo.save_message(
+                MessageModel(
+                    session_id=session_id,
+                    kb_id=kb_id,
+                    role="assistant",
+                    content=assistant_msg,
+                    sources=sources_json,
+                    status=status,
+                )
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Failed to save assistant message async: {}", e)
+
     def cleanup_session(self, session_id: str) -> None:
         """清理会话相关数据。"""

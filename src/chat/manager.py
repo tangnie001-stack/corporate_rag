@@ -116,6 +116,25 @@ class ChatManager:
                 sources,
             )
 
+    async def save_user_async(self, session_id: str, kb_id: str, user_msg: str) -> None:
+        """异步写入单条 user 消息到 MySQL（请求开始时调用）。"""
+        if self._persistence:
+            await self._persistence.save_user_message(session_id, kb_id, user_msg)
+
+    async def save_assistant_async(
+        self,
+        session_id: str,
+        kb_id: str,
+        assistant_msg: str,
+        sources: list[str] | None = None,
+        status: str = "complete",
+    ) -> None:
+        """异步写入单条 assistant 消息到 MySQL（完成/中止时调用）。"""
+        if self._persistence:
+            await self._persistence.save_assistant_message(
+                session_id, kb_id, assistant_msg, sources, status
+            )
+
     # ═══════════ Redis / InMemory 核心 ═══════════
 
     def _init_redis(self, redis_url: str) -> None:
