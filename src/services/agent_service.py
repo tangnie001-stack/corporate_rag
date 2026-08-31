@@ -27,6 +27,7 @@ from src.agents.graph.state import (
 )
 from src.agents.graph.workflow import build_graph
 from src.chat.manager import ChatManager
+from src.chat.streaming import StreamingRunManager
 from src.config.const import SSEInteractionTexts
 from src.infra.db.vector_store import VectorStore
 from src.infra.llm.langfuse_tracing import LangfuseTracer, traced
@@ -313,6 +314,61 @@ async def _dual_stream(
         abort_signal.set()
         task_a.cancel()
         await asyncio.gather(task_a, return_exceptions=True)
+
+
+async def _run_generation(
+    session_id: str,
+    kb_id: str,
+    query: str,
+    history: list,
+    deep_thinking: bool,
+    ctx: RequestContext,
+    manager: StreamingRunManager,
+    graph: CompiledStateGraph | None = None,
+    partial_holder: dict | None = None,
+) -> str:
+    """后台生成任务：迭代图事件转换为带 seq 事件写入缓冲，返回完整回答。
+
+    graph.astream_events 产出的 LangGraph 事件经 _convert_event 转成 SSE
+    事件，逐个以 (seq, event.type, event.payload_for_buffer()) 写入
+    manager 的 per-session 缓冲（缓冲 payload 与 to_sse 的 data: 同构）；
+    token 事件同步累积 full_answer，并可选写入 partial_holder 供取消/出错
+    时回读部分回答。clarify_channel 的合并不在本任务范围（由后续任务负责），
+    本函数只消费 graph 事件源。
+
+    Args:
+        session_id: 会话 ID
+        kb_id: 知识库 ID
+        query: 用户查询
+        history: 对话历史（不含当前 query）
+        deep_thinking: 深度思考开关
+        ctx: 请求上下文（含 clarify_channel / abort_signal）
+        manager: StreamingRunManager（事件缓冲写入）
+        graph: 图实例（测试注入用）。模块级函数无法访问 AgentService 的
+            self._graph，生产侧须由调用方显式传入，None 时抛 ValueError。
+        partial_holder: 可选的 {"text": str} 共享 dict，随 token 产出更新，
+            供取消/出错时写 interrupted 部分回答
+
+    Returns:
+        完整回答（全部 token 累积结果）
+
+    Raises:
+        ValueError: graph 未传入（默认图需调用方显式注入）
+    """
+    if graph is None:
+        raise ValueError("_run_generation 需显式传 graph（默认图由调用方注入）")
+    initial_state = AgentState.make_initial_state(
+        session_id, kb_id, query, history, deep_thinking
+    )
+    full_answer = ""
+    async for item in graph.astream_events(initial_state, version=LangGraph.VERSION):
+        for event in _convert_event(item, None):
+            manager.add_event(session_id, event.type, event.payload_for_buffer())
+            if isinstance(event, SSETokenEvent):
+                full_answer += event.token
+                if partial_holder is not None:
+                    partial_holder["text"] = full_answer
+    return full_answer
 
 
 class AgentService:

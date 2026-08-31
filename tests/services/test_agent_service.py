@@ -3,6 +3,7 @@
 覆盖：状态事件按事件类型接线、abstention 判定、model_used 捕获。
 """
 
+import asyncio
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -462,3 +463,29 @@ def test_citation_event_passes_kind():
     )
     citations = [e for e in events if isinstance(e, SSECitationEvent)]
     assert citations[0].kind == "web"
+
+
+@pytest.mark.asyncio
+async def test_run_generation_writes_events_to_buffer(monkeypatch):
+    """生产者 coroutine：图事件→带 seq 缓冲，token 累积为完整回答。"""
+    from src.chat.streaming import StreamingRunManager
+    from src.infra.llm.request_context import RequestContext
+    from src.services.agent_service import _run_generation
+
+    mgr = StreamingRunManager()
+
+    async def fake_astream(*args, **kwargs):
+        yield _chat_model_stream_item("你")
+        yield _chat_model_stream_item("好")
+
+    fake_graph = Mock()
+    fake_graph.astream_events = fake_astream
+    ctx = RequestContext(session_id="s1")
+    ctx.clarify_channel = asyncio.Queue()
+
+    answer = await _run_generation(
+        "s1", "kb1", "q", [], False, ctx, mgr, graph=fake_graph
+    )
+    assert answer == "你好"
+    events = mgr.get_events_since("s1", 0)
+    assert any(et == "token" for _, et, _ in events)
