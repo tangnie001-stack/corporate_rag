@@ -1,9 +1,6 @@
-# request-abort Specification
+# request-abort Specification (Delta)
 
-## Purpose
-定义流式问答的生成中止与清理语义：agent 循环在后台任务中运行，与 SSE 连接解耦；客户端断开/刷新只停止推送，不中止生成；只有用户显式调用的 cancel 接口才中止生成，并保证中止后消息落库完整（user 到达即写、assistant 完成/中止时写）。
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: 生成与连接解耦，仅 cancel 中止生成
 
@@ -47,7 +44,7 @@
 
 ### Requirement: 同 session 并发防护
 
-系统 SHALL 拒绝同一 session 的并发 `/chat/stream` 请求：per-session 锁（Redis `SETNX chat_lock:{session_id}` 带 TTL）在请求开始时获取、后台生成任务完成时 finally 释放（而非 SSE 连接结束时）；获取失败返回 409"当前会话正在处理中"。前端禁输入挡常见情况，锁为后端兜底（双 tab/异常重放）。
+系统 SHALL 拒绝同一 session 的并发 `/chat/stream` 请求：请求开始时先查进程内任务注册表（`_session_tasks` 存在未完成任务即拒绝）并获取 per-session 锁（Redis `SETNX chat_lock:{session_id}` 带 TTL 兜底），两者均在后台生成任务完成时 finally 释放（而非 SSE 连接结束时）；拒绝时返回 409"当前会话正在处理中"。Redis 锁 TTL 过期不构成竞态——进程内注册表始终准确，TTL 仅作兜底上限。前端禁输入挡常见情况，注册表与锁为后端兜底（双 tab/异常重放）。
 
 #### Scenario: 双 tab 并发被拒
 - **WHEN** 同一 session 已有活跃生成任务时再次发起请求

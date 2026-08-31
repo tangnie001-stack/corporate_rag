@@ -92,6 +92,7 @@ docker compose build --no-cache app    # 改依赖后重建
 - API 路由 handler 必须标注请求体和返回类型（Pydantic BaseModel / StreamingResponse），详细标准见 docs/agents/rules.md
 - API Key 和 Token 通过 `.env` 加载，日志中脱敏；连接串不记录到日志
 - 测试 mock 外部依赖，不发起真实网络调用
+- **部署形态**：生产环境单 worker，流式生成状态（任务注册表/事件缓冲）在进程内，不假设多 worker；详见 docs/agents/defensive-patterns.md
 - 需求池文档在 docs/agents/requirements_pool.md
 - **接口契约**：API 参数、返回值、历史踩坑记录详见 docs/agents/api_contract.md，修改公共方法签名**或响应结构**时，同步更新契约文档与受影响测试的断言
 - **代码风格**：不用三元表达式（`a if cond else b`），写完整的 if/else 结构，保持可读性
