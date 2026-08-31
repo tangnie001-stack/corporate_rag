@@ -394,6 +394,28 @@ data: {"trace_id": "trace_xxx"}
 
 会话不存在或无权访问返回 404（`SESSION_NOT_FOUND`），与 2.4.2/2.4.3 一致。
 
+#### 2.4.5 `GET /api/sessions/task-status?session_id={sid}`
+
+查询会话生成任务状态，供前端判断是否在途生成、是否已完成。
+
+| 参数 | 说明 |
+|------|------|
+| `session_id` | 会话 ID |
+
+Success:
+```json
+{"code": "SUCCESS", "message": "操作成功", "data": {"status": "generating", "buffer_seq": 3}}
+```
+
+| 键 | 类型 | 说明 |
+|----|------|------|
+| `status` | str | `generating`（缓冲存在且无终态，生成中）/ `completed`（缓冲有 done/error 终态，或 MySQL 已有 assistant 消息）/ `idle`（无缓冲且无 assistant 消息） |
+| `buffer_seq` | int\|null | 当前缓冲最大事件序号，仅缓冲存在时返回 |
+
+判定顺序：先查进程内缓冲（`streaming_manager`），无缓冲时回退查 MySQL 消息
+（`svc.get_messages` 是否存在 `role=assistant`）。会话不存在或无权访问返回 404
+（`SESSION_NOT_FOUND`），与 2.4.2/2.4.3 一致。
+
 ### 2.5 评估报告
 
 #### 2.5.1 `POST /api/kbs/eval/latest → dict | null`

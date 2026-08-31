@@ -189,3 +189,55 @@ async def resume_session_events(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.get("/sessions/task-status", response_model=ResponseModel)
+async def get_task_status(
+    request: Request,
+    session_id: str = Query(...),
+    svc: AppService = Depends(get_app_service),
+) -> ResponseModel:
+    """查询会话生成任务状态：generating / completed / idle。
+
+    判定顺序：
+    1. 缓冲存在且无终态 → generating（生成中）
+    2. 缓冲存在且有终态（done/error）→ completed
+    3. 无缓冲时 MySQL 存在 assistant 消息 → completed，否则 idle
+
+    Args:
+        request: FastAPI 请求（从中提取 user_id）
+        session_id: 会话 ID
+        svc: 应用服务实例（由 FastAPI 注入）
+
+    Returns:
+        ResponseModel: data 含 status（generating / completed / idle）；
+            缓冲存在时含 buffer_seq（当前缓冲最大事件序号）
+
+    Raises:
+        BusinessError: 会话不存在或无权访问时返回 404
+    """
+    user_id = getattr(request.state, "user_id", "")
+    session = await svc.get_session_by_id(session_id)
+    if not session or (session.get("user_id") and session["user_id"] != user_id):
+        raise BusinessError(Code.SESSION_NOT_FOUND, Code.SESSION_NOT_FOUND_MSG, 404)
+
+    streaming_manager.sweep_expired()
+    if streaming_manager.buffer_exists(session_id):
+        if streaming_manager.has_terminal(session_id):
+            return ResponseModel(
+                data={
+                    "status": "completed",
+                    "buffer_seq": streaming_manager.get_buffer_max_seq(session_id),
+                }
+            )
+        return ResponseModel(
+            data={
+                "status": "generating",
+                "buffer_seq": streaming_manager.get_buffer_max_seq(session_id),
+            }
+        )
+    msgs = await svc.get_messages(session_id)
+    has_assistant = any(m["role"] == "assistant" for m in msgs)
+    if has_assistant:
+        return ResponseModel(data={"status": "completed"})
+    return ResponseModel(data={"status": "idle"})
