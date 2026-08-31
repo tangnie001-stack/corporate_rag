@@ -48,5 +48,6 @@
 | 模型信息 model_info | `agentic-clarification.md` | 11px muted、fallback amber 徽标 |
 | 引用卡片 citation | `agentic-clarification.md` | 编号 badge + 来源 + snippet、hover primary 边框 |
 | 深度思考开关 thinking-toggle | `agentic-clarification.md` | 输入区紧凑 chip、选中 primary、控制 `enable_thinking` |
+| Markdown 渲染 | `chat-markdown.md` | 助手消息 `.bubble-content.md` 富文本渲染（标题/加粗/列表/代码块/引用/表格）、marked+DOMPurify 安全、流式节流重渲染 |
 
 新组件/页面设计时：全局基线更新到本文件，页面级规格写入 `pages/<name>.md`，效果预览输出 `docs/design/<name>-mockup.html`。

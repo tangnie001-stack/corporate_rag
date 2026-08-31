@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>chat-markdown mockup — LLM 回答 Markdown 渲染</title>
+<style>
+  :root {
+    --primary: #3B82F6;
+    --primary-hover: #2563EB;
+    --primary-light: #DBEAFE;
+    --accent: #F97316;
+    --bg: #F8FAFC;
+    --surface: #FFFFFF;
+    --text-primary: #1E293B;
+    --text-secondary: #64748B;
+    --border: #E2E8F0;
+    --bubble-ai: #FFFFFF;
+    --bubble-user: #EFF6FF;
+    --font-body: "Source Sans 3", "PingFang SC", "Microsoft YaHei", sans-serif;
+    --font-code: "Source Code Pro", ui-monospace, "SFMono-Regular", Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font-family: var(--font-body);
+    background: var(--bg);
+    color: var(--text-primary);
+    padding: 24px;
+  }
+  .page-title { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+  .page-sub { color: var(--text-secondary); font-size: 13px; margin-bottom: 24px; }
+
+  /* 聊天容器（模拟 chat.html） */
+  .chat { max-width: 720px; margin: 0 auto; }
+  .bubble-row { display: flex; margin-bottom: 16px; }
+  .bubble-row.user { justify-content: flex-end; }
+  .bubble-avatar { width: 32px; height: 32px; border-radius: 50%; margin-right: 8px;
+    background: var(--primary-light); color: var(--primary); display: flex;
+    align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
+  .bubble-content { max-width: 85%; padding: 12px 16px; border-radius: 12px; }
+  .bubble-row.ai .bubble-content { background: var(--bubble-ai); box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+  .bubble-row.user .bubble-content { background: var(--bubble-user); border-radius: 16px; }
+  .bubble-meta { font-size: 11px; color: var(--text-secondary); margin-bottom: 4px; }
+  .bubble-row.user .bubble-content { color: var(--text-primary); font-size: 15px; }
+
+  /* ===== Markdown 渲染作用域（.md）===== */
+  .bubble-content.md {
+    font-size: 15px; line-height: 1.6;
+    overflow-wrap: anywhere;
+  }
+  .bubble-content.md p { margin: 8px 0; }
+  .bubble-content.md strong { font-weight: 600; }
+  .bubble-content.md h1, .bubble-content.md h2 {
+    font-size: 16px; font-weight: 700; margin: 20px 0 8px;
+  }
+  .bubble-content.md h3 { font-size: 15px; font-weight: 700; margin: 16px 0 6px; }
+  .bubble-content.md h4, .bubble-content.md h5, .bubble-content.md h6 {
+    font-size: 14px; font-weight: 600; margin: 12px 0 6px;
+  }
+  .bubble-content.md h3 + ul, .bubble-content.md h3 + ol,
+  .bubble-content.md h4 + ul, .bubble-content.md h4 + ol { margin-top: 4px; }
+  .bubble-content.md ul, .bubble-content.md ol {
+    padding-left: 18px; margin: 8px 0;
+  }
+  .bubble-content.md li { margin: 6px 0; }
+  .bubble-content.md li::marker { color: var(--text-secondary); }
+  .bubble-content.md ul ul, .bubble-content.md ol ol,
+  .bubble-content.md ul ol, .bubble-content.md ol ul { margin-top: 4px; }
+  .bubble-content.md a { color: var(--primary); text-decoration: none; }
+  .bubble-content.md a:hover { text-decoration: underline; }
+  .bubble-content.md hr { border: none; height: 1px; background: var(--border); margin: 16px 0; }
+  .bubble-content.md :not(pre) > code {
+    font-family: var(--font-code); font-size: 13px;
+    background: rgba(219,234,254,0.4); border-radius: 4px; padding: 1px 5px;
+  }
+  .bubble-content.md pre {
+    font-family: var(--font-code); font-size: 13px;
+    background: #F1F5F9; border-radius: 8px; padding: 12px;
+    overflow-x: auto; margin: 10px 0;
+  }
+  .bubble-content.md pre code { background: none; padding: 0; }
+  .bubble-content.md blockquote {
+    border-left: 3px solid var(--primary); padding-left: 12px;
+    color: var(--text-secondary); margin: 8px 0;
+  }
+  .bubble-content.md table { border-collapse: collapse; margin: 10px 0; display: block; overflow-x: auto; }
+  .bubble-content.md th {
+    background: #F1F5F9; font-weight: 600; text-align: left;
+    border-bottom: 1px solid var(--border); padding: 6px 10px;
+  }
+  .bubble-content.md td { border-bottom: 1px solid var(--border); padding: 6px 10px; }
+  .bubble-content.md input[type="checkbox"] { accent-color: var(--primary); margin-right: 6px; }
+
+  .xss-note { margin-top: 24px; font-size: 13px; color: var(--text-secondary);
+    background: #FEF3C7; border-radius: 8px; padding: 10px 12px; }
+</style>
+</head>
+<body>
+  <div class="page-title">LLM 回答 Markdown 渲染（.md 作用域）</div>
+  <div class="page-sub">chat-markdown-rendering · 参考 deepseek-harness MarkdownText · 演示真实 web 兜底长文答案</div>
+
+  <div class="chat">
+    <!-- 用户气泡 -->
+    <div class="bubble-row user">
+      <div class="bubble-content">
+        <div class="bubble-meta">你</div>
+        我这边想知道阿里云的服务，云防火墙，包年包月和按流量付费，这两种区别是什么
+      </div>
+    </div>
+
+    <!-- 助手气泡（markdown 渲染） -->
+    <div class="bubble-row ai">
+      <div class="bubble-avatar">🤖</div>
+      <div class="bubble-content md" id="answer"></div>
+    </div>
+  </div>
+
+  <div class="xss-note" id="xss-note"></div>
+
+  <script src="vendor/marked.min.js"></script>
+  <script src="vendor/purify.min.js"></script>
+  <script>
+    // 真实 web 兜底答案（trace_4a252403 落库内容）+ 覆盖全部 markdown 元素
+    const md = `阿里云云防火墙主要提供**包年包月**和**按量付费**两种计费方式，它们的核心区别在于付费时机、资源预留以及适用场景不同。以下是详细对比：
+
+### 1. 包年包月 (Subscription)
+*   **付费模式**：**先付费后使用**。您需要提前购买一定时长（如1个月、1年等）的资源使用权。
+*   **价格优势**：相比按量付费，包年包月的单价通常更低，适合长期稳定使用的业务。
+*   **资源预留**：购买后会为您预留固定的防护资源，确保业务连续性。
+*   **适用场景**：
+    *   业务用量可预估且周期较长。
+    *   对成本敏感，希望锁定长期预算的企业。
+
+### 2. 按量付费 (Pay-As-You-Go)
+*   **付费模式**：**先使用后付费**。按小时或按实际资源消耗结算，月底出账。
+*   **灵活性高**：无需提前购买资源，可随时开通和释放实例，按需伸缩。
+*   **价格波动**：平均单价通常高于包年包月。
+
+### 3. 配置示例（代码块）
+
+    resource "alicloud_cloud_firewall" "example" {
+      instance_name = "test"
+      period        = 12   # 包年包月：按月购买
+      payment_type  = "Subscription"
+    }
+
+### 4. 计费方式对比（表格）
+
+| 维度 | 包年包月 | 按量付费 |
+|------|---------|---------|
+| 付费时机 | 先付费后使用 | 先使用后付费 |
+| 单价 | 较低 | 较高 |
+| 弹性 | 固定+弹性后付费 | 完全按需 |
+| 适用 | 长期稳定业务 | 临时/突发场景 |
+
+> **注意**：包年包月默认开启"弹性流量后付费"，大促/突发流量超出基础配额时会自动按流量计费。
+
+### 总结建议
+- [x] 核心生产环境、流量平稳 → 选**包年包月**
+- [ ] 测试环境、流量波动大 → 选**按量付费**
+
+详细文档见 [阿里云云防火墙产品文档](https://www.aliyun.com/product/cloudfirewall) [1]。`;
+
+    const answerEl = document.getElementById('answer');
+    // 渲染管线：marked.parse → DOMPurify.sanitize → innerHTML
+    // 安全要点：marked 默认透传原始 HTML，DOMPurify 解析含 onerror 的 <img> 时
+    // 会在剥离前执行一次 handler（实测 alert 触发）。因此先用 renderer 把原生
+    // HTML 转义为文本，攻击者 HTML 到不了 DOMPurify 解析器（纵深防御）。
+    marked.use({
+      renderer: {
+        html(token) {
+          const s = token.text || token.raw || '';
+          return s.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        },
+      },
+    });
+    answerEl.innerHTML = DOMPurify.sanitize(marked.parse(md, { gfm: true, breaks: true }));
+
+    // XSS 演示：原生 HTML 已在 marked 侧中性化 + DOMPurify 兜底 → 不应有弹窗
+    const xss = '<img src=x onerror="alert(1)">' + '<scr' + 'ipt>alert(2)</scr' + 'ipt>恶意链接：<a href="javascript:alert(3)">点我</a>';
+    let note = '';
+    try {
+      const cleaned = DOMPurify.sanitize(marked.parse(xss, { gfm: true, breaks: true }));
+      note = 'XSS 安全演示：注入 ' + xss + ' → 中性化后渲染为：' + cleaned;
+    } catch (e) {
+      note = 'XSS 安全演示：注入已被中性化（无弹窗），renderer 处理异常：' + e.message;
+    }
+    document.getElementById('xss-note').textContent = note;
+  </script>
+</body>
+</html>
