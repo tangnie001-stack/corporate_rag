@@ -535,7 +535,9 @@ class AgentService:
             )
         )
         streaming_manager.register(session_id, task, ctx.abort_signal)
-        task.add_done_callback(lambda _task: streaming_manager.unregister(session_id))
+        task.add_done_callback(
+            lambda _task: streaming_manager.unregister_if_current(session_id, task)
+        )
 
         async for event in _subscribe_events(session_id, streaming_manager):
             yield event

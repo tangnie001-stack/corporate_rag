@@ -105,6 +105,16 @@ class StreamingRunManager:
         self._session_tasks.pop(session_id, None)
         self._abort_signals.pop(session_id, None)
 
+    def unregister_if_current(self, session_id: str, task: asyncio.Task) -> None:
+        """仅当注册表中登记的是该 task 时才注销。
+
+        防止旧任务的 done_callback 误删同 session 新注册的任务
+        （断连后后台任务继续跑，用户可能对同一 session 二次提问）。
+        """
+        if self._session_tasks.get(session_id) is task:
+            self._session_tasks.pop(session_id, None)
+            self._abort_signals.pop(session_id, None)
+
     def is_running(self, session_id: str) -> bool:
         """该 session 是否已有活跃生成任务。"""
         task = self._session_tasks.get(session_id)

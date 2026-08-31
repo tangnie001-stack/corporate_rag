@@ -25,6 +25,22 @@ async def test_register_unregister_is_running(mgr):
     assert mgr.get_abort_signal("s1") is None
 
 
+@pytest.mark.asyncio
+async def test_unregister_if_current_does_not_remove_newer_task(mgr):
+    async def noop():
+        await asyncio.sleep(0.01)
+
+    task1 = asyncio.create_task(noop())
+    task2 = asyncio.create_task(noop())
+    mgr.register("s1", task1, asyncio.Event())
+    mgr.register("s1", task2, asyncio.Event())  # 覆盖：同 session 第二轮
+    mgr.unregister_if_current("s1", task1)  # 旧任务 done_callback 触发
+    assert mgr.is_running("s1") is True  # 新任务仍在
+    assert mgr._session_tasks["s1"] is task2
+    mgr.unregister_if_current("s1", task2)
+    assert mgr.is_running("s1") is False
+
+
 def test_set_abort_sets_event(mgr):
     signal = asyncio.Event()
     mgr._abort_signals["s1"] = signal
