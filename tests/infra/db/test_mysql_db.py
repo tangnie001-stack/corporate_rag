@@ -1,5 +1,6 @@
 """MySQL 数据层集成测试 — 使用 KbRepo / DocumentRepo。"""
 
+import asyncio
 import uuid
 
 import pytest
@@ -199,3 +200,29 @@ async def test_save_message_passthrough_status():
     )
     msgs = await chat_repo.get_messages(session_id)
     assert msgs[0].status == "interrupted"
+
+
+@pytest.mark.asyncio
+async def test_user_created_at_before_assistant():
+    from src.infra.db.models.chat import MessageModel
+    from src.infra.db.mysql_db import ChatRepo
+
+    chat_repo = ChatRepo(session_factory)
+    session_id = f"sess-ts-{uuid.uuid4().hex[:8]}"
+    # 模拟 M1 时序：user 请求开始写，assistant 延迟（流结束）写
+    await chat_repo.save_message(
+        MessageModel(session_id=session_id, kb_id="", role="user", content="q")
+    )
+    await asyncio.sleep(1.1)  # 越过 1 秒，模拟生成耗时
+    await chat_repo.save_message(
+        MessageModel(
+            session_id=session_id,
+            kb_id="",
+            role="assistant",
+            content="a",
+            status="complete",
+        )
+    )
+    msgs = await chat_repo.get_messages(session_id)
+    assert [m.role for m in msgs] == ["user", "assistant"]
+    assert msgs[0].created_at <= msgs[1].created_at
