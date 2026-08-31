@@ -1049,15 +1049,21 @@ marked.use({
 });
 
 // DOMPurify v3 对 img/audio/video 等 DATA_URI_TAGS 的 data: 恒放行（ALLOWED_URI_REGEXP 管不到），
-// 此处用钩子补一刀：src/href/xlink:href/poster 一律禁止 data:（D7 纵深）
+// 此处用钩子补一刀：src/href/xlink:href/poster 一律禁止 data:（D7 纵深）；
+// data: 图片剥离 src 后不留空 img 占位，整元素移除，避免残留无意义占位
 DOMPurify.addHook('afterSanitizeAttributes', function (node) {
   if (!node.getAttribute) return;
+  let strippedDataUri = false;
   ['src', 'href', 'xlink:href', 'poster'].forEach(function (name) {
     const value = node.getAttribute(name);
     if (value && value.indexOf('data:') === 0) {
       node.removeAttribute(name);
+      strippedDataUri = true;
     }
   });
+  if (strippedDataUri && node.nodeName === 'IMG') {
+    node.remove();
+  }
 });
 
 function renderMarkdown(text) {
