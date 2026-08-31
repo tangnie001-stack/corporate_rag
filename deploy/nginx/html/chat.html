@@ -237,6 +237,17 @@
     gap: 6px;
   }
 
+  /* 历史中中断回答的标记（status === 'interrupted' 的 assistant 气泡） */
+  .interrupted-tag {
+    display: inline-block;
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 6px;
+    padding: 2px 8px;
+    border: 1px dashed var(--border);
+    border-radius: 4px;
+  }
+
   /* ── Status Indicators ── */
   .status-dot {
     display: inline-block;
@@ -1171,12 +1182,16 @@ function renderStatusTag(stage, message) {
   scrollToBottom();
 }
 
-function renderAiAnswer(text) {
+function renderAiAnswer(text, interrupted) {
   const div = document.createElement('div');
   div.className = 'bubble-row ai';
+  let interruptedTag = '';
+  if (interrupted) {
+    interruptedTag = '<div class="interrupted-tag">（回答被中断）</div>';
+  }
   div.innerHTML = `
     <div class="bubble-avatar">🤖</div>
-    <div class="bubble-content md"><div class="bubble-meta">系统</div>${renderMarkdown(text)}</div>
+    <div class="bubble-content md"><div class="bubble-meta">系统</div>${renderMarkdown(text)}${interruptedTag}</div>
   `;
   chatContainer.appendChild(div);
   scrollToBottom();
@@ -1900,7 +1915,7 @@ async function loadSessionMessages(sessionId) {
       if (m.role === 'user') {
         renderUserBubble(m.content || '');
       } else if (m.role === 'assistant') {
-        renderAiAnswer(m.content || '');
+        renderAiAnswer(m.content || '', m.status === 'interrupted');
       }
     });
   } catch (e) {
