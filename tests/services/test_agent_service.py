@@ -549,3 +549,77 @@ async def test_run_generation_writes_events_to_buffer(monkeypatch):
     assert answer == "你好"
     events = mgr.get_events_since("s1", 0)
     assert any(et == "token" for _, et, _ in events)
+
+
+@pytest.mark.asyncio
+async def test_run_generation_accumulates_citation_sources():
+    """生产者流经 SSECitationEvent 时，partial_holder["sources"] 累积 "文件名 (第x页)"。"""
+    from src.chat.streaming import StreamingRunManager
+    from src.infra.llm.request_context import RequestContext
+    from src.services.agent_service import _run_generation
+
+    mgr = StreamingRunManager()
+    partial_holder = {"text": ""}
+
+    async def fake_astream(*args, **kwargs):
+        yield _format_end_item(
+            [
+                {
+                    "index": 1,
+                    "source": "财报.pdf",
+                    "page": 5,
+                    "snippet": "营收100亿",
+                    "score": 0.95,
+                }
+            ]
+        )
+
+    fake_graph = Mock()
+    fake_graph.astream_events = fake_astream
+    ctx = RequestContext(session_id="s1")
+    ctx.clarify_channel = asyncio.Queue()
+
+    await _run_generation(
+        "s1",
+        "kb1",
+        "q",
+        [],
+        False,
+        ctx,
+        mgr,
+        graph=fake_graph,
+        partial_holder=partial_holder,
+    )
+    assert partial_holder["sources"] == ["财报.pdf (第5页)"]
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_persists_citation_sources_on_complete():
+    """完整路径收尾时 save_assistant_async 携带生产者累积的引用来源。"""
+    service, _ = _make_service()
+
+    async def fake_astream(*args, **kwargs):
+        yield _chat_model_stream_item("营收为100亿 [1]")
+        yield _chat_model_end_item("gpt-4o")
+        yield _finalize_end_item("营收为100亿 [1]", has_contexts=True)
+        yield _format_end_item(
+            [
+                {
+                    "index": 1,
+                    "source": "财报.pdf",
+                    "page": 5,
+                    "snippet": "营收100亿",
+                    "score": 0.95,
+                }
+            ]
+        )
+
+    service._graph = Mock()
+    service._graph.astream_events = fake_astream
+
+    _, fake_svc = await _collect_events(service, "kb1", "session-src", "营收多少")
+
+    fake_svc.save_assistant_async.assert_awaited_once()
+    args = fake_svc.save_assistant_async.await_args.args
+    assert args[4] == "complete"
+    assert args[3] == ["财报.pdf (第5页)"]

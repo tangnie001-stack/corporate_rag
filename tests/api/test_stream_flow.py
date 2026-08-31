@@ -107,6 +107,53 @@ async def test_background_task_finalizes_assistant_on_complete():
 
 
 @pytest.mark.asyncio
+async def test_background_task_error_event_round_trips_from_payload():
+    """answer_builder 抛异常时，error 终态事件 payload 可被 from_payload 正常回放。
+
+    回归防线：error 事件必须以 dict {"error": str} 入缓冲（与实时 sse_error 的
+    data: 同构），否则 resume/status 回放路径在 from_payload 处抛
+    TypeError: string indices must be integers。
+    """
+    from src.api.chat import _run_with_finalize
+    from src.chat.streaming import StreamingRunManager
+    from src.infra.llm.request_context import RequestContext
+    from src.utils.sse import SSEErrorEvent, from_payload
+
+    fake_svc = MagicMock()
+    fake_svc.save_assistant_async = AsyncMock()
+    partial_holder = {"text": "部分回答"}
+    mgr = StreamingRunManager()
+
+    async def answer_builder():
+        raise RuntimeError("LLM generation failed")
+
+    await _run_with_finalize(
+        fake_svc,
+        "s1",
+        "kb1",
+        partial_holder,
+        answer_builder,
+        mgr,
+        asyncio.Event(),
+        lambda: None,
+        RequestContext(session_id="s1"),
+    )
+
+    assert mgr.has_terminal("s1") is True
+    error_events = [
+        (seq, etype, payload)
+        for seq, etype, payload in mgr.get_events_since("s1", 0)
+        if etype == "error"
+    ]
+    assert len(error_events) == 1
+    _, etype, payload = error_events[0]
+    assert isinstance(payload, dict)
+    restored = from_payload(etype, payload)
+    assert isinstance(restored, SSEErrorEvent)
+    assert restored.error == "LLM generation failed"
+
+
+@pytest.mark.asyncio
 async def test_chat_stream_conflict_returns_409(mock_app_service):
     """注册表已有活跃任务 → chat_stream 先查注册表返回 409（不依赖 Redis 锁）。
 

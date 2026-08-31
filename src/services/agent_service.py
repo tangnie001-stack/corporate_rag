@@ -347,8 +347,10 @@ async def _run_generation(
         manager: StreamingRunManager（事件缓冲写入）
         graph: 图实例（测试注入用）。模块级函数无法访问 AgentService 的
             self._graph，生产侧须由调用方显式传入，None 时抛 ValueError。
-        partial_holder: 可选的 {"text": str} 共享 dict，随 token 产出更新，
-            供取消/出错时写 interrupted 部分回答
+        partial_holder: 可选的 {"text": str, "sources": list[str]} 共享 dict，
+            随 token 产出更新 text，随 citation 事件累积 sources
+            （"文件名 (第x页)" 列表），供取消/出错时写 interrupted 部分回答、
+            收尾落库引用来源
 
     Returns:
         完整回答（全部 token 累积结果）
@@ -369,6 +371,10 @@ async def _run_generation(
                 full_answer += event.token
                 if partial_holder is not None:
                     partial_holder["text"] = full_answer
+            elif isinstance(event, SSECitationEvent) and partial_holder is not None:
+                partial_holder.setdefault("sources", []).append(
+                    f"{event.source} (第{event.page}页)"
+                )
     return full_answer
 
 

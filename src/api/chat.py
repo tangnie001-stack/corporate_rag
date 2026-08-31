@@ -175,8 +175,8 @@ async def _run_with_finalize(
         svc: AppService 实例（save_assistant_async 落库）
         session_id: 会话 ID
         kb_id: 知识库 ID
-        partial_holder: 生产者写入的 {"text": 已产出 token} 共享 dict，
-            取消/出错时据此写 interrupted 部分回答
+        partial_holder: 生产者写入的 {"text": 已产出 token, "sources": 引用来源列表}
+            共享 dict，取消/出错时据此写 interrupted 部分回答，收尾落库引用来源
         answer_builder: 可调用对象，执行生成并更新 partial_holder["text"]，
             返回完整回答
         manager: StreamingRunManager（终态事件写入缓冲）
@@ -197,7 +197,11 @@ async def _run_with_finalize(
         partial = partial_holder["text"]
         if partial:
             await svc.save_assistant_async(
-                session_id, kb_id, partial, [], "interrupted"
+                session_id,
+                kb_id,
+                partial,
+                partial_holder.get("sources", []),
+                "interrupted",
             )
         manager.add_event(session_id, "done", {"cancelled": True})
         raise
@@ -206,11 +210,21 @@ async def _run_with_finalize(
         partial = partial_holder["text"]
         if partial:
             await svc.save_assistant_async(
-                session_id, kb_id, partial, [], "interrupted"
+                session_id,
+                kb_id,
+                partial,
+                partial_holder.get("sources", []),
+                "interrupted",
             )
-        manager.add_event(session_id, "error", str(e))
+        manager.add_event(session_id, "error", {"error": str(e)})
     else:
-        await svc.save_assistant_async(session_id, kb_id, full_answer, [], "complete")
+        await svc.save_assistant_async(
+            session_id,
+            kb_id,
+            full_answer,
+            partial_holder.get("sources", []),
+            "complete",
+        )
         manager.add_event(session_id, "done", {"trace_id": trace_id or ""})
     finally:
         current_request_ctx.reset(ctx_token)
@@ -260,7 +274,7 @@ async def _stream_rag_response(
         yield to_sse(SSEDoneEvent(trace_id=current_trace_id.get() or ""))
         return
 
-    partial_holder: dict = {"text": ""}
+    partial_holder: dict = {"text": "", "sources": []}
     abort_signal = asyncio.Event()
     ctx = launch_ctx["ctx"]
 
