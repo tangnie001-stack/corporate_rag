@@ -130,7 +130,7 @@ async def ask_user(
     try:
         # 推送问题（经 channel → SSE 事件），随后等待答案
         await ctx.clarify_channel.put({"type": "ask_user", "questions": enriched})
-        answers = await _wait_with_abort_and_timeout(
+        answers = await wait_with_abort_and_timeout(
             fut, ctx.abort_signal, _ask_user_timeout()
         )
         if str(answers) in (
@@ -179,7 +179,7 @@ async def _load_dimension_options(
     return SUGGESTIONS_MAP.get(dimension, [])
 
 
-async def _wait_with_abort_and_timeout(
+async def wait_with_abort_and_timeout(
     fut: asyncio.Future, abort_signal: asyncio.Event, timeout: float
 ) -> Any:
     """等待答案 Future，与 abort 信号、超时三方竞争，先到者胜。

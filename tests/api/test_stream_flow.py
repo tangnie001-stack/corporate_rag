@@ -370,7 +370,7 @@ async def test_chat_stream_conflict_returns_409(mock_app_service):
 async def test_stream_rag_response_wires_ctx_abort_signal(monkeypatch):
     """_stream_rag_response 把 cancel 端点置位的 abort_signal 接到 ctx.abort_signal。
 
-    C2 回归：ask_user 的 _wait_with_abort_and_timeout 等待 ctx.abort_signal，
+    C2 回归：ask_user 的 wait_with_abort_and_timeout 等待 ctx.abort_signal，
     若与注册表里的 abort 信号不是同一事件，取消唤不醒澄清等待，会干等
     ASK_USER_TIMEOUT。断言接线后 ctx.abort_signal 即 cancel 端点 set_abort
     置位的对象，且 set_abort 能直接置位它。

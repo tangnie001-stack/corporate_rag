@@ -48,6 +48,9 @@ WEB_BODY_LIMIT: int = 2000
 # 来源：agentic 改造需求（2026-08-26 phase1）；用途：agent 循环的迭代/追问/历史注入/并发控制
 MAX_AGENT_ITERATIONS = 5  # agent 循环最大迭代数，超限强制收尾
 MAX_ASK_PER_TURN = 2  # 单 turn 内 ask_user 最大调用次数
+MAX_VERIFY_ASK_PER_TURN = (
+    1  # verify"是否联网"询问每轮上限（独立计数，不计入 MAX_ASK_PER_TURN）
+)
 ASK_USER_TIMEOUT = 120  # ask_user 等待用户回答超时秒数
 HISTORY_MAX_TURNS = 10  # 历史注入保留最近轮数
 HISTORY_TOKEN_RATIO = 0.3  # 历史 token 占 context 窗口上限比例

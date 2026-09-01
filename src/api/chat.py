@@ -261,7 +261,7 @@ async def _stream_rag_response(
 
     本函数创建请求级 abort_signal 并注入任务（经 _run_with_finalize /
     _run_generation 消费），同时把它接到 ctx.abort_signal——ask_user 的
-    _wait_with_abort_and_timeout 等待的是后者，cancel 端点置位时才能
+    wait_with_abort_and_timeout 等待的是后者，cancel 端点置位时才能
     即时唤醒澄清等待而非干等超时。
 
     Args:
@@ -294,7 +294,7 @@ async def _stream_rag_response(
     abort_signal = asyncio.Event()
     ctx = launch_ctx["ctx"]
     # 将 cancel 端点置位的 abort_signal 接到请求上下文：ask_user 的
-    # _wait_with_abort_and_timeout 等待的是 ctx.abort_signal，不接线则取消
+    # wait_with_abort_and_timeout 等待的是 ctx.abort_signal，不接线则取消
     # 唤不醒澄清等待，会干等 ASK_USER_TIMEOUT 超时
     ctx.abort_signal = abort_signal
 

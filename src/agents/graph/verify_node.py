@@ -1,9 +1,21 @@
 """验证循环节点 — 完整性/忠实度校验 + 缺失联网询问。
 
 挂在 agent_finalize → format 之间；仅在会话绑定 KB 时生效（纯对话跳过）。
+防死循环两个关键（grilling 决策）：① 确认联网后向 messages 注入 SystemMessage
+驱动 agent 调 search_web；② verify 自查 _agent_iterations 超限标注缺失直通
+（route_agent 的上限检查管不到 verify→agent 边）。
 """
 
+import asyncio
 import re
+
+from langchain_core.messages import SystemMessage
+
+from src.agents.graph.state import AgentState
+from src.agents.tools.ask_tools import wait_with_abort_and_timeout
+from src.config import settings
+from src.config.const import ASK_USER_TIMEOUT, MAX_VERIFY_ASK_PER_TURN
+from src.infra.llm.request_context import current_request_ctx, pending_asks
 
 _YEAR_PATTERN = re.compile(r"20\d{2}")
 
@@ -72,3 +84,111 @@ async def faithfulness_check(answer: str, contexts: list) -> list[str]:
         return [s for s in data.get("unsupported", []) if s.strip()]
     except Exception:  # noqa: BLE001  # judge 失败不阻断流程，静默返回无标记
         return []
+
+
+async def _ask_web_confirm(state: AgentState, missing_years: list[int]) -> bool:
+    """经 clarify_channel 询问用户是否联网，返回确认结果（async，独立计数）。
+
+    Args:
+        state: 当前图状态（读 session_id）
+        missing_years: 缺失年份列表
+
+    Returns:
+        True 用户确认联网；False 拒绝/超时/槽被占（按"未确认"处理）
+    """
+    ctx = current_request_ctx.get()
+    if ctx is None:
+        return False
+    # 独立计数：不计入 MAX_ASK_PER_TURN（LLM 澄清额度），每轮最多询问 1 次
+    if ctx.verify_ask_count >= MAX_VERIFY_ASK_PER_TURN:
+        return False
+    # 单槽保护：LLM 澄清 ask_user 已挂起时放弃询问，避免覆盖其 Future
+    if ctx.session_id in pending_asks:
+        return False
+    ctx.verify_ask_count += 1
+    payload = {
+        "type": "ask_user",
+        "questions": [
+            {
+                "id": "web_confirm",
+                "question": (
+                    f"知识库仅覆盖部分年份，缺失 {missing_years}，是否需要联网搜索补充？"
+                ),
+                "dimension": "free",
+                "options": ["需要", "不需要"],
+                "multi_select": False,
+            }
+        ],
+    }
+    loop = asyncio.get_running_loop()  # async 节点内禁止 run_until_complete
+    fut = loop.create_future()
+    pending_asks[ctx.session_id] = fut
+    try:
+        await ctx.clarify_channel.put(payload)
+        answers = await wait_with_abort_and_timeout(
+            fut, ctx.abort_signal, ASK_USER_TIMEOUT
+        )
+    finally:
+        pending_asks.pop(ctx.session_id, None)
+        fut.cancel()
+    if not isinstance(answers, list) or not answers:
+        return False
+    selected = answers[0].get("selected", "")
+    return selected in ("需要", "需要联网")
+
+
+async def verify_node(state: AgentState) -> dict:
+    """验证循环节点：未绑定 KB 直通；完整性缺失询问/注入重生成；最终答案跑 judge。
+
+    Args:
+        state: 当前图状态
+
+    Returns:
+        {"answer": 答案, "messages": [SystemMessage], "_needs_regenerate": bool,
+         "_unsupported": list}；_needs_regenerate=True 时条件边回 agent 重生成
+    """
+    if not settings.VERIFY_ENABLED:
+        return {"answer": state.answer or ""}
+    ctx = current_request_ctx.get()
+    if not state._resolved_kb_ids:
+        # 纯对话：跳过 verify（claude-code 式轻量自检由 prompt 准则覆盖）
+        return {"answer": state.answer or ""}
+
+    answer = state.answer or ""
+    required = ctx.temporal_years if ctx is not None else []
+    missing = completeness_check(required, answer) if required else []
+    if missing:
+        confirmed = False
+        if ctx is not None and not ctx.web_confirmed:
+            confirmed = await _ask_web_confirm(state, missing)
+            if confirmed:
+                ctx.web_confirmed = True
+            else:
+                # 用户拒绝/超时/槽被占：标注缺失后直通（不重生成）
+                covered = [y for y in required if y not in missing]
+                answer = f"{answer}\n\n> 注：知识库仅覆盖 {covered}，缺失 {missing} 未联网补充。"
+                return {"answer": answer}
+        if ctx is not None and (confirmed or ctx.web_confirmed):
+            # 终止条件：迭代超限不再重生成，标注缺失直通（route_agent 上限检查管不到此边）
+            if state._agent_iterations >= state._max_agent_iterations:
+                covered = [y for y in required if y not in missing]
+                answer = f"{answer}\n\n> 注：知识库仅覆盖 {covered}，缺失 {missing} 未联网补充。"
+                return {"answer": answer}
+            # 注入 SystemMessage 驱动 agent 调 search_web（add_messages reducer 自动追加）
+            guidance = SystemMessage(
+                content=(
+                    f"知识库缺失年份 {missing}，用户已确认联网，"
+                    "请调用 search_web 工具补充这些年份的数据后再回答。"
+                )
+            )
+            return {
+                "answer": answer,
+                "messages": [guidance],
+                "_needs_regenerate": True,
+            }
+    # 最终答案跑忠实度 judge（仅标记，不驱动流程；P1 输出护栏消费）
+    contexts = ctx.tool_contexts if ctx is not None else []
+    unsupported = await faithfulness_check(answer, contexts)
+    if unsupported:
+        return {"answer": answer, "_unsupported": unsupported}
+    return {"answer": answer}

@@ -48,6 +48,10 @@ class AgentState:
         default_factory=list
     )  # 对话历史（注入 prompt 用）
     _token_usage: dict = field(default_factory=dict)  # token 用量统计
+    _needs_regenerate: bool = False  # 验证循环重生成信号（来源：verify 节点置位；范围：单轮执行；用途：条件边回 agent 重生成）
+    _unsupported: list = field(
+        default_factory=list
+    )  # 忠实度 judge 标记的无支撑句子（来源：verify 节点 judge；范围：单轮执行；用途：P1 输出护栏消费）
     timings: dict = field(default_factory=dict)  # 各节点耗时统计
 
     @classmethod

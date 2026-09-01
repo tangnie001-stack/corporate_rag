@@ -28,6 +28,7 @@ def test_graph_topology():
         "agent",
         "tools",
         "agent_finalize",
+        "verify",
         "format",
     }
     # 固定流水线节点已删除

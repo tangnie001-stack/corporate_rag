@@ -64,6 +64,12 @@ TEMPORAL_PARSE_ENABLED: bool = os.getenv("TEMPORAL_PARSE_ENABLED", "true").lower
     "1",
     "yes",
 )
+# 验证循环开关：关闭时 verify 节点直通（出错可即时关闭）
+VERIFY_ENABLED: bool = os.getenv("VERIFY_ENABLED", "true").lower() in (
+    "true",
+    "1",
+    "yes",
+)
 
 # 向量化模型：将文本转为向量，用于 ChromaDB 语义检索
 EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "qwen3.7-text-embedding")
