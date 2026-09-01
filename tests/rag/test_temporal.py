@@ -10,7 +10,12 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from src.infra.db.mysql_db.document_repo import DocumentRepo
-from src.rag.temporal import compute_missing, derive_candidate_years, has_temporal_words
+from src.rag.temporal import (
+    compute_missing,
+    derive_candidate_years,
+    has_temporal_words,
+    parse_temporal,
+)
 
 
 def test_has_temporal_words_hit():
@@ -92,3 +97,34 @@ async def test_derive_candidates_empty_kb_returns_recent_years(monkeypatch):
 
     candidates = await derive_candidate_years(["kb1"])
     assert candidates == sorted(_recent_years())
+
+
+@pytest.mark.asyncio
+async def test_parse_temporal_candidates_only(monkeypatch):
+    class FakeLLM:
+        async def ainvoke(self, messages, **kwargs):
+            return type("R", (), {"content": '{"years": [2023, 2024, 2025]}'})()
+
+    result = await parse_temporal("这几年", [2022, 2023, 2024, 2025], FakeLLM())
+    assert result["years"] == [2023, 2024, 2025]
+    assert result["has_temporal"] is True
+
+
+@pytest.mark.asyncio
+async def test_parse_temporal_out_of_candidate_rejected(monkeypatch):
+    class FakeLLM:
+        async def ainvoke(self, messages, **kwargs):
+            return type("R", (), {"content": '{"years": [2019, 2024]}'})()
+
+    result = await parse_temporal("这几年", [2022, 2023, 2024, 2025], FakeLLM())
+    assert 2019 not in result["years"]
+
+
+@pytest.mark.asyncio
+async def test_parse_temporal_fallback(monkeypatch):
+    class FakeLLM:
+        async def ainvoke(self, messages, **kwargs):
+            raise RuntimeError("llm down")
+
+    result = await parse_temporal("这几年", [], FakeLLM())
+    assert result["has_temporal"] is False

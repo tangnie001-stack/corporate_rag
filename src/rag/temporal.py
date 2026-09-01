@@ -86,3 +86,57 @@ async def derive_candidate_years(kb_ids: list[str]) -> list[int]:
     for i in range(1, TEMPORAL_RECENT_N_YEARS + 1):
         years.add(this_year - i)
     return sorted(years)
+
+
+import json
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+from src.config.const import TEMPORAL_RECENT_N_YEARS
+
+_BEIJING_TZ = ZoneInfo("Asia/Shanghai")
+
+
+def _fallback_recent_years(candidates: list[int]) -> list[int]:
+    """LLM 失败时回退：最近 N 个完整年度 ∩ 候选。"""
+    this_year = datetime.now(_BEIJING_TZ).year
+    recent = [this_year - i for i in range(1, TEMPORAL_RECENT_N_YEARS + 1)]
+    cand = set(candidates)
+    return [y for y in recent if y in cand]
+
+
+async def parse_temporal(query: str, candidates: list[int], llm) -> dict:
+    """LLM 解析相对时间词为候选集合内的年份（含代码校验）。
+
+    Args:
+        query: 含相对时间词的查询
+        candidates: 候选年份集合（KB 元数据 ∪ 最近 N 年派生，可为空）
+        llm: ChatOpenAI 实例（get_classify_llm()，flash）
+
+    Returns:
+        {"years": [...], "has_temporal": bool}；LLM 失败/输出越界时回退最近 3 年 ∩ 候选
+    """
+    if not candidates:
+        return {"years": [], "has_temporal": False}
+    today = datetime.now(_BEIJING_TZ).date()
+    prompt = (
+        "你是时间解析器。把用户查询中的相对时间词解析为具体年份，"
+        f"只能从候选集合中选择，不得输出候选之外的年份。\n"
+        f"今天是 {today.year}年{today.month}月{today.day}日。\n"
+        f"候选年份: {candidates}\n查询: {query}\n"
+        '输出 JSON: {"years": [年份列表]}（完整年度，排除进行中的当年）'
+    )
+    from langchain_core.messages import HumanMessage
+
+    try:
+        resp = await llm.ainvoke([HumanMessage(content=prompt)], temperature=0)
+        raw = (getattr(resp, "content", None) or "").strip()
+        data = json.loads(raw)
+        years = [int(y) for y in data.get("years", []) if isinstance(y, (int, str))]
+    except Exception:  # noqa: BLE001
+        return {"years": _fallback_recent_years(candidates), "has_temporal": True}
+    cand = set(candidates)
+    valid = [y for y in years if y in cand]
+    if not valid:
+        return {"years": _fallback_recent_years(candidates), "has_temporal": True}
+    return {"years": sorted(valid), "has_temporal": True}
