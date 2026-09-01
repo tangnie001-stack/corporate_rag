@@ -42,7 +42,7 @@
 **claude-code**（8.5）
 - Anthropic 终端编码 agent（闭源，~51 万行 TS；2026-03 因 npm source map 误发布泄露，本地为社区还原版 `claude-code-best/claude-code`）。
 - 核心 `queryLoop()`（Async Generator + while(true)，状态机 Compaction→APICall→ToolExecution）+ 六层 harness：43+ 工具 / 5 种权限模式 / 26 事件 × 4 类型 Hooks / 沙箱 / 上下文工程（CLAUDE.md + 记忆 + 四级压缩）/ 多 agent 编排（coordinator，Orchestrator 模式 5 并行子代理）。人驱动 REPL + Plan mode。
-- **何时查阅**：设计 agent 混合编排、横切环节（校验/hooks/权限/压缩）、子代理隔离上下文时。
+- **何时查阅**：设计 agent 混合编排/横切环节/工具系统时优先参考（混合编排、横切环节校验/hooks/权限/压缩、子代理隔离上下文）。
 
 ### 中高价值（6.5–7.5，建议保留）
 
@@ -56,11 +56,11 @@
 
 **deepseek-harness**（7.0）
 - DeepSeek 官方开源 agent harness（2026-08 公测，MIT）。TypeScript monorepo（~230 workspace），一切皆插件（Cordis 元框架）。核心 `ReactLoopAgent`（turn/step 双层 ReAct）+ 事件钩子横切（waterfall/serial：plan-mode/goal/guard/compaction 挂 agent/pre-step 等边界）+ 工具内嵌子循环（subagent→独立 Agent、workflow→worker 线程 JS 脚本）+ 外包驱动（goal-round-driver）+ Session Log 事件溯源。
-- **何时查阅**：设计横切插件机制、事件钩子、上下文压缩、会话可重建日志时（TS/Cordis 绑定，参考思路为主）。
+- **何时查阅**：设计 agent 混合编排/横切环节/工具系统时优先参考（横切插件机制、事件钩子、上下文压缩、会话可重建日志；TS/Cordis 绑定，参考思路为主）。
 
 **codex**（6.5）
 - OpenAI 官方开源 coding agent（Rust monorepo `codex-rs`，Codex CLI + Harness 全面开源）。核心 `session/turn.rs` ReAct 循环 + **编排工具化**（plan/multi_agents spawn-wait-send_input-resume-close/request_permissions 均为模型可调工具）+ 执行/沙箱/压缩（compact 8+ 变体）/hooks/记忆/worktree。
-- **何时查阅**：把编排能力做成工具让模型自治、沙箱/权限/压缩实现时（Rust，语言不同，参考模式）。
+- **何时查阅**：设计 agent 混合编排/横切环节/工具系统时优先参考（编排工具化让模型自治、沙箱/权限/压缩；Rust，语言不同，参考模式）。
 
 **ragflow-0.26.4**（6.0）
 - RAGFlow 开源 RAG 引擎。DeepDoc 文档解析、模板化分块、知识编译器、引用溯源、Agent 沙箱。
