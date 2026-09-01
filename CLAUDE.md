@@ -32,6 +32,7 @@ Python 3.11+ / FastAPI / ChromaDB / LangChain / DashScope / MySQL 8.0 / Redis 7 
 | docs/agents/ui-design-flow.md | UI 设计流程与产物路径：全局基线 `docs/design/MASTER.md` / 页面规格 `docs/design/pages/<name>.md` / 效果预览 `docs/design/<name>-mockup.html` | **改 UI / 新增组件前必读**；产出按此流程落 `docs/design/`，改完用 playwright-cli 验证 |
 | docs/agents/cookbook.md | 操作记录协议：什么该记、怎么记；条目按协议追加 | 遇到可复用操作流程时按协议记录；需要操作步骤时查阅 |
 | docs/agents/requirements_pool.md | 需求池（意向清单，非已确认需求） | 规划/排期时参考；不作为功能实现依据 |
+| docs/agents/reference-projects.md | 参考项目清单：本地 github 镜像仓库、评分排序、各自适用场景与何时查阅 | 写对应领域代码前、选型/排期时参考 |
 
 ## 代码目录结构（修改代码前必读）
 
@@ -113,15 +114,18 @@ docker compose build --no-cache app    # 改依赖后重建
 - **注释陈述契约，不写推理记录**：保留做什么、行为、失败、时序、后果；删除推理过程、测试讲解、代码复述。
 
 ## 参考项目
-以下项目在对应场景下优先参考其实现模式：
+写对应领域代码前优先参考（评分排序与架构详情见 docs/agents/reference-projects.md）：
 
-- `../github/fastapi-0.141.1` — FastAPI 官方。涉及 API 路由、中间件、依赖注入、异常处理时参考
-- `../github/full-stack-fastapi-template-0.10.0` — FastAPI 官方全栈模板。涉及响应模型设计、用户认证、项目分层时参考
-- `../github/fastapi-best-architecture-1.15.0` — FastAPI 社区最佳实践。涉及统一响应格式、全局异常处理、RBAC 权限时参考
-- `../github/langgraph-1.2.10` — LangGraph 官方。涉及 StateGraph、流式事件、子图、Checkpoint、Human-in-the-loop 时参考
-- `../github/awesome-llm-apps-main` — AI Agent/RAG 模板集。涉及 RAG 进阶、多 Agent 协作、记忆、成本优化时参考
-- `../github/fastapi-langgraph-agent-production-ready-template-master` — FastAPI+LangGraph 生产模板。涉及 LLM 容错、长期记忆、Rate Limiting、Eval 框架、生产监控时参考
-- `../github/dify-1.16.1` — Dify 官方。涉及 LLMOps 平台、AI 应用编排、工作流引擎、RAG 管道、插件体系时参考
-- `../github/financial_rag-main` — 财税法务 RAG 知识库。涉及多智能体协作、LangGraph 状态机、知识图谱、混合检索、三层记忆体系时参考
-- `../github/ragflow-0.26.4` — RAGFlow 开源 RAG 引擎。涉及 DeepDoc 文档解析、模板化分块、知识编译器、引用溯源、Agent 沙箱时参考
-- `../github/deepseek-harness`
+- `../github/fastapi-0.141.1` — API 路由、中间件、依赖注入、异常处理
+- `../github/langgraph-1.2.10` — StateGraph、流式事件、子图、Checkpoint、Human-in-the-loop
+- `../github/financial_rag-main` — 同领域财税法务 RAG：多智能体、混合检索、答案校验（FaithfulnessChecker/ReflectAgent）
+- `../github/claude-code` — 框架层混合编排最完整参考（coordinator 多 agent/Plan mode/hooks/子代理/压缩）
+- `../github/fastapi-langgraph-agent-production-ready-template-master` — FastAPI+LangGraph 生产化：LLM 容错、限流、Eval、监控
+- `../github/dify-1.16.1` — 工作流引擎、RAG 管道、插件体系
+- `../github/deepseek-harness` — 事件钩子横切、工具内嵌子循环、会话事件溯源
+- `../github/codex` — 编排工具化、Rust 执行/沙箱/压缩
+- `../github/ragflow-0.26.4` — 文档解析、模板化分块、引用溯源
+- `../github/Qwen-Agent` — Python 薄层多智能体（react_chat/router/group_chat）
+- `../github/awesome-llm-apps-main` — AI Agent/RAG 模板集（理念参考）
+- `../github/full-stack-fastapi-template-0.10.0` — 全栈模板（含前端，本项目后端为主）
+- `../github/fastapi-best-architecture-1.15.0` — 社区最佳实践（与本项目 rules.md 重叠）
