@@ -148,11 +148,11 @@ async def verify_node(state: AgentState) -> dict:
          "_unsupported": list}；_needs_regenerate=True 时条件边回 agent 重生成
     """
     if not settings.VERIFY_ENABLED:
-        return {"answer": state.answer or ""}
+        return {"answer": state.answer or "", "_needs_regenerate": False}
     ctx = current_request_ctx.get()
     if not state._resolved_kb_ids:
         # 纯对话：跳过 verify（claude-code 式轻量自检由 prompt 准则覆盖）
-        return {"answer": state.answer or ""}
+        return {"answer": state.answer or "", "_needs_regenerate": False}
 
     answer = state.answer or ""
     required = ctx.temporal_years if ctx is not None else []
@@ -167,13 +167,22 @@ async def verify_node(state: AgentState) -> dict:
                 # 用户拒绝/超时/槽被占：标注缺失后直通（不重生成）
                 covered = [y for y in required if y not in missing]
                 answer = f"{answer}\n\n> 注：知识库仅覆盖 {covered}，缺失 {missing} 未联网补充。"
-                return {"answer": answer}
+                return {"answer": answer, "_needs_regenerate": False}
         if ctx is not None and (confirmed or ctx.web_confirmed):
             # 终止条件：迭代超限不再重生成，标注缺失直通（route_agent 上限检查管不到此边）
             if state._agent_iterations >= state._max_agent_iterations:
                 covered = [y for y in required if y not in missing]
                 answer = f"{answer}\n\n> 注：知识库仅覆盖 {covered}，缺失 {missing} 未联网补充。"
-                return {"answer": answer}
+                return {"answer": answer, "_needs_regenerate": False}
+            # 防重复注入：同一条联网指引已存在于 messages 时只置重生成信号，不再追加
+            # （LangGraph 节点读 state.messages 是上一轮值，指引后的 agent/tools 产出
+            #   会追加到末尾，故遍历查找而非只看末条；否则循环每轮堆积相同 SystemMessage）
+            already_guided = any(
+                isinstance(m, SystemMessage) and "用户已确认联网" in (m.content or "")
+                for m in state.messages
+            )
+            if already_guided:
+                return {"answer": answer, "_needs_regenerate": True}
             # 注入 SystemMessage 驱动 agent 调 search_web（add_messages reducer 自动追加）
             guidance = SystemMessage(
                 content=(
@@ -190,5 +199,9 @@ async def verify_node(state: AgentState) -> dict:
     contexts = ctx.tool_contexts if ctx is not None else []
     unsupported = await faithfulness_check(answer, contexts)
     if unsupported:
-        return {"answer": answer, "_unsupported": unsupported}
-    return {"answer": answer}
+        return {
+            "answer": answer,
+            "_unsupported": unsupported,
+            "_needs_regenerate": False,
+        }
+    return {"answer": answer, "_needs_regenerate": False}

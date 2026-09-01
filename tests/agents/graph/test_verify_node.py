@@ -195,7 +195,7 @@ async def test_verify_node_unbound_kb_passthrough(monkeypatch):
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
     state = _make_state(answer="纯对话回答", resolved=[])
     result = await verify_node(state)
-    assert result == {"answer": "纯对话回答"}
+    assert result == {"answer": "纯对话回答", "_needs_regenerate": False}
 
 
 @pytest.mark.asyncio
@@ -206,7 +206,10 @@ async def test_verify_node_disabled_passthrough(monkeypatch):
     try:
         state = _make_state(answer="2024年营收3943亿", resolved=["kb1"])
         result = await verify_node(state)
-        assert result == {"answer": "2024年营收3943亿"}  # 无缺失标注
+        assert result == {
+            "answer": "2024年营收3943亿",
+            "_needs_regenerate": False,
+        }  # 无缺失标注
     finally:
         current_request_ctx.reset(token)
 
@@ -227,9 +230,9 @@ async def test_verify_node_missing_user_rejects_annotate(monkeypatch):
             "answer": (
                 "2024年营收3943亿\n\n"
                 "> 注：知识库仅覆盖 [2024]，缺失 [2023, 2025] 未联网补充。"
-            )
+            ),
+            "_needs_regenerate": False,
         }
-        assert "_needs_regenerate" not in result
     finally:
         current_request_ctx.reset(token)
 
@@ -274,9 +277,32 @@ async def test_verify_node_missing_iteration_limit_annotate(monkeypatch):
             "answer": (
                 "2024年营收3943亿\n\n"
                 "> 注：知识库仅覆盖 [2024]，缺失 [2023, 2025] 未联网补充。"
-            )
+            ),
+            "_needs_regenerate": False,
         }
-        assert "_needs_regenerate" not in result
+    finally:
+        current_request_ctx.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_verify_node_missing_confirmed_already_guided(monkeypatch):
+    """缺失年份 + 联网指引已注入过 → 只置重生成信号，不再重复追加 SystemMessage。"""
+    monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
+    monkeypatch.setattr(
+        "src.agents.graph.verify_node._ask_web_confirm",
+        AsyncMock(side_effect=AssertionError("已确认过联网，不应再次询问")),
+    )
+    _ctx, token = _make_ctx(temporal_years=[2023, 2024, 2025], web_confirmed=True)
+    try:
+        state = _make_state(answer="2024年营收3943亿", resolved=["kb1"])
+        state.messages = [
+            SystemMessage(
+                content="知识库缺失年份 [2023, 2025]，用户已确认联网，请调用 search_web 工具补充。"
+            )
+        ]
+        result = await verify_node(state)
+        assert result["_needs_regenerate"] is True
+        assert "messages" not in result  # 不再追加第二条指引
     finally:
         current_request_ctx.reset(token)
 
@@ -293,7 +319,11 @@ async def test_verify_node_complete_runs_judge(monkeypatch):
     try:
         state = _make_state(answer="2024年营收3943亿", resolved=["kb1"])
         result = await verify_node(state)
-        assert result == {"answer": "2024年营收3943亿", "_unsupported": ["句X"]}
+        assert result == {
+            "answer": "2024年营收3943亿",
+            "_unsupported": ["句X"],
+            "_needs_regenerate": False,
+        }
     finally:
         current_request_ctx.reset(token)
 
@@ -310,6 +340,6 @@ async def test_verify_node_complete_judge_clean(monkeypatch):
     try:
         state = _make_state(answer="2024年营收3943亿", resolved=["kb1"])
         result = await verify_node(state)
-        assert result == {"answer": "2024年营收3943亿"}
+        assert result == {"answer": "2024年营收3943亿", "_needs_regenerate": False}
     finally:
         current_request_ctx.reset(token)
