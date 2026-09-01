@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>设计稿 — Chat 页面（harness 布局 · 浅色系 · 参照现有消息样式）v6</title>
+<link href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600;700&family=Source+Sans+3:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* ═══ 设计系统（浅色 · 与现有 chat.html 一致）═══ */
+  :root {
+    --primary: #3B82F6;
+    --primary-hover: #2563EB;
+    --primary-light: #DBEAFE;
+    --bg: #F8FAFC;
+    --surface: #FFFFFF;
+    --surface-muted: #F1F5F9;
+    --text: #1E293B;
+    --text-secondary: #64748B;
+    --text-muted: #94A3B8;
+    --border: #E2E8F0;
+    --bubble-ai: #F8FAFC;
+    --bubble-user: #3B82F6;
+    --bubble-user-text: #FFFFFF;
+    --kb-accent: #3B82F6;
+    --shadow: 0 1px 3px rgba(0,0,0,0.08);
+    --shadow-lg: 0 4px 12px rgba(0,0,0,0.04);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: 'Source Sans 3', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 14px; line-height: 1.5;
+    color: var(--text); background: var(--bg);
+    -webkit-font-smoothing: antialiased;
+  }
+  svg { display: block; }
+
+  .app { display: flex; height: 100vh; }
+
+  /* ── 侧栏（浅色） ── */
+  .sidebar {
+    width: 280px; background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; flex-shrink: 0;
+  }
+  .sidebar-header { padding: 16px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); }
+  .logo {
+    width: 32px; height: 32px; border-radius: 8px;
+    background: linear-gradient(135deg, #3B82F6, #7C3AED);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 700; font-family: Lexend; font-size: 14px;
+  }
+  .brand { display: flex; flex-direction: column; gap: 1px; }
+  .brand-name { font-family: Lexend; font-weight: 600; font-size: 14px; color: var(--text); }
+  .brand-version { font-size: 11px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
+
+  .feature-block { padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; border-bottom: 1px solid var(--border); }
+  .feature-btn {
+    width: 100%; padding: 9px 12px; background: var(--surface-muted);
+    border: 1px solid var(--border); border-radius: 10px;
+    color: var(--text); font-size: 13px; font-weight: 500;
+    display: flex; align-items: center; gap: 8px; cursor: pointer;
+    transition: background 150ms;
+  }
+  .feature-btn:hover { background: #E2E8F0; }
+  .feature-btn svg { width: 15px; height: 15px; color: var(--text-secondary); }
+  .feature-btn .label { flex: 1; text-align: left; }
+
+  .section-title { padding: 16px 16px 8px; font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .session-list { flex: 1; overflow-y: auto; padding: 0 8px; }
+  .session-item {
+    padding: 8px 12px; border-radius: 8px; font-size: 13px; color: var(--text-secondary);
+    cursor: pointer; margin-bottom: 2px; transition: background 150ms;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .session-item:hover { background: var(--surface-muted); color: var(--text); }
+  .session-item.active { background: var(--primary); color: #fff; }
+  .session-item .rel-time { font-size: 11px; color: var(--text-muted); margin-left: 6px; }
+  .session-item.active .rel-time { color: rgba(255,255,255,0.8); }
+
+  .sidebar-footer { padding: 12px 16px; border-top: 1px solid var(--border); }
+  .user-avatar { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; cursor: pointer; transition: background 150ms; }
+  .user-avatar:hover { background: var(--surface-muted); }
+  .avatar {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: var(--surface-muted); border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-secondary); font-size: 13px; font-weight: 600;
+  }
+  .user-meta { display: flex; flex-direction: column; }
+  .user-name { font-size: 13px; color: var(--text); }
+  .user-action { font-size: 11px; color: var(--text-muted); }
+
+  /* ── 主区 ── */
+  .main { flex: 1; display: flex; flex-direction: column; background: var(--bg); overflow: hidden; }
+  .page { display: none; width: 100%; height: 100%; }
+  .page.active { display: flex; flex-direction: column; }
+
+  /* ═══ 页面①：新对话页（输入框居中） ═══ */
+  .new-chat { align-items: center; justify-content: center; padding: 40px 24px; }
+  .new-chat .welcome-logo {
+    width: 56px; height: 56px; border-radius: 14px; margin: 0 auto 20px;
+    background: linear-gradient(135deg, #3B82F6, #7C3AED);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 700; font-family: Lexend; font-size: 22px;
+  }
+  .new-chat .welcome-brand { display: flex; align-items: center; justify-content: center; gap: 8px; font-family: Lexend; font-weight: 600; font-size: 20px; margin-bottom: 8px; }
+  .preview-tag { background: var(--surface-muted); border: 1px solid var(--border); color: var(--text-secondary); padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 500; }
+  .new-chat .welcome-title { font-family: Lexend; font-weight: 600; font-size: 26px; margin: 8px 0 8px; text-align: center; }
+  .new-chat .welcome-sub { color: var(--text-secondary); font-size: 14px; margin-bottom: 28px; text-align: center; }
+
+  /* ★ 知识库选择器（输入框上方） */
+  .kb-bar { width: 100%; max-width: 720px; margin: 0 auto 10px; display: flex; align-items: center; }
+  .kb-trigger {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 7px 14px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    font-size: 13px; color: var(--text); cursor: pointer;
+    box-shadow: var(--shadow);
+    transition: border-color 150ms, background 150ms;
+  }
+  .kb-trigger:hover { border-color: var(--primary); }
+  .kb-trigger svg { width: 14px; height: 14px; color: var(--text-secondary); }
+  .kb-trigger .chevron { width: 12px; height: 12px; opacity: 0.6; margin-left: 2px; }
+  .kb-trigger .kb-selected { color: var(--primary); font-weight: 500; }
+  .kb-trigger .kb-none { color: var(--text-secondary); }
+
+  .kb-menu {
+    position: absolute; top: calc(100% + 6px); left: 0;
+    min-width: 240px; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 6px; box-shadow: var(--shadow-lg);
+    display: none; z-index: 30;
+  }
+  .kb-menu.open { display: block; }
+  .kb-menu-title { padding: 6px 10px 4px; font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .kb-menu-item {
+    display: flex; align-items: center; gap: 9px;
+    padding: 9px 10px; border-radius: 8px;
+    font-size: 13px; color: var(--text); cursor: pointer;
+    transition: background 150ms;
+  }
+  .kb-menu-item:hover { background: var(--surface-muted); }
+  .kb-menu-item .kb-icon { width: 14px; height: 14px; color: var(--text-secondary); }
+  .kb-menu-item .check {
+    margin-left: auto; width: 16px; height: 16px;
+    border: 1px solid var(--border); border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .kb-menu-item.selected .check { border-color: var(--primary); background: var(--primary); }
+  .kb-menu-item.selected .check svg { width: 10px; height: 10px; }
+  .kb-menu-divider { height: 1px; background: var(--border); margin: 6px 4px; }
+  .kb-menu-manage { color: var(--text-secondary); }
+  .kb-menu-manage svg { width: 14px; height: 14px; opacity: 0.8; }
+
+  /* 输入框 */
+  .composer {
+    width: 100%; max-width: 720px; margin: 0 auto;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 24px;
+    padding: 14px 14px 12px; box-shadow: var(--shadow-lg);
+    transition: border-color 150ms;
+  }
+  .composer:focus-within { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(59,130,246,0.15); }
+  .composer-input {
+    width: 100%; min-height: 28px; max-height: 220px;
+    background: transparent; border: none; outline: none;
+    color: var(--text); font-size: 15px; line-height: 1.5;
+    resize: none; font-family: inherit;
+  }
+  .composer-input::placeholder { color: var(--text-muted); }
+  .composer-bottom { margin-top: 10px; display: flex; align-items: center; justify-content: flex-end; }
+
+  .send-btn {
+    width: 38px; height: 38px; border-radius: 50%;
+    border: 1px solid var(--border); background: transparent;
+    color: var(--text-secondary);
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+    transition: background 150ms, color 150ms, border-color 150ms;
+  }
+  .send-btn:hover { background: var(--surface-muted); }
+  .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .send-btn:not(:disabled) { border-color: var(--primary); background: var(--primary); color: #fff; }
+  .send-btn:not(:disabled):hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+  .send-btn svg { width: 18px; height: 18px; }
+
+  /* ═══ 页面②：历史对话页 ═══ */
+  .main-header {
+    height: 52px; padding: 0 24px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+    background: var(--surface);
+  }
+  .header-title { font-size: 13px; color: var(--text-secondary); display: flex; align-items: center; gap: 10px; }
+  .header-title .dot { width: 6px; height: 6px; border-radius: 50%; background: #10B981; }
+  .header-title .kb-info { color: var(--primary); font-weight: 500; }
+  .header-title .kb-info:empty { display: none; }
+
+  /* 消息流（参照现有 chat.html：用户蓝气泡、AI 浅灰气泡） */
+  .chat-thread { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding: 24px; align-items: center; }
+  .chat-thread .inner { width: 100%; max-width: 880px; display: flex; flex-direction: column; gap: 16px; }
+  .msg-row { display: flex; }
+  .msg-row.user { justify-content: flex-end; }
+  .msg { max-width: 72%; border-radius: 12px; padding: 10px 14px; font-size: 14px; line-height: 1.6; }
+  .msg-row.user .msg { background: #F1F5F9; color: var(--text); border-top-right-radius: 4px; }
+  .msg-row.ai { justify-content: flex-start; }
+  .msg-row.ai .msg { background: var(--bubble-ai); border: 1px solid var(--border); border-top-left-radius: 4px; max-width: 100%; }
+
+  /* markdown 排版（AI 回复） */
+  .md { font-size: 14px; line-height: 1.7; color: var(--text); }
+  .md h1, .md h2, .md h3 { font-family: Lexend; font-weight: 600; margin: 14px 0 6px; line-height: 1.4; }
+  .md h1 { font-size: 18px; } .md h2 { font-size: 16px; } .md h3 { font-size: 14px; }
+  .md p { margin: 6px 0; }
+  .md ul, .md ol { margin: 6px 0; padding-left: 20px; }
+  .md li { margin: 3px 0; }
+  .md code { background: #F1F5F9; border-radius: 4px; padding: 1px 5px; font-family: 'JetBrains Mono', monospace; font-size: 12.5px; }
+  .md pre { background: #0F172A; color: #E2E8F0; border-radius: 8px; padding: 10px 12px; overflow-x: auto; margin: 8px 0; }
+  .md pre code { background: transparent; color: inherit; padding: 0; }
+  .md blockquote { border-left: 3px solid var(--border); padding-left: 10px; margin: 8px 0; color: var(--text-secondary); }
+  .md table { border-collapse: collapse; margin: 8px 0; font-size: 13px; }
+  .md th, .md td { border: 1px solid var(--border); padding: 5px 10px; }
+  .md th { background: var(--surface-muted); }
+  .md a { color: var(--primary); text-decoration: none; }
+  .md a:hover { text-decoration: underline; }
+
+  .tool-strip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; background: var(--surface-muted); border-radius: 8px; font-size: 12px; color: var(--text-secondary); margin-top: 8px; }
+  .tool-strip svg { width: 12px; height: 12px; }
+  .ref-card { margin-top: 8px; padding: 8px 12px; background: var(--surface-muted); border-left: 3px solid var(--primary); border-radius: 6px; font-size: 12px; color: var(--text-secondary); }
+  .ref-card b { color: var(--primary); }
+  .model-note { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
+  .model-note b { color: var(--text-secondary); font-weight: 500; }
+  .feedback { display: inline-flex; gap: 4px; margin-top: 6px; }
+  .feedback button { border: none; background: transparent; color: var(--text-muted); cursor: pointer; padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+  .feedback button:hover { background: var(--surface-muted); color: var(--text); }
+
+  .composer-wrap { flex-shrink: 0; padding: 16px 24px 20px; display: flex; flex-direction: column; align-items: center; background: var(--bg); }
+  .composer-wrap .composer { max-width: 880px; }
+
+  .mock-help {
+    position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%);
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text-secondary); font-size: 11px; padding: 6px 14px; border-radius: 20px;
+    box-shadow: var(--shadow); z-index: 40;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ========== 左侧栏 ========== -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">FQ</div>
+      <div class="brand">
+        <div class="brand-name">Corporate Agent Harness</div>
+        <div class="brand-version">v0.1.0</div>
+      </div>
+    </div>
+
+    <div class="feature-block">
+      <button class="feature-btn" onclick="go('new')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>
+        <span class="label">新建会话</span>
+      </button>
+      <button class="feature-btn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+        <span class="label">知识库管理</span>
+      </button>
+    </div>
+
+    <div class="section-title">会话历史</div>
+    <div class="session-list">
+      <div class="session-item" onclick="go('history')">腾讯这几年业绩怎么样<span class="rel-time">2m</span></div>
+      <div class="session-item" onclick="go('history')">腾讯 2024 年报关键数据<span class="rel-time">1h</span></div>
+      <div class="session-item" onclick="go('history')">东软 Q1 业务亮点<span class="rel-time">7d</span></div>
+      <div class="session-item" onclick="go('history')">对比腾讯与阿里同期营收<span class="rel-time">12d</span></div>
+    </div>
+
+    <div class="sidebar-footer">
+      <div class="user-avatar" title="登录 / 退出登录">
+        <div class="avatar">U</div>
+        <div class="user-meta">
+          <div class="user-name">用户名</div>
+          <div class="user-action">登录 · 退出</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ========== 主区 ========== -->
+  <main class="main">
+
+    <!-- ═══ 页面①：新对话页 ═══ -->
+    <div class="page new-chat active" id="page-new">
+      <div class="welcome-logo">FQ</div>
+      <div class="welcome-brand">Corporate Agent Harness <span class="preview-tag">预览版</span></div>
+      <div class="welcome-title">探索企业知识，赋能业务问答</div>
+      <div class="welcome-sub">基于工具与知识库的智能助手，支持多知识库切换与联网补充</div>
+
+      <!-- ★ 知识库选择器（输入框上方） -->
+      <div class="kb-bar">
+        <div class="kb-trigger" onclick="toggleMenu(event)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+          <span class="kb-selected kb-none" id="kbLabel">选择知识库</span>
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <div class="kb-menu" id="kbMenu">
+          <div class="kb-menu-title">选择知识库</div>
+          <div class="kb-menu-item" data-kb="腾讯" onclick="pick(event)">
+            <svg class="kb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+            腾讯
+            <span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg></span>
+          </div>
+          <div class="kb-menu-item" data-kb="东软" onclick="pick(event)">
+            <svg class="kb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+            东软
+            <span class="check"></span>
+          </div>
+          <div class="kb-menu-divider"></div>
+          <div class="kb-menu-item kb-menu-manage" onclick="closeMenu()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            知识库管理…
+          </div>
+        </div>
+      </div>
+
+      <div class="composer">
+        <textarea class="composer-input" placeholder="描述你想查询的内容，例如「腾讯这几年的业绩怎么样」"></textarea>
+        <div class="composer-bottom">
+          <button class="send-btn" disabled title="发送">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ 页面②：历史对话页 ═══ -->
+    <div class="page" id="page-history">
+      <header class="main-header">
+        <div class="header-title">
+          <span class="dot"></span>
+          <span>腾讯这几年业绩怎么样</span>
+          <span class="kb-info">知识库:腾讯</span>
+        </div>
+        <div class="model-info">
+          <span class="preview-tag">预览版</span>
+        </div>
+      </header>
+
+      <div class="chat-thread">
+        <div class="inner">
+          <div class="msg-row user">
+            <div class="msg">腾讯这几年业绩怎么样？</div>
+          </div>
+          <div class="msg-row ai">
+            <div class="msg md">
+              <h3>腾讯 2024 年业绩概要</h3>
+              <p>根据知识库内容，腾讯 <b>2024 年</b>营业收入为 <b>3943 亿元</b>，同比增长约 8%<span class="cite">[1][2]</span>。</p>
+              <ul>
+                <li>营业收入：<b>3943 亿元</b>（同比 +8%）</li>
+                <li>净利润：<b>1068 亿元</b>（同比 +36%）</li>
+              </ul>
+              <blockquote>数据来源：tencent_2024_annual.pdf<span class="cite">[1][2]</span></blockquote>
+              <div class="tool-strip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>检索：腾讯控股年报（2 条）</div>
+              <div class="ref-card"><b>[1]</b> tencent_2024_annual.pdf (p.3) — 营业收入 3943 亿</div>
+              <div class="ref-card"><b>[2]</b> tencent_2024_annual.pdf (p.5) — 净利润 1068 亿</div>
+              <div class="model-note">由 <b>DeepSeek-V4-Flash</b> 回答</div>
+              <div class="feedback"><button>👍</button><button>👎</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 底部输入框 -->
+      <div class="composer-wrap">
+        <div class="composer">
+          <textarea class="composer-input" placeholder="描述你想查询的内容…"></textarea>
+          <div class="composer-bottom">
+            <button class="send-btn" disabled title="发送">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<div class="mock-help">设计稿演示：点「新建会话」→ 新对话页；点会话项 → 历史对话页；点知识库胶囊 → 单选弹窗</div>
+
+<script>
+  function go(name) {
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.getElementById('page-' + name).classList.add('active');
+    closeMenu();
+  }
+  function toggleMenu(e) {
+    e.stopPropagation();
+    const menu = e.currentTarget.nextElementSibling;
+    document.querySelectorAll('.kb-menu').forEach(m => { if (m !== menu) m.classList.remove('open'); });
+    menu.classList.toggle('open');
+  }
+  function closeMenu() { document.querySelectorAll('.kb-menu').forEach(m => m.classList.remove('open')); }
+  document.addEventListener('click', closeMenu);
+
+  function pick(e) {
+    e.stopPropagation();
+    const item = e.currentTarget;
+    const menu = item.closest('.kb-menu');
+    const triggerLabel = menu.parentElement.querySelector('.kb-selected');
+    const wasSelected = item.classList.contains('selected');
+    menu.querySelectorAll('.kb-menu-item[data-kb], .kb-menu-item.selected').forEach(i => i.classList.remove('selected'));
+    if (!wasSelected) {
+      item.classList.add('selected');
+      if (triggerLabel) triggerLabel.textContent = item.dataset.kb;
+    } else {
+      if (triggerLabel) { triggerLabel.textContent = '请选择知识库'; triggerLabel.classList.add('kb-none'); }
+    }
+    closeMenu();
+  }
+  document.querySelectorAll('.composer-input').forEach(t => t.addEventListener('input', function () {
+    const send = this.closest('.composer').querySelector('.send-btn');
+    send.disabled = this.value.trim().length === 0;
+  }));
+</script>
+</body>
+</html>
