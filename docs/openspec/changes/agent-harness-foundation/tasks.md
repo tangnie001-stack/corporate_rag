@@ -19,11 +19,12 @@
 ## 3. 验证循环（spec: answer-verification）
 
 - [ ] 3.1 完整性校验函数：**正则提取答案年份（`\d{4}`，来自 `AgentState.answer`）**，比对"要求覆盖年份（RequestContext.temporal_years）"，输出缺失清单
-- [ ] 3.2 忠实度校验：LLM judge（**复用 `RAGAS_LLM_MODEL`，temperature=0**）对照引用上下文逐句核对答案事实点（Self-RAG IsSup 思路），输出无支撑句子清单；judge 只标记不删内容
-- [ ] 3.3 `workflow.py` 插入 `verify` 节点：`agent_finalize` → `verify` → 条件边（通过→`format`）；**缺失年份时经 `ask_user` 机制（复用 clarify_channel）询问"是否联网补充"** → 用户确认才触发 search_web 补充并回 agent 重生成，拒绝则标注"知识库仅覆盖 X 年"后直接 format
+- [ ] 3.2 忠实度校验：LLM judge（**复用 `RAGAS_LLM_MODEL`，temperature=0**）对照引用上下文逐句核对答案事实点（Self-RAG IsSup 思路），输出无支撑句子清单；judge 只标记不删内容；**仅在完整性通过后的最终答案运行**（中途重生成不跑）
+- [ ] 3.3 `workflow.py` 插入 `verify` 节点：`agent_finalize` → `verify` → 条件边（通过→`format`）；**缺失年份时经 `ask_user` 机制（复用 clarify_channel）询问"是否联网补充"**（**独立计数，不计入 MAX_ASK_PER_TURN**）→ 用户确认才触发 search_web 补充并回 agent 重生成，拒绝则标注"知识库仅覆盖 X 年"后直接 format
 - [ ] 3.4 会话内记住联网确认：`RequestContext.web_confirmed` 置位后，后续缺失年份直接联网不再询问；修订终止条件：LLM judge 最多 2 轮，超限转拒答（标注信息不足）或转人工；新增配置开关（env）即时启停
 - [ ] 3.5 单测：完整性缺失触发询问、用户确认/拒绝分支、web_confirmed 会话内不重复询问、无支撑断言标记、轮次上限转拒答、开关禁用时直接通过
 - [ ] 3.6 验证循环日志：校验结果（通过/不通过/轮次/缺失年份清单/询问与确认结果）打点，便于排查
+- [ ] 3.7 纯对话轻量自检：`FINANCIAL_SYSTEM_PROMPT` 增加忠实报告准则（claude-code 模式）——"不确定/无法验证的内容如实说明、不编造；可联网核实就联网；不把没查证的当查证了"；verify 节点未绑定 KB 时跳过
 
 ## 4. 工具注册表化（spec: tool-registry）
 
@@ -33,6 +34,7 @@
 - [ ] 4.4 **KB=RAG 开关**：会话未绑定 KB 时不注册 retrieve_kb（工具不出现在 LLM 可见列表）；`kb_id=""` 语义改为"不检索"（`kb_router_node` 空值时 `_resolved_kb_ids=[]`），废弃隐式跨库
 - [ ] 4.5 MCP 适配器入口预留：统一工具 schema 定义，MCP 工具可经适配器注册（本 change 不实际接 MCP server）
 - [ ] 4.6 单测：注册/启停/返回列表、新工具注册不影响主循环、停用工具不出现在 LLM 可见列表、空 kb_id 不检索（retrieve_kb 返回空）
+- [ ] 4.7 **search_web 升级 `queries: list[str]` 数组**：`SearchWebArgs` schema 改多查询（最多 4 个）、tavily 并发调用合并结果统一编号、单测（多 query 一次调用占 1 次 web 额度）
 
 ## 5. 聊天页 UI 重构（spec: chat-harness-ui，设计稿 docs/design/pages/chat-harness.md）
 

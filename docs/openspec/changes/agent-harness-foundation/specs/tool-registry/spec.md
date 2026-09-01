@@ -41,3 +41,12 @@
 
 - **WHEN** 接入一个 MCP server 并加载其工具
 - **THEN** MCP 工具经适配器转换为注册表统一 schema 注册，可与其他本地工具一并启用/停用
+
+### Requirement: search_web 多查询升级
+
+`search_web` 工具 SHALL 升级参数为 `queries: list[str]` 数组（deepseek-harness `web_search` 模式，最多 4 个查询），一次工具调用可覆盖多个搜索目标（如缺失多个年份）；调用次数仍受 `WEB_SEARCH_PER_TURN_LIMIT` 约束（一次多查询调用占 1 次额度）。
+
+#### Scenario: 多缺失年份一次搜索
+
+- **WHEN** 用户确认联网，缺失年份 [2023, 2025]
+- **THEN** LLM 调用 `search_web(queries=["腾讯 2023 年报 业绩", "腾讯 2025 年 业绩"])`，一次调用覆盖两个年份，占 1 次 web 额度

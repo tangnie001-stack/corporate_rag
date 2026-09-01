@@ -44,6 +44,8 @@
 
 **judge 模型**：复用 `RAGAS_LLM_MODEL`（默认 `qwen3.8-max`，temperature 固定 0，独立于生产 LLM 的非推理评估模型）。理由：temperature=0 判断稳定、独立模型避免"自己审自己"偏倚、`LangchainLLMWrapper` 封装可复用（`src/cli/eval_ragas.py`）。结构化校验先行（规则，快且权威），LLM judge 仅补忠实度盲区，标记无支撑句子供修订参考、不直接删内容。
 
+**judge 触发时机（grilling 决策）**：完整性校验（正则，快）每次生成后执行；**LLM judge 只在完整性通过后的最终答案运行**——中途"询问联网→重生成"的过程答案不跑 judge，一次问答 judge 最多 1-2 次（最终版 + judge 打回后的修订版，受 2 轮上限约束）。
+
 **定位说明**：验证循环是所有生产 harness 的标配（harness 12 模块第 10 项，业界公认"demo 与生产"分界线）。编码 agent（claude-code/codex）用规则反馈（测试/linter/类型检查）验证——产物可执行；本项目是 RAG，答案不可执行验证，故用"结构化规则 + LLM judge"组合。deepseek-harness 目前只有工具错误回喂，无独立答案评审，属其缺口而非行业标准。
 
 **备选与取舍**：
@@ -64,7 +66,9 @@
 
 **方案**：`workflow.py` 在 `agent_finalize` 与 `format` 之间插入 `verify` 节点（条件边：通过→format，不通过→触发补充或转拒答）；kb_router 保持现状（P1 再下移）。
 
-**缺失处理（grilling 决策）**：完整性校验检测到答案缺失年份时，**不自动修订补充**，而是通过 `ask_user` 机制（复用 `clarify_channel` 投递，同现有澄清卡片）询问用户"是否联网补充缺失年份"——用户确认后才触发 search_web 联网；用户拒绝则返回现有答案并标注"知识库仅覆盖 X 年"。**会话内记住确认**（`RequestContext.web_confirmed`）：用户在某会话确认过"需要联网"后，后续缺失年份不再询问，直接联网。
+**缺失处理（grilling 决策）**：完整性校验检测到答案缺失年份时，**不自动修订补充**，而是通过 `ask_user` 机制（复用 `clarify_channel` 投递，同现有澄清卡片）询问用户"是否联网补充缺失年份"——用户确认后才触发 search_web 联网；用户拒绝则返回现有答案并标注"知识库仅覆盖 X 年"。**会话内记住确认**（`RequestContext.web_confirmed`）：用户在某会话确认过"需要联网"后，后续缺失年份不再询问，直接联网。**verify 的"是否联网"询问独立计数**（不计入 `MAX_ASK_PER_TURN`，每轮最多询问 1 次，避免与 LLM 澄清互相挤占额度）。
+
+**纯对话（未绑定 KB）轻量自检（grilling 决策）**：verify 节点仅在绑定 KB 时生效（无检索证据可核对）；纯对话场景跳过 verify，改用 **claude-code 式 prompt 行为准则**（零额外 LLM 调用）：system prompt 要求"不确定/无法验证的内容如实说明、不编造；可联网核实就联网；不把没查证的当查证了"（呼应 claude-code `prompts.ts` 的忠实报告准则）。
 
 **备选与取舍**：
 - 现在下移 kb_router：单独动一次图 + 改一批测试 → 否决（P1 与验证循环一起动图，图只改一次）
@@ -93,6 +97,8 @@
 - 代码自动调 search_web：绕过用户知情同意，财务数据可靠性无保障 → 否决
 - 注入给 LLM 让它自主调（原方案）：LLM 不靠谱（本次 bug 根因）、且绕过了用户对联网数据的知情 → 否决
 - **采纳理由**：有 KB 时"数据为准 + 联网需知情同意"（联网数据可能与 KB 冲突/质量不可靠）；无 KB 时本就纯对话，LLM 自主是自然行为
+
+**search_web 多查询升级（grilling 决策）**：确认联网后缺失多个年份（如 [2023, 2025]）时，`search_web` 升级为 `queries: list[str]` 数组（deepseek-harness `web_search` 模式，最多 4 个 query × 每 query 若干结果），一次工具调用覆盖所有缺失年份——省 `web_count` 额度、省 agent 迭代（每次迭代都是 LLM token 成本）。
 
 ### D7: KB = RAG 开关，跨库检索废弃（grilling 决策）
 
