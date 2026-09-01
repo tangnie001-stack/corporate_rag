@@ -126,5 +126,7 @@ async def test_parse_temporal_fallback(monkeypatch):
         async def ainvoke(self, messages, **kwargs):
             raise RuntimeError("llm down")
 
-    result = await parse_temporal("这几年", [], FakeLLM())
-    assert result["has_temporal"] is False
+    candidates = [2022, 2023, 2024, 2025]
+    result = await parse_temporal("这几年", candidates, FakeLLM())
+    assert result["years"] == [y for y in _recent_years() if y in candidates]
+    assert result["has_temporal"] is True
