@@ -28,6 +28,12 @@ from src.infra.search.query_router import aggregate_kb_entities
 from src.rag import retrieval
 from src.rag.context import RAGContext
 from src.rag.retrieval import _ALL_ENTITY_KEYS
+from src.rag.temporal import (
+    compute_missing,
+    derive_candidate_years,
+    has_temporal_words,
+    parse_temporal,
+)
 
 # ASK_USER_TIMEOUT / aggregate_kb_entities 为 ask_tools 的 monkeypatch 入口（测试经
 # rag_tools 模块属性替换），并作为本模块对外 re-export 的一部分
@@ -92,6 +98,21 @@ def make_rag_tools(
             kb_ids = state._resolved_kb_ids
         else:
             kb_ids = None
+
+        # 时间结构化约束（grilling 决策）：正则粗筛命中才解析；结果写入 RequestContext
+        ctx = current_request_ctx.get()
+        if (
+            settings.TEMPORAL_PARSE_ENABLED
+            and ctx is not None
+            and kb_ids
+            and has_temporal_words(query)
+        ):
+            candidates = await derive_candidate_years(kb_ids)
+            from src.models import get_classify_llm
+
+            parsed = await parse_temporal(query, candidates, get_classify_llm())
+            ctx.temporal_years = parsed["years"]
+            ctx.missing_years = compute_missing(parsed["years"], candidates)
 
         start = time.monotonic()
         # kb_ids 非空 → 多 KB 并行检索后合并去重；

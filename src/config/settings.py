@@ -58,6 +58,12 @@ CLARIFICATION_ENABLED: bool = os.getenv("CLARIFICATION_ENABLED", "true").lower()
     "1",
     "yes",
 )
+# 时间结构化约束开关：关闭时跳过时间解析（出错可即时关闭）
+TEMPORAL_PARSE_ENABLED: bool = os.getenv("TEMPORAL_PARSE_ENABLED", "true").lower() in (
+    "true",
+    "1",
+    "yes",
+)
 
 # 向量化模型：将文本转为向量，用于 ChromaDB 语义检索
 EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "qwen3.7-text-embedding")

@@ -245,3 +245,109 @@ async def test_retrieve_kb_rerank_timeout_falls_back_raw_order(monkeypatch):
     assert "[1]" in out and "[2]" in out
     assert "毛利率 40%" in out
     assert "来源: 财报.pdf (第1页)" in out
+
+
+@pytest.mark.asyncio
+async def test_retrieve_kb_writes_temporal_years(retrieve_kb, monkeypatch):
+    """含相对时间词查询：mock 时间解析后，temporal_years 填充、missing_years 正确计算。"""
+    from src.agents.tools import rag_tools
+
+    async def fake_derive_candidate_years(kb_ids: list[str]) -> list[int]:
+        """mock 候选年份：知识库只覆盖 2024-2025。"""
+        return [2024, 2025]
+
+    async def fake_parse_temporal(query: str, candidates: list[int], llm) -> dict:
+        """mock LLM 时间解析：要求覆盖 2023-2025。"""
+        return {"years": [2023, 2024, 2025], "has_temporal": True}
+
+    monkeypatch.setattr(
+        rag_tools, "derive_candidate_years", fake_derive_candidate_years
+    )
+    monkeypatch.setattr(rag_tools, "parse_temporal", fake_parse_temporal)
+
+    ctx = RequestContext(session_id="s1")
+    token = current_request_ctx.set(ctx)
+    try:
+        await retrieve_kb.ainvoke(
+            {"query": "腾讯这几年业绩怎么样", "state": _new_state()}
+        )
+        ctx = current_request_ctx.get()
+        assert ctx is not None
+        assert ctx.temporal_years == [2023, 2024, 2025]
+        # 2023 不在候选（知识库未覆盖）→ 判定为缺失
+        assert ctx.missing_years == [2023]
+    finally:
+        current_request_ctx.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_retrieve_kb_no_temporal_words_skips_parse(retrieve_kb, monkeypatch):
+    """不含相对时间词查询：跳过时间解析，temporal_years / missing_years 保持空。"""
+    from src.agents.tools import rag_tools
+
+    parse_called = []
+
+    async def fake_derive_candidate_years(kb_ids: list[str]) -> list[int]:
+        """mock 候选年份：正常返回候选集。"""
+        return [2023, 2024, 2025]
+
+    async def fake_parse_temporal(query: str, candidates: list[int], llm) -> dict:
+        """mock LLM 时间解析：记录调用（本测试应不被调用）。"""
+        parse_called.append(query)
+        return {"years": [2023, 2024, 2025], "has_temporal": True}
+
+    monkeypatch.setattr(
+        rag_tools, "derive_candidate_years", fake_derive_candidate_years
+    )
+    monkeypatch.setattr(rag_tools, "parse_temporal", fake_parse_temporal)
+
+    ctx = RequestContext(session_id="s1")
+    token = current_request_ctx.set(ctx)
+    try:
+        await retrieve_kb.ainvoke({"query": "腾讯 2024 年营收", "state": _new_state()})
+        ctx = current_request_ctx.get()
+        assert ctx is not None
+        assert ctx.temporal_years == []
+        assert ctx.missing_years == []
+        assert parse_called == []
+    finally:
+        current_request_ctx.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_retrieve_kb_temporal_parse_disabled(retrieve_kb, monkeypatch):
+    """TEMPORAL_PARSE_ENABLED=False：含时间词也跳过解析，temporal_years / missing_years 保持空。"""
+    from src.agents.tools import rag_tools
+    from src.config import settings
+
+    monkeypatch.setattr(settings, "TEMPORAL_PARSE_ENABLED", False)
+
+    parse_called = []
+
+    async def fake_derive_candidate_years(kb_ids: list[str]) -> list[int]:
+        """mock 候选年份：正常返回候选集。"""
+        return [2023, 2024, 2025]
+
+    async def fake_parse_temporal(query: str, candidates: list[int], llm) -> dict:
+        """mock LLM 时间解析：记录调用（本测试应不被调用）。"""
+        parse_called.append(query)
+        return {"years": [2023, 2024, 2025], "has_temporal": True}
+
+    monkeypatch.setattr(
+        rag_tools, "derive_candidate_years", fake_derive_candidate_years
+    )
+    monkeypatch.setattr(rag_tools, "parse_temporal", fake_parse_temporal)
+
+    ctx = RequestContext(session_id="s1")
+    token = current_request_ctx.set(ctx)
+    try:
+        await retrieve_kb.ainvoke(
+            {"query": "腾讯这几年业绩怎么样", "state": _new_state()}
+        )
+        ctx = current_request_ctx.get()
+        assert ctx is not None
+        assert ctx.temporal_years == []
+        assert ctx.missing_years == []
+        assert parse_called == []
+    finally:
+        current_request_ctx.reset(token)
