@@ -7,9 +7,9 @@
 ## What Changes
 
 - **CLAUDE.md 认知层调整**：标题由 `# Corporate RAG` 改为 `# Corporate Agent Harness`；角色描述改为"负责企业智能助手 harness（聊天底座 + 可插拔工具/知识库）的设计，RAG 知识库是其中一个能力模块"；技术栈补充 MCP；`docs/agents/reference-projects.md` 中 harness 类参考项目（claude-code / deepseek-harness / codex）的"何时查阅"优先级提前
-- **时间结构化约束（新增能力）**：候选年份由 KB 文档元数据（`meta_info` 的 year/report_period 实体）派生，LLM 从候选集合中选择而非自由生成年份，代码层校验合法性；缺失年份由代码比对算出并注入检索/搜索
-- **验证循环 / 答案校验（新增能力）**：在 `agent_finalize` → `format` 之间新增校验节点，结构化完整性校验优先（比对"问题要求的时间范围 vs 答案实际覆盖"），忠实度校验复用 `RAGAS_LLM_MODEL`（temperature=0 独立评估模型）做 LLM judge；不通过触发补充检索/修订（最多 2 轮），超限转拒答或转人工
-- **工具注册表化（新增能力）**：`make_rag_tools` 硬编码工具列表升级为 `ToolRegistry`（注册 / 启用开关 / 依赖注入），每个工具独立 handler；为 MCP 接入与未来 subagent 工具（多 Agent 阶段）留接口
+- **时间结构化约束（新增能力）**：候选年份由绑定 KB 文档元数据（`meta_info` 的 year/report_period 实体）派生，**时间词正则粗筛命中才调 LLM** 从候选集合中选择（而非自由生成），代码层校验合法性；缺失年份由代码比对算出，作为**询问用户是否联网补充**的依据（用户确认后才联网）
+- **验证循环 / 答案校验（新增能力）**：在 `agent_finalize` → `format` 之间新增校验节点，完整性校验用**正则提取答案年份**比对要求范围，忠实度校验复用 `RAGAS_LLM_MODEL`（temperature=0 独立评估模型）做 LLM judge；**缺失年份经 ask_user 询问用户"是否联网"确认后才补充**（会话内记住确认），拒绝则标注"知识库仅覆盖 X 年"；judge 最多 2 轮，超限转拒答或转人工
+- **工具注册表化（新增能力）**：`make_rag_tools` 硬编码工具列表升级为 `ToolRegistry`（注册 / 启用开关 / 依赖注入），每个工具独立 handler；**KB=RAG 开关**——会话未绑定 KB 时不注册 retrieve_kb，`kb_id=""` 语义改为"不检索"（**废弃隐式跨库检索**）；为 MCP 接入与未来 subagent 工具（多 Agent 阶段）留接口
 - **聊天页 UI 重构（新增能力）**：chat.html 按 `docs/design/pages/chat-harness.md` 设计稿重构——布局参考 deepseek-harness（左侧会话栏 + 双页面形态：新对话页居中输入框 / 历史对话页底部输入框），**整体浅色系（与现有 chat.html / MASTER.md 一致）**；知识库（KB）选择器置于新对话页输入框上方独立行（单选勾选、可取消，取消显示"请选择知识库"），KB 会话级绑定（新建会话时选定，会话内不可改，历史对话页顶栏显示 `会话名 知识库:XXX`）；消息流参照现有 chat.html（用户浅灰气泡 / AI markdown 回复 + 模型标注，无时间戳）
 
 ## Capabilities
