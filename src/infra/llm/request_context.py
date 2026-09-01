@@ -41,6 +41,14 @@ class RequestContext:
     web_count: int = (
         0  # search_web 调用计数，范围：请求内累积，用途：限制单轮联网搜索次数上限
     )
+    temporal_years: list[int] = field(
+        default_factory=list
+    )  # 时间解析出的要求覆盖年份（来源：时间解析层；用途：验证循环完整性验收标准）
+    missing_years: list[int] = field(
+        default_factory=list
+    )  # 知识库缺失年份（来源：时间解析比对；用途：询问用户是否联网的依据）
+    web_confirmed: bool = False  # 本轮请求内已确认联网（来源：验证循环询问用户后置位；用途：本轮后续缺失年份不再询问；跨轮持久化留 P1）
+    verify_ask_count: int = 0  # verify"是否联网"询问计数（来源：verify 节点自增；用途：每轮最多询问 1 次，独立于 ask_count）
 
 
 current_request_ctx: ContextVar[RequestContext | None] = ContextVar(

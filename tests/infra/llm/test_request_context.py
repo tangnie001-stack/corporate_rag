@@ -37,3 +37,12 @@ def test_request_context_fields():
     ctx.tool_contexts.append(rag_ctx)
     assert ctx.tool_contexts == [rag_ctx]
     assert ctx2.tool_contexts == []
+
+
+def test_request_context_temporal_fields_defaults():
+    """temporal/missing_years/web_confirmed/verify_ask_count 默认值。"""
+    ctx = RequestContext(session_id="s1")
+    assert ctx.temporal_years == []
+    assert ctx.missing_years == []
+    assert ctx.web_confirmed is False
+    assert ctx.verify_ask_count == 0
