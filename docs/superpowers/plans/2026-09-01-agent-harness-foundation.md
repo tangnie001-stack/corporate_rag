@@ -29,15 +29,17 @@
 - `tests/rag/test_temporal.py`、`tests/agents/graph/test_verify_node.py`、`tests/agents/tools/test_registry.py`
 
 **修改：**
-- `src/infra/llm/request_context.py` — 扩展 temporal_years/missing_years/web_confirmed
-- `src/agents/tools/rag_tools.py` — retrieve_kb 接入时间解析、工具注册表化、KB 开关
+- `src/infra/llm/request_context.py` — 扩展 temporal_years/missing_years/web_confirmed + verify_ask_count
+- `src/agents/tools/rag_tools.py` — retrieve_kb 接入时间解析、工具注册表化、删 `_semantic_select_kb`（KB 开关）
+- `src/agents/tools/ask_tools.py` — `_wait_with_abort_and_timeout` 公开导出（verify 复用）
 - `src/agents/tools/web_tools.py` — search_web 升级 queries 数组
 - `src/agents/graph/workflow.py` — 插入 verify 节点
-- `src/agents/graph/agent_node.py` — 无
+- `src/agents/graph/agent_node.py` — `_initial_messages` 传 kb_bound（prompt 软引导）
 - `src/agents/graph/nodes.py` — kb_router_node 空值语义（不检索）
+- `src/rag/prompt.py` — build_prompt 加 kb_bound 参数（软引导）
 - `src/config/prompts.py` — 忠实报告准则（纯对话轻量自检）
 - `src/config/settings.py` — TEMPORAL_PARSE_ENABLED / VERIFY_ENABLED 开关
-- `src/config/const.py` — verify 询问独立计数常量
+- `src/config/const.py` — MAX_VERIFY_ASK_PER_TURN / TEMPORAL_RECENT_N_YEARS
 - `deploy/nginx/html/chat.html` — UI 重构（frontend-design）
 - `docs/agents/api_contract.md` / `docs/agents/glossary.md` — kb_id 空串语义
 - `CLAUDE.md` — 认知层调整
@@ -115,7 +117,7 @@ Expected: FAIL（无 temporal_years 属性）
         default_factory=list
     )  # 知识库缺失年份（来源：时间解析比对；用途：询问用户是否联网的依据）
     web_confirmed: bool = (
-        False  # 会话内已确认联网（来源：验证循环询问用户后置位；用途：后续缺失年份不再询问）
+        False  # 本轮请求内已确认联网（来源：验证循环询问用户后置位；用途：本轮后续缺失年份不再询问；跨轮持久化留 P1）
     )
 ```
 
@@ -147,7 +149,7 @@ git commit -m "feat: RequestContext 扩展 temporal/missing_years/web_confirmed"
 
 ```python
 import pytest
-from src.rag.temporal import has_temporal_words, compute_missing
+from src.rag.temporal import has_temporal_words, compute_missing, derive_candidate_years
 
 
 def test_has_temporal_words_hit():
@@ -163,6 +165,12 @@ def test_has_temporal_words_miss():
 def test_compute_missing():
     assert compute_missing([2023, 2024, 2025], [2024]) == [2023, 2025]
     assert compute_missing([2024], [2024]) == []
+
+
+def test_derive_candidates_include_recent_years(monkeypatch):
+    # KB 只覆盖 2024 → 候选 = {2024} ∪ 最近 3 个完整年度（grilling 决策）
+    # 需 mock DocumentRepo.get_documents；断言候选包含 2024 且包含 今年-1/-2/-3
+    ...
 ```
 
 - [ ] **Step 2: 跑失败**
@@ -211,17 +219,22 @@ def compute_missing(years: list[int], covered: list[int]) -> list[int]:
 
 
 async def derive_candidate_years(kb_ids: list[str]) -> list[int]:
-    """从绑定 KB 文档元数据聚合候选年份。
+    """从绑定 KB 文档元数据聚合候选年份，∪ 最近 3 个完整年度。
 
     读取 KB 文档 meta_info 的 year / report_period 实体，聚合去重排序；
-    KB 为空或元数据缺失时返回空列表（调用方走"无时间约束"路径）。
+    最后并入最近 3 个完整年度（排除进行中的当年，N 取 const.TEMPORAL_RECENT_N_YEARS）。
+    KB 为空或元数据缺失时仍返回最近 N 年（供"这几年"触发联网询问，grilling 决策）。
 
     Args:
         kb_ids: 知识库 ID 列表
 
     Returns:
-        候选年份列表（升序，可能为空）
+        候选年份列表（升序，可能仅含最近 N 年）
     """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from src.config.const import TEMPORAL_RECENT_N_YEARS
     from src.infra.db.engine import session_factory
     from src.infra.db.mysql_db.document_repo import DocumentRepo
 
@@ -249,6 +262,11 @@ async def derive_candidate_years(kb_ids: list[str]) -> list[int]:
                 m = re.search(r"(20\d{2})", period)
                 if m:
                     years.add(int(m.group(1)))
+    # 并入最近 3 个完整年度（排除进行中的当年）：KB 只覆盖 2024 时"这几年"
+    # 也能解析出 [2023, 2025] 等缺失年份触发联网询问，否则核心 bug 修不掉
+    this_year = datetime.now(ZoneInfo("Asia/Shanghai")).year
+    for i in range(1, TEMPORAL_RECENT_N_YEARS + 1):
+        years.add(this_year - i)
     return sorted(years)
 ```
 
@@ -276,34 +294,38 @@ git commit -m "feat: 时间解析模块（候选年份派生/时间词粗筛/缺
 - [ ] **Step 1: 写失败测试**
 
 ```python
+import pytest
 from src.rag.temporal import parse_temporal
 
 
-def test_parse_temporal_candidates_only(monkeypatch):
+@pytest.mark.asyncio
+async def test_parse_temporal_candidates_only(monkeypatch):
     class FakeLLM:
         async def ainvoke(self, messages, **kwargs):
             return type("R", (), {"content": '{"years": [2023, 2024, 2025]}'})()
 
-    result = parse_temporal("这几年", [2022, 2023, 2024, 2025], FakeLLM())
+    result = await parse_temporal("这几年", [2022, 2023, 2024, 2025], FakeLLM())
     assert result["years"] == [2023, 2024, 2025]
     assert result["has_temporal"] is True
 
 
-def test_parse_temporal_out_of_candidate_rejected(monkeypatch):
+@pytest.mark.asyncio
+async def test_parse_temporal_out_of_candidate_rejected(monkeypatch):
     class FakeLLM:
         async def ainvoke(self, messages, **kwargs):
             return type("R", (), {"content": '{"years": [2019, 2024]}'})()
 
-    result = parse_temporal("这几年", [2022, 2023, 2024, 2025], FakeLLM())
+    result = await parse_temporal("这几年", [2022, 2023, 2024, 2025], FakeLLM())
     assert 2019 not in result["years"]
 
 
-def test_parse_temporal_fallback(monkeypatch):
+@pytest.mark.asyncio
+async def test_parse_temporal_fallback(monkeypatch):
     class FakeLLM:
         async def ainvoke(self, messages, **kwargs):
             raise RuntimeError("llm down")
 
-    result = parse_temporal("这几年", [], FakeLLM())
+    result = await parse_temporal("这几年", [], FakeLLM())
     assert result["has_temporal"] is False
 ```
 
@@ -315,30 +337,30 @@ Expected: FAIL（parse_temporal 未定义）
 - [ ] **Step 3: 实现**（追加到 temporal.py）
 
 ```python
-import asyncio
 import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from src.config.const import TEMPORAL_RECENT_N_YEARS
+
 _BEIJING_TZ = ZoneInfo("Asia/Shanghai")
-_FALLBACK_N_YEARS = 3
 
 
 def _fallback_recent_years(candidates: list[int]) -> list[int]:
     """LLM 失败时回退：最近 N 个完整年度 ∩ 候选。"""
     this_year = datetime.now(_BEIJING_TZ).year
-    recent = [this_year - i for i in range(1, _FALLBACK_N_YEARS + 1)]
+    recent = [this_year - i for i in range(1, TEMPORAL_RECENT_N_YEARS + 1)]
     cand = set(candidates)
     return [y for y in recent if y in cand]
 
 
-def parse_temporal(query: str, candidates: list[int], llm) -> dict:
+async def parse_temporal(query: str, candidates: list[int], llm) -> dict:
     """LLM 解析相对时间词为候选集合内的年份（含代码校验）。
 
     Args:
         query: 含相对时间词的查询
-        candidates: 候选年份集合（KB 元数据派生，可为空）
-        llm: ChatOpenAI 实例（flash）
+        candidates: 候选年份集合（KB 元数据 ∪ 最近 N 年派生，可为空）
+        llm: ChatOpenAI 实例（get_classify_llm()，flash）
 
     Returns:
         {"years": [...], "has_temporal": bool}；LLM 失败/输出越界时回退最近 3 年 ∩ 候选
@@ -356,9 +378,7 @@ def parse_temporal(query: str, candidates: list[int], llm) -> dict:
     from langchain_core.messages import HumanMessage
 
     try:
-        resp = asyncio.get_event_loop().run_until_complete(
-            llm.ainvoke([HumanMessage(content=prompt)], temperature=0)
-        )
+        resp = await llm.ainvoke([HumanMessage(content=prompt)], temperature=0)
         raw = (getattr(resp, "content", None) or "").strip()
         data = json.loads(raw)
         years = [int(y) for y in data.get("years", []) if isinstance(y, (int, str))]
@@ -371,7 +391,7 @@ def parse_temporal(query: str, candidates: list[int], llm) -> dict:
     return {"years": sorted(valid), "has_temporal": True}
 ```
 
-> 注：`parse_temporal` 目前是同步签名（内部 run_until_complete 适配工具调用场景）。若后续接入事件循环已有环境，改为 `async def parse_temporal` 并在调用方 await。
+> 注：`parse_temporal` 为 async 函数（grilling 决策），调用方 `await`；llm 实例用 `get_classify_llm()`（flash 分类模型，理解+结构化输出足够）。
 
 - [ ] **Step 4: 跑通过**
 
@@ -433,12 +453,14 @@ from src.rag.temporal import (
         if settings.TEMPORAL_PARSE_ENABLED and ctx is not None and kb_ids:
             if has_temporal_words(query):
                 candidates = await derive_candidate_years(kb_ids)
-                parsed = await parse_temporal_async(query, candidates, llm_for_parse)
+                from src.models import get_classify_llm
+
+                parsed = await parse_temporal(query, candidates, get_classify_llm())
                 ctx.temporal_years = parsed["years"]
                 ctx.missing_years = compute_missing(parsed["years"], candidates)
 ```
 
-> 注：若 B3 保持同步签名，此处 `parse_temporal_async` 为 `asyncio.to_thread(parse_temporal, ...)` 的包装；llm_for_parse 用 `get_classify_llm()`（flash）。
+> 注：`parse_temporal` 已是 async（B3），直接 await，无 to_thread 包装；llm 用 `get_classify_llm()`（flash）。
 
 - [ ] **Step 4: 跑通过 + 开关测试**
 
@@ -541,9 +563,9 @@ async def faithfulness_check(answer: str, contexts: list) -> list[str]:
     if not contexts:
         return []
     from src.config import settings
-    from src.models import get_classify_llm
+    from src.models import get_llm
 
-    llm = get_classify_llm()  # 评估专用模型（RAGAS_LLM_MODEL，temperature 0）
+    llm = get_llm(model=settings.RAGAS_LLM_MODEL, temperature=0)  # 评估专用模型（RAGAS_LLM_MODEL，非 get_classify_llm）
     evidence = "\n".join(c.content if hasattr(c, "content") else str(c) for c in contexts)[:8000]
     prompt = (
         "检查回答中的每个事实点是否被引用证据支撑。\n"
@@ -579,7 +601,7 @@ git commit -m "feat: 完整性校验 + 忠实度 judge（verify_node）"
 **Files:**
 - Modify: `src/agents/graph/verify_node.py`
 - Modify: `src/agents/graph/workflow.py`
-- Modify: `src/agents/tools/ask_tools.py`（提取可复用投递函数，若需要）
+- Modify: `src/agents/tools/ask_tools.py`（公开导出 `_wait_with_abort_and_timeout` 供 verify 复用）
 - Modify: `src/config/const.py` / `settings.py`（VERIFY_ENABLED / 独立计数）
 - Test: `tests/agents/graph/test_verify_node.py`、`tests/services/test_dual_stream.py`（适配）
 
@@ -587,82 +609,105 @@ git commit -m "feat: 完整性校验 + 忠实度 judge（verify_node）"
 - Consumes: `completeness_check` / `faithfulness_check`（C1）、`current_request_ctx`、`clarify_channel`
 - Produces: `verify_node(state: AgentState) -> dict`（返回 `answer`/`citations` 或触发询问信号）
 
-- [ ] **Step 1: 加配置开关（settings.py）**
+- [ ] **Step 1: 加配置开关与常量**
 
 ```python
+# settings.py
 # 验证循环开关：关闭时 verify 节点直通（出错可即时关闭）
 VERIFY_ENABLED: bool = os.getenv("VERIFY_ENABLED", "true").lower() in ("true", "1", "yes")
 ```
 
+```python
+# const.py
+MAX_VERIFY_ASK_PER_TURN = 1  # verify"是否联网"询问每轮上限（独立计数，不计入 MAX_ASK_PER_TURN）
+TEMPORAL_RECENT_N_YEARS = 3  # 候选年份并入的最近完整年度数（排除进行中的当年）
+```
+
+> 注：`RequestContext` 需新增 `verify_ask_count: int = 0` 字段（verify 询问独立计数，不碰 ctx.ask_count）。
+
 - [ ] **Step 2: 实现 verify_node**
 
 ```python
-"""verify_node 主体：未绑定 KB → 直通；完整性缺失 → 询问是否联网；最终答案跑 judge。"""
+"""verify_node 主体：未绑定 KB → 直通；完整性缺失 → 询问是否联网；最终答案跑 judge。
+
+挂在 agent_finalize → format 之间；仅在会话绑定 KB 时生效（纯对话跳过）。
+防死循环两个关键（grilling 决策）：① 确认联网后向 messages 注入 SystemMessage
+驱动 agent 调 search_web；② verify 自查 _agent_iterations 超限标注缺失直通
+（route_agent 的上限检查管不到 verify→agent 边）。
+"""
 import asyncio
+
+from langchain_core.messages import SystemMessage
 
 from src.agents.graph.state import AgentState
 from src.agents.graph.verify_node import completeness_check, faithfulness_check
+from src.agents.tools.ask_tools import _wait_with_abort_and_timeout
 from src.config import settings
-from src.infra.llm.request_context import current_request_ctx
+from src.config.const import ASK_USER_TIMEOUT, MAX_VERIFY_ASK_PER_TURN
+from src.infra.llm.request_context import current_request_ctx, pending_asks
 
 
-def _ask_web_confirm(session_id: str, missing_years: list[int]) -> bool:
-    """经 clarify_channel 询问用户是否联网，返回用户确认结果（阻塞等待，独立计数）。
+async def _ask_web_confirm(state: AgentState, missing_years: list[int]) -> bool:
+    """经 clarify_channel 询问用户是否联网，返回确认结果（async，独立计数）。
 
     Args:
-        session_id: 会话 ID
+        state: 当前图状态（读 session_id）
         missing_years: 缺失年份列表
 
     Returns:
-        True 用户确认联网；False 拒绝或超时
+        True 用户确认联网；False 拒绝/超时/槽被占（按"未确认"处理）
     """
-    import asyncio
-    from src.config.const import ASK_USER_TIMEOUT
-    from src.infra.llm.request_context import pending_asks
-
     ctx = current_request_ctx.get()
     if ctx is None:
         return False
-    question_id = "web_confirm"
+    # 独立计数：不计入 MAX_ASK_PER_TURN（LLM 澄清额度），每轮最多询问 1 次
+    if ctx.verify_ask_count >= MAX_VERIFY_ASK_PER_TURN:
+        return False
+    # 单槽保护：LLM 澄清 ask_user 已挂起时放弃询问，避免覆盖其 Future
+    if ctx.session_id in pending_asks:
+        return False
+    ctx.verify_ask_count += 1
     payload = {
         "type": "ask_user",
         "questions": [{
-            "id": question_id,
+            "id": "web_confirm",
             "question": f"知识库仅覆盖部分年份，缺失 {missing_years}，是否需要联网搜索补充？",
             "dimension": "free",
             "options": ["需要", "不需要"],
             "multi_select": False,
         }],
     }
-    fut = asyncio.get_event_loop().create_future()
-    pending_asks[session_id] = fut
-    ctx.clarify_channel.put_nowait(payload)
+    loop = asyncio.get_running_loop()  # async 节点内禁止 run_until_complete
+    fut = loop.create_future()
+    pending_asks[ctx.session_id] = fut
     try:
-        answers = asyncio.get_event_loop().run_until_complete(
-            asyncio.wait_for(fut, timeout=ASK_USER_TIMEOUT)
+        await ctx.clarify_channel.put(payload)
+        answers = await _wait_with_abort_and_timeout(
+            fut, ctx.abort_signal, ASK_USER_TIMEOUT
         )
-    except Exception:
-        return False
     finally:
-        pending_asks.pop(session_id, None)
-    selected = answers[0].get("selected") if answers else ""
+        pending_asks.pop(ctx.session_id, None)
+        fut.cancel()
+    if not isinstance(answers, list) or not answers:
+        return False
+    selected = answers[0].get("selected", "")
     return selected in ("需要", "需要联网")
 
 
 async def verify_node(state: AgentState) -> dict:
-    """验证循环节点：未绑定 KB 直通；完整性缺失询问；最终答案跑 judge。
+    """验证循环节点：未绑定 KB 直通；完整性缺失询问/注入重生成；最终答案跑 judge。
 
     Args:
         state: 当前图状态
 
     Returns:
-        {"answer": 答案}；缺失且需联网时，返回信号由条件边回 agent 重生成
+        {"answer": 答案, "messages": [SystemMessage], "_needs_regenerate": bool,
+         "_unsupported": list}；_needs_regenerate=True 时条件边回 agent 重生成
     """
     if not settings.VERIFY_ENABLED:
         return {"answer": state.answer or ""}
     ctx = current_request_ctx.get()
-    kb_bound = bool(getattr(state, "_resolved_kb_ids", None))
-    if not kb_bound:
+    if not state._resolved_kb_ids:
         # 纯对话：跳过 verify（claude-code 式轻量自检由 prompt 准则覆盖）
         return {"answer": state.answer or ""}
 
@@ -670,17 +715,31 @@ async def verify_node(state: AgentState) -> dict:
     required = ctx.temporal_years if ctx is not None else []
     missing = completeness_check(required, answer) if required else []
     if missing:
+        confirmed = False
         if ctx is not None and not ctx.web_confirmed:
-            confirmed = _ask_web_confirm(state.session_id, missing)
+            confirmed = await _ask_web_confirm(state, missing)
             if confirmed:
                 ctx.web_confirmed = True
-                # 回 agent 重生成（LLM 据缺失年份调 search_web 补充）
-                return {"answer": answer, "_needs_regenerate": True}
-            # 用户拒绝：标注缺失后直通
-            answer = f"{answer}\n\n> 注：知识库仅覆盖 {required} 中的 {set(required) - set(missing)}，缺失 {missing} 未联网补充。"
-        elif ctx is not None and ctx.web_confirmed:
-            return {"answer": answer, "_needs_regenerate": True}
-    # 最终答案跑忠实度 judge
+            else:
+                # 用户拒绝/超时/槽被占：标注缺失后直通（不重生成）
+                covered = [y for y in required if y not in missing]
+                answer = f"{answer}\n\n> 注：知识库仅覆盖 {covered}，缺失 {missing} 未联网补充。"
+                return {"answer": answer}
+        if ctx is not None and (confirmed or ctx.web_confirmed):
+            # 终止条件：迭代超限不再重生成，标注缺失直通（route_agent 上限检查管不到此边）
+            if state._agent_iterations >= state._max_agent_iterations:
+                covered = [y for y in required if y not in missing]
+                answer = f"{answer}\n\n> 注：知识库仅覆盖 {covered}，缺失 {missing} 未联网补充。"
+                return {"answer": answer}
+            # 注入 SystemMessage 驱动 agent 调 search_web（add_messages reducer 自动追加）
+            guidance = SystemMessage(
+                content=(
+                    f"知识库缺失年份 {missing}，用户已确认联网，"
+                    "请调用 search_web 工具补充这些年份的数据后再回答。"
+                )
+            )
+            return {"answer": answer, "messages": [guidance], "_needs_regenerate": True}
+    # 最终答案跑忠实度 judge（仅标记，不驱动流程；P1 输出护栏消费）
     contexts = ctx.tool_contexts if ctx is not None else []
     unsupported = await faithfulness_check(answer, contexts)
     if unsupported:
@@ -688,22 +747,32 @@ async def verify_node(state: AgentState) -> dict:
     return {"answer": answer}
 ```
 
+> 注：`AgentState` 需新增 `_needs_regenerate: bool = False`、`_unsupported: list = field(default_factory=list)` 两个字段；`_agent_iterations`/`_max_agent_iterations` 已存在（state.py:32-35），无需新增。`RequestContext` 需新增 `verify_ask_count: int = 0`（独立计数）。`_wait_with_abort_and_timeout` 目前是 ask_tools 私有函数，跨模块导入需在 ask_tools 中公开（去掉下划线或 __all__ 导出）。
+
 - [ ] **Step 3: workflow.py 插入 verify 节点**
 
 ```python
 from src.agents.graph.verify_node import verify_node
+
+
+def route_verify(state: AgentState) -> str:
+    """verify 条件边：需重生成回 agent，否则进 format。"""
+    if getattr(state, "_needs_regenerate", False):
+        return "agent"
+    return LangGraphNode.Format.NAME
+
 
     builder.add_node("verify", verify_node)
     # agent_finalize → verify → (通过→format / 需重生成→agent)
     builder.add_edge("agent_finalize", "verify")
     builder.add_conditional_edges(
         "verify",
-        lambda state: "agent" if getattr(state, "_needs_regenerate", False) else "format",
+        route_verify,
         {"agent": "agent", "format": LangGraphNode.Format.NAME},
     )
 ```
 
-> 注：`_needs_regenerate` 需加进 `AgentState`（dataclass 字段，默认 False）；重生成时 `_agent_iterations` 上限兜底防死循环。
+> 注：`_needs_regenerate`（bool，默认 False）、`_unsupported`（list）需新增进 `AgentState`；`_agent_iterations`/`_max_agent_iterations` 已存在。重生成安全靠"SystemMessage 注入 + verify 自查 `_agent_iterations` 终止"双保险（grilling 决策），`route_agent` 的上限检查管不到 verify→agent 边。
 
 - [ ] **Step 4: 跑测试 + 适配存量**
 
@@ -850,6 +919,8 @@ class ToolRegistry:
         return self._entries[name].fn
 ```
 
+> 注：`deps` 本轮仅字段预留（register 存 entry，enabled_tools() 不消费）——实际依赖注入仍走闭包（retrieve_kb 的 vector_store/bm25/reranker），MCP 适配器接入时再启用 deps（grilling 决策）。
+
 - [ ] **Step 4: 跑通过**
 
 Run: `pytest tests/agents/tools/test_registry.py -v`
@@ -870,24 +941,21 @@ git commit -m "feat: ToolRegistry 注册表（注册/启停/依赖注入）"
 
 **Interfaces:**
 - Consumes: `ToolRegistry`（D1）
-- Produces: `make_rag_tools(vector_store, bm25, reranker, prompt_manager, embed_fn, kb_bound: bool = True) -> list` — 未绑定 KB 时不注册 retrieve_kb
+- Produces: `make_rag_tools(vector_store, bm25, reranker, prompt_manager, embed_fn) -> list` — 工具列表编译期固定（graph 在 AgentService.__init__ 编译一次、bind_tools 一次），**KB=RAG 开关不靠编译期移除工具**，落地为"工具内空返回 + prompt 软引导"（grilling 决策，见 D2 Step 3/4）
 
-- [ ] **Step 1: 改造 make_rag_tools**
+- [ ] **Step 1: 改造 make_rag_tools（注册表化，纯重构）**
 
 ```python
-def make_rag_tools(
-    vector_store, bm25, reranker, prompt_manager, embed_fn, kb_bound: bool = True
-) -> list:
-    """构建工具列表：注册表管理；kb_bound=False（纯对话）时不注册 retrieve_kb。
+def make_rag_tools(vector_store, bm25, reranker, prompt_manager, embed_fn) -> list:
+    """构建工具列表：注册表管理；retrieve_kb 始终注册（KB=RAG 开关在工具内实现）。
 
     Args:
         ...（原有）
-        kb_bound: 会话是否绑定知识库（未绑定=纯对话，不提供 RAG 检索工具）
     """
     from src.agents.tools.registry import ToolRegistry
 
     registry = ToolRegistry()
-    registry.register("retrieve_kb", retrieve_kb, deps={...}, enabled=kb_bound)
+    registry.register("retrieve_kb", retrieve_kb)
     registry.register("ask_user", ask_user)
     if settings.WEB_SEARCH_ENABLED:
         from src.agents.tools.web_tools import search_web
@@ -895,11 +963,7 @@ def make_rag_tools(
     return registry.enabled_tools()
 ```
 
-- [ ] **Step 2: 接入 kb_bound**
-
-在 `workflow.py` 构建图时传 `kb_bound=bool(initial_state.kb_id)`；agent 循环前确定（通过 state.kb_id）。
-
-- [ ] **Step 3: kb_router_node 空值语义改"不检索"（nodes.py）**
+- [ ] **Step 2: kb_router_node 空值语义改"不检索"（nodes.py）**
 
 ```python
         # kb_id 为空 = 未绑定 KB（纯对话），不检索（废弃隐式跨库）
@@ -907,16 +971,38 @@ def make_rag_tools(
             return {"_resolved_kb_ids": []}
 ```
 
-- [ ] **Step 4: 跑测试**
+- [ ] **Step 3: retrieve_kb 删 `_semantic_select_kb`，空 kb_ids 直接返回空（rag_tools.py）**
+
+```python
+        if kb_ids:
+            tasks = [
+                retrieval.search(query, kb_id, vector_store, bm25) for kb_id in kb_ids
+            ]
+            per_kb_results = await asyncio.gather(*tasks)
+            results = _merge_search_results(per_kb_results)
+        else:
+            # 未绑定 KB：不检索（废弃 _semantic_select_kb 语义选库 = 隐式跨库）
+            results = []
+```
+
+> 注：`_semantic_select_kb` 函数（rag_tools.py:191-226）及其导入一并删除；这是"即便被调也返回空"的硬保证，配合 Step 4 的 prompt 软引导，双保险实现 KB=RAG 开关。
+
+- [ ] **Step 4: prompt 软引导——`build_prompt` 加 `kb_bound` 参数**
+
+`src/rag/prompt.py` 的 `build_prompt` 增加 `kb_bound: bool = True` 参数，未绑定时在 SystemMessage 后追加会话指令：
+"本会话未绑定知识库，请勿调用知识库检索工具，可基于常识或联网搜索回答。"
+`src/agents/graph/agent_node.py` `_initial_messages` 调用处传 `kb_bound=bool(state.kb_id)`。
+
+- [ ] **Step 5: 跑测试**
 
 Run: `pytest tests/agents/ tests/api/test_chat.py -v`
-Expected: PASS（存量空 kb_id 用例若走跨库断言，适配为"不检索"）
+Expected: PASS（存量空 kb_id 用例若走跨库断言，适配为"不检索"；`_semantic_select_kb` 相关测试删除或改断言空返回）
 
-- [ ] **Step 5: 提交**
+- [ ] **Step 6: 提交**
 
 ```bash
-git add src/agents/tools/rag_tools.py src/agents/graph/workflow.py src/agents/graph/nodes.py
-git commit -m "feat: 工具注册表化 + KB=RAG 开关（未绑定不注册 retrieve_kb，空 kb_id 不检索）"
+git add src/agents/tools/rag_tools.py src/agents/tools/registry.py src/agents/graph/nodes.py src/rag/prompt.py src/agents/graph/agent_node.py
+git commit -m "feat: 工具注册表化 + KB=RAG 开关（空 kb_id 不检索，删语义选库，prompt 软引导）"
 ```
 
 ### Task D3: search_web 升级 queries 数组
@@ -1031,7 +1117,7 @@ git commit -m "feat: 聊天页 UI 重构（chat-harness 设计稿落地）"
 
 - [ ] F1.1 `pytest tests/ -v` 全量通过
 - [ ] F1.2 `ruff check .` 无错误；`pyright src/` 不引入新 error
-- [ ] F1.3 `docs/agents/api_contract.md` / `docs/agents/glossary.md` 更新 `kb_id` 空串语义（"搜索所有知识库"→"不检索"）
+- [ ] F1.3 `docs/agents/api_contract.md` / `docs/agents/glossary.md` 更新 `kb_id` 空串语义（"搜索所有知识库"→"不检索"）；同步改代码内注释：`src/agents/graph/state.py:19`（`kb_id: str = ""` 注释"空字符串 = 跨库搜索"→"不检索"）、`src/services/agent_service.py:470`（stream_chat docstring"空字符串表示跨库搜索"→"不检索"）
 - [ ] F1.4 手动验证："腾讯这几年业绩怎么样"（绑定腾讯 KB）→ 解析 [2023,2024,2025]、缺失询问"是否联网"、确认后多 query 联网补充、拒绝则标注"仅覆盖 2024"
 - [ ] F1.5 提交
 
@@ -1045,5 +1131,5 @@ git commit -m "chore: agent-harness-foundation 质量门禁收尾"
 ## Self-Review 记录
 
 - **Spec 覆盖**：temporal-constraint（B1-B4）✓、answer-verification（C1-C3）✓、tool-registry（D1-D3）✓、chat-harness-ui（E1-E6）✓、CLAUDE.md 认知层（A1）✓、契约同步（F1.3）✓
-- **决策覆盖**：正则粗筛触发（B2/B4）✓、KB=RAG 开关（D2）✓、跨库废弃（D2.3）✓、询问确认 + web_confirmed（C2）✓、judge 最终答案跑（C1/C2）✓、search_web 多查询（D3）✓、纯对话轻量自检（C3）✓、独立计数（C2 `_ask_web_confirm`）✓
-- **遗留（P1）**：kb_router 下移、错误分类重试、输出护栏、上下文压缩、检索质量评估（不在本 plan）
+- **决策覆盖**：正则粗筛触发（B2/B4）✓、候选 = KB 覆盖 ∪ 最近 3 年（B2）✓、KB=RAG 开关（D2 工具内空返回 + prompt 软引导，非编译期移除）✓、跨库废弃（D2 删 `_semantic_select_kb`）✓、询问确认 + web_confirmed 单轮请求内（C2）✓、重生成 SystemMessage 注入（C2）✓、verify 自查终止条件（C2）✓、judge 用 RAGAS_LLM_MODEL（C1）✓、judge 最终答案跑 + `_unsupported` 仅记录（C1/C2）✓、search_web 多查询（D3）✓、纯对话轻量自检（C3）✓、verify 询问独立计数 MAX_VERIFY_ASK_PER_TURN（C2）✓、parse_temporal async 化（B3）✓
+- **遗留（P1，记忆文件已同步）**：kb_router 下移、错误分类重试、输出护栏（消费 `_unsupported`）、上下文压缩、检索质量评估、per-session 工具列表裁剪、季度/半年度粒度精确比对、web_confirmed 跨轮持久化（含 web_denied 语义）、修订终止"转人工"升级路径（不在本 plan）

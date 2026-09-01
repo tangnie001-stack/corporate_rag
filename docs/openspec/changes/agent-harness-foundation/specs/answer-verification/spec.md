@@ -31,7 +31,9 @@
 
 ### Requirement: 缺失年份联网询问
 
-会话绑定知识库且完整性校验检测到缺失年份时，系统 SHALL 通过 `ask_user` 机制（复用 `clarify_channel` 投递，同现有澄清卡片）询问用户"是否联网补充缺失年份"；**用户确认后才调用 search_web 联网补充**，拒绝则返回现有答案并标注"知识库仅覆盖 X 年"。**会话内记住确认**（`RequestContext.web_confirmed`）：用户在某会话确认过"需要联网"后，该会话后续缺失年份不再询问，直接联网。**确认询问独立计数**：不计入 `MAX_ASK_PER_TURN`（每轮最多询问 1 次，避免与 LLM 澄清互相挤占）。
+会话绑定知识库且完整性校验检测到缺失年份时，系统 SHALL 通过 `ask_user` 机制（复用 `clarify_channel` 投递，同现有澄清卡片）询问用户"是否联网补充缺失年份"；**用户确认后才调用 search_web 联网补充**，拒绝则返回现有答案并标注"知识库仅覆盖 X 年"。**会话内记住确认**（`RequestContext.web_confirmed`）：用户确认过"需要联网"后，**单轮请求内**后续缺失年份不再询问，直接联网（跨轮持久化留 P1）。**确认询问独立计数**：不计入 `MAX_ASK_PER_TURN`（新增 `MAX_VERIFY_ASK_PER_TURN=1` 防御上限，每轮最多询问 1 次，避免与 LLM 澄清互相挤占额度）。
+
+**重生成机制（防死循环）**：用户确认后，verify 节点 SHALL 向 `state.messages` 追加一条 `SystemMessage`（含缺失年份与"请调用 search_web 补充"指令），再置 `_needs_regenerate=True` 回 agent 重生成——否则 LLM 用原消息重生成相同答案、不会调 search_web，verify→agent 无限循环。`_ask_web_confirm` 必须为 async 函数（复用 ask_tools 的 `_wait_with_abort_and_timeout` 与 `pending_asks` 单槽保护；槽被 LLM 澄清占用时放弃询问按"未确认"处理；禁止 `run_until_complete`）。
 
 #### Scenario: 用户确认联网
 
@@ -55,7 +57,7 @@
 #### Scenario: 答案包含无支撑断言
 
 - **WHEN** 最终答案某句事实无法从任何引用上下文找到依据
-- **THEN** 忠实度校验用 judge 模型标记该句无支撑，触发修订或提示 LLM 删除/修正无依据内容
+- **THEN** 忠实度校验用 judge 模型标记该句无支撑（`_unsupported` 写入 state/日志）；P0 仅记录不驱动流程，触发 LLM 删除/修正无支撑内容的修订动作留 P1 输出护栏
 
 ### Requirement: 纯对话轻量自检
 
@@ -68,9 +70,9 @@
 
 ### Requirement: 修订终止条件
 
-系统 SHALL 为校验-修订循环设置轮次上限：完整性校验（结构化，快）每次生成后执行；LLM judge 最多 2 轮。达到上限仍不达标 SHALL 转拒答（标注信息不足）或转人工，不得无限循环。
+系统 SHALL 为校验-修订循环设置轮次上限：完整性校验（结构化，快）每次生成后执行；LLM judge 最多 2 轮。达到上限仍不达标 SHALL 转拒答（标注信息不足）或转人工，不得无限循环。**P0 实现**：verify 节点自查 `_agent_iterations >= _max_agent_iterations`（=5）时不再置 `_needs_regenerate`，把缺失标注拼到 answer 直通 format（软拒答）——`route_agent` 的上限检查管不到 verify→agent 边，**必须 verify 自查**；"转人工"升级路径留 P1。
 
 #### Scenario: 修订轮次耗尽
 
-- **WHEN** LLM judge 校验-修订循环达到 2 轮上限且仍未达标
-- **THEN** 系统返回拒答（"未在文档中找到完整数据"）或触发人工升级，不再继续修订
+- **WHEN** 缺失年份经联网重生成后仍缺失、`_agent_iterations` 达到上限
+- **THEN** 系统不再重生成，返回现有答案并标注"知识库仅覆盖 X 年"（软拒答），终止校验-修订循环

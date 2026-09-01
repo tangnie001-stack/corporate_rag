@@ -42,9 +42,11 @@
 
 **方案**：`agent_finalize` → `format` 之间新增校验节点。完整性校验用结构化比对（解析出的年份/实体范围 vs 答案覆盖），每次生成后执行（毫秒级）；忠实度校验用 LLM judge 对照引用上下文逐句核对（Self-RAG IsSup 思路），最多 2 轮，超限转拒答/转人工（financial_rag-main `needs_human_review` 模式）。
 
-**judge 模型**：复用 `RAGAS_LLM_MODEL`（默认 `qwen3.8-max`，temperature 固定 0，独立于生产 LLM 的非推理评估模型）。理由：temperature=0 判断稳定、独立模型避免"自己审自己"偏倚、`LangchainLLMWrapper` 封装可复用（`src/cli/eval_ragas.py`）。结构化校验先行（规则，快且权威），LLM judge 仅补忠实度盲区，标记无支撑句子供修订参考、不直接删内容。
+**judge 模型**：复用 `RAGAS_LLM_MODEL`（默认 `qwen3.8-max`，temperature 固定 0，独立于生产 LLM 的非推理评估模型）。理由：temperature=0 判断稳定、独立模型避免"自己审自己"偏倚、`LangchainLLMWrapper` 封装可复用（`src/cli/eval_ragas.py`）。**实现注意**：judge 走 `get_llm(model=settings.RAGAS_LLM_MODEL, temperature=0)`（models.py 工厂），**不是** `get_classify_llm()`（那是 CLASSIFY_MODEL 分类小模型）。结构化校验先行（规则，快且权威），LLM judge 仅补忠实度盲区，标记无支撑句子供修订参考、不直接删内容。
 
-**judge 触发时机（grilling 决策）**：完整性校验（正则，快）每次生成后执行；**LLM judge 只在完整性通过后的最终答案运行**——中途"询问联网→重生成"的过程答案不跑 judge，一次问答 judge 最多 1-2 次（最终版 + judge 打回后的修订版，受 2 轮上限约束）。
+**judge 触发时机（grilling 决策）**：完整性校验（正则，快）每次生成后执行；**LLM judge 只在完整性通过后的最终答案运行**——中途"询问联网→重生成"的过程答案不跑 judge，一次问答 judge 最多 1-2 次（最终版 + judge 打回后的修订版，受 2 轮上限约束）。judge 打回信号（`_unsupported`）本轮**仅记录不驱动流程**（日志/state 字段，供 P1 输出护栏消费）。
+
+**修订终止条件（grilling 补充）**：verify 节点自查 `_agent_iterations >= _max_agent_iterations`（=5）时不再置 `_needs_regenerate`，把缺失标注拼到 answer 直通 format（软拒答）。`route_agent` 的上限检查只作用在 agent→tools/finalize 边，管不到 verify→agent 边，故**必须 verify 自查**，否则死循环。spec「修订终止条件」的"转拒答/转人工"中，"转人工"留 P1。
 
 **定位说明**：验证循环是所有生产 harness 的标配（harness 12 模块第 10 项，业界公认"demo 与生产"分界线）。编码 agent（claude-code/codex）用规则反馈（测试/linter/类型检查）验证——产物可执行；本项目是 RAG，答案不可执行验证，故用"结构化规则 + LLM judge"组合。deepseek-harness 目前只有工具错误回喂，无独立答案评审，属其缺口而非行业标准。
 
@@ -66,7 +68,9 @@
 
 **方案**：`workflow.py` 在 `agent_finalize` 与 `format` 之间插入 `verify` 节点（条件边：通过→format，不通过→触发补充或转拒答）；kb_router 保持现状（P1 再下移）。
 
-**缺失处理（grilling 决策）**：完整性校验检测到答案缺失年份时，**不自动修订补充**，而是通过 `ask_user` 机制（复用 `clarify_channel` 投递，同现有澄清卡片）询问用户"是否联网补充缺失年份"——用户确认后才触发 search_web 联网；用户拒绝则返回现有答案并标注"知识库仅覆盖 X 年"。**会话内记住确认**（`RequestContext.web_confirmed`）：用户在某会话确认过"需要联网"后，后续缺失年份不再询问，直接联网。**verify 的"是否联网"询问独立计数**（不计入 `MAX_ASK_PER_TURN`，每轮最多询问 1 次，避免与 LLM 澄清互相挤占额度）。
+**缺失处理（grilling 决策）**：完整性校验检测到答案缺失年份时，**不自动修订补充**，而是通过 `ask_user` 机制（复用 `clarify_channel` 投递，同现有澄清卡片）询问用户"是否联网补充缺失年份"——用户确认后才触发 search_web 联网；用户拒绝则返回现有答案并标注"知识库仅覆盖 X 年"。**会话内记住确认**（`RequestContext.web_confirmed`）：用户确认过"需要联网"后，**单轮请求内**后续缺失年份不再询问，直接联网（**跨轮持久化留 P1**——一次同意不等于 7 天内永久联网，且拒绝的 `web_denied` 是否记住需另行定语义）。**verify 的"是否联网"询问独立计数**（不计入 `MAX_ASK_PER_TURN`，新增 `MAX_VERIFY_ASK_PER_TURN=1` 防御上限，避免与 LLM 澄清互相挤占额度）。
+
+**重生成机制（grilling 补充，防死循环关键）**：用户确认联网后，verify 必须**向 `state.messages` 追加一条 `SystemMessage`**（如"知识库缺失年份 [2023, 2025]，用户已确认联网，请调用 search_web 补充后再回答"）再置 `_needs_regenerate=True` 回 agent——否则 agent 用原 messages 重生成相同答案、LLM 不知要调 search_web，verify→agent 无限循环。`state.messages` 声明 `add_messages` reducer，节点返回的 messages 自动追加，无需手动拼列表。**新增 `AgentState._needs_regenerate`（bool，默认 False）**作为"回 agent"开关；`_agent_iterations` 已存在（state.py），无需新增。**实现约束**：`_ask_web_confirm` 必须是 async 函数——用 `asyncio.get_running_loop()` 创建 future、复用 ask_tools 的 `_wait_with_abort_and_timeout`（abort_signal 三方竞争）与 `pending_asks` 单槽保护（槽被 LLM 澄清占用时放弃询问、按"未确认"处理），**禁止 `run_until_complete`**（async 节点内调用抛 `RuntimeError: This event loop is already running`）。
 
 **纯对话（未绑定 KB）轻量自检（grilling 决策）**：verify 节点仅在绑定 KB 时生效（无检索证据可核对）；纯对话场景跳过 verify，改用 **claude-code 式 prompt 行为准则**（零额外 LLM 调用）：system prompt 要求"不确定/无法验证的内容如实说明、不编造；可联网核实就联网；不把没查证的当查证了"（呼应 claude-code `prompts.ts` 的忠实报告准则）。
 
@@ -78,6 +82,8 @@
 **方案**：时间解析作为 `retrieve_kb` 工具调用前的内部步骤（或独立可复用的解析函数），解析结果写入 `RequestContext`（`temporal_years` / `missing_years`），供验证循环读取做完整性验收标准。
 
 **触发条件（grilling 决策）**：解析前用**时间词正则粗筛**（`近|这|上|今|去|几|最近|前几年` 等），仅命中才调 LLM 解析；未命中直接走"无时间约束"路径（零成本）。**仅当会话绑定 KB 时执行**（未绑定 KB 不调 retrieve_kb，自然跳过时间解析）。
+
+**候选年份窗口（grilling 结清，Open Question）**：候选 = **KB 元数据覆盖年份 ∪ 最近 3 个完整年度**（排除进行中的当年），N=3 进 const.py。理由：spec「缺失年份判定与询问依据」场景"知识库仅覆盖 2024 却解析出 [2023,2024,2025]"只在候选含 KB 外年份时才能成立——若候选仅从 KB 派生，LLM 只能从 [2024] 选，"这几年"永远解析不出 [2023,2025]，缺失判定恒空，核心 bug（KB 只覆盖 2024 时用户问"这几年"）修不掉。**季度/半年度粒度 P0 归一为年份**（2025Q1 → 2025，`derive_candidate_years` 用 `20\d{2}` 正则提取），精确粒度比对留 P1（temporal 结构升级 Period + verify 覆盖判定区分全年报/单季报）。
 
 **备选与取舍**：
 - 独立图节点：多一次动图、多一个 LLM 调用路径 → 否决（工具内更贴合"按需解析"）
@@ -102,7 +108,12 @@
 
 ### D7: KB = RAG 开关，跨库检索废弃（grilling 决策）
 
-**方案**：会话绑定 KB 才启用 RAG 检索；**未绑定 KB 时 `retrieve_kb` 不出现在 LLM 工具列表**、system prompt 不引导检索，agent 走纯对话/联网。后端 `kb_id=""` 语义从"搜索所有知识库（跨库）"改为"不检索"（`kb_router_node` 空值时 `_resolved_kb_ids=[]`，retrieve_kb 即便被调也返回空）。**跨库检索本轮废弃**（UI 不提供"全部知识库"选项），未来如需以"知识库多选/分组"方式加回（P2）。
+**方案**：会话绑定 KB 才启用 RAG 检索；未绑定 KB 时 agent 走纯对话/联网。后端 `kb_id=""` 语义从"搜索所有知识库（跨库）"改为"不检索"（`kb_router_node` 空值时 `_resolved_kb_ids=[]`）。**跨库检索本轮废弃**（UI 不提供"全部知识库"选项），未来如需以"知识库多选/分组"方式加回（P2）。
+
+**落地方式（grilling 补充，架构事实约束）**：graph 在 `AgentService.__init__` 编译一次、`llm.bind_tools(tools)` 一次（agent_node.py），**工具列表编译期固定，无法按会话隐藏 retrieve_kb**（`initial_state` 是每请求的，plan 原"构建图时传 kb_bound"不可行）。故 P0 落地为三重组合：
+1. **工具内空返回**：retrieve_kb 的 `if kb_ids:` else 分支**删除 `_semantic_select_kb` 语义选库调用**（那正是隐式跨库），kb_ids 空时直接返回空结果——"即便被调也返回空"，硬保证绝不跨库；
+2. **prompt 软引导**：`build_prompt` 增加 `kb_bound: bool` 参数，未绑定时首轮注入会话指令"本会话未绑定知识库，请勿调用知识库检索工具"，LLM 即使看到 retrieve_kb 也被明确禁止；
+3. **per-session 工具列表动态裁剪留 P1**：按会话动态 `bind_tools` 违反 tool-registry spec"不修改 agent 主循环代码"约束，是 MCP 化后的自然演进。
 
 **备选与取舍**：
 - 保留隐式跨库（kb_id="" → kb_router 路由）：与"KB 会话级绑定"、"没选不调 RAG"冲突 → 否决
@@ -110,11 +121,14 @@
 
 ## Risks / Trade-offs
 
-- [验证循环增加延迟与 token 成本] → 结构化校验优先（快）、LLM judge 限 1-2 轮；终止条件硬上限
-- [LLM judge 误判（好答案打回 / 错答案放过）] → 结构化规则优先，LLM judge 仅补充忠实度；财务数字用规则比对兜底
+- [验证循环增加延迟与 token 成本] → 结构化校验优先（快）、LLM judge 限 1-2 轮；终止条件硬上限（verify 自查 `_agent_iterations`）
+- [LLM judge 误判（好答案打回 / 错答案放过）] → 结构化规则优先，LLM judge 仅补充忠实度；财务数字用规则比对兜底；judge 打回仅记录不驱动流程（P1 输出护栏消费）
+- [重生成死循环（verify→agent 无限往返）] → verify 注入 SystemMessage 驱动真修订 + verify 自查 `_agent_iterations` 超限标注直通（`route_agent` 上限检查管不到 verify→agent 边，必须 verify 自查）
 - [工具注册表化重构影响现有测试] → 纯重构不改行为，回归测试保障；新增注册表单测
 - [时间解析依赖 KB 元数据质量（缺失/不准）] → 元数据缺失时走"无时间约束"默认路径，不阻塞主流程
 - [验证循环与前置解析耦合（完整性验收依赖解析输出）] → 解析失败时校验退化为仅忠实度检查，不空转
+- [KB=RAG 开关无法按会话隐藏工具（graph 编译期固定）] → 工具内空返回（删语义选库）+ prompt 软引导；per-session 裁剪 P1
+- [季度粒度归一化误判（KB 只覆盖单季报被判为覆盖全年）] → 最坏"该联网没联网"，比"不该联网却联网"安全；精确比对 P1
 - [本 change 不动 kb_router，架构名实暂不符] → 认知层（CLAUDE.md）先行，P1 完成架构落位，期间功能不受影响
 
 ## Migration Plan
@@ -130,6 +144,8 @@
 
 ## Open Questions
 
-- **"这几年"默认年份窗口**：候选窗口取最近 N 个完整年度（N=3）还是 KB 有几年算几年？倾向"候选 = KB 覆盖 ∪ 最近 3 年"，需业务确认
-- **工具注册表的配置化**：注册表是否需要读取配置文件（yaml）声明启停，还是仅代码注册 + env 开关？倾向先代码注册 + env 开关，配置化 P1 再考虑
-- **"是否联网"确认的 UX 文案**：询问卡片的文案与选项（"需要/不需要"）定稿，实施时与前端确认
+- **~~"这几年"默认年份窗口~~（已结清 2026-09-02）**：候选 = **KB 覆盖 ∪ 最近 3 个完整年度**（D5 已采纳）；否则 KB 只覆盖 2024 时"这几年"解析不出缺失年份，核心 bug 修不掉
+- **~~工具注册表的配置化~~（已结清）**：先代码注册 + env 开关，配置文件（yaml）声明启停留 P1
+- **~~"是否联网"确认的 UX 文案~~（已结清）**：询问卡片文案"知识库仅覆盖部分年份，缺失 [X]，是否需要联网搜索补充？"，选项"需要/不需要"；实施时与前端核对实际渲染
+- **web_confirmed 跨轮持久化（P1）**：单轮请求内记住已定；跨轮是否持久化到 Redis 会话、拒绝（web_denied）是否记住，P1 做时先定语义（一次同意 ≠ 7 天永久联网）
+- **修订终止"转人工"路径（P1）**：P0 超限走"标注缺失直通"（软拒答）；spec 的"转人工"升级路径 P1 实现
