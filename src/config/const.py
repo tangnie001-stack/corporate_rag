@@ -54,6 +54,9 @@ HISTORY_TOKEN_RATIO = 0.3  # 历史 token 占 context 窗口上限比例
 # per-session 并发锁 TTL 秒：须大于 ASK_USER_TIMEOUT（ask_user 挂起等待期间锁不能提前
 # 过期，否则并发兜底失效），在超时基础上留 60s 余量
 SESSION_LOCK_TTL = ASK_USER_TIMEOUT + 60
+# 候选年份并入的最近完整年度数（排除进行中的当年）：KB 只覆盖 2024 时"这几年"仍能
+# 解析出 [2023, 2025] 等缺失年份触发联网询问
+TEMPORAL_RECENT_N_YEARS = 3
 
 
 # ── 检索精排超时 ──
