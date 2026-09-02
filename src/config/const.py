@@ -51,6 +51,9 @@ MAX_ASK_PER_TURN = 2  # 单 turn 内 ask_user 最大调用次数
 MAX_VERIFY_ASK_PER_TURN = (
     1  # verify"是否联网"询问每轮上限（独立计数，不计入 MAX_ASK_PER_TURN）
 )
+# verify 联网指引 SystemMessage 的标记短语：注入与查重共用（避免裸字符串耦合，
+# 注入文案改了而查重漏改会破坏防重复注入逻辑）
+VERIFY_GUIDANCE_MARKER: str = "用户已确认联网"
 ASK_USER_TIMEOUT = 120  # ask_user 等待用户回答超时秒数
 HISTORY_MAX_TURNS = 10  # 历史注入保留最近轮数
 HISTORY_TOKEN_RATIO = 0.3  # 历史 token 占 context 窗口上限比例

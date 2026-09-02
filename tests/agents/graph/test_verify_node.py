@@ -110,7 +110,7 @@ async def test_ask_web_confirm_confirmed(monkeypatch):
     """用户选择"需要"且未超限/槽空 → 返回 True，独立计数自增。"""
     ctx, token = _make_ctx()
     try:
-        _mock_wait(monkeypatch, [{"selected": "需要"}])
+        _mock_wait(monkeypatch, [{"id": "web_confirm", "selected": ["需要"]}])
         result = await _ask_web_confirm(AgentState(session_id="s1"), [2023, 2025])
         assert result is True
         assert ctx.verify_ask_count == 1
@@ -124,9 +124,25 @@ async def test_ask_web_confirm_confirmed(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_ask_web_confirm_selected_list_confirmed(monkeypatch):
+    """前端答案 selected 为数组且含"需要" → 返回 True（真实答案形状回归，防 list/str 失配）。"""
+    _ctx, token = _make_ctx()
+    try:
+        _mock_wait(
+            monkeypatch,
+            [{"id": "web_confirm", "selected": ["需要"]}],
+        )
+        result = await _ask_web_confirm(AgentState(session_id="s1"), [2023])
+        assert result is True
+        assert "s1" not in pending_asks
+    finally:
+        current_request_ctx.reset(token)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "ret",
-    ["超时文本", [], [{"selected": "不需要"}]],
+    ["超时文本", [], [{"id": "web_confirm", "selected": ["不需要"]}]],
 )
 async def test_ask_web_confirm_not_confirmed(monkeypatch, ret):
     """答案非列表/空列表/明确拒绝 → 按"未确认"返回 False。"""
@@ -145,7 +161,7 @@ async def test_ask_web_confirm_count_limit(monkeypatch):
     """verify_ask_count 达每轮上限 → 直接返回 False，不推送问题。"""
     ctx, token = _make_ctx(verify_ask_count=MAX_VERIFY_ASK_PER_TURN)
     try:
-        _mock_wait(monkeypatch, [{"selected": "需要"}])
+        _mock_wait(monkeypatch, [{"id": "web_confirm", "selected": ["需要"]}])
         result = await _ask_web_confirm(AgentState(session_id="s1"), [2023])
         assert result is False
         assert ctx.verify_ask_count == MAX_VERIFY_ASK_PER_TURN  # 计数未再自增
@@ -161,7 +177,7 @@ async def test_ask_web_confirm_slot_occupied(monkeypatch):
     pending_asks["s1"] = fut
     ctx, token = _make_ctx()
     try:
-        _mock_wait(monkeypatch, [{"selected": "需要"}])
+        _mock_wait(monkeypatch, [{"id": "web_confirm", "selected": ["需要"]}])
         result = await _ask_web_confirm(AgentState(session_id="s1"), [2023])
         assert result is False
         assert ctx.verify_ask_count == 0  # 槽被占不计次

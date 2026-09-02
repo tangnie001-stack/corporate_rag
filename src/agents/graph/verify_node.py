@@ -10,11 +10,16 @@ import asyncio
 import re
 
 from langchain_core.messages import SystemMessage
+from loguru import logger
 
 from src.agents.graph.state import AgentState
 from src.agents.tools.ask_tools import wait_with_abort_and_timeout
 from src.config import settings
-from src.config.const import ASK_USER_TIMEOUT, MAX_VERIFY_ASK_PER_TURN
+from src.config.const import (
+    ASK_USER_TIMEOUT,
+    MAX_VERIFY_ASK_PER_TURN,
+    VERIFY_GUIDANCE_MARKER,
+)
 from src.infra.llm.request_context import current_request_ctx, pending_asks
 
 _YEAR_PATTERN = re.compile(r"20\d{2}")
@@ -65,9 +70,13 @@ async def faithfulness_check(answer: str, contexts: list) -> list[str]:
     llm = get_llm(
         model=settings.RAGAS_LLM_MODEL, temperature=0
     )  # 评估专用模型（RAGAS_LLM_MODEL，非 get_classify_llm）
-    evidence = "\n".join(
-        c.content if hasattr(c, "content") else str(c) for c in contexts
-    )[:8000]
+    evidence_parts = []
+    for c in contexts:
+        if hasattr(c, "content"):
+            evidence_parts.append(c.content)
+        else:
+            evidence_parts.append(str(c))
+    evidence = "\n".join(evidence_parts)[:8000]
     prompt = (
         "检查回答中的每个事实点是否被引用证据支撑。\n"
         f"引用证据:\n{evidence}\n回答:\n{answer}\n"
@@ -77,12 +86,21 @@ async def faithfulness_check(answer: str, contexts: list) -> list[str]:
 
     try:
         resp = await llm.ainvoke([HumanMessage(content=prompt)], temperature=0)
-        raw = (getattr(resp, "content", None) or "").strip()
+        content = resp.content if resp is not None else None
+        if isinstance(content, str):
+            raw = content.strip()
+        else:
+            raw = ""
         import json
 
         data = json.loads(raw)
         return [s for s in data.get("unsupported", []) if s.strip()]
-    except Exception:  # noqa: BLE001  # judge 失败不阻断流程，静默返回无标记
+    except Exception as exc:  # noqa: BLE001  # judge 失败不阻断流程，降级返回无标记，留日志
+        logger.warning(
+            "judge=faithfulness_check 调用失败，降级返回空标记 answer_len={} err={}",
+            len(answer),
+            exc,
+        )
         return []
 
 
@@ -103,7 +121,7 @@ async def _ask_web_confirm(state: AgentState, missing_years: list[int]) -> bool:
     if ctx.verify_ask_count >= MAX_VERIFY_ASK_PER_TURN:
         return False
     # 单槽保护：LLM 澄清 ask_user 已挂起时放弃询问，避免覆盖其 Future
-    if ctx.session_id in pending_asks:
+    if state.session_id in pending_asks:
         return False
     ctx.verify_ask_count += 1
     payload = {
@@ -122,19 +140,22 @@ async def _ask_web_confirm(state: AgentState, missing_years: list[int]) -> bool:
     }
     loop = asyncio.get_running_loop()  # async 节点内禁止 run_until_complete
     fut = loop.create_future()
-    pending_asks[ctx.session_id] = fut
+    pending_asks[state.session_id] = fut
     try:
         await ctx.clarify_channel.put(payload)
         answers = await wait_with_abort_and_timeout(
             fut, ctx.abort_signal, ASK_USER_TIMEOUT
         )
     finally:
-        pending_asks.pop(ctx.session_id, None)
+        pending_asks.pop(state.session_id, None)
         fut.cancel()
     if not isinstance(answers, list) or not answers:
         return False
-    selected = answers[0].get("selected", "")
-    return selected in ("需要", "需要联网")
+    # 前端答案 selected 为数组（clarify.py 按数组消费）；对数组归一化判断，避免 list/str 恒不相等
+    selected = answers[0].get("selected") or []
+    if isinstance(selected, list):
+        return any(str(s) in ("需要", "需要联网") for s in selected)
+    return False
 
 
 async def verify_node(state: AgentState) -> dict:
@@ -178,7 +199,8 @@ async def verify_node(state: AgentState) -> dict:
             # （LangGraph 节点读 state.messages 是上一轮值，指引后的 agent/tools 产出
             #   会追加到末尾，故遍历查找而非只看末条；否则循环每轮堆积相同 SystemMessage）
             already_guided = any(
-                isinstance(m, SystemMessage) and "用户已确认联网" in (m.content or "")
+                isinstance(m, SystemMessage)
+                and VERIFY_GUIDANCE_MARKER in (m.content or "")
                 for m in state.messages
             )
             if already_guided:
@@ -186,7 +208,7 @@ async def verify_node(state: AgentState) -> dict:
             # 注入 SystemMessage 驱动 agent 调 search_web（add_messages reducer 自动追加）
             guidance = SystemMessage(
                 content=(
-                    f"知识库缺失年份 {missing}，用户已确认联网，"
+                    f"知识库缺失年份 {missing}，{VERIFY_GUIDANCE_MARKER}，"
                     "请调用 search_web 工具补充这些年份的数据后再回答。"
                 )
             )
