@@ -9,7 +9,7 @@
 
 | 标识符 | 格式 | 说明 | 常见错误 |
 |--------|------|------|----------|
-| `kb_id` | UUID 字符串（如 `53890512-f252-45bf-9485-25b4253cb4f1`）或空字符串 `""` | 知识库唯一标识。`""` 表示"搜索所有知识库" | ❌ 传了 `kb_name`（"2024年报"） |
+| `kb_id` | UUID 字符串（如 `53890512-f252-45bf-9485-25b4253cb4f1`）或空字符串 `""` | 知识库唯一标识。`""` 表示"不检索"（未绑定 KB，纯对话） | ❌ 传了 `kb_name`（"2024年报"） |
 | `doc_id` | UUID 字符串 | 文档唯一标识 | ❌ 传了 MySQL 自增 ID |
 | `session_id` | 任意字符串 | 会话标识，用于关联对话历史 | ❌ 传了空字符串 |
 | `chunk_id` | `"{doc_id}:{index}"` 格式 | 向量库中的文档分块 ID | - |
@@ -152,7 +152,7 @@ Content-Type: `text/event-stream`
 | 字段 | 说明 |
 |------|------|
 | `session_id` | 会话 ID |
-| `kb_id` | 知识库 UUID（空字符串跨库搜索） |
+| `kb_id` | 知识库 UUID（空字符串不检索，未绑定 KB） |
 | `query` | 用户问题 |
 | `deep_thinking` | 深度思考开关（可选，默认 `false`）：`true` 时 agent 主 LLM 以思考模式调用（`enable_thinking=true`）；`false` 显式关闭。来自 `chat-thinking-toggle` capability |
 
@@ -637,7 +637,7 @@ name = f"kb_{kb_id.replace('-', '')}"
 
 | 节点 | 节点名 (NAME) | 输出字段 | 说明 |
 |------|--------------|---------|------|
-| **kb_router** | `"kb_router"` | `_resolved_kb_ids: list[str] \| None` | KB 路由穿透/智能匹配 |
+| **kb_router** | `"kb_router"` | `_resolved_kb_ids: list[str] \| None` | KB 路由穿透/空值不检索 |
 | **agent** | `"agent"` | `messages`, `_agent_iterations` | agent 模型节点：bind_tools 调 LLM，可发起工具调用（retrieve_kb / ask_user / search_web） |
 | **agent_tools** | `"agent_tools"` | `messages`（ToolMessage 追加） | ToolNode 执行工具，错误回喂；工具集：`retrieve_kb`（KB 混合检索）/ `search_web`（Tavily 联网搜索兜底，KB 不达标时补充知识库外事实）/ `ask_user`（澄清追问） |
 | **agent_finalize** | `"agent_finalize"` | `answer`, `tool_contexts` | 循环结束提取末次 AIMessage content → `answer`，读入 `tool_contexts` |
@@ -714,7 +714,7 @@ kb_router → agent（LLM + bind_tools）
 ```
 用户提问 "2024年公司营收多少" (query)
   → POST /api/chat/stream（body: ChatStreamRequest）
-    → kb_router: 穿透/跨库路由 → _resolved_kb_ids
+    → kb_router_node: 解析 _resolved_kb_ids（空 kb_id → 空列表，不检索）
     → agent 循环:
         1. agent: LLM 思考 → 调用 retrieve_kb
         2. agent_tools: 检索（hybrid Dense + BM25 + RRF 融合 → rerank 精排 → format_context）

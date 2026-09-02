@@ -16,7 +16,7 @@ class AgentState:
 
     # ── 输入 ──
     session_id: str = ""  # 会话 ID（多轮对话用，作为 Redis key 取历史）
-    kb_id: str = ""  # 知识库 ID（空字符串 = 跨库搜索）
+    kb_id: str = ""  # 知识库 ID（空字符串 = 不检索（未绑定 KB，纯对话））
     query: str = ""  # 用户原始查询文本
     trace_id: str = field(
         default_factory=lambda: current_trace_id.get() or "unknown"

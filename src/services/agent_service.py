@@ -467,7 +467,7 @@ class AgentService:
         拿到启动上下文后再 create_task，避免任务生命周期与 SSE 消费耦合。
 
         Args:
-            kb_id: 知识库 ID（空字符串表示跨库搜索）
+            kb_id: 知识库 ID（空字符串表示不检索（未绑定 KB））
             session_id: 会话 ID
             query: 用户查询文本
             deep_thinking: 深度思考开关（默认 False）；为 True 时 agent LLM

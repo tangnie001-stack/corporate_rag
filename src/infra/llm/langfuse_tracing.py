@@ -25,7 +25,7 @@ class TraceInput:
     使用 dataclass 替代手动构造 dict，消除 key 名与变量名的重复维护。
     """
 
-    kb_id: str  # 知识库 ID（空字符串 = 跨库搜索）
+    kb_id: str  # 知识库 ID（空字符串 = 不检索（未绑定 KB））
     session_id: str  # 会话 ID（用于 Langfuse 会话聚合）
     query: str  # 用户查询文本
 

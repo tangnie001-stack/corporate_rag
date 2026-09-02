@@ -266,7 +266,7 @@ async def _stream_rag_response(
 
     Args:
         svc: AppService 实例
-        kb_id: 知识库 UUID（空字符串表示跨库搜索）
+        kb_id: 知识库 UUID（空字符串表示不检索（未绑定 KB））
         session_id: 会话 ID
         query: 用户查询文本
         user_id: 当前用户 ID（保留签名供契约对齐，收尾已并入后台任务）
