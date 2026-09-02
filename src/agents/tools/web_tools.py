@@ -6,6 +6,7 @@
 format_node 统一产出引用，kind=web 区分来源。
 """
 
+import asyncio
 import time
 
 from langchain_core.tools import tool
@@ -23,23 +24,27 @@ from src.rag.context import RAGContext
 
 
 class SearchWebArgs(BaseModel):
-    """search_web 工具参数（LLM 可见的入参契约）。"""
+    """search_web 工具参数（多查询：一次调用覆盖多个搜索目标）。"""
 
-    query: str = Field(description="搜索查询文本")
-    top_k: int = Field(default=5, ge=1, le=10, description="返回结果条数上限")
+    queries: list[str] = Field(
+        description="搜索查询列表（最多 4 个），一次调用并行搜索并合并结果"
+    )
+    top_k: int = Field(default=5, ge=1, le=10, description="每个查询返回结果条数上限")
 
 
 @tool("search_web", args_schema=SearchWebArgs)
-async def search_web(query: str, top_k: int = 5) -> str:
-    """在互联网上搜索实时信息，返回带来源链接的网页摘要/正文。
+async def search_web(queries: list[str], top_k: int = 5) -> str:
+    """在互联网上并行搜索实时信息，返回带来源链接的网页摘要/正文。
 
     何时调用：retrieve_kb 检索结果为空或全部明显不相关，已确认问题不在
     当前知识库范围内时调用，用于补充知识库外的事实性信息。
     知识库能回答的问题不要调用本工具。
+    一次调用可传多个查询（queries，最多 4 个）覆盖多个独立搜索目标，
+    各查询并行搜索后按查询顺序合并统一编号，仅占用 1 次联网搜索额度。
 
     Args:
-        query: 搜索查询文本（简洁、含关键实体）
-        top_k: 返回结果条数上限（默认 5，最多 10）
+        queries: 搜索查询列表（最多 4 个），每个查询简洁、含关键实体
+        top_k: 每个查询返回结果条数上限（默认 5，最多 10）
 
     Returns:
         带全局编号的网页块文本 "[n] 来源: url\\n内容: ..."；达限次/失败时返回提示或空串
@@ -47,33 +52,42 @@ async def search_web(query: str, top_k: int = 5) -> str:
     ctx = current_request_ctx.get()
     if ctx is None:
         return SSEInteractionTexts.ASK_USER_CTX_UNAVAILABLE
+    queries = queries[:4]
+    if not queries:
+        return ""
     if ctx.web_count >= settings.WEB_SEARCH_PER_TURN_LIMIT:
         logger.info(
-            "tool=search_web limit reached session_id={} query={}",
+            "tool=search_web limit reached session_id={} queries={}",
             ctx.session_id,
-            query[:40],
+            queries,
         )
         return SSEInteractionTexts.WEB_SEARCH_LIMIT_TEXT
-    ctx.web_count += 1
+    ctx.web_count += 1  # 一次多查询调用只占 1 次额度
 
     start = time.monotonic()
-    results = await tavily_search(query, top_k=top_k, timeout=settings.TAVILY_TIMEOUT)
-    if not results:
+    results_list = await asyncio.gather(
+        *[
+            tavily_search(q, top_k=top_k, timeout=settings.TAVILY_TIMEOUT)
+            for q in queries
+        ]
+    )
+    if not any(results_list):
         logger.info(
-            "tool=search_web query={} result_count=0 latency_ms={:.0f}",
-            query[:40],
+            "tool=search_web queries={} result_count=0 latency_ms={:.0f}",
+            queries,
             (time.monotonic() - start) * 1000,
         )
         return ""
 
-    # extract 拉取 top-1~2 正文，失败不影响已拿到的摘要
+    # 每个 query 取其 top-1~2 拉正文（保持单查询语义、保证各查询覆盖），
+    # 合并为一次 extract 调用，失败不影响已拿到的摘要
+    extract_urls = [r["url"] for q_results in results_list for r in q_results[:2]]
     bodies: dict[str, str] = {}
-    extracted = await tavily_extract(
-        [r["url"] for r in results[:2]], timeout=settings.TAVILY_TIMEOUT
-    )
+    extracted = await tavily_extract(extract_urls, timeout=settings.TAVILY_TIMEOUT)
     for item in extracted:
         bodies[item["url"]] = item.get("content", "")[:WEB_BODY_LIMIT]
 
+    results = [r for q_results in results_list for r in q_results]
     collector = ctx.tool_contexts
     offset = len(collector)
     blocks = []
@@ -97,8 +111,8 @@ async def search_web(query: str, top_k: int = 5) -> str:
         )
         blocks.append(f"[{offset + len(blocks) + 1}] 来源: {r['url']}\n内容: {content}")
     logger.info(
-        "judge: query={} stage=web_confirm count={} result_count={} latency_ms={:.0f}",
-        query[:40],
+        "judge: queries={} stage=web_confirm count={} result_count={} latency_ms={:.0f}",
+        queries,
         ctx.web_count,
         len(blocks),
         (time.monotonic() - start) * 1000,
