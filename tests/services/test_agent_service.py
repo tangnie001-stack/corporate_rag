@@ -621,6 +621,49 @@ async def test_run_generation_buffers_reasoning_event(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_generation_buffers_ask_user_from_clarify_channel():
+    """ask_user 经 clarify_channel 投递的问题 → 缓冲出现 ask_user 事件。
+
+    回归防线：澄清通道须与图事件循环并行消费（_drain_clarify_channel），
+    否则问题 payload 滞留队列、前端收不到 event: ask_user 澄清卡。
+    """
+    from src.chat.streaming import StreamingRunManager
+    from src.infra.llm.request_context import RequestContext
+    from src.services.agent_service import _run_generation
+
+    mgr = StreamingRunManager()
+
+    async def fake_astream(*args, **kwargs):
+        # 模拟 ask_user 工具在生成中途投递问题（真实场景中工具随即 await 用户答案）
+        await ctx.clarify_channel.put(
+            {
+                "type": "ask_user",
+                "questions": [
+                    {"id": "q1", "question": "请问查询哪家公司？", "options": []}
+                ],
+            }
+        )
+        await asyncio.sleep(0.05)  # 让并行消费任务有时间完成处理
+        yield {"event": "on_chain_end", "data": {}}
+
+    fake_graph = Mock()
+    fake_graph.astream_events = fake_astream
+    ctx = RequestContext(session_id="s1")
+    await _run_generation("s1", "kb1", "q", [], False, ctx, mgr, graph=fake_graph)
+
+    events = mgr.get_events_since("s1", 0)
+    ask_payloads = [payload for _, et, payload in events if et == "ask_user"]
+    assert ask_payloads == [
+        {
+            "type": "ask_user",
+            "questions": [
+                {"id": "q1", "question": "请问查询哪家公司？", "options": []}
+            ],
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_run_generation_buffers_abstention_from_captured_final_answer():
     """agent_finalize 产物命中拒答标记 → 循环结束后 abstention 事件入缓冲（位于 model_info 之前）。"""
     from src.chat.streaming import StreamingRunManager

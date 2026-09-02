@@ -129,6 +129,11 @@ async def _ask_web_confirm(state: AgentState, missing_years: list[int]) -> bool:
     if state.session_id in pending_asks:
         return False
     ctx.verify_ask_count += 1
+    logger.info(
+        "verify web_confirm ask triggered session_id={} missing={}",
+        state.session_id,
+        missing_years,
+    )
     payload = {
         "type": "ask_user",
         "questions": [
@@ -180,16 +185,31 @@ async def verify_node(state: AgentState) -> dict:
         return {"answer": state.answer or "", "_needs_regenerate": False}
     ctx = current_request_ctx.get()
     if not state._resolved_kb_ids:
+        logger.info("verify skipped (no kb bound) session_id={}", state.session_id)
         # 纯对话：跳过 verify（claude-code 式轻量自检由 prompt 准则覆盖）
         return {"answer": state.answer or "", "_needs_regenerate": False}
 
     answer = state.answer or ""
     required = ctx.temporal_years if ctx is not None else []
     missing = completeness_check(required, answer) if required else []
+    logger.info(
+        "verify_node session_id={} kb_ids={} required={} missing={} answer_len={}",
+        state.session_id,
+        state._resolved_kb_ids,
+        required,
+        missing,
+        len(answer),
+    )
     if missing:
         confirmed = False
         if ctx is not None and not ctx.web_confirmed:
             confirmed = await _ask_web_confirm(state, missing)
+            logger.info(
+                "verify web_confirm result session_id={} missing={} confirmed={}",
+                state.session_id,
+                missing,
+                confirmed,
+            )
             if confirmed:
                 ctx.web_confirmed = True
             else:

@@ -319,6 +319,40 @@ async def _dual_stream(
         await asyncio.gather(task_a, return_exceptions=True)
 
 
+async def _drain_clarify_channel(
+    ctx: RequestContext,
+    manager: StreamingRunManager,
+    session_id: str,
+    capture: _StreamCapture,
+) -> None:
+    """消费 clarify_channel：ask_user 澄清 payload 转 SSE 事件写入缓冲。
+
+    ask_user 工具与 verify 节点的 web_confirm 都把 {"type": "ask_user", ...}
+    投递到 ctx.clarify_channel（无界队列）。本任务与 _run_generation 的
+    graph 事件循环并行运行，取出后经 _convert_event 转 SSEAskUserEvent 写入
+    manager 缓冲，由 SSE 消费者推给前端渲染澄清卡；若缺此消费方，问题
+    payload 滞留队列，前端收不到 event: ask_user，等满 ASK_USER_TIMEOUT
+    超时。任务随生成循环结束/异常/取消被 _run_generation 的 finally 取消。
+
+    Args:
+        ctx: 请求上下文（clarify_channel 的单一消费方）
+        manager: StreamingRunManager（事件缓冲写入）
+        session_id: 会话 ID
+        capture: 流捕获容器（透传 _convert_event，ask_user 不捕获字段）
+    """
+    while True:
+        item = await ctx.clarify_channel.get()
+        try:
+            for event in _convert_event(item, capture):
+                manager.add_event(session_id, event.type, event.payload_for_buffer())
+        except Exception as exc:  # noqa: BLE001  # 单条转换失败不终止消费
+            logger.warning(
+                "clarify item convert failed item_type={} err={}",
+                type(item).__name__,
+                exc,
+            )
+
+
 async def _run_generation(
     session_id: str,
     kb_id: str,
@@ -341,8 +375,8 @@ async def _run_generation(
     on_chat_model_end）与 final_answer/tool_contexts（agent_finalize 节点
     on_chain_end）；循环结束后按捕获结果补发 abstention / model_info 事件
     到缓冲（复刻旧 stream_chat 语义，供前端拒答提示与模型名展示）。
-    clarify_channel 的合并不在本任务范围（由后续任务负责），
-    本函数只消费 graph 事件源。
+    ask_user 澄清通道由 _drain_clarify_channel 并行消费并写入同一缓冲，
+    与图事件同路推送给前端。
 
     Args:
         session_id: 会话 ID
@@ -377,19 +411,32 @@ async def _run_generation(
     full_answer = ""
     if abort_signal is not None and abort_signal.is_set():
         raise asyncio.CancelledError
-    async for item in graph.astream_events(initial_state, version=LangGraph.VERSION):
-        for event in _convert_event(item, capture):
-            manager.add_event(session_id, event.type, event.payload_for_buffer())
-            if isinstance(event, SSETokenEvent):
-                full_answer += event.token
-                if partial_holder is not None:
-                    partial_holder["text"] = full_answer
-            elif isinstance(event, SSECitationEvent) and partial_holder is not None:
-                partial_holder.setdefault("sources", []).append(
-                    f"{event.source} (第{event.page}页)"
-                )
-        if abort_signal is not None and abort_signal.is_set():
-            raise asyncio.CancelledError
+    # 澄清通道与图事件循环并行：ask_user / web_confirm 经 clarify_channel
+    # 投递的问题 payload 须转 SSE 写入缓冲，否则前端收不到澄清卡
+    drain_task = asyncio.create_task(
+        _drain_clarify_channel(ctx, manager, session_id, capture)
+    )
+    try:
+        async for item in graph.astream_events(
+            initial_state, version=LangGraph.VERSION
+        ):
+            for event in _convert_event(item, capture):
+                manager.add_event(session_id, event.type, event.payload_for_buffer())
+                if isinstance(event, SSETokenEvent):
+                    full_answer += event.token
+                    if partial_holder is not None:
+                        partial_holder["text"] = full_answer
+                elif isinstance(event, SSECitationEvent) and partial_holder is not None:
+                    partial_holder.setdefault("sources", []).append(
+                        f"{event.source} (第{event.page}页)"
+                    )
+            if abort_signal is not None and abort_signal.is_set():
+                raise asyncio.CancelledError
+    finally:
+        # 生成结束/异常/取消后停止澄清消费（工具等待期间图事件循环阻塞，
+        # 澄清项已被并行任务即时消费，收尾时队列已空）
+        drain_task.cancel()
+        await asyncio.gather(drain_task, return_exceptions=True)
     # 收尾：复刻旧 stream_chat 语义，按捕获结果补发 abstention / model_info
     # 事件（capture 在循环内经 _convert_event 填充 model_used / final_answer）
     if capture.final_answer is not None:
