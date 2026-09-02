@@ -49,6 +49,7 @@ class RequestContext:
     )  # 知识库缺失年份（来源：时间解析比对；用途：询问用户是否联网的依据）
     web_confirmed: bool = False  # 本轮请求内已确认联网（来源：验证循环询问用户后置位；用途：本轮后续缺失年份不再询问；跨轮持久化留 P1）
     verify_ask_count: int = 0  # verify"是否联网"询问计数（来源：verify 节点自增；用途：每轮最多询问 1 次，独立于 ask_count）
+    temporal_parsed: bool = False  # 本轮是否已完成时间解析（来源：retrieve_kb 时间解析块置位；用途：turn 内最多解析一次，避免重复 DB+LLM 且不覆盖已置位约束）
 
 
 current_request_ctx: ContextVar[RequestContext | None] = ContextVar(

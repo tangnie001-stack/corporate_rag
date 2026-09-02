@@ -100,13 +100,15 @@ def make_rag_tools(
         else:
             kb_ids = None
 
-        # 时间结构化约束（grilling 决策）：正则粗筛命中才解析；结果写入 RequestContext
+        # 时间结构化约束（grilling 决策）：正则粗筛命中才解析；结果写入 RequestContext。
+        # turn 内最多解析一次：首次解析成功后置 temporal_parsed，后续调用跳过 DB+LLM 重复执行
         ctx = current_request_ctx.get()
         if (
             settings.TEMPORAL_PARSE_ENABLED
             and ctx is not None
             and kb_ids
             and has_temporal_words(query)
+            and not ctx.temporal_parsed
         ):
             candidates = await derive_candidate_years(kb_ids)
             from src.models import get_classify_llm
@@ -114,6 +116,7 @@ def make_rag_tools(
             parsed = await parse_temporal(query, candidates, get_classify_llm())
             ctx.temporal_years = parsed["years"]
             ctx.missing_years = compute_missing(parsed["years"], candidates)
+            ctx.temporal_parsed = True
 
         start = time.monotonic()
         # kb_ids 非空 → 多 KB 并行检索后合并去重；

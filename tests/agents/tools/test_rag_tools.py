@@ -285,6 +285,49 @@ async def test_retrieve_kb_no_temporal_words_skips_parse(retrieve_kb, monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_retrieve_kb_temporal_parse_once_per_turn(retrieve_kb, monkeypatch):
+    """同一 turn 内多次调用 retrieve_kb：时间解析只执行一次，不重复 DB+LLM，约束保持首次结果。"""
+    from src.agents.tools import rag_tools
+
+    derive_calls = []
+    parse_calls = []
+
+    async def fake_derive_candidate_years(kb_ids: list[str]) -> list[int]:
+        """mock 候选年份：记录调用次数。"""
+        derive_calls.append(kb_ids)
+        return [2023, 2024, 2025]
+
+    async def fake_parse_temporal(query: str, candidates: list[int], llm) -> dict:
+        """mock LLM 时间解析：记录调用次数，返回固定解析结果。"""
+        parse_calls.append(query)
+        return {"years": [2023, 2024, 2025], "has_temporal": True}
+
+    monkeypatch.setattr(
+        rag_tools, "derive_candidate_years", fake_derive_candidate_years
+    )
+    monkeypatch.setattr(rag_tools, "parse_temporal", fake_parse_temporal)
+
+    ctx = RequestContext(session_id="s1")
+    token = current_request_ctx.set(ctx)
+    try:
+        await retrieve_kb.ainvoke(
+            {"query": "腾讯这几年业绩怎么样", "state": _new_state()}
+        )
+        await retrieve_kb.ainvoke(
+            {"query": "腾讯这几年的营收趋势", "state": _new_state()}
+        )
+        ctx = current_request_ctx.get()
+        assert ctx is not None
+        # 首次调用解析一次，第二次调用复用结果，不再重复 DB+LLM
+        assert len(derive_calls) == 1
+        assert len(parse_calls) == 1
+        assert ctx.temporal_years == [2023, 2024, 2025]
+        assert ctx.missing_years == []
+    finally:
+        current_request_ctx.reset(token)
+
+
+@pytest.mark.asyncio
 async def test_retrieve_kb_temporal_parse_disabled(retrieve_kb, monkeypatch):
     """TEMPORAL_PARSE_ENABLED=False：含时间词也跳过解析，temporal_years / missing_years 保持空。"""
     from src.agents.tools import rag_tools
