@@ -22,7 +22,6 @@ from src.config import TOP_K_RERANK, settings
 from src.config.const import ASK_USER_TIMEOUT, RERANK_TIMEOUT
 from src.core.logging import log_event
 from src.infra.db.vector_store import VectorStore
-from src.infra.db.vector_store.types import ChunkResult
 from src.infra.llm.request_context import current_request_ctx
 from src.infra.search.bm25_index import BM25Index
 from src.infra.search.query_router import aggregate_kb_entities
@@ -61,7 +60,6 @@ def make_rag_tools(
     bm25: BM25Index | None,
     reranker,
     prompt_manager,
-    embed_fn,
 ) -> list[BaseTool]:
     """构建工具列表：注册表管理；retrieve_kb 始终注册（KB=RAG 开关在工具内实现）。
 
@@ -70,7 +68,6 @@ def make_rag_tools(
         bm25: BM25 检索引擎实例（闭包注入，混合检索时使用）
         reranker: Reranker 模型实例（闭包注入，rerank_results 使用）
         prompt_manager: 提示词管理器（闭包注入，当前工具未直接使用，保留签名）
-        embed_fn: 嵌入函数（闭包注入，当前工具不再使用，保留签名兼容调用方）
 
     Returns:
         工具列表：retrieve_kb（知识库检索）、ask_user（澄清追问）；开启 web 兜底时追加
@@ -91,15 +88,15 @@ def make_rag_tools(
         Args:
             query: 检索查询文本
             top_k: 返回条数上限（默认 TOP_K_RERANK，精排后按此截断）
-            state: LangGraph 注入的 AgentState，读取 kb_router 已解析的 KB 列表
+            state: LangGraph 注入的 AgentState，读取 kb_id（空 = 未绑定 KB 不检索）
 
         Returns:
             带全局递增引用编号的精排上下文文本，如 "[1] 来源: xxx (第3页)\\n内容: ..."
         """
         if state is not None:
-            kb_ids = state._resolved_kb_ids
+            kb_id = state.kb_id
         else:
-            kb_ids = None
+            kb_id = ""
 
         # 时间结构化约束（grilling 决策）：正则粗筛命中才解析；结果写入 RequestContext。
         # turn 内最多解析一次：首次解析成功后置 temporal_parsed，后续调用跳过 DB+LLM 重复执行
@@ -107,11 +104,11 @@ def make_rag_tools(
         if (
             settings.TEMPORAL_PARSE_ENABLED
             and ctx is not None
-            and kb_ids
+            and kb_id
             and has_temporal_words(query)
             and not ctx.temporal_parsed
         ):
-            candidates = await derive_candidate_years(kb_ids)
+            candidates = await derive_candidate_years([kb_id])
             from src.models import get_classify_llm
 
             parsed = await parse_temporal(query, candidates, get_classify_llm())
@@ -120,16 +117,11 @@ def make_rag_tools(
             ctx.temporal_parsed = True
 
         start = time.monotonic()
-        # kb_ids 非空 → 多 KB 并行检索后合并去重；
-        # kb_ids 为空（未绑定 KB）→ 不检索（KB=RAG 开关硬保证：即便被调也返回空）
-        if kb_ids:
-            tasks = [
-                retrieval.search(query, kb_id, vector_store, bm25) for kb_id in kb_ids
-            ]
-            per_kb_results = await asyncio.gather(*tasks)
-            results = _merge_search_results(per_kb_results)
+        # kb_id 非空 → 检索该库；kb_id 为空（未绑定 KB）→ 不检索
+        # （KB=RAG 开关硬保证：即便被调也返回空，废弃 _semantic_select_kb 语义选库 = 隐式跨库）
+        if kb_id:
+            results = await retrieval.search(query, kb_id, vector_store, bm25)
         else:
-            # 未绑定 KB：不检索（废弃 _semantic_select_kb 语义选库 = 隐式跨库）
             results = []
 
         # rerank 为同步 HTTP 调用（无内置超时），放线程池 + 超时兜底，避免阻塞事件循环；
@@ -206,23 +198,3 @@ def make_rag_tools(
 
         registry.register("search_web", search_web)
     return registry.enabled_tools()
-
-
-def _merge_search_results(results_list: list[list[ChunkResult]]) -> list[ChunkResult]:
-    """合并多 KB 检索结果，按 chunk id 去重后保持首次出现顺序。
-
-    Args:
-        results_list: 各 KB 的检索结果（外层按 KB，内层为该 KB 的检索结果）
-
-    Returns:
-        去重后的扁平检索结果列表
-    """
-    merged: list[ChunkResult] = []
-    seen: set[str] = set()
-    for results in results_list:
-        for item in results:
-            if item.id in seen:
-                continue
-            seen.add(item.id)
-            merged.append(item)
-    return merged

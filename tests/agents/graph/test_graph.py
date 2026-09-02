@@ -14,12 +14,10 @@ from src.rag.context import RAGContext
 
 
 def test_graph_topology():
-    """图结构断言：kb_router → agent 循环 → format，不含固定流水线节点。"""
+    """图结构断言：agent 循环 → verify → format，不含固定流水线节点。"""
     graph = build_graph(
         MagicMock(),
         None,
-        MagicMock(),
-        MagicMock(),
         MagicMock(),
         MagicMock(),
         MagicMock(),
@@ -28,7 +26,6 @@ def test_graph_topology():
     # LangGraph 内部哨兵节点 __start__/__end__ 不属于业务节点，断言前剔除
     node_names = set(nodes) - {"__start__", "__end__"}
     assert node_names == {
-        "kb_router",
         "agent",
         "tools",
         "agent_finalize",
@@ -36,7 +33,14 @@ def test_graph_topology():
         "format",
     }
     # 固定流水线节点已删除
-    for removed in ("classify", "rewrite", "retrieve", "rerank", "generate"):
+    for removed in (
+        "kb_router",
+        "classify",
+        "rewrite",
+        "retrieve",
+        "rerank",
+        "generate",
+    ):
         assert removed not in node_names
 
 
@@ -256,9 +260,7 @@ def _build_test_graph(llm) -> object:
         MagicMock(),  # vector_store
         None,  # bm25
         llm,  # agent LLM（fake，按序响应）
-        MagicMock(),  # classify_llm
         MagicMock(),  # reranker
-        MagicMock(),  # embed_fn
         StubPromptManager(),
         tools=[fake_search_web],
     )

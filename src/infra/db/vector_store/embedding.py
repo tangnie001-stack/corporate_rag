@@ -66,7 +66,7 @@ class DashScopeEmbeddingFunction(EmbeddingFunction):
     def embed_query(self, text: str) -> list[float]:  # type: ignore[override]
         """将单条查询文本转为嵌入向量。
 
-        注意：这是项目自定义扩展（search / kb_router 依赖 单文本→单向量），
+        注意：这是项目自定义扩展（search 依赖 单文本→单向量），
         与 ChromaDB EmbeddingFunction 协议的 input: Documents → Embeddings
         签名不同，属于有意偏离，故标注 ignore[override]。
 

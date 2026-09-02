@@ -5,7 +5,6 @@
 """
 
 import re
-from collections.abc import Callable
 from difflib import SequenceMatcher
 
 from loguru import logger
@@ -17,25 +16,6 @@ from src.config.const import SSEInteractionTexts
 _SNIPPET_WINDOW = 200
 # 与回答重叠低于该长度视为无意义，回退到内容开头窗口
 _SNIPPET_MIN_MATCH = 15
-
-
-def make_kb_router_node(embed_fn, llm) -> Callable:
-    """创建 KB 路由节点工厂函数。
-
-    kb_id 非空 → 穿透（固定检索该 KB）；kb_id 为空 = 未绑定 KB（纯对话），
-    不检索（废弃隐式跨库路由）。embed_fn/llm 参数保留签名兼容 workflow.py 调用，
-    节点内不再实例化 KBRouter。
-    """
-
-    async def kb_router_node(state: AgentState) -> dict:
-        # kb_id 非空 → 穿透
-        if state.kb_id:
-            return {"_resolved_kb_ids": [state.kb_id]}
-
-        # kb_id 为空 = 未绑定 KB（纯对话），不检索（废弃隐式跨库）
-        return {"_resolved_kb_ids": []}
-
-    return kb_router_node
 
 
 def _relevant_snippet(content: str, answer: str) -> str:

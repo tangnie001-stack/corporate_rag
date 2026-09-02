@@ -178,7 +178,8 @@ def _content_logging_callbacks() -> list | None:
 def get_classify_llm() -> ChatOpenAI:
     """创建分类/路由专用 LLM 实例（小模型，关闭思考模式）。
 
-    KBRouter 和 classify 节点使用，与 generate 节点的大模型分离，
+    用于实体抽取（DocumentEntityExtractor）、意图/缺失维度判定（QueryRouter）、
+    相对时间词解析（parse_temporal）等轻量分类任务；与生成回答的大模型分离，
     避免大模型在简单分类任务上浪费推理时间。
 
     Returns:

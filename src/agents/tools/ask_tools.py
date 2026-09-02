@@ -70,7 +70,7 @@ async def ask_user(
 
     Args:
         questions: 需要用户补充的问题列表（含 id/question/dimension/options/multi_select）
-        state: LangGraph 注入的 AgentState，读取 kb_id/_resolved_kb_ids 确定 KB 候选来源
+        state: LangGraph 注入的 AgentState，读取 kb_id 确定 KB 候选来源
 
     Returns:
         用户答案的 JSON 文本；超限/超时/取消时返回对应错误文本
@@ -157,15 +157,13 @@ async def _load_dimension_options(
 
     Args:
         dimension: 缺失维度（company/period/metric/free）
-        state: AgentState，提供 kb_id/_resolved_kb_ids 定位 KB 候选来源
+        state: AgentState，提供 kb_id 定位 KB 候选来源
 
     Returns:
         候选选项列表；KB 无候选且 dimension 不在 SUGGESTIONS_MAP 时为空列表
     """
     if dimension in ("company", "period"):
-        if state is not None and state._resolved_kb_ids:
-            kb_ids = state._resolved_kb_ids
-        elif state is not None and state.kb_id:
+        if state is not None and state.kb_id:
             kb_ids = [state.kb_id]
         else:
             kb_ids = None

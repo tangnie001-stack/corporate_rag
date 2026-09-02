@@ -16,17 +16,6 @@ from src.rag import retrieval
 from src.rag.context import RAGContext
 
 
-class _FakeEmbedFn:
-    """mock embed_fn：文本含"财务"返回 [1,0]，含"人事"返回 [0,1]，其余返回零向量。"""
-
-    def embed_query(self, text: str) -> list[float]:
-        if "财务" in text:
-            return [1.0, 0.0]
-        if "人事" in text:
-            return [0.0, 1.0]
-        return [0.0, 0.0]
-
-
 def _fixed_contexts() -> list[RAGContext]:
     """构造固定两条 RAGContext，作为 mock 检索/精排的返回。"""
     return [
@@ -70,15 +59,12 @@ def retrieve_kb(monkeypatch):
         bm25=None,
         reranker=None,
         prompt_manager=None,
-        embed_fn=_FakeEmbedFn(),
     )[0]
 
 
 def _new_state() -> AgentState:
-    """构造带 _resolved_kb_ids 的初始 AgentState。"""
-    state = AgentState.make_initial_state("s1", "kb1", "毛利率", [])
-    state._resolved_kb_ids = ["kb1"]
-    return state
+    """构造绑定 KB1 的初始 AgentState（kb_id 由 make_initial_state 携带）。"""
+    return AgentState.make_initial_state("s1", "kb1", "毛利率", [])
 
 
 @pytest.mark.asyncio
@@ -111,8 +97,8 @@ async def test_retrieve_kb_appends_to_collector(retrieve_kb):
 
 
 @pytest.mark.asyncio
-async def test_retrieve_kb_unbound_none_returns_empty(monkeypatch):
-    """未绑定 KB（_resolved_kb_ids=None）→ 不检索，返回空字符串（KB=RAG 开关硬保证）。"""
+async def test_retrieve_kb_unbound_returns_empty(monkeypatch):
+    """未绑定 KB（kb_id=""）→ 不检索，返回空字符串（KB=RAG 开关硬保证）。"""
     search_called = []
 
     async def fake_search(query, kb_id, vector_store, bm25):
@@ -127,40 +113,10 @@ async def test_retrieve_kb_unbound_none_returns_empty(monkeypatch):
         bm25=None,
         reranker=None,
         prompt_manager=None,
-        embed_fn=_FakeEmbedFn(),
     )[0]
 
     state = AgentState.make_initial_state("s1", "", "财务年报毛利率多少", [])
-    state._resolved_kb_ids = None
     out = await tool.ainvoke({"query": "财务年报毛利率多少", "state": state})
-
-    assert out == ""
-    assert search_called == []
-
-
-@pytest.mark.asyncio
-async def test_retrieve_kb_unbound_empty_list_returns_empty(monkeypatch):
-    """kb_router 节点输出空列表（未绑定 KB）→ 不检索，返回空字符串。"""
-    search_called = []
-
-    async def fake_search(query, kb_id, vector_store, bm25):
-        search_called.append(kb_id)
-        return []
-
-    monkeypatch.setattr(retrieval, "search", fake_search)
-    monkeypatch.setattr(retrieval, "rerank_results", lambda q, r, rk: [])
-
-    tool = make_rag_tools(
-        vector_store=cast(VectorStore, None),
-        bm25=None,
-        reranker=None,
-        prompt_manager=None,
-        embed_fn=_FakeEmbedFn(),
-    )[0]
-
-    state = AgentState.make_initial_state("s1", "", "毛利率", [])
-    state._resolved_kb_ids = []
-    out = await tool.ainvoke({"query": "毛利率", "state": state})
 
     assert out == ""
     assert search_called == []
@@ -201,7 +157,6 @@ async def test_retrieve_kb_rerank_timeout_falls_back_raw_order(monkeypatch):
         bm25=None,
         reranker=None,
         prompt_manager=None,
-        embed_fn=_FakeEmbedFn(),
     )[0]
 
     ctx = RequestContext(session_id="s1")

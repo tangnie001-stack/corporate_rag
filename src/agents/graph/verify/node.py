@@ -30,7 +30,7 @@ async def verify_node(state: AgentState) -> dict:
         return {"answer": state.answer or "", "_needs_regenerate": False}
     ctx = current_request_ctx.get()
     # ── 态 A：未绑定 KB（纯对话）──
-    if not state._resolved_kb_ids:
+    if not state.kb_id:
         decision = await web_citation_guard(state, ctx)
         if decision is not None:
             return decision
@@ -43,9 +43,9 @@ async def verify_node(state: AgentState) -> dict:
     required = ctx.temporal_years if ctx is not None else []
     missing = completeness_check(required, answer) if required else []
     logger.info(
-        "verify_node session_id={} kb_ids={} required={} missing={} answer_len={}",
+        "verify_node session_id={} kb_id={} required={} missing={} answer_len={}",
         state.session_id,
-        state._resolved_kb_ids,
+        state.kb_id,
         required,
         missing,
         len(answer),

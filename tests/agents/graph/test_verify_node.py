@@ -192,14 +192,14 @@ async def test_ask_web_confirm_slot_occupied(monkeypatch):
 
 def _make_state(
     answer: str = "",
-    resolved: list[str] | None = None,
+    kb_id: str = "",
     iterations: int = 0,
     max_iter: int = 5,
 ) -> AgentState:
-    """构造 verify_node 测试用 AgentState。"""
+    """构造 verify_node 测试用 AgentState（kb_id="" = 未绑定 KB，态 A）。"""
     return AgentState(
         answer=answer,
-        _resolved_kb_ids=resolved,
+        kb_id=kb_id,
         _agent_iterations=iterations,
         _max_agent_iterations=max_iter,
     )
@@ -207,9 +207,9 @@ def _make_state(
 
 @pytest.mark.asyncio
 async def test_verify_node_unbound_kb_passthrough(monkeypatch):
-    """未绑定 KB（_resolved_kb_ids 为空）→ 直通返回 answer，不询问/不 judge。"""
+    """未绑定 KB（kb_id=""）→ 直通返回 answer，不询问/不 judge。"""
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
-    state = _make_state(answer="纯对话回答", resolved=[])
+    state = _make_state(answer="纯对话回答")
     result = await verify_node(state)
     assert result == {"answer": "纯对话回答", "_needs_regenerate": False}
 
@@ -220,7 +220,7 @@ async def test_verify_node_disabled_passthrough(monkeypatch):
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", False)
     _ctx, token = _make_ctx(temporal_years=[2023, 2024, 2025])
     try:
-        state = _make_state(answer="2024年营收3943亿", resolved=["kb1"])
+        state = _make_state(answer="2024年营收3943亿", kb_id="kb1")
         result = await verify_node(state)
         assert result == {
             "answer": "2024年营收3943亿",
@@ -240,7 +240,7 @@ async def test_verify_node_missing_user_rejects_annotate(monkeypatch):
     )
     _ctx, token = _make_ctx(temporal_years=[2023, 2024, 2025])
     try:
-        state = _make_state(answer="2024年营收3943亿", resolved=["kb1"])
+        state = _make_state(answer="2024年营收3943亿", kb_id="kb1")
         result = await verify_node(state)
         assert result == {
             "answer": (
@@ -263,7 +263,7 @@ async def test_verify_node_missing_confirmed_regenerates(monkeypatch):
     )
     ctx, token = _make_ctx(temporal_years=[2023, 2024, 2025])
     try:
-        state = _make_state(answer="2024年营收3943亿", resolved=["kb1"])
+        state = _make_state(answer="2024年营收3943亿", kb_id="kb1")
         result = await verify_node(state)
         assert result["answer"] == "2024年营收3943亿"
         assert result["_needs_regenerate"] is True
@@ -286,7 +286,7 @@ async def test_verify_node_missing_iteration_limit_annotate(monkeypatch):
     _ctx, token = _make_ctx(temporal_years=[2023, 2024, 2025], web_confirmed=True)
     try:
         state = _make_state(
-            answer="2024年营收3943亿", resolved=["kb1"], iterations=5, max_iter=5
+            answer="2024年营收3943亿", kb_id="kb1", iterations=5, max_iter=5
         )
         result = await verify_node(state)
         assert result == {
@@ -310,7 +310,7 @@ async def test_verify_node_missing_confirmed_already_guided(monkeypatch):
     )
     _ctx, token = _make_ctx(temporal_years=[2023, 2024, 2025], web_confirmed=True)
     try:
-        state = _make_state(answer="2024年营收3943亿", resolved=["kb1"])
+        state = _make_state(answer="2024年营收3943亿", kb_id="kb1")
         state.messages = [
             SystemMessage(
                 content="知识库缺失年份 [2023, 2025]，用户已确认联网，请调用 search_web 工具补充。"
@@ -333,7 +333,7 @@ async def test_verify_node_complete_runs_judge(monkeypatch):
     )
     _ctx, token = _make_ctx(temporal_years=[2024], tool_contexts=_make_contexts())
     try:
-        state = _make_state(answer="2024年营收3943亿", resolved=["kb1"])
+        state = _make_state(answer="2024年营收3943亿", kb_id="kb1")
         result = await verify_node(state)
         assert result == {
             "answer": "2024年营收3943亿",
@@ -354,7 +354,7 @@ async def test_verify_node_complete_judge_clean(monkeypatch):
     )
     _ctx, token = _make_ctx(temporal_years=[2024], tool_contexts=_make_contexts())
     try:
-        state = _make_state(answer="2024年营收3943亿", resolved=["kb1"])
+        state = _make_state(answer="2024年营收3943亿", kb_id="kb1")
         result = await verify_node(state)
         assert result == {"answer": "2024年营收3943亿", "_needs_regenerate": False}
     finally:
@@ -381,7 +381,7 @@ async def test_verify_node_unbound_web_no_citation_guides(monkeypatch):
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
     _ctx, token = _make_ctx(tool_contexts=_make_web_contexts())
     try:
-        state = _make_state(answer="建议选择 2核2G 配置，性价比较高", resolved=[])
+        state = _make_state(answer="建议选择 2核2G 配置，性价比较高")
         result = await verify_node(state)
         assert result["_needs_regenerate"] is True
         assert len(result["messages"]) == 1
@@ -397,7 +397,7 @@ async def test_verify_node_unbound_web_with_citation_passthrough(monkeypatch):
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
     _ctx, token = _make_ctx(tool_contexts=_make_web_contexts())
     try:
-        state = _make_state(answer="建议选择 2核2G 配置[1]，性价比较高", resolved=[])
+        state = _make_state(answer="建议选择 2核2G 配置[1]，性价比较高")
         result = await verify_node(state)
         assert result == {
             "answer": "建议选择 2核2G 配置[1]，性价比较高",
@@ -413,9 +413,7 @@ async def test_verify_node_unbound_web_iteration_limit_passthrough(monkeypatch):
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
     _ctx, token = _make_ctx(tool_contexts=_make_web_contexts())
     try:
-        state = _make_state(
-            answer="建议选择 2核2G 配置", resolved=[], iterations=5, max_iter=5
-        )
+        state = _make_state(answer="建议选择 2核2G 配置", iterations=5, max_iter=5)
         result = await verify_node(state)
         assert result == {
             "answer": "建议选择 2核2G 配置",
@@ -431,7 +429,7 @@ async def test_verify_node_unbound_web_already_guided_passthrough(monkeypatch):
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
     _ctx, token = _make_ctx(tool_contexts=_make_web_contexts())
     try:
-        state = _make_state(answer="建议选择 2核2G 配置", resolved=[])
+        state = _make_state(answer="建议选择 2核2G 配置")
         state.messages = [
             SystemMessage(
                 content="你刚才的回答引用了联网搜索结果，但没有标注来源编号，请为联网引用标注来源编号"
@@ -452,7 +450,7 @@ async def test_verify_node_unbound_no_web_passthrough(monkeypatch):
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
     _ctx, token = _make_ctx(tool_contexts=[])  # ctx 存在但无 web 检索上下文
     try:
-        state = _make_state(answer="纯对话回答", resolved=[])
+        state = _make_state(answer="纯对话回答")
         result = await verify_node(state)
         assert result == {
             "answer": "纯对话回答",

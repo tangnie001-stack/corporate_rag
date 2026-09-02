@@ -480,16 +480,14 @@ class AgentService:
         bm25: BM25Index | None,
         chat_manager: ChatManager,
         llm=None,
-        classify_llm=None,
         reranker=None,
         prompt_manager: PromptManager | None = None,
     ):
-        from src.models import get_classify_llm, get_embeddings, get_llm, get_rerank
+        from src.models import get_llm, get_rerank
 
         self._vector_store = vector_store
         self._bm25 = bm25
         self._llm = llm or get_llm()
-        self._classify_llm = classify_llm or get_classify_llm()
         self._reranker = reranker or get_rerank()
         self._chat_manager = chat_manager
         self._prompt_manager = prompt_manager or PromptManager()
@@ -499,9 +497,7 @@ class AgentService:
             vector_store,
             bm25,
             self._llm,
-            self._classify_llm,
             self._reranker,
-            get_embeddings(),
             self._prompt_manager,
         )
         logger.info("AgentService initialized with compiled graph")

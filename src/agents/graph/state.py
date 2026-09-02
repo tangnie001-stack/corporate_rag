@@ -40,9 +40,6 @@ class AgentState:
     # ── 模型信息 ──
     model_used: str = ""  # LiteLLM 实际使用的模型名（用于识别 fallback）
     is_fallback: bool = False  # 是否触发了模型 fallback
-    # ── 路由控制 ──
-    _resolved_kb_ids: list[str] | None = None
-    # None = 未路由 / 降级全量；[...] = 路由选中的 KB ID 列表
     # ── 内部 ──
     _history: list[ChatMessage] = field(
         default_factory=list
@@ -81,9 +78,6 @@ class LangGraphNode:
     与 AgentState 字段同源：生产侧（nodes/query_router）与消费侧
     （agent_service）共用同一套 key，避免字段名散落成两套。
     """
-
-    class KbRouter:
-        NAME: str = "kb_router"  # 知识库路由（按 user_id 分发到对应知识库）
 
     class Format:
         NAME: str = "format"  # 引用格式化
