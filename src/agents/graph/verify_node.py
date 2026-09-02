@@ -18,11 +18,50 @@ from src.config import settings
 from src.config.const import (
     ASK_USER_TIMEOUT,
     MAX_VERIFY_ASK_PER_TURN,
+    VERIFY_CITATION_MARKER,
     VERIFY_GUIDANCE_MARKER,
+    SSEInteractionTexts,
 )
 from src.infra.llm.request_context import current_request_ctx, pending_asks
 
 _YEAR_PATTERN = re.compile(r"20\d{2}")
+
+
+def _answer_has_citation(answer: str) -> bool:
+    """判断回答文本是否含 [n] 引用标记（format_node 依赖 [n] 提取 citations）。"""
+    return re.search(r"\[\d+\]", answer) is not None
+
+
+def _has_web_context(ctx) -> bool:
+    """判断本轮是否调用了 search_web 并拿到了联网上下文（tool_contexts 含 kind=web）。
+
+    Args:
+        ctx: 当前请求上下文（可能为 None）
+
+    Returns:
+        True 存在 kind=web 的检索上下文
+    """
+    if ctx is None:
+        return False
+    return any(
+        getattr(c, "kind", None) == SSEInteractionTexts.CITATION_KIND_WEB
+        for c in ctx.tool_contexts
+    )
+
+
+def _citation_guidance_already_injected(state: AgentState) -> bool:
+    """查重：联网引用标注指引 SystemMessage 是否已注入过。
+
+    Args:
+        state: 当前图状态（遍历 messages 找含 VERIFY_CITATION_MARKER 的 SystemMessage）
+
+    Returns:
+        True 已注入过（避免每轮重复追加同一条指引）
+    """
+    return any(
+        isinstance(m, SystemMessage) and VERIFY_CITATION_MARKER in (m.content or "")
+        for m in state.messages
+    )
 
 
 def extract_years(answer: str) -> set[int]:
@@ -185,9 +224,36 @@ async def verify_node(state: AgentState) -> dict:
         return {"answer": state.answer or "", "_needs_regenerate": False}
     ctx = current_request_ctx.get()
     if not state._resolved_kb_ids:
+        # 纯对话（未绑定 KB）：不做年份完整性/忠实度校验（claude-code 式轻量自检由 prompt 覆盖）。
+        # 但若本轮调过 search_web 且回答未带 [n] 引用（format_node 提取不到 → 前端无来源），
+        # 注入一次引导 SystemMessage 驱动 agent 补标注后重生成（2026-09-02 bug 修复）。
+        answer = state.answer or ""
+        if (
+            _has_web_context(ctx)
+            and not _answer_has_citation(answer)
+            and state._agent_iterations < state._max_agent_iterations
+            and not _citation_guidance_already_injected(state)
+        ):
+            logger.info(
+                "verify web-citation guide session_id={} answer_len={}",
+                state.session_id,
+                len(answer),
+            )
+            guidance = SystemMessage(
+                content=(
+                    f"你刚才的回答引用了联网搜索结果，但没有标注来源编号，"
+                    f"{VERIFY_CITATION_MARKER}，请在引用来源的对应句末补上 [n] 编号"
+                    "（编号须与搜索结果返回的来源列表一致）后重新回答。"
+                )
+            )
+            return {
+                "answer": answer,
+                "messages": [guidance],
+                "_needs_regenerate": True,
+            }
+        # 纯对话未联网 / 已带引用 / 迭代超限 / 已引导过一次：直通 format
         logger.info("verify skipped (no kb bound) session_id={}", state.session_id)
-        # 纯对话：跳过 verify（claude-code 式轻量自检由 prompt 准则覆盖）
-        return {"answer": state.answer or "", "_needs_regenerate": False}
+        return {"answer": answer, "_needs_regenerate": False}
 
     answer = state.answer or ""
     required = ctx.temporal_years if ctx is not None else []

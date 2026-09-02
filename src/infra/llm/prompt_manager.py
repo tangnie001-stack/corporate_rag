@@ -24,8 +24,11 @@ from src.config.prompts import (
 )
 
 # 本地兜底的 prompt 常量（与 src/config/prompts.py 一致）
+# 引用编号指令：无论来源（知识库文档或联网搜索结果）都必须在句末标注来源编号，
+# 否则 format_node 按 [n] 正则提取不到引用，前端无来源可展示（2026-09-02 bug 修复）
 _INLINE_CITATION_INSTRUCTION: str = (
-    '\n引用文档时请在句末标注编号 [1][2]，例如："营收3943亿元[1]"。\n'
+    "\n引用知识库文档或联网搜索结果时，请在对应句末标注来源编号 [1][2]，"
+    '编号须与工具返回的来源列表一致，例如："营收3943亿元[1]"。\n'
 )
 
 _FALLBACK_SYSTEM_PROMPT: str = FINANCIAL_SYSTEM_PROMPT + _INLINE_CITATION_INSTRUCTION

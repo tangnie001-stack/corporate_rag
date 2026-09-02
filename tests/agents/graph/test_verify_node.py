@@ -359,3 +359,104 @@ async def test_verify_node_complete_judge_clean(monkeypatch):
         assert result == {"answer": "2024年营收3943亿", "_needs_regenerate": False}
     finally:
         current_request_ctx.reset(token)
+
+
+def _make_web_contexts() -> list[RAGContext]:
+    """构造一条 kind=web 的联网搜索上下文（模拟 search_web 结果）。"""
+    return [
+        RAGContext(
+            content="阿里云轻量应用服务器适合个人博客",
+            source="https://example.com/aliyun",
+            page=0,
+            doc_id="https://example.com/aliyun",
+            chunk_id="https://example.com/aliyun",
+            kind="web",
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_verify_node_unbound_web_no_citation_guides(monkeypatch):
+    """未绑定 KB + 已联网检索 + 回答无 [n] 引用 → 注入标注引导并置重生成信号。"""
+    monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
+    _ctx, token = _make_ctx(tool_contexts=_make_web_contexts())
+    try:
+        state = _make_state(answer="建议选择 2核2G 配置，性价比较高", resolved=[])
+        result = await verify_node(state)
+        assert result["_needs_regenerate"] is True
+        assert len(result["messages"]) == 1
+        assert isinstance(result["messages"][0], SystemMessage)
+        assert "请为联网引用标注来源编号" in result["messages"][0].content
+    finally:
+        current_request_ctx.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_verify_node_unbound_web_with_citation_passthrough(monkeypatch):
+    """未绑定 KB + 回答已带 [n] 引用 → 直通 format，不注入不重生成。"""
+    monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
+    _ctx, token = _make_ctx(tool_contexts=_make_web_contexts())
+    try:
+        state = _make_state(answer="建议选择 2核2G 配置[1]，性价比较高", resolved=[])
+        result = await verify_node(state)
+        assert result == {
+            "answer": "建议选择 2核2G 配置[1]，性价比较高",
+            "_needs_regenerate": False,
+        }
+    finally:
+        current_request_ctx.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_verify_node_unbound_web_iteration_limit_passthrough(monkeypatch):
+    """未绑定 KB + 回答无引用但迭代已超限 → 直通不注入（防死循环）。"""
+    monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
+    _ctx, token = _make_ctx(tool_contexts=_make_web_contexts())
+    try:
+        state = _make_state(
+            answer="建议选择 2核2G 配置", resolved=[], iterations=5, max_iter=5
+        )
+        result = await verify_node(state)
+        assert result == {
+            "answer": "建议选择 2核2G 配置",
+            "_needs_regenerate": False,
+        }
+    finally:
+        current_request_ctx.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_verify_node_unbound_web_already_guided_passthrough(monkeypatch):
+    """未绑定 KB + 标注指引已注入过 → 直通不重复注入（防多轮堆积）。"""
+    monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
+    _ctx, token = _make_ctx(tool_contexts=_make_web_contexts())
+    try:
+        state = _make_state(answer="建议选择 2核2G 配置", resolved=[])
+        state.messages = [
+            SystemMessage(
+                content="你刚才的回答引用了联网搜索结果，但没有标注来源编号，请为联网引用标注来源编号"
+            )
+        ]
+        result = await verify_node(state)
+        assert result == {
+            "answer": "建议选择 2核2G 配置",
+            "_needs_regenerate": False,
+        }
+    finally:
+        current_request_ctx.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_verify_node_unbound_no_web_passthrough(monkeypatch):
+    """未绑定 KB + 未联网（无 web context）→ 纯对话直通，不注入。"""
+    monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
+    _ctx, token = _make_ctx(tool_contexts=[])  # ctx 存在但无 web 检索上下文
+    try:
+        state = _make_state(answer="纯对话回答", resolved=[])
+        result = await verify_node(state)
+        assert result == {
+            "answer": "纯对话回答",
+            "_needs_regenerate": False,
+        }
+    finally:
+        current_request_ctx.reset(token)
