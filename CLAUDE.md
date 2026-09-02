@@ -80,6 +80,13 @@ docker compose build --no-cache app    # 改依赖后重建
 - trace_id 的格式 `trace_<uuid>`，生成优先级：请求头 `X-Trace-ID` → 查询参数 `trace_id` → 自动生成。所有响应头均返回 `X-Trace-ID`（含 401/500）。
 - 容器日志内 `/data/logs/`，按天轮转，trace_id 在日志行第三个 `|` 分隔段：
 
+## 日志简则
+
+- 事件消息英文 k=v + `[层名]` 前缀；中文仅限用户可见文案（SSEInteractionTexts）
+- 分级：debug 诊断 / info 里程碑 / warning 降级可恢复 / error 单点 / exception 透传
+- 检索行为信号用 `retrieval_signal:` helper，不手拼
+- 完整规范见 docs/agents/rules.md「日志约定」
+
 ## 验证
 改完代码后自检以下清单：
 1. **质量门禁**：`pytest tests/ -v` 全部通过、`ruff check .` 无错误、`pyright src/` 不引入新 error（存量多为第三方库误报，以不新增为准）、无遗留 `print()`/TODO/调试代码
