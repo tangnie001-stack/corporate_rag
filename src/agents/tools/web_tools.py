@@ -109,9 +109,9 @@ async def search_web(queries: list[str], top_k: int = 5) -> str:
             bodies[item["url"]] = item.get("content", "")[:WEB_BODY_LIMIT]
     except Exception as exc:  # noqa: BLE001  # extract 失败不阻断合并结果，降级用搜索摘要兜底
         logger.warning(
-            "tool=search_web extract failed urls={} session_id={} err={}",
-            extract_urls,
+            "[retrieval] search_web extract failed session_id={} url_count={} err={}",
             ctx.session_id,
+            len(extract_urls),
             exc,
         )
 
