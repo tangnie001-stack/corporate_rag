@@ -49,7 +49,7 @@ class ChatRepo:
                     SessionModel.kb_id,
                     SessionModel.created_at,
                     SessionModel.updated_at,
-                    func.coalesce(KbModel.name, "所有知识库").label("kb_name"),
+                    func.coalesce(KbModel.name, "未绑定知识库").label("kb_name"),
                     func.count(MessageModel.id).label("message_count"),
                 )
                 .outerjoin(
