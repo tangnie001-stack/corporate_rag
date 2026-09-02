@@ -641,23 +641,25 @@ name = f"kb_{kb_id.replace('-', '')}"
 | **agent** | `"agent"` | `messages`, `_agent_iterations` | agent 模型节点：bind_tools 调 LLM，可发起工具调用（retrieve_kb / ask_user / search_web） |
 | **agent_tools** | `"agent_tools"` | `messages`（ToolMessage 追加） | ToolNode 执行工具，错误回喂；工具集：`retrieve_kb`（KB 混合检索）/ `search_web`（Tavily 联网搜索兜底，KB 不达标时补充知识库外事实）/ `ask_user`（澄清追问） |
 | **agent_finalize** | `"agent_finalize"` | `answer`, `tool_contexts` | 循环结束提取末次 AIMessage content → `answer`，读入 `tool_contexts` |
+| **verify** | `"verify"` | `answer`, `_needs_regenerate`, `_unsupported` | 验证循环节点：完整性校验（缺失年份→询问是否联网/注入 SystemMessage 回 agent 重生成）；最终答案跑忠实度 judge（`_unsupported` 仅标记，P1 输出护栏消费） |
 | **format** | `"format"` | `citations: list[dict]` | 去重引用列表 |
 
 ### 5.2 agent 循环（model ↔ tools 条件循环）
 
-图结构为 `kb_router → agent → (agent_tools | agent_finalize) → format`：
+图结构为 `kb_router → agent → (agent_tools | agent_finalize) → verify → (format | agent)`：
 
 ```
 kb_router → agent（LLM + bind_tools）
               │ 有 tool_calls 且未超限
               ▼
-         agent_tools（ToolNode 执行 retrieve_kb / ask_user）
+         agent_tools（ToolNode 执行 retrieve_kb / ask_user / search_web）
               │ 工具结果回填 messages
               ▼
             agent（下一轮 LLM）
               │ 无 tool_calls / 达迭代上限
               ▼
          agent_finalize（提取 answer + tool_contexts）
+              │ verify：完整性通过 → format；缺失年份 → 询问联网/注入重生成回 agent
               ▼
             format（引用去重）
 ```
@@ -714,7 +716,7 @@ kb_router → agent（LLM + bind_tools）
 ```
 用户提问 "2024年公司营收多少" (query)
   → POST /api/chat/stream（body: ChatStreamRequest）
-    → kb_router_node: 解析 _resolved_kb_ids（空 kb_id → 空列表，不检索）
+    → kb_router: 解析 _resolved_kb_ids（空 kb_id → 空列表，不检索）
     → agent 循环:
         1. agent: LLM 思考 → 调用 retrieve_kb
         2. agent_tools: 检索（hybrid Dense + BM25 + RRF 融合 → rerank 精排 → format_context）
@@ -722,6 +724,7 @@ kb_router → agent（LLM + bind_tools）
            （检索不达标时可在循环内调用 search_web 联网兜底，产出 kind=web 引用）
            （信息不足时可在循环内调用 ask_user 追问，见 6.2）
     → agent_finalize: 提取 answer + tool_contexts
+    → verify: 完整性校验（缺失年份→询问是否联网/注入重生成回 agent）；最终答案跑忠实度 judge
     → format_node: 去重引用列表
     → SSE 事件流推送至前端:
         event: status (agent, "正在思考...")

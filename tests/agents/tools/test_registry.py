@@ -25,3 +25,20 @@ def test_get_missing_raises():
         pass
     else:
         raise AssertionError("should raise KeyError")
+
+
+def test_unregister_removes_entry():
+    reg = ToolRegistry()
+    reg.register("a", lambda: 1)
+    reg.unregister("a")
+    assert reg.enabled_tools() == []
+
+
+def test_unregister_missing_silent():
+    reg = ToolRegistry()
+    reg.unregister("nope")  # 不存在应静默，不抛异常
+
+
+def test_set_enabled_missing_silent():
+    reg = ToolRegistry()
+    reg.set_enabled("nope", False)  # 不存在应静默，不抛异常
