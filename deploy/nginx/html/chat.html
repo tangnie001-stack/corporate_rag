@@ -1768,7 +1768,7 @@ async function loadSessions() {
     listEl.innerHTML = sessions.map(s => {
       const title = s.title || s.id.slice(0, 8);
       const rel = formatRelTime(s.updated_at);
-      return `<button type="button" class="session-item ${s.id === state.sessionId ? 'active' : ''}" onclick="switchSession('${s.id}')" title="${escapeHtml(title)}">
+      return `<button type="button" class="session-item ${s.id === state.sessionId ? 'active' : ''}" onclick="switchSession('${escapeHtml(s.id)}')" title="${escapeHtml(title)}">
         <span class="session-title">${escapeHtml(title)}</span>
         <span class="rel-time">${rel}</span>
       </button>`;
@@ -1952,7 +1952,9 @@ Promise.all([
   } else {
     showNewPage();
   }
-  if (hadSavedSession) {
+  if (hadSavedSession && count > 0) {
+    // 仅历史对话页（有历史消息）才尝试续接生成中的回答；
+    // 新对话页（count === 0）没有可回放的消息流，不应 resume 到隐藏容器
     resumeIfGenerating(state.sessionId);
   }
 });
