@@ -63,9 +63,12 @@ def make_agent_model_node(llm, tools, prompt_manager) -> Callable:
     model = llm.bind_tools(tools)
 
     def _initial_messages(state: AgentState) -> list[BaseMessage]:
-        # 历史窗口截断（最近 N 轮 + token 双上限）后再组装初始消息
+        # 历史窗口截断（最近 N 轮 + token 双上限）后再组装初始消息；
+        # kb_bound 由 kb_id 是否非空决定（未绑定 KB → 追加禁止检索指令）
         history = _truncate_history(state._history or [])
-        return build_prompt(state.query, "", history, prompt_manager)
+        return build_prompt(
+            state.query, "", history, prompt_manager, kb_bound=bool(state.kb_id)
+        )
 
     async def agent_model(state: AgentState) -> dict:
         if state.messages:

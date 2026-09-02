@@ -44,6 +44,12 @@ FINANCIAL_SYSTEM_PROMPT: str = """你是一个智能问答助手，优先通过�
 
 # ====== 用户消息模板 ======
 
+# 未绑定知识库会话的系统指令追加 — build_prompt(kb_bound=False) 时在系统提示后追加，
+# 明确禁止调用知识库检索工具（KB=RAG 开关软引导层；硬保证是 retrieve_kb 空 kb_ids 返回空）
+KB_UNBOUND_SYSTEM_PROMPT: str = (
+    "本会话未绑定知识库，请勿调用知识库检索工具，可基于常识或联网搜索回答。"
+)
+
 # 用户提问时的完整消息模板，包含参考文档块和用户问题。
 #
 # 占位符说明：

@@ -22,37 +22,18 @@ _SNIPPET_MIN_MATCH = 15
 def make_kb_router_node(embed_fn, llm) -> Callable:
     """创建 KB 路由节点工厂函数。
 
-    当 kb_id 为空（"所有知识库"）时，使用 KBRouter 智能匹配 KB。
-    当 kb_id 非空时直接穿透。
+    kb_id 非空 → 穿透（固定检索该 KB）；kb_id 为空 = 未绑定 KB（纯对话），
+    不检索（废弃隐式跨库路由）。embed_fn/llm 参数保留签名兼容 workflow.py 调用，
+    节点内不再实例化 KBRouter。
     """
-    from src.rag.kb_router import KBRouter
-
-    router = KBRouter(embed_fn, llm)
 
     async def kb_router_node(state: AgentState) -> dict:
         # kb_id 非空 → 穿透
         if state.kb_id:
             return {"_resolved_kb_ids": [state.kb_id]}
 
-        # kb_id 为空 → 路由
-        from src.infra.db.engine import session_factory
-        from src.infra.db.mysql_db import KbRepo
-        from src.infra.llm.trace_context import current_user_id
-
-        uid = current_user_id.get()
-        if not uid:
-            logger.info("kb_router_node: no user_id, fallback to all")
-            return {"_resolved_kb_ids": None}
-
-        kbs = await KbRepo(session_factory).get_all_kb(uid)
-        kb_ids = router.route(state.query, kbs)
-        logger.info(
-            "kb_router_node: query={} kb_count={} routed={}",
-            state.query[:40],
-            len(kbs),
-            kb_ids,
-        )
-        return {"_resolved_kb_ids": kb_ids if kb_ids else None}
+        # kb_id 为空 = 未绑定 KB（纯对话），不检索（废弃隐式跨库）
+        return {"_resolved_kb_ids": []}
 
     return kb_router_node
 
