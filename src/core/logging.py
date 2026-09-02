@@ -150,3 +150,79 @@ def setup_logging(configure_trace_id: bool = False) -> None:
     # trace_id patcher（仅 API 模式）
     if configure_trace_id:
         _setup_trace_id_patcher()
+
+
+# ==== 统一事件日志 helper ====
+
+# 分层前缀允许值（与 rules.md「日志约定」前缀表一致）
+_LOG_PREFIXES = {"retrieval", "verify", "agent", "session", "db", "llm"}
+
+# 行为信号类型（与 rules.md「检索行为信号日志」一致）
+_RETRIEVAL_SIGNALS = {
+    "reretrieve",
+    "to_web",
+    "abstain_after_retrieve",
+    "unsupported",
+    "cited",
+    "empty_result",
+}
+
+# query/搜索词截断长度（与 rules.md 约定一致）
+_LOG_QUERY_TRUNCATE = 40
+
+
+def _truncate(value: str, limit: int = _LOG_QUERY_TRUNCATE) -> str:
+    """按字符截断长字段，超出加省略号。"""
+    if len(value) <= limit:
+        return value
+    return value[:limit] + "…"
+
+
+def log_event(prefix: str, event: str, **fields: object) -> None:
+    """输出带分层前缀的英文 k=v 事件日志。
+
+    规范（rules.md「日志约定」）：
+      - prefix 必须是 _LOG_PREFIXES 内层名
+      - message = [层名] 事件 + 各字段 k=v
+      - trace_id 由 logging patcher 注入，不在此写入
+
+    Args:
+        prefix: 层名前缀（retrieval/verify/agent/session/db/llm）
+        event: 事件名（如 "search start" / "rerank done"）
+        fields: k=v 字段（值会被 str() 化后拼入）
+    """
+    if prefix not in _LOG_PREFIXES:
+        logger.warning("log_event unknown prefix={}", prefix)
+        prefix = "core"
+    kv = " ".join(f"{k}={v}" for k, v in fields.items())
+    message = f"[{prefix}] {event}"
+    if kv:
+        message += f" {kv}"
+    logger.info(message)
+
+
+def retrieval_signal(signal: str, query: str, iteration: int, **fields: object) -> None:
+    """输出检索行为信号日志（P1 检索质量诊断地基）。
+
+    规范（rules.md「检索行为信号日志」）：
+      - 前缀 retrieval_signal:
+      - signal 必须是 _RETRIEVAL_SIGNALS 内类型
+      - query 截断 40 字符
+      - trace_id 由 logging patcher 注入，不在此写入
+
+    Args:
+        signal: 行为信号类型（reretrieve/to_web/abstain_after_retrieve/unsupported/cited/empty_result）
+        query: 用户查询文本（自动截断）
+        iteration: agent 迭代序号
+        fields: 附加字段（kb_id/result_count/reason 等）
+    """
+    if signal not in _RETRIEVAL_SIGNALS:
+        logger.warning("retrieval_signal unknown signal={}", signal)
+    kv = " ".join(f"{k}={v}" for k, v in fields.items())
+    message = (
+        f'retrieval_signal: signal={signal} query="{_truncate(query)}" '
+        f"iteration={iteration}"
+    )
+    if kv:
+        message += f" {kv}"
+    logger.info(message)
