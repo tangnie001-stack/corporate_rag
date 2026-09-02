@@ -52,7 +52,8 @@ async def search_web(queries: list[str], top_k: int = 5) -> str:
     ctx = current_request_ctx.get()
     if ctx is None:
         return SSEInteractionTexts.ASK_USER_CTX_UNAVAILABLE
-    queries = queries[:4]
+    # 过滤空串查询（LLM 可能输出空字符串），只保留有效 query
+    queries = [q for q in queries[:4] if q and q.strip()]
     if not queries:
         return ""
     if ctx.web_count >= settings.WEB_SEARCH_PER_TURN_LIMIT:
@@ -69,9 +70,27 @@ async def search_web(queries: list[str], top_k: int = 5) -> str:
         *[
             tavily_search(q, top_k=top_k, timeout=settings.TAVILY_TIMEOUT)
             for q in queries
-        ]
+        ],
+        return_exceptions=True,
     )
-    if not any(results_list):
+    # 单 query 失败不连坐全部：过滤异常项，保留成功项继续合并
+    successful_results: list[list[dict]] = []
+    failed_count = 0
+    for r in results_list:
+        # gather(return_exceptions=True) 捕获 BaseException（含 KeyboardInterrupt 等），
+        # 按 BaseException 判断才能完整排除异常项
+        if isinstance(r, BaseException):
+            failed_count += 1
+        else:
+            successful_results.append(r)
+    if failed_count:
+        logger.warning(
+            "tool=search_web {} of {} queries failed session_id={}",
+            failed_count,
+            len(results_list),
+            ctx.session_id,
+        )
+    if not any(successful_results):
         logger.info(
             "tool=search_web queries={} result_count=0 latency_ms={:.0f}",
             queries,
@@ -81,13 +100,13 @@ async def search_web(queries: list[str], top_k: int = 5) -> str:
 
     # 每个 query 取其 top-1~2 拉正文（保持单查询语义、保证各查询覆盖），
     # 合并为一次 extract 调用，失败不影响已拿到的摘要
-    extract_urls = [r["url"] for q_results in results_list for r in q_results[:2]]
+    extract_urls = [r["url"] for q_results in successful_results for r in q_results[:2]]
     bodies: dict[str, str] = {}
     extracted = await tavily_extract(extract_urls, timeout=settings.TAVILY_TIMEOUT)
     for item in extracted:
         bodies[item["url"]] = item.get("content", "")[:WEB_BODY_LIMIT]
 
-    results = [r for q_results in results_list for r in q_results]
+    results = [r for q_results in successful_results for r in q_results]
     collector = ctx.tool_contexts
     offset = len(collector)
     blocks = []

@@ -133,3 +133,66 @@ async def test_search_web_empty_queries(monkeypatch, ctx):
 
     assert out == ""
     assert ctx.web_count == 0
+
+
+@pytest.mark.asyncio
+async def test_search_web_filters_blank_queries(monkeypatch, ctx):
+    """空串/纯空白查询被过滤，不调 tavily 搜索空白 query，仅占 1 次额度。"""
+
+    searched = []
+
+    async def _recording_search(query, top_k=5, timeout=5.0, transport=None):
+        searched.append(query)
+        return []
+
+    monkeypatch.setattr(web_tools, "tavily_search", _recording_search)
+
+    out = await search_web.ainvoke({"queries": ["", "  ", "real"]})
+
+    assert out == ""
+    assert searched == ["real"]
+    assert ctx.web_count == 1
+
+
+@pytest.mark.asyncio
+async def test_search_web_partial_failure_keeps_success(monkeypatch, ctx):
+    """单个 query 失败不连坐全部：异常项被过滤，成功项正常合并进结果。"""
+
+    async def _flaky_search(query, top_k=5, timeout=5.0, transport=None):
+        if query == "bad":
+            raise RuntimeError("tavily down")
+        return [
+            {
+                "url": f"https://{query}.com/1",
+                "title": query,
+                "content": f"{query}内容",
+                "score": 0.9,
+            }
+        ]
+
+    async def _extract(urls, timeout=5.0, transport=None):
+        return [{"url": u, "content": f"{u} 正文"} for u in urls]
+
+    monkeypatch.setattr(web_tools, "tavily_search", _flaky_search)
+    monkeypatch.setattr(web_tools, "tavily_extract", _extract)
+
+    out = await search_web.ainvoke({"queries": ["bad", "good"]})
+
+    assert "[1] 来源: https://good.com/1" in out
+    assert "bad" not in out
+    assert len(ctx.tool_contexts) == 1
+
+
+@pytest.mark.asyncio
+async def test_search_web_all_failures_returns_empty(monkeypatch, ctx):
+    """全部 query 失败：过滤后无成功项，返回空串（不抛异常）。"""
+
+    async def _fail_all(query, top_k=5, timeout=5.0, transport=None):
+        raise RuntimeError("tavily down")
+
+    monkeypatch.setattr(web_tools, "tavily_search", _fail_all)
+
+    out = await search_web.ainvoke({"queries": ["a", "b"]})
+
+    assert out == ""
+    assert ctx.web_count == 1
