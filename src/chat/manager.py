@@ -94,7 +94,7 @@ class ChatManager:
         kb_id: str,
         user_msg: str,
         assistant_msg: str,
-        sources: list[str] | None = None,
+        sources: list[dict] | None = None,
     ) -> None:
         """异步写入 user + assistant 消息到 MySQL。
 
@@ -106,7 +106,7 @@ class ChatManager:
             kb_id: 关联的知识库 ID
             user_msg: 用户消息内容
             assistant_msg: 助理回答内容
-            sources: 来源引用列表
+            sources: 来源引用列表（[{source, page, snippet, kind, index}] 结构化）
         """
         if self._persistence:
             await self._persistence.save_messages(
@@ -127,7 +127,7 @@ class ChatManager:
         session_id: str,
         kb_id: str,
         assistant_msg: str,
-        sources: list[str] | None = None,
+        sources: list[dict] | None = None,
         status: str = "complete",
     ) -> None:
         """异步写入单条 assistant 消息到 MySQL（完成/中止时调用）。"""

@@ -5,6 +5,7 @@
 """
 
 import asyncio
+import json
 
 from loguru import logger
 
@@ -159,7 +160,12 @@ class AppService:
         }
 
     async def get_messages(self, session_id: str) -> list[dict]:
-        """获取会话消息。"""
+        """获取会话消息。
+
+        sources 反序列化：库内 Text 列存 JSON 字符串（旧数据为扁平
+        "url (第N页)" 字符串数组，新数据为结构化 dict 数组），读回后
+        json.loads 还原为数组返回，避免前端收到双重转义字符串。
+        """
         msgs = await self._chat_repo.get_messages(session_id)
         return [
             {
@@ -167,7 +173,7 @@ class AppService:
                 "role": m.role,
                 "content": m.content,
                 "kb_id": m.kb_id,
-                "sources": m.sources,
+                "sources": self._parse_sources(m.sources),
                 "prompt_tokens": m.prompt_tokens,
                 "completion_tokens": m.completion_tokens,
                 "total_tokens": m.total_tokens,
@@ -177,6 +183,34 @@ class AppService:
             }
             for m in msgs
         ]
+
+    @staticmethod
+    def _parse_sources(raw: str | None) -> list:
+        """解析库中 sources 为数组，兼容存量双层 JSON 转义，非法/空返回空列表。
+
+        历史成因：persistence 先 json.dumps(list) 成 JSON 字符串，chat_repo
+        save_message 又对其 dumps 一次 → 库内实际为双层转义的 JSON 字符串。
+        故迭代解包：结果仍是 JSON 字符串则继续 loads，直到得到 list 为止；
+        最终非 list（解析异常 / 非数组）返回空列表，不阻断消息读取。
+
+        Args:
+            raw: sources 原始值（Text 列存储值或 None）
+
+        Returns:
+            反序列化后的来源数组；无法解析为数组时返回空列表
+        """
+        if not raw:
+            return []
+        value = raw
+        for _ in range(4):  # 上限防御，正常最多两层
+            try:
+                parsed = json.loads(value)
+            except (ValueError, TypeError):
+                return []
+            if isinstance(parsed, list):
+                return parsed
+            value = parsed
+        return []
 
     async def delete_session_and_messages(self, session_id: str) -> bool:
         """删除会话及其消息。"""
@@ -207,7 +241,7 @@ class AppService:
         session_id: str,
         kb_id: str,
         assistant_msg: str,
-        sources: list[str] | None = None,
+        sources: list[dict] | None = None,
         status: str = "complete",
     ) -> None:
         """流结束后异步写入单条 assistant 消息到 MySQL。"""
@@ -221,7 +255,7 @@ class AppService:
         kb_id: str,
         user_msg: str,
         assistant_msg: str,
-        sources: list[str] | None = None,
+        sources: list[dict] | None = None,
     ) -> None:
         """批量持久化保存消息。"""
         await self.chat_manager.save_messages_async(

@@ -724,7 +724,7 @@ async def test_run_generation_buffers_model_info_when_model_captured():
 
 @pytest.mark.asyncio
 async def test_run_generation_accumulates_citation_sources():
-    """生产者流经 SSECitationEvent 时，partial_holder["sources"] 累积 "文件名 (第x页)"。"""
+    """生产者流经 SSECitationEvent 时，partial_holder["sources"] 累积结构化 dict。"""
     from src.chat.streaming import StreamingRunManager
     from src.infra.llm.request_context import RequestContext
     from src.services.agent_service import _run_generation
@@ -761,7 +761,15 @@ async def test_run_generation_accumulates_citation_sources():
         graph=fake_graph,
         partial_holder=partial_holder,
     )
-    assert partial_holder["sources"] == ["财报.pdf (第5页)"]
+    assert partial_holder["sources"] == [
+        {
+            "source": "财报.pdf",
+            "page": 5,
+            "snippet": "营收100亿",
+            "kind": "kb",
+            "index": 1,
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -871,4 +879,12 @@ async def test_stream_chat_persists_citation_sources_on_complete():
     fake_svc.save_assistant_async.assert_awaited_once()
     args = fake_svc.save_assistant_async.await_args.args
     assert args[4] == "complete"
-    assert args[3] == ["财报.pdf (第5页)"]
+    assert args[3] == [
+        {
+            "source": "财报.pdf",
+            "page": 5,
+            "snippet": "营收100亿",
+            "kind": "kb",
+            "index": 1,
+        }
+    ]

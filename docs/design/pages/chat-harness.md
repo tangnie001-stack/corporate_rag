@@ -151,8 +151,8 @@
 ```
   U │ 腾讯这几年业绩怎么样
   A │ [引用] 根据知识库内容，腾讯2024年营业收入为3943亿元[1][2]…
-    │   📎 来源：tencent_2024_annual.pdf (p.3)   [1]
-    │   📎 来源：tencent_2024_annual.pdf (p.5)   [2]
+    │   🔍 检索：腾讯控股年报（2 条）
+    │   来源 [1] [2] ›           ← 一体横条
     │   由 DeepSeek-V4-Flash 回答
     │   👍👎
   ⚙ │ 🔍 检索：腾讯控股年报（2 条） · 🌐 联网：腾讯2025年报
@@ -169,7 +169,13 @@
 - **AI 回复（markdown）**：左对齐，**浅灰底 `#F8FAFC` + 描边 `#E2E8F0`**（与现有 `--bubble-ai` 一致），markdown 排版（标题 h1-h3 / 列表 / 加粗 / 引用 / 代码块 / 表格）；**不含时间戳**
 - **模型标注**：AI 回复末尾一行小字"由 **DeepSeek-V4-Flash** 回答"（11px muted；模型名 secondary），真实环境取当前轮 `model_used`
 - **工具调用/检索状态**：AI 回复下方紧凑行（`bg #F1F5F9`，图标 + 文字，如"🔍 检索：腾讯控股年报（2 条）"）
-- **引用（citations）**：AI 回复下方来源卡（`bg #F1F5F9`，蓝边 `#3B82F6`，`[1] 来源.pdf (p.3)` + 摘要片段）
+- **引用（citations）**：**正文内联引用号 + 末尾一体来源横条 + 右侧引用抽屉**
+  - **正文内联**：模型生成内容中的 `[1][2]`（markdown 渲染后）为可点击蓝色引用号（12px primary 加粗，hover primary-light 圆角底）；**点击打开右侧引用抽屉并高亮定位到对应条目**
+  - **末尾来源横条**：AI 回复内 markdown 之后**一条整体按钮**「来源 [1] [2] ›」—— 文件图标 + "来源" 标签 + 编号（primary 蓝色字）+ 右箭头；`--surface-muted` 底、1px `--border`、圆角 8px、padding 5×12px；**整条可点击**（不是分开的胶囊），hover 边变 primary 底变 `--primary-light`
+  - **右侧引用抽屉（drawer）**：从屏幕**右侧**滑出（fixed right 0、宽 380px、动画 translateX 220ms ease），**不遮挡中间对话区**；遮罩 `rgba(15,23,42,0.24)`；头部（文件夹图标 + 标题"引用来源" + 关闭 ✕）；列表区列出**全部**引用条目：左侧 [n] 编号方块（focus 时 primary 底白字高亮），右侧文件名（icon + 单行截断 + 「第N页」徽标）+ 摘要片段
+  - **数据来源不变**：`SSECitationEvent`（source/page/snippet/index）；无引用时不渲染横条
+  - 交互：点击外部遮罩 / Esc / ✕ 关闭抽屉
+  - **历史回放（刷新 / 切换会话）**：assistant 消息携带结构化 `sources` 数组（见 `api_contract.md §2.4.2`），前端 `loadSessionMessages` 读取后调用 `attachHistoryCitations` 重建该气泡的横条 + 抽屉（复用实时路径同一套 `renderCiteBar` / `openCiteDrawer` / `attachInlineCiteRefs`）。**兼容策略**：存量旧数据 `sources` 为扁平字符串数组（"文件名 (第x页)"），由后端 `get_messages` 迭代解包返回（剥离历史双重 JSON 转义），前端对字符串项降级展示——横条照显、抽屉 `snippet` 留空；新数据为结构化 dict（`source/page/snippet/kind/index`），完整还原引用细节。
 - **反馈按钮**：AI 回复右下角 👍/👎
 - **深度思考块**：AI 回复内可折叠的 reasoning 段（`bg #F1F5F9`，左蓝色边）
 

@@ -388,10 +388,10 @@ async def _run_generation(
         manager: StreamingRunManager（事件缓冲写入）
         graph: 图实例（测试注入用）。模块级函数无法访问 AgentService 的
             self._graph，生产侧须由调用方显式传入，None 时抛 ValueError。
-        partial_holder: 可选的 {"text": str, "sources": list[str]} 共享 dict，
+        partial_holder: 可选的 {"text": str, "sources": list[dict]} 共享 dict，
             随 token 产出更新 text，随 citation 事件累积 sources
-            （"文件名 (第x页)" 列表），供取消/出错时写 interrupted 部分回答、
-            收尾落库引用来源
+            （[{source, page, snippet, kind, index}]，历史回放重建引用用），
+            供取消/出错时写 interrupted 部分回答、收尾落库引用来源
         abort_signal: 可选的请求级中止信号（cancel 端点置位）；置位后本任务
             在循环内尽快抛 CancelledError 中断生成，交由调用方收尾落库
 
@@ -427,8 +427,16 @@ async def _run_generation(
                     if partial_holder is not None:
                         partial_holder["text"] = full_answer
                 elif isinstance(event, SSECitationEvent) and partial_holder is not None:
+                    # 落库保留完整引用结构（source/page/snippet/kind/index），
+                    # 供历史回放重建引用横条与抽屉；旧数据为 "url (第x页)" 扁平串由前端降级
                     partial_holder.setdefault("sources", []).append(
-                        f"{event.source} (第{event.page}页)"
+                        {
+                            "source": event.source,
+                            "page": event.page,
+                            "snippet": event.snippet,
+                            "kind": event.kind,
+                            "index": event.index,
+                        }
                     )
             if abort_signal is not None and abort_signal.is_set():
                 raise asyncio.CancelledError

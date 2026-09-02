@@ -44,7 +44,7 @@ class PersistenceService:
         kb_id: str,
         user_msg: str,
         assistant_msg: str,
-        sources: list[str] | None = None,
+        sources: list[dict] | None = None,
     ) -> None:
         """异步写入 user + assistant 消息。"""
         try:
@@ -88,7 +88,7 @@ class PersistenceService:
         session_id: str,
         kb_id: str,
         assistant_msg: str,
-        sources: list[str] | None = None,
+        sources: list[dict] | None = None,
         status: str = "complete",
     ) -> None:
         """写入一条 assistant 消息（完成/中止时调用，status 区分完整与中断）。"""

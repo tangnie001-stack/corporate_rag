@@ -344,7 +344,22 @@ Success:
   {
     "role": "assistant",
     "content": "回答文本",
-    "sources": ["文件名.pdf (第3页)", "文件2.docx (第5页)"],
+    "sources": [
+      {
+        "source": "文件名.pdf",
+        "page": 3,
+        "snippet": "原文片段（最多 200 字符）",
+        "kind": "kb",
+        "index": 1
+      },
+      {
+        "source": "https://example.com/aliyun",
+        "page": 0,
+        "snippet": "阿里云轻量应用服务器适合个人博客",
+        "kind": "web",
+        "index": 2
+      }
+    ],
     "status": "interrupted",
     "created_at": "2026-07-03T12:00:05"
   }
@@ -352,6 +367,8 @@ Success:
 ```
 
 `status` 取值 `complete` / `interrupted`，标识消息是否完整生成（前端据此标记被中断的回答）。
+
+`sources` 字段：assistant 消息携带的引用来源列表，新数据为结构化对象数组（每项含 `source` 文件名/URL、`page` 页码、`snippet` 原文片段、`kind` 来源类型 `kb`/`web`、`index` 引用编号）；前端历史回放路径根据此字段重建「来源」横条与右侧抽屉。`kind` 与 SSE `citation` 事件 `data.kind` 同源。**存量旧数据**为扁平字符串数组（每项形如 `"文件名.pdf (第3页)"`），由 `get_messages` 反序列化时循环解包兼容（最多解 4 层剥离历史双重 JSON 转义）；前端对字符串项降级——横条照显、抽屉 `snippet` 留空。
 
 404:
 ```json

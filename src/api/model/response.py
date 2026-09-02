@@ -174,7 +174,10 @@ class MessageItem(BaseModel):
 
     role: str  # 角色（user / assistant）
     content: str  # 消息内容
-    sources: str | None = None  # 引用来源（JSON 字符串）
+    sources: list | None = (
+        None  # 引用来源数组：新数据为结构化 dict（source/page/snippet/kind/index），
+    )
+    # 旧数据为 "url (第N页)" 扁平字符串（降级展示）
     status: str = "complete"  # complete / interrupted — 消息状态
     created_at: str | None = None  # 发送时间
 

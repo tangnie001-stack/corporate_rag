@@ -335,7 +335,88 @@
   .bubble-content.md table td { border: 1px solid var(--border); padding: 6px 10px; }
   .bubble-content.md input[type="checkbox"], .bubble-content.md input[disabled] { accent-color: var(--primary); }
 
+  /* 引用交互：正文内联引用号 + 一体来源横条 + 右侧引用抽屉 */
   .cite { color: var(--primary); font-weight: 600; }
+  .cite-ref {
+    display: inline-block; padding: 0 3px; margin: 0 1px;
+    color: var(--primary); font-weight: 600; font-size: 12px;
+    vertical-align: baseline; cursor: pointer; border-radius: 4px;
+    border: none; background: none; font-family: inherit;
+    transition: background 150ms, color 150ms;
+  }
+  .cite-ref:hover { background: var(--primary-light); }
+  .md .cite-ref { color: var(--primary); font-weight: 600; font-size: 12px; }
+
+  .cite-bar {
+    display: inline-flex; align-items: center; gap: 6px;
+    margin-top: 8px; max-width: 100%;
+    padding: 5px 12px;
+    background: var(--surface-muted); border: 1px solid var(--border);
+    border-radius: 8px; font-size: 12px; color: var(--text-secondary);
+    cursor: pointer; transition: border-color 150ms, background 150ms;
+    font-family: var(--font-body); animation: fadeInUp 250ms ease-out;
+  }
+  .cite-bar:hover { border-color: var(--primary-border, #93C5FD); background: var(--primary-light); }
+  .cite-bar .bar-label { color: var(--text-muted); flex-shrink: 0; }
+  .cite-bar .bar-refs {
+    color: var(--primary); font-weight: 600; letter-spacing: 1px;
+    white-space: nowrap;
+  }
+  .cite-bar .bar-arrow { width: 12px; height: 12px; color: var(--text-muted); margin-left: 2px; transition: transform 150ms; flex-shrink: 0; }
+
+  /* 右侧引用抽屉（滑出面板，不遮挡对话区） */
+  .drawer-backdrop {
+    position: fixed; inset: 0; background: rgba(15, 23, 42, 0.24);
+    z-index: 70; opacity: 0; pointer-events: none; transition: opacity 200ms;
+  }
+  .drawer-backdrop.show { opacity: 1; pointer-events: auto; }
+  .cite-drawer {
+    position: fixed; top: 0; right: 0; bottom: 0; z-index: 71;
+    width: 380px; max-width: 88vw;
+    background: var(--surface); border-left: 1px solid var(--border);
+    box-shadow: -8px 0 28px rgba(15, 23, 42, 0.12);
+    transform: translateX(100%); transition: transform 220ms ease;
+    display: flex; flex-direction: column;
+  }
+  .cite-drawer.open { transform: translateX(0); }
+  .drawer-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 16px 18px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+  .drawer-head .head-icon {
+    width: 26px; height: 26px; border-radius: 7px;
+    background: var(--primary-light); color: var(--primary);
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .drawer-head .head-icon svg { width: 14px; height: 14px; }
+  .drawer-head h3 { font-size: 14px; font-weight: 600; color: var(--text); flex: 1; }
+  .drawer-close {
+    width: 28px; height: 28px; border: none; border-radius: 7px; background: transparent;
+    color: var(--text-muted); cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: background 150ms, color 150ms;
+  }
+  .drawer-close:hover { background: var(--surface-muted); color: var(--text); }
+  .drawer-close svg { width: 15px; height: 15px; }
+  .drawer-list { flex: 1; overflow-y: auto; padding: 8px 0; }
+  .drawer-item { display: flex; gap: 10px; padding: 12px 18px; border-bottom: 1px solid var(--border); }
+  .drawer-item:last-child { border-bottom: none; }
+  .drawer-item .num {
+    width: 22px; height: 22px; border-radius: 6px; flex-shrink: 0;
+    background: var(--surface-muted); color: var(--primary);
+    font-size: 12px; font-weight: 600;
+    display: flex; align-items: center; justify-content: center; margin-top: 1px;
+  }
+  .drawer-item.focus .num { background: var(--primary); color: #fff; }
+  .drawer-item .body { min-width: 0; flex: 1; }
+  .drawer-item .file { display: flex; align-items: center; gap: 6px; font-weight: 600; color: var(--text); font-size: 13px; }
+  .drawer-item .file svg { width: 13px; height: 13px; color: var(--text-muted); flex-shrink: 0; }
+  .drawer-item .file .fname { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .drawer-item .page {
+    flex-shrink: 0; font-size: 11px; color: var(--text-muted); font-weight: 400;
+    background: var(--surface-muted); border-radius: 999px; padding: 1px 8px;
+  }
+  .drawer-item .snippet { margin-top: 4px; font-size: 12.5px; color: var(--text-secondary); line-height: 1.6; }
+  .drawer-empty { padding: 48px 18px; text-align: center; color: var(--text-muted); font-size: 13px; }
 
   /* 中断回答标记 */
   .interrupted-tag {
@@ -368,19 +449,6 @@
     transition: background 150ms, color 150ms;
   }
   .resume-btn:hover { background: var(--primary); color: #fff; }
-
-  /* 引用来源卡（AI 回复下方） */
-  .citation-list {
-    align-self: flex-start; display: flex; flex-direction: column; gap: 6px;
-    max-width: 85%; margin-top: -6px; animation: fadeInUp 250ms ease-out;
-  }
-  .citation-item {
-    font-size: 12px; color: var(--text-secondary); line-height: 1.4;
-    background: var(--surface-muted); border-left: 3px solid var(--primary);
-    padding: 6px 12px; border-radius: 6px; max-width: 100%;
-  }
-  .citation-index { color: var(--primary); font-weight: 600; margin-right: 4px; }
-  .citation-source { font-weight: 600; color: var(--text); }
 
   /* 模型标注 */
   .model-note { font-size: 11px; color: var(--text-muted); margin-top: -8px; align-self: flex-start; }
@@ -652,6 +720,21 @@
   </main>
 </div>
 
+<!-- 右侧引用抽屉：点击来源横条 / 正文引用号滑出，展示本条回复全部引用，不遮挡对话区 -->
+<div class="drawer-backdrop" id="drawerBackdrop" onclick="closeCiteDrawer()"></div>
+<aside class="cite-drawer" id="citeDrawer" aria-label="引用来源" role="dialog" aria-hidden="true">
+  <div class="drawer-head">
+    <span class="head-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+    </span>
+    <h3>引用来源</h3>
+    <button class="drawer-close" type="button" onclick="closeCiteDrawer()" title="关闭">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 18L18 6M6 6l12 12"/></svg>
+    </button>
+  </div>
+  <div class="drawer-list" id="drawerList"></div>
+</aside>
+
 <script src="vendor/marked.min.js"></script>
 <script src="vendor/purify.min.js"></script>
 <script>
@@ -776,6 +859,7 @@ function showNewPage() {
   $('page-new').classList.add('active');
   $('page-history').classList.remove('active');
   chatContainer.innerHTML = '';
+  resetCiteState();
   stickToBottom = true;
   activeComposer().input.focus();
 }
@@ -951,28 +1035,185 @@ function finalizeAnswer() {
   }
   if (streamBubble) {
     streamBubble.innerHTML = renderMarkdown(streamBuffer);
+    const host = streamBubble.closest('.bubble-row.ai');
+    attachInlineCiteRefs(host); // 正文引用号转可点击（仅当本回复有 citation 数据）
     scrollToBottom();
   }
   streamBuffer = '';
   streamBubble = null;
 }
 
+// ── 引用交互：AI 回复聚合为一条「来源 [n]」横条 + 右侧抽屉 ──
+// 引用归属到最近的 AI 气泡行（.bubble-row.ai）：SSE citation 事件在 format 结束后到达，
+// 此时该轮 AI 气泡已存在；跨轮时新的 AI 气泡行触发新横条，旧横条留在原回复下。
+let _citeBarHost = null;   // 当前横条归属的 AI 气泡行
+let _citeBar = null;       // 当前归属的横条 DOM（位于气泡行之后）
+
+function lastAiRow() {
+  const rows = chatContainer.querySelectorAll('.bubble-row.ai');
+  return rows.length ? rows[rows.length - 1] : null;
+}
+
 function renderCitation(source, page, snippet, index) {
-  let list = chatContainer.querySelector('.citation-list');
-  if (!list) {
-    list = document.createElement('div');
-    list.className = 'citation-list';
-    chatContainer.appendChild(list);
+  const host = lastAiRow();
+  if (!host) return;
+  if (_citeBarHost !== host) {
+    _citeBarHost = host;
+    host._citeData = [];
+    host._citeBarEl = null;
   }
-  const item = document.createElement('div');
-  item.className = 'citation-item';
-  let badge = '';
-  if (index && index > 0) {
-    badge = `<span class="citation-index">[${index}]</span>`;
-  }
-  item.innerHTML = `${badge}<span class="citation-source">📄 ${escapeHtml(source)}</span> · 第${page}页<br>${escapeHtml(snippet)}`;
-  list.appendChild(item);
+  const num = index > 0 ? index : host._citeData.length + 1;
+  host._citeData.push({ source, page, snippet, num });
+  renderCiteBar(host);
   scrollToBottom();
+}
+
+function renderCiteBar(host) {
+  const cites = host._citeData || [];
+  if (!cites.length) return;
+  let bar = host._citeBarEl;
+  if (!bar || !bar.isConnected || bar.previousElementSibling !== host) {
+    bar = document.createElement('button');
+    bar.type = 'button';
+    bar.className = 'cite-bar';
+    bar.setAttribute('title', '查看引用来源');
+    bar.innerHTML = `
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#64748B" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+      <span class="bar-label">来源</span>
+      <span class="bar-refs"></span>
+      <svg class="bar-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg>`;
+    bar.addEventListener('click', () => openCiteDrawer(host._citeData || []));
+    host.insertAdjacentElement('afterend', bar);
+    host._citeBarEl = bar;
+    if (_citeBarHost === host) _citeBar = bar;
+  }
+  bar.querySelector('.bar-refs').textContent = cites.map(c => '[' + c.num + ']').join(' ');
+}
+
+// 历史回放挂载引用：把 /api/sessions/messages 返回的 sources（结构化 dict 数组；
+// 旧数据为 "url (第N页)" 扁平字符串）归一化渲染到指定 AI 气泡下，复用横条+抽屉。
+function attachHistoryCitations(host, rawSources) {
+  if (!host || !Array.isArray(rawSources) || !rawSources.length) return;
+  const cites = [];
+  rawSources.forEach((item, i) => {
+    let source = '';
+    let page = 0;
+    let snippet = '';
+    let num = 0;
+    if (typeof item === 'string') {
+      // 旧扁平格式 "url (第N页)"：提取来源与页码
+      const m = item.match(/^(.*?)\s*\(第(\d+)页\)\s*$/);
+      if (m) {
+        source = m[1];
+        page = parseInt(m[2], 10) || 0;
+      } else {
+        source = item;
+      }
+    } else if (item && typeof item === 'object') {
+      source = item.source || '';
+      page = item.page || 0;
+      snippet = item.snippet || '';
+      num = item.index || 0;
+    }
+    if (!source) return;
+    cites.push({ source, page, snippet, num: num > 0 ? num : i + 1 });
+  });
+  if (!cites.length) return;
+  host._citeData = cites;
+  host._citeBarEl = null;
+  renderCiteBar(host);
+  attachInlineCiteRefs(host); // 正文 [n] 也转为可点击引用号
+  scrollToBottom();
+}
+
+function openCiteDrawer(citations, focusNum) {
+  const list = document.getElementById('drawerList');
+  if (!list) return;
+  const items = citations || [];
+  if (!items.length) {
+    list.innerHTML = '<div class="drawer-empty">本条回复暂无引用来源</div>';
+  } else {
+    list.innerHTML = items.map(c => `
+      <div class="drawer-item ${c.num === focusNum ? 'focus' : ''}">
+        <span class="num">[${c.num}]</span>
+        <div class="body">
+          <div class="file">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+            <span class="fname">${escapeHtml(c.source || '')}</span>
+            <span class="page">第${c.page || 0}页</span>
+          </div>
+          <div class="snippet">${escapeHtml(c.snippet || '')}</div>
+        </div>
+      </div>`).join('');
+  }
+  document.getElementById('citeDrawer').classList.add('open');
+  document.getElementById('drawerBackdrop').classList.add('show');
+  document.getElementById('citeDrawer').setAttribute('aria-hidden', 'false');
+}
+
+function closeCiteDrawer() {
+  const drawer = document.getElementById('citeDrawer');
+  const backdrop = document.getElementById('drawerBackdrop');
+  if (drawer) drawer.classList.remove('open');
+  if (backdrop) backdrop.classList.remove('show');
+  if (drawer) drawer.setAttribute('aria-hidden', 'true');
+}
+
+// 正文内联引用号：把 AI 回复 markdown 正文里的「[n]」（n 属于本回复引用集）转为可点击引用号，
+// 点击打开抽屉并定位到对应条目。流式渲染期间不处理（整段重渲染会覆盖），仅在 finalize 后做一次。
+function attachInlineCiteRefs(host) {
+  if (!host || !host._citeData || !host._citeData.length) return;
+  const content = host.querySelector('.bubble-content.md');
+  if (!content || content.querySelector('.cite-ref')) return;
+  const validNums = new Set(host._citeData.map(c => c.num));
+  const re = /\[(\d+)\]/g;
+  const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
+  const textNodes = [];
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    const parent = node.parentElement;
+    if (!parent || parent.closest('pre, code, a, .cite-ref, .cite-bar')) continue;
+    if (re.test(node.nodeValue)) textNodes.push(node);
+    re.lastIndex = 0;
+  }
+  textNodes.forEach(tn => {
+    re.lastIndex = 0;
+    let match;
+    let lastIdx = 0;
+    let added = false;
+    const frag = document.createDocumentFragment();
+    while ((match = re.exec(tn.nodeValue)) !== null) {
+      const num = parseInt(match[1], 10);
+      if (!validNums.has(num)) continue;
+      added = true;
+      if (match.index > lastIdx) {
+        frag.appendChild(document.createTextNode(tn.nodeValue.slice(lastIdx, match.index)));
+      }
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'cite-ref';
+      btn.textContent = match[0];
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        openCiteDrawer(host._citeData || [], num);
+      });
+      frag.appendChild(btn);
+      lastIdx = match.index + match[0].length;
+    }
+    if (added) {
+      if (lastIdx < tn.nodeValue.length) {
+        frag.appendChild(document.createTextNode(tn.nodeValue.slice(lastIdx)));
+      }
+      tn.parentNode.replaceChild(frag, tn);
+    }
+  });
+}
+
+// 每次新提问 / 切换会话时清空引用横条归属，避免旧横条被新 citation 误更新
+function resetCiteState() {
+  _citeBarHost = null;
+  _citeBar = null;
+  closeCiteDrawer();
 }
 
 function renderModelInfo(model, isFallback) {
@@ -1781,6 +2022,7 @@ async function loadSessions() {
 // 加载指定会话的历史消息并渲染（POST /api/sessions/messages），返回消息数
 async function loadSessionMessages(sessionId) {
   chatContainer.innerHTML = '';
+  resetCiteState();
   try {
     const res = await fetch('/api/sessions/messages', {
       method: 'POST',
@@ -1795,6 +2037,9 @@ async function loadSessionMessages(sessionId) {
         renderUserBubble(m.content || '');
       } else if (m.role === 'assistant') {
         renderAiAnswer(m.content || '', m.status === 'interrupted');
+        // 历史回放重建引用：sources 由后端反序列化为数组（结构化 dict / 旧扁平串），
+        // 渲染横条并可展开抽屉（含 snippet）；刷新/切换会话后引用不丢失
+        attachHistoryCitations(lastAiRow(), m.sources);
       }
     });
     return messages.length;
@@ -1892,6 +2137,16 @@ function toggleUserDropdown(e) {
     document.addEventListener('click', closeOnClickOutside);
   }
 }
+
+// Esc 关闭引用抽屉
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    const drawer = document.getElementById('citeDrawer');
+    if (drawer && drawer.classList.contains('open')) {
+      closeCiteDrawer();
+    }
+  }
+});
 
 function closeOnClickOutside(e) {
   const dd = document.getElementById('userDropdown');
