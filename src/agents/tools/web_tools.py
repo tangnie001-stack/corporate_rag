@@ -99,12 +99,20 @@ async def search_web(queries: list[str], top_k: int = 5) -> str:
         return ""
 
     # 每个 query 取其 top-1~2 拉正文（保持单查询语义、保证各查询覆盖），
-    # 合并为一次 extract 调用，失败不影响已拿到的摘要
+    # 合并为一次 extract 调用，失败降级跳过正文抽取（保留已拿到的摘要）
     extract_urls = [r["url"] for q_results in successful_results for r in q_results[:2]]
     bodies: dict[str, str] = {}
-    extracted = await tavily_extract(extract_urls, timeout=settings.TAVILY_TIMEOUT)
-    for item in extracted:
-        bodies[item["url"]] = item.get("content", "")[:WEB_BODY_LIMIT]
+    try:
+        extracted = await tavily_extract(extract_urls, timeout=settings.TAVILY_TIMEOUT)
+        for item in extracted:
+            bodies[item["url"]] = item.get("content", "")[:WEB_BODY_LIMIT]
+    except Exception as exc:  # noqa: BLE001  # extract 失败不阻断合并结果，降级用搜索摘要兜底
+        logger.warning(
+            "tool=search_web extract failed urls={} session_id={} err={}",
+            extract_urls,
+            ctx.session_id,
+            exc,
+        )
 
     results = [r for q_results in successful_results for r in q_results]
     collector = ctx.tool_contexts

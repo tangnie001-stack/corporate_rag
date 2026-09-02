@@ -3,7 +3,12 @@
 供 retrieve_kb 工具内部调用；时间解析结果写入 RequestContext 供验证循环读取。
 """
 
+import json
 import re
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+from src.config.const import TEMPORAL_RECENT_N_YEARS
 
 # 时间词粗筛（包含判断，不要求精确匹配新变体）
 _TEMPORAL_WORD_PATTERN = re.compile(r"近|这|上|今|去|几|最近|前几年")
@@ -49,11 +54,6 @@ async def derive_candidate_years(kb_ids: list[str]) -> list[int]:
     Returns:
         候选年份列表（升序，可能仅含最近 N 年）
     """
-    import json
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-
-    from src.config.const import TEMPORAL_RECENT_N_YEARS
     from src.infra.db.engine import session_factory
     from src.infra.db.mysql_db.document_repo import DocumentRepo
 
@@ -89,12 +89,6 @@ async def derive_candidate_years(kb_ids: list[str]) -> list[int]:
         years.add(this_year - i)
     return sorted(years)
 
-
-import json
-from datetime import datetime
-from zoneinfo import ZoneInfo
-
-from src.config.const import TEMPORAL_RECENT_N_YEARS
 
 _BEIJING_TZ = ZoneInfo("Asia/Shanghai")
 
@@ -132,7 +126,10 @@ async def parse_temporal(query: str, candidates: list[int], llm) -> dict:
 
     try:
         resp = await llm.ainvoke([HumanMessage(content=prompt)], temperature=0)
-        raw = (resp.content if resp is not None else None) or ""
+        if resp is not None:
+            raw = resp.content or ""
+        else:
+            raw = ""
         raw = raw.strip()
         data = json.loads(raw)
         years_raw = data.get("years") or []

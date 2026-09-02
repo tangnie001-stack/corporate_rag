@@ -64,7 +64,6 @@ async def faithfulness_check(answer: str, contexts: list) -> list[str]:
     """
     if not contexts:
         return []
-    from src.config import settings
     from src.models import get_llm
 
     llm = get_llm(
@@ -86,7 +85,10 @@ async def faithfulness_check(answer: str, contexts: list) -> list[str]:
 
     try:
         resp = await llm.ainvoke([HumanMessage(content=prompt)], temperature=0)
-        content = resp.content if resp is not None else None
+        if resp is not None:
+            content = resp.content
+        else:
+            content = None
         if isinstance(content, str):
             raw = content.strip()
         else:
@@ -94,10 +96,13 @@ async def faithfulness_check(answer: str, contexts: list) -> list[str]:
         import json
 
         data = json.loads(raw)
-        return [s for s in data.get("unsupported", []) if s.strip()]
+        unsupported = data.get("unsupported", [])
+        if not isinstance(unsupported, list):
+            return []
+        return [s for s in unsupported if s.strip()]
     except Exception as exc:  # noqa: BLE001  # judge 失败不阻断流程，降级返回无标记，留日志
         logger.warning(
-            "judge=faithfulness_check 调用失败，降级返回空标记 answer_len={} err={}",
+            "judge=faithfulness_check 调用或解析失败，降级返回空标记 answer_len={} err={}",
             len(answer),
             exc,
         )
@@ -151,8 +156,11 @@ async def _ask_web_confirm(state: AgentState, missing_years: list[int]) -> bool:
         fut.cancel()
     if not isinstance(answers, list) or not answers:
         return False
+    first = answers[0]
+    if not isinstance(first, dict):
+        return False
     # 前端答案 selected 为数组（clarify.py 按数组消费）；对数组归一化判断，避免 list/str 恒不相等
-    selected = answers[0].get("selected") or []
+    selected = first.get("selected") or []
     if isinstance(selected, list):
         return any(str(s) in ("需要", "需要联网") for s in selected)
     return False
