@@ -1484,6 +1484,9 @@ function sendMessage() {
   if (state.current === STATE.STREAMING) return;
 
   c.input.value = '';
+  // 程序清空不触发 input 事件重评，立即置 disabled；随后若切到历史对话页，
+  // setInputState 只作用于 history composer，新对话页按钮状态在此保留（空输入 → disabled）
+  c.sendBtn.disabled = true;
 
   // 新对话页发送首条消息：切到历史对话页展示消息流（KB 已随请求绑定）
   if ($('page-new').classList.contains('active')) {
