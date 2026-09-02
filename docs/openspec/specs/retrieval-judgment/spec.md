@@ -2,9 +2,7 @@
 
 ## Purpose
 TBD - created by archiving change web-search-fallback. Update Purpose after archive.
-
 ## Requirements
-
 ### Requirement: 一律先检索
 
 非闲聊实质性问题 SHALL 一律先调用 `retrieve_kb` 检索知识库，根据检索结果判断能否回答，不预先猜测问题是否在知识库范围内。

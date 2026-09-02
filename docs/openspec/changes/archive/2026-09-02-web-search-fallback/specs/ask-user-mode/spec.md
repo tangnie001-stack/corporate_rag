@@ -1,9 +1,10 @@
 # ask-user-mode Specification
 
 ## Purpose
-TBD - created by archiving change web-search-fallback. Update Purpose after archive.
 
-## Requirements
+ask_user 澄清工具支持模型自带候选选项：`ASK_USER_MODE_DSH` 开启时走 dsh 全自由格式（选项全由模型提供），关闭时为双模式（KB 问题按 dimension 注入真实候选防编造）。
+
+## ADDED Requirements
 
 ### Requirement: ask_user 模型自带选项
 

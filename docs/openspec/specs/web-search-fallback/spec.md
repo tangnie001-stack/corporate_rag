@@ -2,9 +2,7 @@
 
 ## Purpose
 TBD - created by archiving change web-search-fallback. Update Purpose after archive.
-
 ## Requirements
-
 ### Requirement: search_web 工具
 
 系统 SHALL 提供 `search_web` 工具，通过 Tavily 搜索引擎（search + extract）检索互联网实时信息，返回带来源链接的网页摘要/正文。工具接口固定为 `search_web(query, top_k)`，服务商实现可替换。

@@ -1,3 +1,13 @@
+## Status: SUPERSEDED（作废，2026-09-03 标注）
+
+本 change 的改造对象已被后续架构演进取代，方案不再适用，**不归档**：
+
+- **目标文件已删除**：`rag/chain.py` 与 `rag/stream.py` 的手动打点链路在 agentic 化重构（agentic-clarification → streaming-decouple 等）中被整块移除，`RAGChain` 类已不存在（现为 `src/agents/graph/agent_node.py` 的 LangGraph agent 循环）。
+- **LangfuseTracer 仍在用**：`LangfuseTracer`（`src/infra/llm/langfuse_tracing.py`）未按本 proposal 替换为 CallbackHandler，仍被 `src/services/agent_service.py:496` 使用。
+- **tasks 全未勾选（0/27）**：改动从未实施。
+
+若未来要统一 LLM 调用的 trace 与日志，应按新架构（LangGraph + `agent_service`）重新设计，另起 change。
+
 ## Why
 
 LLM 调用追踪目前是手动打点方式（`LangfuseTracer.start_generation/end_generation`），与业务代码（`stream.py`）高度耦合。存在三个问题：
