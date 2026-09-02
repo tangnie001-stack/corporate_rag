@@ -13,7 +13,7 @@ from src.agents.graph.agent_node import (
 )
 from src.agents.graph.nodes import format_node, make_kb_router_node
 from src.agents.graph.state import AgentState, LangGraphNode
-from src.agents.graph.verify_node import verify_node
+from src.agents.graph.verify import verify_node
 from src.agents.tools.rag_tools import make_rag_tools
 from src.infra.db.vector_store import VectorStore
 from src.infra.search.bm25_index import BM25Index

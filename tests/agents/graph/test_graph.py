@@ -303,11 +303,11 @@ async def test_graph_verify_loop_success_terminates_at_format(monkeypatch):
     """
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
     monkeypatch.setattr(
-        "src.agents.graph.verify_node._ask_web_confirm",
+        "src.agents.graph.verify.ask_confirm._ask_web_confirm",
         AsyncMock(return_value=True),
     )
     monkeypatch.setattr(
-        "src.agents.graph.verify_node.faithfulness_check",
+        "src.agents.graph.verify.faithfulness.faithfulness_check",
         AsyncMock(return_value=[]),
     )
     _ctx, token = _make_verify_ctx()
@@ -346,11 +346,11 @@ async def test_graph_verify_loop_terminates_at_iteration_limit(monkeypatch):
     """
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
     monkeypatch.setattr(
-        "src.agents.graph.verify_node._ask_web_confirm",
+        "src.agents.graph.verify.ask_confirm._ask_web_confirm",
         AsyncMock(return_value=True),
     )
     monkeypatch.setattr(
-        "src.agents.graph.verify_node.faithfulness_check",
+        "src.agents.graph.verify.faithfulness.faithfulness_check",
         AsyncMock(return_value=[]),
     )
     _ctx, token = _make_verify_ctx()

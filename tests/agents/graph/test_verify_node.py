@@ -12,7 +12,7 @@ import pytest
 from langchain_core.messages import AIMessage, SystemMessage
 
 from src.agents.graph.state import AgentState
-from src.agents.graph.verify_node import (
+from src.agents.graph.verify import (
     _ask_web_confirm,
     completeness_check,
     extract_years,
@@ -100,7 +100,7 @@ def _make_ctx(
 def _mock_wait(monkeypatch, return_value):
     """mock verify_node 模块内的 wait_with_abort_and_timeout，避免真实等待。"""
     monkeypatch.setattr(
-        "src.agents.graph.verify_node.wait_with_abort_and_timeout",
+        "src.agents.graph.verify.ask_confirm.wait_with_abort_and_timeout",
         AsyncMock(return_value=return_value),
     )
 
@@ -235,7 +235,7 @@ async def test_verify_node_missing_user_rejects_annotate(monkeypatch):
     """缺失年份 + 用户拒绝联网 → 标注缺失后直通，不重生成。"""
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
     monkeypatch.setattr(
-        "src.agents.graph.verify_node._ask_web_confirm",
+        "src.agents.graph.verify.ask_confirm._ask_web_confirm",
         AsyncMock(return_value=False),
     )
     _ctx, token = _make_ctx(temporal_years=[2023, 2024, 2025])
@@ -258,7 +258,7 @@ async def test_verify_node_missing_confirmed_regenerates(monkeypatch):
     """缺失年份 + 用户确认联网 → 注入 SystemMessage 并置 _needs_regenerate。"""
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
     monkeypatch.setattr(
-        "src.agents.graph.verify_node._ask_web_confirm",
+        "src.agents.graph.verify.ask_confirm._ask_web_confirm",
         AsyncMock(return_value=True),
     )
     ctx, token = _make_ctx(temporal_years=[2023, 2024, 2025])
@@ -280,7 +280,7 @@ async def test_verify_node_missing_iteration_limit_annotate(monkeypatch):
     """确认联网但 _agent_iterations 已超限 → 标注缺失直通，不重生成不询问。"""
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
     monkeypatch.setattr(
-        "src.agents.graph.verify_node._ask_web_confirm",
+        "src.agents.graph.verify.ask_confirm._ask_web_confirm",
         AsyncMock(side_effect=AssertionError("已确认过联网，不应再次询问")),
     )
     _ctx, token = _make_ctx(temporal_years=[2023, 2024, 2025], web_confirmed=True)
@@ -305,7 +305,7 @@ async def test_verify_node_missing_confirmed_already_guided(monkeypatch):
     """缺失年份 + 联网指引已注入过 → 只置重生成信号，不再重复追加 SystemMessage。"""
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
     monkeypatch.setattr(
-        "src.agents.graph.verify_node._ask_web_confirm",
+        "src.agents.graph.verify.ask_confirm._ask_web_confirm",
         AsyncMock(side_effect=AssertionError("已确认过联网，不应再次询问")),
     )
     _ctx, token = _make_ctx(temporal_years=[2023, 2024, 2025], web_confirmed=True)
@@ -328,7 +328,7 @@ async def test_verify_node_complete_runs_judge(monkeypatch):
     """完整性通过 → 跑忠实度 judge，标记 _unsupported。"""
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
     monkeypatch.setattr(
-        "src.agents.graph.verify_node.faithfulness_check",
+        "src.agents.graph.verify.faithfulness.faithfulness_check",
         AsyncMock(return_value=["句X"]),
     )
     _ctx, token = _make_ctx(temporal_years=[2024], tool_contexts=_make_contexts())
@@ -349,7 +349,7 @@ async def test_verify_node_complete_judge_clean(monkeypatch):
     """完整性通过且 judge 无标记 → 返回纯 answer。"""
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
     monkeypatch.setattr(
-        "src.agents.graph.verify_node.faithfulness_check",
+        "src.agents.graph.verify.faithfulness.faithfulness_check",
         AsyncMock(return_value=[]),
     )
     _ctx, token = _make_ctx(temporal_years=[2024], tool_contexts=_make_contexts())
