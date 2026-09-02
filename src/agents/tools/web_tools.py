@@ -18,6 +18,7 @@ from src.config.const import (
     WEB_BODY_LIMIT,
     SSEInteractionTexts,
 )
+from src.core.logging import log_event
 from src.infra.llm.request_context import current_request_ctx
 from src.infra.search.tavily_client import tavily_extract, tavily_search
 from src.rag.context import RAGContext
@@ -57,8 +58,8 @@ async def search_web(queries: list[str], top_k: int = 5) -> str:
     if not queries:
         return ""
     if ctx.web_count >= settings.WEB_SEARCH_PER_TURN_LIMIT:
-        logger.info(
-            "tool=search_web limit reached session_id={} queries={}",
+        logger.debug(
+            "[retrieval] search_web limit reached session_id={} queries={}",
             ctx.session_id,
             queries,
         )
@@ -85,16 +86,16 @@ async def search_web(queries: list[str], top_k: int = 5) -> str:
             successful_results.append(r)
     if failed_count:
         logger.warning(
-            "tool=search_web {} of {} queries failed session_id={}",
+            "[retrieval] search_web partial_failed session_id={} failed={}/{}",
+            ctx.session_id,
             failed_count,
             len(results_list),
-            ctx.session_id,
         )
     if not any(successful_results):
-        logger.info(
-            "tool=search_web queries={} result_count=0 latency_ms={:.0f}",
-            queries,
-            (time.monotonic() - start) * 1000,
+        logger.warning(
+            "[retrieval] search_web all_failed session_id={} queries={}",
+            ctx.session_id,
+            queries[:3],
         )
         return ""
 
@@ -137,11 +138,12 @@ async def search_web(queries: list[str], top_k: int = 5) -> str:
             )
         )
         blocks.append(f"[{offset + len(blocks) + 1}] 来源: {r['url']}\n内容: {content}")
-    logger.info(
-        "judge: queries={} stage=web_confirm count={} result_count={} latency_ms={:.0f}",
-        queries,
-        ctx.web_count,
-        len(blocks),
-        (time.monotonic() - start) * 1000,
+    log_event(
+        "retrieval",
+        "search_web done",
+        session_id=ctx.session_id,
+        query_count=len(queries),
+        result_count=len(blocks),
+        latency_ms=f"{(time.monotonic() - start) * 1000:.0f}",
     )
     return "\n\n".join(blocks)

@@ -20,6 +20,7 @@ from src.agents.graph.state import AgentState
 from src.agents.tools.ask_tools import AskQuestion, AskUserArgs, ask_user
 from src.config import TOP_K_RERANK, settings
 from src.config.const import ASK_USER_TIMEOUT, RERANK_TIMEOUT
+from src.core.logging import log_event
 from src.infra.db.vector_store import VectorStore
 from src.infra.db.vector_store.types import ChunkResult
 from src.infra.llm.request_context import current_request_ctx
@@ -140,9 +141,9 @@ def make_rag_tools(
             )
         except TimeoutError:
             logger.warning(
-                "tool=retrieve_kb rerank timeout after {}s, fallback to raw order query={}",
+                "[retrieval] rerank timeout after {}s query={}",
                 RERANK_TIMEOUT,
-                query,
+                query[:40],
             )
             contexts = []
             for r in results:
@@ -173,12 +174,13 @@ def make_rag_tools(
             iteration = state._agent_iterations
         else:
             iteration = 0
-        logger.info(
-            "tool=retrieve_kb iteration={} query={} result_count={} latency_ms={:.0f}",
-            iteration,
-            query,
-            len(contexts),
-            (time.monotonic() - start) * 1000,
+        log_event(
+            "retrieval",
+            "retrieve_kb done",
+            iteration=iteration,
+            query=query[:40],
+            result_count=len(contexts),
+            latency_ms=f"{(time.monotonic() - start) * 1000:.0f}",
         )
 
         # 全局递增编号：同步块内读取偏移并追加，无 await，asyncio 单线程保证原子
@@ -192,12 +194,6 @@ def make_rag_tools(
         blocks = [
             f"[{offset + i + 1}] {c.to_prompt_text()}" for i, c in enumerate(contexts)
         ]
-        logger.info(
-            "judge: query={} stage=retrieve iteration={} result_count={}",
-            query[:40],
-            iteration,
-            len(blocks),
-        )
         return "\n\n".join(blocks)
 
     from src.agents.tools.registry import ToolRegistry

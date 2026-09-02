@@ -13,6 +13,7 @@ from src.config import (
     TOP_K_RETRIEVAL,
 )
 from src.config.const import ENTITY_OPTIONAL_TYPES, ENTITY_TYPES
+from src.core.logging import log_event
 from src.infra.db.vector_store import VectorStore
 from src.infra.db.vector_store.types import ChunkResult
 from src.infra.llm.chat_message import ChatMessage
@@ -67,27 +68,19 @@ async def search(
     Returns:
         检索结果列表，按相关性降序排列；混合模式为 RRF 融合结果
     """
-    logger.info(
-        "[DIAG] search() called: kb_id={!r} kb_id_empty={} query_len={} hybrid={}",
-        kb_id,
-        not kb_id,
-        len(query),
-        HYBRID_SEARCH_ENABLED and bool(bm25) and bool(kb_id),
-    )
-
     if HYBRID_SEARCH_ENABLED and bm25 and kb_id:
-        logger.info("RAG search starting hybrid: kb_id={}", kb_id)
         dense_t = asyncio.to_thread(
             vector_store.similarity_search, kb_id, query, TOP_K_RETRIEVAL
         )
         bm25_t = asyncio.to_thread(bm25.search, kb_id, query, TOP_K_RETRIEVAL)
         d, b = await asyncio.gather(dense_t, bm25_t)
         results = rrf_fusion(d or [], b or [])
-        logger.info(
-            "RAG search: kb_id={} query_len={} results={} mode=hybrid",
-            kb_id,
-            len(query),
-            len(results),
+        log_event(
+            "retrieval",
+            "hybrid done",
+            kb_id=kb_id,
+            query_len=len(query),
+            result_count=len(results),
         )
         results = _dedup_by_doc_id(results)
         return results
@@ -100,12 +93,16 @@ async def search(
         results = await asyncio.to_thread(
             vector_store.similarity_search, kb_id, query, k=TOP_K_RETRIEVAL
         )
-    logger.info(
-        "RAG search: kb_id={} query_len={} results={} mode={}",
-        kb_id,
-        len(query),
-        len(results) if results else 0,
-        "search_all" if not kb_id else "dense",
+    if results:
+        result_count = len(results)
+    else:
+        result_count = 0
+    log_event(
+        "retrieval",
+        "search done",
+        kb_id=kb_id or "all",
+        query_len=len(query),
+        result_count=result_count,
     )
     results = _dedup_by_doc_id(results or [])
     return results
@@ -128,16 +125,10 @@ def rerank_results(
         取前 TOP_K_RERANK 条相对结果，不应用绝对分数阈值过滤
     """
     if not results:
-        logger.info("[DIAG] rerank_results: input empty, returning []")
+        log_event("retrieval", "rerank skip", reason="empty_input")
         return []
 
     docs = [r.content for r in results]
-    logger.info(
-        "Rerank start: model={} docs={} query_len={}",
-        getattr(reranker, "model", ""),
-        len(docs),
-        len(query),
-    )
     try:
         reranked = with_retry(
             reranker.rerank,
@@ -147,8 +138,9 @@ def rerank_results(
         )(docs, query)
     except Exception as e:  # noqa: BLE001
         logger.warning(
-            "Rerank failed after {} attempts (using raw order): {}",
+            "[retrieval] rerank failed after {} attempts query={}: {}",
             RETRY_MAX_ATTEMPTS,
+            query[:40],
             e,
         )
         reranked = []
@@ -184,11 +176,11 @@ def rerank_results(
             )
         )
     if contexts:
-        logger.info(
-            "Rerank completed: {} -> {} contexts, top_score={:.4f}",
-            len(results),
-            len(contexts),
-            contexts[0].score,
+        log_event(
+            "retrieval",
+            "rerank done",
+            doc_count=len(results),
+            query_len=len(query),
         )
     return contexts
 
