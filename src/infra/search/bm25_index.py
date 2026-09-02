@@ -3,6 +3,7 @@
 import pickle
 from pathlib import Path
 
+from loguru import logger
 from rank_bm25 import BM25Okapi
 
 from src.infra.db.vector_store.types import ChunkResult
@@ -36,6 +37,40 @@ class BM25Index:
         bm25 = BM25Okapi(corpus)
         with open(kb_dir / "bm25.pkl", "wb") as f:
             pickle.dump({"bm25": bm25, "chunks": chunks}, f)
+
+    def rebuild_from_results(self, kb_id: str, results: list) -> None:
+        """从 Chroma 读回的全部分块重建 KB 的 BM25 索引（全量覆盖写）。
+
+        Chroma get_all_chunks 返回的是 ChunkResult（id/content/metadata），
+        BM25 持久化需要 ChunkData（content/metadata/chunk_id），此处做适配：
+        chunk_id 复用 Chroma id（格式 {doc_id}:{index}），保证 search 侧
+        chunk.chunk_id 能还原。空结果视为删除索引（无语料可建）。
+
+        Args:
+            kb_id: 知识库 ID
+            results: Chroma 全量分块（ChunkResult 列表）
+        """
+        if not results:
+            self.delete_index(kb_id)
+            return
+        chunk_data = [
+            ChunkData(content=r.content, metadata=r.metadata, chunk_id=r.id)
+            for r in results
+        ]
+        self.build_index(kb_id, chunk_data)
+
+    def delete_index(self, kb_id: str) -> None:
+        """删除知识库的 BM25 索引（删除 KB 时同步清理，防幽灵检索）。
+
+        Args:
+            kb_id: 知识库 ID
+        """
+        import shutil
+
+        kb_dir = self.index_dir / kb_id
+        if kb_dir.exists():
+            shutil.rmtree(kb_dir)
+            logger.info("BM25 index deleted: kb_id={}", kb_id)
 
     def search(self, kb_id: str, query: str, k: int = 150) -> list[ChunkResult]:
         """执行 BM25 词法检索。

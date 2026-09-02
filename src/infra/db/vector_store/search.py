@@ -202,3 +202,36 @@ def get_chunks_paginated(
     except Exception as e:  # noqa: BLE001
         logger.warning("Failed to get paginated chunks for doc_id={}: {}", doc_id, e)
         return ChunkQueryResult(items=[], total=0, page=page, page_size=page_size)
+
+
+def get_all_chunks(collection, kb_id: str) -> list[ChunkResult]:
+    """取整个知识库 collection 的全部分块（BM25 全量重建用）。
+
+    Args:
+        collection: ChromaDB Collection 实例
+        kb_id: 知识库 ID（仅用于日志）
+
+    Returns:
+        全部分块列表；读取失败时返回空列表（由调用方决定是否降级）
+    """
+    try:
+        results = collection.get(include=["documents", "metadatas"])
+        ids = results.get("ids") or []
+        documents = results.get("documents") or []
+        metadatas = results.get("metadatas") or []
+        chunks = []
+        for i in range(len(ids)):
+            chunks.append(
+                ChunkResult(
+                    id=ids[i],
+                    content=documents[i] if documents else "",
+                    metadata=metadatas[i] if metadatas else {},
+                )
+            )
+        logger.info(
+            "[CHROMA] method=get_all_chunks | kb_id={} | rows={}", kb_id, len(chunks)
+        )
+        return chunks
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Failed to get all chunks for kb_id={}: {}", kb_id, e)
+        return []

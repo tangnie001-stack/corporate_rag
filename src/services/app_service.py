@@ -63,7 +63,9 @@ class AppService:
             chat_manager=self.chat_manager,
         )
         self.kb = KBService(self._kb_repo)
-        self.document = DocumentService(self._doc_repo, self.vector_store, self.router)
+        self.document = DocumentService(
+            self._doc_repo, self.vector_store, self.router, self.bm25
+        )
         self._auth_service: AuthService | None = None
 
     # ==================== 认证 ====================
@@ -101,6 +103,11 @@ class AppService:
             logger.info("ChromaDB delete_collection: kb_id={}", kb_id)
         except Exception:  # noqa: BLE001
             logger.warning("ChromaDB delete collection failed for kb={}", kb_id)
+        if self.bm25 is not None:
+            try:
+                await asyncio.to_thread(self.bm25.delete_index, kb_id)
+            except Exception:  # noqa: BLE001
+                logger.warning("BM25 index delete failed for kb={}", kb_id)
         ok = await self._kb_repo.soft_delete_kb(kb_id)
         if ok:
             logger.info("Knowledge base soft-deleted: {}", kb_id)

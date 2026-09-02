@@ -162,6 +162,19 @@ class VectorStore:
         collection = self._chroma.get_or_create_collection(kb_id)
         return _search.get_chunks_paginated(collection, doc_id, page, page_size)
 
+    def get_all_chunks(self, kb_id: str) -> list[ChunkResult]:
+        """取整个知识库的全部分块（BM25 索引全量重建用）。
+
+        Args:
+            kb_id: 知识库 ID
+
+        Returns:
+            全部分块列表；读取失败返回空列表
+        """
+        with self._chroma._lock:
+            collection = self._chroma.get_or_create_collection(kb_id)
+            return _search.get_all_chunks(collection, kb_id)
+
     def delete_collection(self, kb_id: str) -> bool:
         """删除整个知识库的 collection。
 
