@@ -17,6 +17,12 @@
 - **响应信封**：统一响应包装 `{"code", "message", "data"}`，仅由 `ResponseEnvelopeMiddleware` 产生；业务层只 `raise` 异常，不 `return JSONResponse`
 - **SSE 事件流**：聊天流式输出的事件序列，`status → token → citation → done`
 
+## 日志规范
+
+- **分层前缀**：日志 message 以 `[层名]` 开头标识事件归属，层名 ∈ `{retrieval, verify, agent, session, db, llm}`；同一类事件全系统只有一个统一前缀
+- **retrieval_signal**：检索行为信号日志前缀，类型 ∈ `{reretrieve, to_web, abstain_after_retrieve, unsupported, cited, empty_result}`；格式 `retrieval_signal: signal=... query="..." iteration=... kb_id=...`
+- **五级级别语义**：`debug`（诊断，默认关）/ `info`（里程碑）/ `warning`（降级可恢复）/ `error`（单点已处理）/ `exception`（透传带 traceback）
+
 ## RAG 流水线
 
 - **chunk**：文档切分后的最小检索单元，由 `src/chunking/` 分块策略产生
