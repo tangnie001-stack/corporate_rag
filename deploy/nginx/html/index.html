@@ -1,1127 +1,1261 @@
-<!-- nginx/html/index.html -->
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Corporate RAG — 知识库管理</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    fontFamily: {
-                        sans: ['IBM Plex Sans', 'system-ui', '-apple-system', 'sans-serif'],
-                    },
-                },
-            },
-        };
-    </script>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Corporate Agent Harness — 知识库管理</title>
+<link href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600;700&family=Source+Sans+3:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* ═══ 设计系统（浅色 · 与 chat-harness v6 一致）═══ */
+  :root {
+    --primary: #3B82F6;
+    --primary-hover: #2563EB;
+    --primary-light: #DBEAFE;
+    --primary-border: #93C5FD;
+    --bg: #F8FAFC;
+    --surface: #FFFFFF;
+    --surface-muted: #F1F5F9;
+    --text: #1E293B;
+    --text-secondary: #64748B;
+    --text-muted: #94A3B8;
+    --border: #E2E8F0;
+    --success: #059669;
+    --success-light: #ECFDF5;
+    --danger: #DC2626;
+    --danger-light: #FEF2F2;
+    --warning: #F59E0B;
+    --warning-light: #FFFBEB;
+    --shadow: 0 1px 3px rgba(0,0,0,0.08);
+    --shadow-lg: 0 4px 12px rgba(0,0,0,0.04);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: 'Source Sans 3', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 14px; line-height: 1.5;
+    color: var(--text); background: var(--bg);
+    -webkit-font-smoothing: antialiased;
+  }
+  svg { display: block; }
+  button { font-family: inherit; }
+
+  .app { display: flex; min-height: 100vh; }
+
+  /* ── 侧栏（与 chat.html 同款 · 全量复刻） ── */
+  .sidebar {
+    width: 280px; background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; flex-shrink: 0;
+    position: fixed; top: 0; bottom: 0; z-index: 30;
+  }
+  .sidebar-header { padding: 16px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); }
+  .logo {
+    width: 32px; height: 32px; border-radius: 8px;
+    background: linear-gradient(135deg, #3B82F6, #7C3AED);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 700; font-family: Lexend; font-size: 14px;
+    flex-shrink: 0;
+  }
+  .brand { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .brand-name { font-family: Lexend; font-weight: 600; font-size: 14px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .brand-version { font-size: 11px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
+
+  .feature-block { padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; border-bottom: 1px solid var(--border); }
+  .feature-btn {
+    width: 100%; padding: 9px 12px; background: var(--surface-muted);
+    border: 1px solid var(--border); border-radius: 10px;
+    color: var(--text); font-size: 13px; font-weight: 500;
+    display: flex; align-items: center; gap: 8px; cursor: pointer;
+    transition: background 150ms; text-decoration: none;
+  }
+  .feature-btn:hover { background: #E2E8F0; }
+  .feature-btn svg { width: 15px; height: 15px; color: var(--text-secondary); flex-shrink: 0; }
+  .feature-btn .label { flex: 1; text-align: left; }
+  .feature-btn.active { background: var(--primary-light); border-color: var(--primary-border); color: var(--primary); }
+  .feature-btn.active svg { color: var(--primary); }
+
+  .section-title { padding: 16px 16px 8px; font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .sidebar-kb-list { flex: 1; overflow-y: auto; padding: 0 8px 12px; }
+  .kb-side-item {
+    display: flex; align-items: center; gap: 8px;
+    width: 100%; padding: 8px 12px; border: none; border-radius: 8px;
+    background: transparent; font-size: 13px; color: var(--text-secondary);
+    cursor: pointer; margin-bottom: 2px; transition: background 150ms;
+    text-align: left; font-family: inherit;
+  }
+  .kb-side-item:hover { background: var(--surface-muted); color: var(--text); }
+  .kb-side-item.active { background: var(--primary); color: #fff; }
+  .kb-side-item .kb-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kb-side-item .kb-count { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+  .kb-side-item.active .kb-count { color: rgba(255,255,255,0.8); }
+  .sidebar-kb-list .empty-hint { padding: 16px 12px; font-size: 12px; color: var(--text-muted); text-align: center; }
+
+  .sidebar-footer { padding: 12px 16px; border-top: 1px solid var(--border); }
+  .user-avatar {
+    display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px;
+    cursor: pointer; transition: background 150ms; text-decoration: none; color: inherit;
+    background: none; border: none; width: 100%; font-size: 14px; font-family: inherit;
+  }
+  .user-avatar:hover { background: var(--surface-muted); }
+  .avatar {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: var(--primary-light); border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--primary); font-size: 13px; font-weight: 600; flex-shrink: 0;
+  }
+  .user-meta { display: flex; flex-direction: column; min-width: 0; }
+  .user-name { font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .user-action { font-size: 11px; color: var(--text-muted); }
+  .user-dropdown {
+    position: absolute; bottom: calc(100% + 6px); right: 8px;
+    min-width: 140px; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; box-shadow: var(--shadow-lg); padding: 4px; z-index: 50; display: none;
+  }
+  .user-dropdown.show { display: block; }
+  .user-dropdown button {
+    width: 100%; text-align: left; padding: 8px 10px;
+    border: none; border-radius: 8px; background: transparent;
+    color: #DC2626; font-size: 13px; cursor: pointer;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .user-dropdown button:hover { background: #FEF2F2; }
+  .sidebar-footer { position: relative; }
+
+  /* 移动端 */
+  .sidebar-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+    z-index: 20; display: none;
+  }
+  .sidebar-overlay.show { display: block; }
+  .hamburger {
+    display: none; position: fixed; top: 12px; left: 12px; z-index: 40;
+    width: 36px; height: 36px; border: 1px solid var(--border); border-radius: 10px;
+    background: var(--surface); box-shadow: var(--shadow);
+    align-items: center; justify-content: center; color: var(--text-secondary); cursor: pointer;
+  }
+  @media (max-width: 767px) {
+    .sidebar { transform: translateX(-100%); transition: transform 220ms ease; }
+    .sidebar.open { transform: translateX(0); }
+    .hamburger { display: flex; }
+  }
+
+  /* ── 主区 ── */
+  .main { flex: 1; margin-left: 280px; padding: 28px 32px 40px; background: var(--bg); min-width: 0; }
+  @media (max-width: 767px) { .main { margin-left: 0; padding: 64px 16px 24px; } }
+
+  .page-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+  .page-header h2 { font-family: Lexend; font-size: 20px; font-weight: 600; color: var(--text); }
+  .page-sub { font-size: 12.5px; color: var(--text-muted); margin-top: 2px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 8px 14px; border-radius: 10px; font-size: 13px; font-weight: 500;
+    cursor: pointer; transition: background 150ms, border-color 150ms; border: none;
+  }
+  .btn svg { width: 15px; height: 15px; }
+  .btn-primary { background: var(--primary); color: #fff; }
+  .btn-primary:hover { background: var(--primary-hover); }
+  .btn-ghost { background: transparent; color: var(--text-secondary); }
+  .btn-ghost:hover { background: var(--surface-muted); color: var(--text); }
+  .btn-danger { background: var(--danger); color: #fff; }
+  .btn-danger:hover { background: #B91C1C; }
+
+  /* KB 网格卡片 */
+  .kb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .kb-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px; cursor: pointer; transition: border-color 150ms, box-shadow 150ms;
+    display: flex; flex-direction: column; gap: 10px; position: relative;
+  }
+  .kb-card:hover { border-color: var(--primary-border); box-shadow: var(--shadow); }
+  .kb-card.selected { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(59,130,246,0.15); }
+  .kb-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  .kb-card-id { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .kb-ic {
+    width: 38px; height: 38px; border-radius: 10px; background: var(--primary-light);
+    color: var(--primary); display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-family: Lexend; font-size: 15px; flex-shrink: 0;
+  }
+  .kb-card-name { font-weight: 600; color: var(--text); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kb-card-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+  .kb-del {
+    width: 28px; height: 28px; border: none; border-radius: 8px; background: transparent;
+    color: var(--text-muted); cursor: pointer; opacity: 0; transition: opacity 150ms, background 150ms, color 150ms;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .kb-card:hover .kb-del, .kb-del:focus { opacity: 1; }
+  .kb-del:hover { background: var(--danger-light); color: var(--danger); }
+  .kb-del svg { width: 16px; height: 16px; }
+  .kb-card-desc { font-size: 12.5px; color: var(--text-secondary); line-height: 1.55; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .kb-card-foot { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--text-muted); }
+  .kb-empty {
+    grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 56px 0; color: var(--text-muted);
+  }
+  .kb-empty .big { font-size: 40px; margin-bottom: 12px; opacity: 0.6; }
+  .kb-empty p { font-size: 13px; }
+  .kb-empty .hint { font-size: 12px; margin-top: 4px; }
+
+  /* 文档区 */
+  .doc-section { display: none; }
+  .doc-section.show { display: block; }
+  .doc-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .doc-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+    padding: 16px 20px; border-bottom: 1px solid var(--border);
+  }
+  .doc-head-title h3 { font-size: 15px; font-weight: 600; color: var(--text); }
+  .doc-head-title p { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+  .doc-head-actions { display: flex; align-items: center; gap: 10px; }
+  .ragas-summary {
+    display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px;
+    background: var(--primary-light); border: 1px solid var(--primary-border);
+    border-radius: 8px; font-size: 12px; color: var(--text-secondary);
+  }
+  .ragas-summary b { color: var(--primary); font-weight: 600; }
+  .ragas-summary .ragas-dot { color: var(--primary-border); }
+  .ragas-summary .ragas-pass { color: var(--success); font-weight: 700; }
+  .ragas-summary .ragas-fail { color: var(--danger); font-weight: 700; }
+
+  .doc-list { display: flex; flex-direction: column; }
+  .doc-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 12px 20px; transition: background 150ms; cursor: pointer;
+  }
+  .doc-row:hover { background: var(--surface-muted); }
+  .doc-row + .doc-row { border-top: 1px solid var(--border); }
+  .doc-info { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1; }
+  .doc-type {
+    width: 34px; height: 34px; border-radius: 8px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700;
+  }
+  .doc-type.pdf { background: #FEE2E2; color: #DC2626; }
+  .doc-type.docx { background: #DBEAFE; color: #2563EB; }
+  .doc-type.txt { background: var(--surface-muted); color: var(--text-muted); }
+  .doc-meta { min-width: 0; }
+  .doc-name { font-size: 13.5px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .doc-sub { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--text-muted); margin-top: 2px; flex-wrap: wrap; }
+  .doc-sub .score { font-weight: 600; }
+  .doc-sub .score.pass { color: var(--success); }
+  .doc-sub .score.fail { color: var(--danger); }
+  .doc-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  .icon-btn {
+    width: 28px; height: 28px; border: none; border-radius: 8px; background: transparent;
+    color: var(--text-muted); cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: background 150ms, color 150ms;
+  }
+  .icon-btn:hover { background: var(--danger-light); color: var(--danger); }
+  .icon-btn svg { width: 15px; height: 15px; }
+  .doc-empty { display: flex; flex-direction: column; align-items: center; padding: 48px 0; color: var(--text-muted); }
+  .doc-empty .big { font-size: 36px; margin-bottom: 10px; opacity: 0.6; }
+  .doc-empty .skeleton { width: 100%; height: 48px; border-radius: 8px; margin-bottom: 8px; }
+  .doc-empty .skeleton.w-3\\/4 { width: 75%; }
+
+  /* 状态徽标 */
+  .status-badge { font-size: 11px; padding: 2px 10px; border-radius: 999px; font-weight: 500; display: inline-block; }
+  .status-badge.ready { background: var(--success-light); color: var(--success); }
+  .status-badge.processing { background: var(--primary-light); color: var(--primary); }
+  .status-badge.error { background: var(--danger-light); color: var(--danger); }
+  .status-badge.warning { background: var(--warning-light); color: #92400E; }
+
+  /* skeleton 加载占位 */
+  .skeleton { background: linear-gradient(90deg, var(--surface-muted) 0%, #E2E8F0 50%, var(--surface-muted) 100%); background-size: 200% 100%; animation: skeleton-shimmer 1.4s ease-in-out infinite; border-radius: 6px; }
+  @keyframes skeleton-shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  /* spinner */
+  .spinner {
+    width: 18px; height: 18px; border: 2px solid var(--surface-muted);
+    border-top-color: var(--primary); border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* 弹窗 */
+  .modal-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,0.4); z-index: 40; display: none; }
+  .modal-backdrop.show { display: block; }
+  .modal {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    z-index: 50; background: var(--surface); border-radius: 12px;
+    box-shadow: var(--shadow-lg); width: min(92vw, 440px); padding: 22px; display: none;
+  }
+  .modal.show { display: block; }
+  .modal.wide { width: min(92vw, 720px); }
+  .modal h3 { font-size: 16px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+  .modal .modal-sub { font-size: 13px; color: var(--text-muted); margin-bottom: 16px; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 13px; font-weight: 500; color: var(--text); margin-bottom: 6px; }
+  .field label .req { color: var(--danger); }
+  .input {
+    width: 100%; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px;
+    font-size: 13.5px; font-family: inherit; color: var(--text); outline: none; background: var(--surface);
+    transition: border-color 150ms, box-shadow 150ms; resize: none;
+  }
+  .input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(59,130,246,0.15); }
+  .modal-foot { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+
+  /* 分块预览/评估弹窗（宽版） */
+  .chunk-modal-panel, .eval-modal-panel { background: var(--surface); border-radius: 12px; box-shadow: var(--shadow-lg); width: min(92vw, 720px); max-height: 85vh; display: none; flex-direction: column; }
+  .chunk-modal-panel.show, .eval-modal-panel.show { display: flex; }
+  .chunk-modal-panel { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 50; }
+  .eval-modal-panel { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 50; }
+  .eval-modal-panel.narrow { width: min(92vw, 480px); }
+  .chunk-modal-head, .eval-modal-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 16px 20px; border-bottom: 1px solid var(--border);
+  }
+  .chunk-modal-head h3, .eval-modal-head h3 { font-size: 15px; font-weight: 600; color: var(--text); }
+  .chunk-modal-head p, .eval-modal-head p { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
+  .chunk-list, .eval-detail-body, .eval-broken-body { flex: 1; overflow-y: auto; padding: 16px 20px; min-height: 0; }
+  .chunk-list { display: flex; flex-direction: column; gap: 10px; }
+  .chunk-pagination, .eval-pagination {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 10px 20px; border-top: 1px solid var(--border); background: var(--surface-muted);
+  }
+  .chunk-pagination.hidden, .eval-pagination.hidden { display: none; }
+  .chunk-count-badge { display: inline-block; font-size: 12px; font-weight: 600; color: var(--primary); background: var(--primary-light); padding: 2px 10px; border-radius: 999px; }
+  .chunk-count-badge.hidden { display: none; }
+  .chunk-loading { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 32px 0; color: var(--text-muted); font-size: 13px; }
+  .chunk-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; animation: fadeInUp 250ms ease-out; }
+  @keyframes fadeInUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+  .chunk-card:hover { border-color: var(--primary-border); }
+  .chunk-card-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px; background: var(--surface-muted); font-size: 12px; }
+  .chunk-card-number { font-weight: 600; color: var(--text); }
+  .chunk-card-meta { display: flex; align-items: center; gap: 12px; color: var(--text-muted); }
+  .chunk-card-meta span { display: inline-flex; align-items: center; gap: 4px; }
+  .chunk-card-meta svg { width: 12px; height: 12px; }
+  .chunk-card-body { padding: 10px 14px; font-size: 13px; }
+  .chunk-card-body pre { white-space: pre-wrap; word-break: break-word; color: var(--text); font-family: 'JetBrains Mono', monospace; font-size: 12.5px; line-height: 1.6; }
+  .eval-summary-card { background: linear-gradient(180deg, var(--surface-muted), transparent); border: 1px solid var(--border); border-radius: 10px; padding: 16px; display: flex; align-items: center; justify-content: space-between; }
+  .eval-summary-card .score { font-size: 28px; font-weight: 700; }
+  .eval-summary-card .score.pass { color: var(--success); }
+  .eval-summary-card .score.fail { color: var(--danger); }
+  .eval-section { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+  .eval-section-title { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }
+  .eval-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: 13px; }
+  .eval-row .meter { flex: 1; height: 6px; background: var(--surface-muted); border-radius: 999px; overflow: hidden; }
+  .eval-row .meter > span { display: block; height: 100%; background: var(--success); border-radius: 999px; }
+  .eval-row .meter > span.warn { background: var(--warning); }
+  .eval-row .meter > span.fail { background: var(--danger); }
+  .eval-row .row-label { width: 80px; color: var(--text-secondary); }
+  .eval-row .row-score { width: 48px; text-align: right; font-weight: 600; color: var(--text); }
+  .eval-row .row-link { color: var(--primary); font-size: 12px; cursor: pointer; }
+  .eval-row .row-link:hover { text-decoration: underline; }
+  .eval-broken-item { background: var(--surface-muted); border-radius: 6px; padding: 8px 12px; font-family: 'JetBrains Mono', monospace; font-size: 12.5px; line-height: 1.55; color: var(--text); }
+  .eval-broken-arrow { text-align: center; color: var(--text-muted); padding: 4px 0; }
+
+  /* 上传 loading */
+  .upload-loading-card { background: var(--surface); border-radius: 12px; padding: 32px 40px; box-shadow: var(--shadow-lg); display: flex; flex-direction: column; align-items: center; }
+  .upload-loading-card .spinner { width: 32px; height: 32px; border-width: 3px; margin-bottom: 14px; }
+  .upload-loading-card p { font-size: 14px; font-weight: 500; color: var(--text); }
+  .upload-loading-card .hint { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+
+  /* toast */
+  .toast { position: fixed; top: 32px; left: 50%; transform: translateX(-50%); z-index: 50; display: flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 12px; color: #fff; font-size: 13px; box-shadow: var(--shadow-lg); max-width: 80%; word-break: break-word; text-align: center; white-space: pre-wrap; }
+  .toast.hidden { display: none; }
+  .toast.success { background: var(--success); }
+  .toast.error { background: var(--danger); }
+  .toast.warning { background: var(--warning); }
+  .toast-icon { width: 20px; height: 20px; border-radius: 50%; background: rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0; }
+</style>
 </head>
-<body class="bg-slate-50 min-h-screen font-sans text-slate-900">
+<body>
 
-    <!-- ====== Sidebar ====== -->
-    <aside id="sidebar" class="fixed top-0 left-0 z-30 h-screen w-64 bg-slate-900 text-slate-300 flex flex-col transition-transform duration-300 -translate-x-full md:translate-x-0">
-        <!-- Logo -->
-        <div class="px-5 py-5 border-b border-slate-700">
-            <h1 class="text-lg font-semibold text-white flex items-center gap-2">
-                <span class="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white text-sm font-bold">FQ</span>
-                Corporate RAG
-            </h1>
-            <p class="text-xs text-slate-500 mt-1">金融文档智能问答系统</p>
-        </div>
+<!-- Mobile Hamburger -->
+<button class="hamburger" type="button" onclick="toggleSidebar()" aria-label="菜单">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+</button>
 
-        <!-- Navigation -->
-        <nav class="px-3 py-4 border-b border-slate-700">
-            <a href="/" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-800">
-                <span>💬</span> 智能问答
-            </a>
-            <a href="/Knowledgebase" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium bg-blue-600/10 text-blue-400 mt-1">
-                <span>📚</span> 知识库管理
-            </a>
-        </nav>
+<div class="app">
 
-        <!-- KB List -->
-        <div class="flex-1 overflow-hidden flex flex-col">
-            <div class="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">知识库</div>
-            <div id="sidebar-kb-list" class="sidebar-kb-list flex-1 overflow-y-auto px-3 pb-2">
-                <!-- Populated by JS -->
-                <div class="px-3 py-8 text-center text-xs text-slate-600">暂无知识库</div>
+  <!-- ========== 侧栏（全量复刻 chat.html） ========== -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">FQ</div>
+      <div class="brand">
+        <div class="brand-name">Corporate Agent Harness</div>
+        <div class="brand-version">v0.1.0</div>
+      </div>
+    </div>
+
+    <div class="feature-block">
+      <a class="feature-btn" href="/">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-5l-5 5v-5z"/></svg>
+        <span class="label">智能问答</span>
+      </a>
+      <button class="feature-btn active" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+        <span class="label">知识库管理</span>
+      </button>
+    </div>
+
+    <div class="section-title">知识库</div>
+    <div class="sidebar-kb-list" id="sidebar-kb-list"></div>
+
+    <div class="sidebar-footer">
+      <div id="user-area"></div>
+    </div>
+  </aside>
+
+  <div class="sidebar-overlay" id="sidebar-overlay" onclick="toggleSidebar()"></div>
+
+  <!-- ========== 主区 ========== -->
+  <main class="main">
+    <div class="page-header">
+      <div>
+        <h2>知识库管理</h2>
+        <div class="page-sub">管理知识库与其中的文档，供智能问答检索引用</div>
+      </div>
+      <button class="btn btn-primary" type="button" onclick="showCreateModal()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+        新建知识库
+      </button>
+    </div>
+
+    <div id="kb-grid" class="kb-grid"></div>
+
+    <div id="doc-section" class="doc-section">
+      <div class="doc-card">
+        <div class="doc-head">
+          <div class="doc-head-title">
+            <h3 id="doc-section-title">文档列表</h3>
+            <p id="doc-section-subtitle"></p>
+          </div>
+          <div class="doc-head-actions">
+            <div id="ragas-summary" class="ragas-summary" style="display:none">
+              <span>RAGAS</span>
+              <b id="ragas-faith">—</b>
+              <span class="ragas-dot">·</span>
+              <b id="ragas-recall">—</b>
+              <span id="ragas-pass-icon" class="ragas-pass">✓</span>
             </div>
+            <label class="btn btn-primary" style="cursor:pointer">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+              上传文档
+              <input type="file" id="file-input" accept=".pdf,.docx,.txt" style="display:none" onchange="handleUpload(event)">
+            </label>
+          </div>
         </div>
+        <div id="doc-list" class="doc-list"></div>
+      </div>
+    </div>
+  </main>
+</div>
 
-        <!-- New KB Button -->
-        <div class="px-3 py-3 border-t border-slate-700">
-            <button onclick="showCreateModal()" class="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-                新建知识库
-            </button>
-        </div>
-    </aside>
+<!-- ====== Create KB Modal ====== -->
+<div id="create-backdrop" class="modal-backdrop" onclick="hideCreateModal()"></div>
+<div id="create-modal" class="modal">
+  <h3>新建知识库</h3>
+  <div class="modal-sub">创建一个新的知识库来管理文档</div>
+  <div class="field">
+    <label>知识库名称 <span class="req">*</span></label>
+    <input class="input" id="kb-name" placeholder="例如：2024年年报">
+  </div>
+  <div class="field">
+    <label>描述（可选）</label>
+    <textarea class="input" id="kb-desc" rows="2" placeholder="简要描述知识库内容"></textarea>
+  </div>
+  <div class="modal-foot">
+    <button class="btn btn-ghost" type="button" onclick="hideCreateModal()">取消</button>
+    <button class="btn btn-primary" type="button" onclick="handleCreate()">创建</button>
+  </div>
+</div>
 
-    <!-- ====== Mobile Overlay ====== -->
-    <div id="sidebar-overlay" onclick="toggleSidebar()" class="sidebar-overlay fixed inset-0 z-20 bg-black/50 hidden md:hidden"></div>
+<!-- ====== Delete Confirm Modal ====== -->
+<div id="delete-backdrop" class="modal-backdrop" onclick="hideDeleteModal()"></div>
+<div id="delete-modal" class="modal" style="width:min(92vw,400px)">
+  <div style="display:flex; align-items:flex-start; gap:12px; margin-bottom:16px">
+    <div style="width:40px; height:40px; border-radius:50%; background:var(--danger-light); display:flex; align-items:center; justify-content:center; flex-shrink:0">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" stroke-width="2"><path d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+    </div>
+    <div>
+      <h3 style="margin-bottom:2px">确认删除</h3>
+      <p id="delete-modal-text" style="font-size:12.5px; color:var(--text-muted)">此操作不可撤销，知识库内的所有文档将被清除。</p>
+    </div>
+  </div>
+  <div class="modal-foot">
+    <button class="btn btn-ghost" type="button" onclick="hideDeleteModal()">取消</button>
+    <button id="delete-confirm-btn" class="btn btn-danger" type="button">删除</button>
+  </div>
+</div>
 
-    <!-- ====== Hamburger (mobile) ====== -->
-    <button onclick="toggleSidebar()" class="fixed top-3 left-3 z-10 md:hidden w-9 h-9 rounded-lg bg-white border border-slate-200 shadow-sm flex items-center justify-center text-slate-600">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+<!-- ====== Chunk Preview Modal ====== -->
+<div id="chunk-backdrop" class="modal-backdrop" onclick="hideChunkPreview()"></div>
+<div id="chunk-modal" class="chunk-modal-panel">
+  <div class="chunk-modal-head">
+    <div style="min-width:0; flex:1">
+      <h3 id="chunk-modal-title">分块预览</h3>
+      <p id="chunk-modal-subtitle"></p>
+    </div>
+    <div style="display:flex; align-items:center; gap:8px; flex-shrink:0">
+      <span id="chunk-count-badge" class="chunk-count-badge hidden"></span>
+      <button class="btn btn-ghost" type="button" onclick="hideChunkPreview()" style="padding:6px">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+  </div>
+  <div id="chunk-list" class="chunk-list">
+    <div class="chunk-loading">
+      <div class="spinner"></div>
+      <span>加载分块数据...</span>
+    </div>
+  </div>
+  <div id="chunk-pagination" class="chunk-pagination hidden">
+    <span id="chunk-page-info" style="font-size:12px; color:var(--text-secondary)"></span>
+    <div style="display:flex; align-items:center; gap:8px">
+      <button id="chunk-prev-btn" type="button" onclick="changeChunkPage(-1)" class="btn btn-ghost" style="font-size:12px; padding:4px 12px">上一页</button>
+      <button id="chunk-next-btn" type="button" onclick="changeChunkPage(1)" class="btn btn-ghost" style="font-size:12px; padding:4px 12px">下一页</button>
+    </div>
+  </div>
+</div>
+
+<!-- ====== Upload Loading ====== -->
+<div id="upload-loading" class="modal-backdrop" style="display:none">
+  <div style="position:fixed; inset:0; display:flex; align-items:center; justify-content:center">
+    <div class="upload-loading-card">
+      <div class="spinner"></div>
+      <p>正在同步上传中...</p>
+      <p class="hint">请勿关闭页面</p>
+    </div>
+  </div>
+</div>
+
+<!-- ====== Eval Detail Modal ====== -->
+<div id="eval-backdrop" class="modal-backdrop" onclick="hideEvalModal()"></div>
+<div id="eval-modal" class="eval-modal-panel" style="width:min(92vw,640px)">
+  <div class="eval-modal-head">
+    <div>
+      <h3>分块评估详情</h3>
+      <p>文件级质量评分</p>
+    </div>
+    <button class="btn btn-ghost" type="button" onclick="hideEvalModal()" style="padding:6px">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 18L18 6M6 6l12 12"/></svg>
     </button>
+  </div>
+  <div id="eval-detail-body" class="eval-detail-body">
+    <div class="chunk-loading"><div class="spinner"></div><span>加载中...</span></div>
+  </div>
+</div>
 
-    <!-- ====== User Area (top-right) ====== -->
-    <div id="user-area" class="fixed top-14 md:top-8 right-3 z-10 flex items-center gap-3">
-        <!-- Populated by updateUserArea() -->
-    </div>
+<!-- ====== Eval Broken Detail ====== -->
+<div id="eval-broken-backdrop" class="modal-backdrop" onclick="hideEvalBroken()"></div>
+<div id="eval-broken-modal" class="eval-modal-panel narrow">
+  <div class="eval-modal-head">
+    <h3 id="eval-broken-title">断裂详情</h3>
+    <button class="btn btn-ghost" type="button" onclick="hideEvalBroken()" style="padding:6px">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 18L18 6M6 6l12 12"/></svg>
+    </button>
+  </div>
+  <div id="eval-broken-body" class="eval-broken-body"></div>
+</div>
 
-    <!-- ====== Clickaway handler for user dropdown ====== -->
-    <div id="user-dropdown-backdrop" class="fixed inset-0 z-0 hidden"></div>
+<!-- ====== Toast ====== -->
+<div id="toast" class="toast hidden" style="display:none">
+  <span class="toast-icon">✓</span>
+  <span class="toast-text"></span>
+</div>
 
-    <!-- ====== Main Content ====== -->
-    <main class="md:ml-64 min-h-screen p-4 md:p-6 lg:p-8 pt-14 md:pt-8 md:pr-48 lg:pr-48">
-        <!-- Page Header -->
-        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
-            <h2 class="text-xl md:text-2xl font-bold text-slate-900">知识库管理</h2>
-            <button onclick="showCreateModal()" class="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors shadow-sm">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-                新建知识库
-            </button>
-        </div>
+<!-- 旧的 user-dropdown-backdrop 保留以兼容 JS（侧栏底部用户下拉专用） -->
+<div id="user-dropdown-backdrop" class="modal-backdrop" style="display:none; z-index:25"></div>
 
-        <!-- KB List (grid cards view) -->
-        <div id="kb-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-            <!-- Populated by JS -->
-            <div class="col-span-full">
-                <div class="flex flex-col items-center justify-center py-16 text-slate-400">
-                    <div class="text-5xl mb-4">📂</div>
-                    <p class="text-sm mb-1">暂无知识库</p>
-                    <p class="text-xs text-slate-400">点击右上角「新建知识库」开始</p>
-                </div>
-            </div>
-        </div>
+<script src="js/api.js?v=13"></script>
+<script>
+let _userId = '';
+let selectedKbId = null;
+let selectedKbName = '';
+let _docPollTimer = null;
 
-        <!-- Document section (shown when KB selected) -->
-        <div id="doc-section" class="hidden">
-            <div class="bg-white rounded-xl border border-slate-200 shadow-sm">
-                <!-- Header -->
-                <div class="flex flex-col gap-3 px-5 py-4 border-b border-slate-100">
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <h3 id="doc-section-title" class="font-semibold text-slate-900">文档列表</h3>
-                            <p id="doc-section-subtitle" class="text-xs text-slate-500 mt-0.5"></p>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <!-- RAGAS Eval Summary (KB level) -->
-                            <div id="ragas-summary" class="hidden flex items-center gap-2 px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-lg text-xs">
-                                <span class="text-blue-600 font-medium">RAGAS</span>
-                                <span id="ragas-faith" class="text-blue-700 font-semibold">—</span>
-                                <span class="text-blue-400">·</span>
-                                <span id="ragas-recall" class="text-blue-700 font-semibold">—</span>
-                                <span class="text-blue-400" id="ragas-pass-icon"></span>
+// ── 鉴权 + 用户区（侧栏底部，与 chat.html 同款） ──
+(async function checkAuth() {
+    try {
+        const traceId = generateTraceId();
+        const r = await fetch('/api/auth/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Trace-ID': traceId },
+            body: JSON.stringify({}),
+        });
+        const d = await r.json();
+        if (d.code !== 'SUCCESS' || !d.data?.valid) {
+            updateUserArea(null);
+        } else {
+            updateUserArea(d.data.user_id || '');
+        }
+    } catch (e) {
+        updateUserArea(null);
+    }
+})();
+
+function updateUserArea(userId) {
+    const el = document.getElementById('user-area');
+    if (!userId) {
+        el.innerHTML = '<a href="/login.html?redirect=' + encodeURIComponent(location.pathname) + '" class="user-avatar">' +
+            '<div class="avatar">' +
+            '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>' +
+            '</div>' +
+            '<div class="user-meta"><div class="user-name">未登录</div><div class="user-action">登录</div></div>' +
+            '</a>';
+        return;
+    }
+    const initial = (userId.charAt(0) || 'U').toUpperCase();
+    el.innerHTML = [
+        '<div class="user-menu" style="position:relative; width:100%">',
+        '<button onclick="toggleUserDropdown(event)" class="user-avatar" type="button" title="用户菜单">',
+        '<div class="avatar">' + escapeHtml(initial) + '</div>',
+        '<div class="user-meta">',
+        '<div class="user-name">' + escapeHtml(userId) + '</div>',
+        '<div class="user-action">退出登录</div>',
+        '</div>',
+        '</button>',
+        '<div id="user-dropdown" class="user-dropdown">',
+        '<button type="button" onclick="handleLogout()">',
+        '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3h4a3 3 0 0 1 3 3v1"/></svg>',
+        '退出登录',
+        '</button>',
+        '</div>',
+        '</div>',
+    ].join('');
+}
+
+function toggleUserDropdown(e) {
+    if (e) e.stopPropagation();
+    const dd = document.getElementById('user-dropdown');
+    const bk = document.getElementById('user-dropdown-backdrop');
+    const open = dd && !dd.classList.contains('show');
+    if (dd) dd.classList.toggle('show', open);
+    if (bk) bk.style.display = open ? 'block' : 'none';
+    if (open) {
+        setTimeout(() => document.addEventListener('click', closeOnClickOutside), 0);
+    }
+}
+
+function closeOnClickOutside(e) {
+    const dd = document.getElementById('user-dropdown');
+    const ua = document.getElementById('user-area');
+    if (!ua || !ua.contains(e.target)) {
+        closeUserDropdown();
+        document.removeEventListener('click', closeOnClickOutside);
+    }
+}
+
+function closeUserDropdown() {
+    const dd = document.getElementById('user-dropdown');
+    const bk = document.getElementById('user-dropdown-backdrop');
+    if (dd) dd.classList.remove('show');
+    if (bk) bk.style.display = 'none';
+}
+
+async function handleLogout() {
+    try {
+        await fetch('/api/auth/logout', { method: 'POST' });
+    } catch (_) {}
+    document.cookie = 'token=; path=/; max-age=0';
+    location.href = '/login.html';
+}
+
+// ── 侧栏移动端 ──
+function toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebar-overlay');
+    sidebar.classList.toggle('open');
+    overlay.classList.toggle('show');
+}
+
+// ── 加载 KB 列表 ──
+async function loadKBs() {
+    try {
+        const kbs = await listKBs();
+
+        // 侧栏 KB 列表（浅色 chip 风格）
+        const sidebarList = document.getElementById('sidebar-kb-list');
+        if (kbs.length === 0) {
+            sidebarList.innerHTML = '<div class="empty-hint">暂无知识库</div>';
+        } else {
+            sidebarList.innerHTML = kbs.map(kb =>
+                `<button type="button" onclick="selectKB('${kb.id}','${escapeAttr(kb.name)}')" class="kb-side-item ${selectedKbId === kb.id ? 'active' : ''}">
+                    <span class="kb-name">${escapeHtml(kb.name)}</span>
+                    <span class="kb-count">${kb.doc_count || 0} 文档</span>
+                </button>`
+            ).join('');
+        }
+
+        // 主区 KB 网格
+        const grid = document.getElementById('kb-grid');
+        if (kbs.length === 0) {
+            grid.innerHTML = '<div class="kb-empty"><div class="big">📂</div><p>暂无知识库</p><p class="hint">点击右上角「新建知识库」开始</p></div>';
+        } else {
+            grid.innerHTML = kbs.map(kb => {
+                const failedBg = kb.eval_passed === false ? 'style="background:rgba(254,226,226,0.4);"' : '';
+                return `
+                <div onclick="selectKB('${kb.id}','${escapeAttr(kb.name)}')" class="kb-card ${selectedKbId === kb.id ? 'selected' : ''}" ${failedBg}>
+                    <div class="kb-card-head">
+                        <div class="kb-card-id">
+                            <div class="kb-ic">${escapeHtml(kb.name.charAt(0))}</div>
+                            <div>
+                                <div class="kb-card-name">${escapeHtml(kb.name)}</div>
+                                <div class="kb-card-meta">${kb.doc_count || 0} 个文档</div>
                             </div>
-                            <label class="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors cursor-pointer shadow-sm">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-                            上传文档
-                            <input type="file" id="file-input" accept=".pdf,.docx,.txt" class="hidden" onchange="handleUpload(event)">
-                        </label>
                         </div>
-                    </div>
-                <!-- Document list -->
-                <div id="doc-list" class="divide-y divide-slate-100">
-                    <!-- Populated by JS -->
-                    <div class="flex flex-col items-center justify-center py-12 text-slate-400">
-                        <div class="text-4xl mb-3">📄</div>
-                        <p class="text-sm">选择知识库后查看文档</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </main>
-
-    <!-- ====== Create KB Modal ====== -->
-    <div id="create-modal" class="fixed inset-0 z-40 hidden">
-        <div onclick="hideCreateModal()" class="modal-backdrop absolute inset-0 bg-black/40"></div>
-        <div class="absolute inset-0 flex items-center justify-center p-4">
-            <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 relative z-10 animate-[fadeIn_0.2s_ease-out]">
-                <h3 class="text-lg font-semibold text-slate-900 mb-1">新建知识库</h3>
-                <p class="text-sm text-slate-500 mb-5">创建一个新的知识库来管理文档</p>
-
-                <div class="space-y-4">
-                    <div>
-                        <label class="block text-sm font-medium text-slate-700 mb-1.5">知识库名称 <span class="text-red-500">*</span></label>
-                        <input type="text" id="kb-name" class="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-shadow" placeholder="例如：2024年年报">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-slate-700 mb-1.5">描述（可选）</label>
-                        <textarea id="kb-desc" rows="2" class="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-shadow resize-none" placeholder="简要描述知识库内容"></textarea>
-                    </div>
-                </div>
-
-                <div class="flex justify-end gap-3 mt-6">
-                    <button onclick="hideCreateModal()" class="px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100 rounded-lg transition-colors">取消</button>
-                    <button onclick="handleCreate()" class="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors shadow-sm">创建</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- ====== Delete Confirm Modal ====== -->
-    <div id="delete-modal" class="fixed inset-0 z-40 hidden">
-        <div onclick="hideDeleteModal()" class="modal-backdrop absolute inset-0 bg-black/40"></div>
-        <div class="absolute inset-0 flex items-center justify-center p-4">
-            <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 relative z-10 animate-[fadeIn_0.2s_ease-out]">
-                <div class="flex items-center gap-3 mb-3">
-                    <div class="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
-                        <svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                    </div>
-                    <div>
-                        <h3 class="text-lg font-semibold text-slate-900">确认删除</h3>
-                        <p id="delete-modal-text" class="text-sm text-slate-500 mt-0.5">此操作不可撤销，知识库内的所有文档将被清除。</p>
-                    </div>
-                </div>
-                <div class="flex justify-end gap-3 mt-5">
-                    <button onclick="hideDeleteModal()" class="px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100 rounded-lg transition-colors">取消</button>
-                    <button id="delete-confirm-btn" class="px-5 py-2.5 bg-red-600 hover:bg-red-500 text-white text-sm font-medium rounded-lg transition-colors shadow-sm">删除</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- ====== Chunk Preview Modal ====== -->
-    <div id="chunk-modal" class="fixed inset-0 z-40 hidden">
-        <div onclick="hideChunkPreview()" class="modal-backdrop absolute inset-0 bg-black/30"></div>
-        <div class="absolute inset-0 flex items-center justify-center p-4">
-            <div class="chunk-modal-panel bg-white rounded-xl shadow-xl w-[80vw] max-w-[80vw] max-h-[85vh] flex flex-col relative z-10">
-                <!-- Header -->
-                <div class="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-                    <div class="min-w-0 mr-4">
-                        <h3 id="chunk-modal-title" class="text-base font-semibold text-slate-900 truncate">分块预览</h3>
-                        <p id="chunk-modal-subtitle" class="text-xs text-slate-400 mt-0.5 font-medium"></p>
-                    </div>
-                    <div class="flex items-center gap-2 flex-shrink-0">
-                        <span id="chunk-count-badge" class="hidden text-xs font-semibold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full"></span>
-                        <button onclick="hideChunkPreview()" class="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+                        <button type="button" class="kb-del" title="删除知识库" onclick="event.stopPropagation(); showDeleteModal('${kb.id}','${escapeAttr(kb.name)}')">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                         </button>
                     </div>
-                </div>
-                <!-- Content -->
-                <div id="chunk-list" class="flex-1 overflow-y-auto px-6 py-4 space-y-3 min-h-0">
-                    <div class="chunk-loading">
-                        <div class="spinner"></div>
-                        <span>加载分块数据...</span>
+                    <div class="kb-card-desc">${escapeHtml(kb.description || '暂无描述')}</div>
+                    <div class="kb-card-foot">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
+                        <span>ID: ${escapeHtml(kb.id.slice(0, 8))}...</span>
+                        ${kb.created_at ? `<span>· ${new Date(kb.created_at).toLocaleDateString()}</span>` : ''}
                     </div>
-                </div>
-                <!-- Pagination Footer -->
-                <div id="chunk-pagination" class="hidden flex items-center justify-between px-6 py-3 border-t border-slate-100 bg-slate-50/80">
-                    <span id="chunk-page-info" class="text-xs text-slate-500 font-medium"></span>
-                    <div class="flex items-center gap-2">
-                        <button id="chunk-prev-btn" onclick="changeChunkPage(-1)" class="px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">上一页</button>
-                        <button id="chunk-next-btn" onclick="changeChunkPage(1)" class="px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">下一页</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- ====== Upload Loading Modal ====== -->
-    <div id="upload-loading" class="fixed inset-0 z-50" style="display:none">
-        <div class="absolute inset-0 bg-black/40"></div>
-        <div class="absolute inset-0 flex items-center justify-center">
-            <div class="bg-white rounded-2xl px-10 py-8 shadow-2xl flex flex-col items-center">
-                <div class="spinner mb-4" style="width:32px;height:32px;border-width:3px"></div>
-                <p class="text-sm font-medium text-slate-700">正在同步上传中...</p>
-                <p class="text-xs text-slate-400 mt-1">请勿关闭页面</p>
-            </div>
-        </div>
-    </div>
-
-    <!-- ====== Eval Detail Modal ====== -->
-    <div id="eval-modal" class="fixed inset-0 z-40" style="display:none">
-        <div onclick="hideEvalModal()" class="modal-backdrop absolute inset-0 bg-black/30"></div>
-        <div class="absolute inset-0 flex items-center justify-center p-4">
-            <div class="eval-modal-panel bg-white rounded-xl shadow-xl w-[90vw] max-w-2xl max-h-[85vh] flex flex-col relative z-10">
-                <!-- Header -->
-                <div class="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-                    <div>
-                        <h3 class="text-base font-semibold text-slate-900">分块评估详情</h3>
-                        <p class="text-xs text-slate-400 mt-0.5">文件级质量评分</p>
-                    </div>
-                    <button onclick="hideEvalModal()" class="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
-                    </button>
-                </div>
-                <!-- Content -->
-                <div id="eval-detail-body" class="flex-1 overflow-y-auto px-6 py-4 min-h-0 space-y-4">
-                    <!-- Populated by JS -->
-                    <div class="flex items-center justify-center py-8 text-slate-400">
-                        <div class="spinner mr-3"></div>
-                        <span>加载中...</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- ====== Eval Broken Detail Sub-Modal ====== -->
-    <div id="eval-broken-modal" class="fixed inset-0 z-50" style="display:none">
-        <div onclick="hideEvalBroken()" class="modal-backdrop absolute inset-0 bg-black/30"></div>
-        <div class="absolute inset-0 flex items-center justify-center p-4">
-            <div class="eval-modal-panel bg-white rounded-xl shadow-xl w-[80vw] max-w-lg max-h-[70vh] flex flex-col relative z-10">
-                <div class="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-                    <h3 id="eval-broken-title" class="text-base font-semibold text-slate-900"></h3>
-                    <button onclick="hideEvalBroken()" class="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
-                    </button>
-                </div>
-                <div id="eval-broken-body" class="flex-1 overflow-y-auto px-6 py-4 space-y-3 text-sm"></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- ====== Toast ====== -->
-    <div id="toast" class="fixed top-8 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-5 py-3 rounded-xl text-white text-sm shadow-xl max-w-2xl hidden" style="background-color: #059669; word-break: break-word; text-align: center; white-space: pre-wrap;">
-        <span class="toast-icon w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-xs flex-shrink-0">✓</span>
-        <span class="toast-text flex-1 min-w-0"></span>
-    </div>
-
-    <!-- ====== Scripts ====== -->
-    <script src="js/api.js?v=13"></script>
-    <script>
-        let _userId = '';
-
-        (async function checkAuth() {
-            try {
-                const traceId = generateTraceId();
-                const r = await fetch('/api/auth/verify', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-Trace-ID': traceId },
-                    body: JSON.stringify({}),
-                });
-                const d = await r.json();
-                if (d.code !== 'SUCCESS' || !d.data?.valid) {
-                    updateUserArea(null);
-                } else {
-                    updateUserArea(d.data.user_id || '');
-                }
-            } catch (e) {
-                updateUserArea(null);
-            }
-        })();
-
-        function updateUserArea(userId) {
-            const el = document.getElementById('user-area');
-            if (!userId) {
-                el.innerHTML = '<a href="/login.html?redirect=' + encodeURIComponent(location.pathname) + '" class="inline-flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-sm font-medium rounded-lg shadow-sm transition-all hover:shadow-md">登录</a>';
-                return;
-            }
-            el.innerHTML = [
-                '<div class="relative">',
-                '<button onclick="toggleUserDropdown(event)" class="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-sm hover:shadow-md transition-shadow cursor-pointer">',
-                '<svg class="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/></svg>',
-                '</button>',
-                '<div id="user-dropdown" class="absolute right-0 top-full mt-2 w-40 bg-white rounded-xl border border-slate-200 shadow-lg py-1.5 hidden">',
-                '<button onclick="handleLogout()" class="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors flex items-center gap-2 cursor-pointer">',
-                '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>',
-                '退出登录',
-                '</button>',
-                '</div>',
-                '</div>',
-            ].join('');
-        }
-
-        function toggleUserDropdown(e) {
-            if (e) e.stopPropagation();
-            const dd = document.getElementById('user-dropdown');
-            const bk = document.getElementById('user-dropdown-backdrop');
-            const open = dd.classList.contains('hidden');
-            dd.classList.toggle('hidden', !open);
-            bk.classList.toggle('hidden', !open);
-            if (open) {
-                setTimeout(() => document.addEventListener('click', closeOnClickOutside), 0);
-            }
-        }
-
-        function closeOnClickOutside(e) {
-            const dd = document.getElementById('user-dropdown');
-            const ua = document.getElementById('user-area');
-            if (!ua.contains(e.target)) {
-                closeUserDropdown();
-                document.removeEventListener('click', closeOnClickOutside);
-            }
-        }
-
-        function closeUserDropdown() {
-            document.getElementById('user-dropdown').classList.add('hidden');
-            document.getElementById('user-dropdown-backdrop').classList.add('hidden');
-            document.removeEventListener('click', closeOnClickOutside);
-        }
-
-        async function handleLogout() {
-            try {
-                await fetch('/api/auth/logout', { method: 'POST' });
-            } catch (_) {}
-            document.cookie = 'token=; path=/; max-age=0';
-            location.href = '/login.html';
-        }
-
-        let selectedKbId = null;
-        let selectedKbName = '';
-        let _docPollTimer = null;
-
-        // ====== Sidebar ======
-        function toggleSidebar() {
-            const sidebar = document.getElementById('sidebar');
-            const overlay = document.getElementById('sidebar-overlay');
-            sidebar.classList.toggle('-translate-x-full');
-            overlay.classList.toggle('hidden');
-        }
-
-        // ====== Load KBs ======
-        async function loadKBs() {
-            try {
-                const kbs = await listKBs();
-
-                // Sidebar KB list
-                const sidebarList = document.getElementById('sidebar-kb-list');
-                if (kbs.length === 0) {
-                    sidebarList.innerHTML = '<div class="px-3 py-6 text-center text-xs text-slate-600">暂无知识库</div>';
-                } else {
-                    sidebarList.innerHTML = kbs.map(kb =>
-                        `<button onclick="selectKB('${kb.id}','${escapeAttr(kb.name)}')" class="w-full text-left px-3 py-2 rounded-lg text-sm mb-0.5 transition-colors ${selectedKbId === kb.id ? 'bg-blue-600/15 text-blue-400 font-medium' : 'text-slate-400 hover:text-white hover:bg-slate-800'}">
-                            <div class="truncate">${kb.name}</div>
-                            <div class="text-[10px] ${selectedKbId === kb.id ? 'text-blue-400/60' : 'text-slate-600'}">${kb.doc_count || 0} 文档</div>
-                        </button>`
-                    ).join('');
-                }
-
-                // Main grid
-                const grid = document.getElementById('kb-grid');
-                if (kbs.length === 0) {
-                    grid.innerHTML = `<div class="col-span-full">
-                        <div class="flex flex-col items-center justify-center py-16 text-slate-400">
-                            <div class="text-5xl mb-4">📂</div>
-                            <p class="text-sm mb-1">暂无知识库</p>
-                            <p class="text-xs text-slate-400">点击右上角「新建知识库」开始</p>
-                        </div>
-                    </div>`;
-                } else {
-                    grid.innerHTML = kbs.map(kb =>
-                        `<div onclick="selectKB('${kb.id}','${escapeAttr(kb.name)}')" class="bg-white rounded-xl border border-slate-200 p-5 hover:border-blue-300 hover:shadow-md transition-all cursor-pointer group">
-                            <div class="flex items-start justify-between mb-3">
-                                <div class="flex items-center gap-3">
-                                    <div class="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center text-blue-600 font-bold">${kb.name.charAt(0)}</div>
-                                    <div>
-                                        <h4 class="font-medium text-slate-900 text-sm">${kb.name}</h4>
-                                        <p class="text-xs text-slate-400 mt-0.5">${kb.doc_count || 0} 个文档</p>
-                                    </div>
-                                </div>
-                                <button onclick="event.stopPropagation(); showDeleteModal('${kb.id}','${escapeAttr(kb.name)}')" class="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 transition-all">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-                                </button>
-                            </div>
-                            <p class="text-xs text-slate-400 line-clamp-2">${kb.description || '暂无描述'}</p>
-                            <div class="mt-3 flex items-center gap-2 text-xs text-slate-400">
-                                <span>ID: ${kb.id.slice(0,8)}...</span>
-                                ${kb.created_at ? `<span>· ${new Date(kb.created_at).toLocaleDateString()}</span>` : ''}
-                            </div>
-                        </div>`
-                    ).join('');
-                }
-            } catch (err) {
-                if (err.message === 'AUTH_REQUIRED') {
-                    location.href = '/login.html?redirect=' + encodeURIComponent(location.pathname);
-                    return;
-                }
-                showToast('加载知识库失败: ' + err.message, 'error');
-            }
-        }
-
-        function escapeAttr(str) {
-            return str.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-        }
-
-        // ====== Create KB ======
-        function showCreateModal() {
-            document.getElementById('create-modal').classList.remove('hidden');
-            setTimeout(() => document.getElementById('kb-name').focus(), 100);
-        }
-
-        function hideCreateModal() {
-            document.getElementById('create-modal').classList.add('hidden');
-            document.getElementById('kb-name').value = '';
-            document.getElementById('kb-desc').value = '';
-        }
-
-        async function handleCreate() {
-            const name = document.getElementById('kb-name').value.trim();
-            if (!name) { showToast('请输入知识库名称', 'error'); return; }
-            try {
-                await createKB(name, document.getElementById('kb-desc').value.trim());
-                showToast('知识库创建成功');
-                hideCreateModal();
-                loadKBs();
-            } catch (err) {
-                showToast('创建失败: ' + err.message, 'error');
-            }
-        }
-
-        // ====== Delete KB ======
-        let deleteKbId = null;
-
-        function showDeleteModal(kbId, kbName) {
-            deleteKbId = kbId;
-            document.getElementById('delete-modal-text').textContent = `确定要删除「${kbName}」吗？此操作不可撤销。`;
-            document.getElementById('delete-modal').classList.remove('hidden');
-            document.getElementById('delete-confirm-btn').onclick = handleDelete;
-        }
-
-        function hideDeleteModal() {
-            document.getElementById('delete-modal').classList.add('hidden');
-            deleteKbId = null;
-            deleteDocInfo = null;
-        }
-
-        async function handleDelete() {
-            if (!deleteKbId) return;
-            try {
-                await deleteKB(deleteKbId);
-                showToast('知识库已删除');
-                if (selectedKbId === deleteKbId) {
-                    selectedKbId = null;
-                    document.getElementById('doc-section').classList.add('hidden');
-                }
-                hideDeleteModal();
-                loadKBs();
-            } catch (err) {
-                showToast('删除失败: ' + err.message, 'error');
-            }
-        }
-
-        // ====== Delete Document ======
-        let deleteDocInfo = null;
-
-        function showDeleteDocModal(kbId, docId, filename) {
-            deleteDocInfo = { kbId, docId };
-            document.getElementById('delete-modal-text').textContent = `确定要删除「${filename}」吗？此操作不可撤销。`;
-            document.getElementById('delete-modal').classList.remove('hidden');
-            document.getElementById('delete-confirm-btn').onclick = handleDeleteDoc;
-        }
-
-        async function handleDeleteDoc() {
-            if (!deleteDocInfo) return;
-            const { kbId, docId } = deleteDocInfo;
-            hideDeleteModal();
-            try {
-                const r = await apiRequest('/kbs/documents/delete', {
-                    method: 'POST',
-                    body: JSON.stringify({ kb_id: kbId, doc_id: docId }),
-                });
-                if (!r.success) throw new Error('删除失败');
-                showToast('文档已删除');
-                deleteDocInfo = null;
-                setTimeout(() => {
-                    loadDocuments(selectedKbId);
-                    loadKBs();
-                }, 2000);
-            } catch (err) {
-                showToast('删除失败: ' + err.message, 'error');
-            }
-        }
-
-        // ====== Select KB ======
-        async function selectKB(kbId, name) {
-            selectedKbId = kbId;
-            selectedKbName = name;
-            document.getElementById('doc-section').classList.remove('hidden');
-            document.getElementById('doc-section-title').textContent = `📄 ${name}`;
-            document.getElementById('doc-section-subtitle').textContent = `知识库 ID: ${kbId}`;
-
-            // Reload sidebar to highlight active
-            loadKBs();
-
-            // Show loading state
-            document.getElementById('doc-list').innerHTML = `
-                <div class="px-5 py-6 space-y-3">
-                    <div class="skeleton h-12 w-full"></div>
-                    <div class="skeleton h-12 w-full"></div>
-                    <div class="skeleton h-12 w-3/4"></div>
                 </div>`;
-
-            // Close sidebar on mobile
-            if (window.innerWidth < 768) toggleSidebar();
-
-            await loadDocuments(kbId);
-            loadRagasEval(kbId);
+            }).join('');
         }
-
-        // ====== Load Documents ======
-        async function loadDocuments(kbId) {
-            try {
-                const docs = await listDocuments(kbId);
-                const list = document.getElementById('doc-list');
-                // Store eval data for access by detail button
-                window._evalDocs = [];
-
-                if (docs.length === 0) {
-                    list.innerHTML = `<div class="flex flex-col items-center justify-center py-12 text-slate-400">
-                        <div class="text-4xl mb-3">📄</div>
-                        <p class="text-sm mb-1">暂无文档</p>
-                        <p class="text-xs text-slate-400">点击右上角「上传文档」添加</p>
-                    </div>`;
-                    return;
-                }
-
-                list.innerHTML = docs.map((doc, i) => {
-                    window._evalDocs[i] = doc.eval_detail || null;
-                    const evalFailedBg = doc.eval_passed === false ? 'style="background:rgba(254,226,226,0.15);"' : '';
-                    return `
-                    <div class="flex items-center justify-between px-5 py-3.5 hover:bg-slate-50 transition-colors group ${doc.status === 'ready' ? 'cursor-pointer' : ''}" ${doc.status === 'ready' ? `onclick="showChunkPreview('${kbId}','${doc.id}','${escapeAttr(doc.filename)}')"` : ''} ${evalFailedBg}>
-                        <div class="flex items-center gap-3 min-w-0 flex-1">
-                            <div class="w-8 h-8 rounded-lg ${(doc.file_type || doc.type) === 'pdf' ? 'bg-red-100' : (doc.file_type || doc.type) === 'docx' ? 'bg-blue-100' : 'bg-slate-100'} flex items-center justify-center flex-shrink-0 text-xs font-bold ${(doc.file_type || doc.type) === 'pdf' ? 'text-red-600' : (doc.file_type || doc.type) === 'docx' ? 'text-blue-600' : 'text-slate-600'}">${((doc.file_type || doc.type) || 'txt').toUpperCase().slice(0,3)}</div>
-                            <div class="min-w-0">
-                                <div class="text-sm font-medium text-slate-900 truncate">${doc.filename}</div>
-                                <div class="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
-                                    <span>${formatSize(doc.size)}</span>
-                                    ${doc.chunk_count ? `<span>· ${doc.chunk_count} 分块</span>` : ''}
-                                    ${doc.created_at ? `<span>· ${new Date(doc.created_at).toLocaleDateString()}</span>` : ''}
-                                    ${doc.eval_score != null ? `<span class="flex items-center gap-1 ${doc.eval_passed ? 'text-emerald-600' : 'text-red-500'} font-medium">
-                                        <span>分块评分</span>
-                                        <span class="text-xs font-bold">${doc.eval_score.toFixed(2)}</span>
-                                        <span>${doc.eval_passed ? '✓' : '✗'}</span>
-                                    </span>` : ''}
-                                </div>
-                            </div>
-                        </div>
-                        <div class="flex items-center gap-2 flex-shrink-0">
-                            <span class="status-badge ${doc.status === 'ready' ? 'ready' : (doc.status === 'error' || doc.status === 'failed') ? 'error' : 'processing'}">
-                                ${doc.status === 'ready' ? '✓ 就绪' : (doc.status === 'error' || doc.status === 'failed') ? '✕ 失败' : '⋯ 处理中'}
-                            </span>
-                            ${doc.eval_detail ? '<button onclick="event.stopPropagation();showEvalModal(window._evalDocs[' + i + '])" class="px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title="查看评估详情">详情</button>' : ''}
-                            ${doc.status === 'ready' || doc.status === 'error' || doc.status === 'failed' ? `<button onclick="event.stopPropagation();showDeleteDocModal('${kbId}','${doc.id}','${escapeAttr(doc.filename)}')" class="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors" title="删除文档">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-                            </button>` : ''}
-                        </div>
-                    </div>
-                `;
-                }).join('');
-
-                // Poll for latest document if still processing
-                startDocPolling(kbId, docs);
-            } catch (err) {
-                const list = document.getElementById('doc-list');
-                list.innerHTML = `<div class="flex flex-col items-center justify-center py-12 text-red-400">
-                    <div class="text-4xl mb-3">⚠</div>
-                    <p class="text-sm">加载文档失败</p>
-                    <button onclick="loadDocuments('${kbId}')" class="mt-3 text-xs text-blue-600 hover:underline">重试</button>
-                </div>`;
-                showToast('加载文档失败: ' + err.message, 'error');
-            }
+    } catch (err) {
+        if (err.message === 'AUTH_REQUIRED') {
+            location.href = '/login.html?redirect=' + encodeURIComponent(location.pathname);
+            return;
         }
+        showToast('加载知识库失败: ' + err.message, 'error');
+    }
+}
 
-        // ====== Document Processing Polling ======
-        function startDocPolling(kbId, docs) {
-            if (_docPollTimer) {
-                clearInterval(_docPollTimer);
-                _docPollTimer = null;
-            }
+function escapeAttr(str) { return str.replace(/'/g, "\\'").replace(/"/g, '&quot;'); }
 
-            const pending = docs
-                .filter(d => d.status !== 'ready' && d.status !== 'error' && d.status !== 'failed')
-                .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))[0];
+// ── 弹窗：创建 ──
+function showCreateModal() {
+    document.getElementById('create-modal').classList.add('show');
+    document.getElementById('create-backdrop').classList.add('show');
+    setTimeout(() => document.getElementById('kb-name').focus(), 100);
+}
+function hideCreateModal() {
+    document.getElementById('create-modal').classList.remove('show');
+    document.getElementById('create-backdrop').classList.remove('show');
+    document.getElementById('kb-name').value = '';
+    document.getElementById('kb-desc').value = '';
+}
+async function handleCreate() {
+    const name = document.getElementById('kb-name').value.trim();
+    if (!name) { showToast('请输入知识库名称', 'error'); return; }
+    try {
+        await createKB(name, document.getElementById('kb-desc').value.trim());
+        showToast('知识库创建成功', 'success');
+        hideCreateModal();
+        loadKBs();
+    } catch (err) {
+        showToast('创建失败: ' + err.message, 'error');
+    }
+}
 
-            if (!pending) return;
-
-            let pollCount = 0;
-            _docPollTimer = setInterval(async () => {
-                pollCount++;
-                try {
-                    const traceId = generateTraceId();
-                    const resp = await fetch(`${API_BASE}/kbs/documents/status`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'X-Trace-ID': traceId },
-                        body: JSON.stringify({ kb_id: kbId, doc_id: pending.id }),
-                    });
-                    const body = await resp.json();
-                    const data = body.data || {};
-
-                    if (data.status === 'ready') {
-                        clearInterval(_docPollTimer);
-                        _docPollTimer = null;
-                        showToast(`文档处理完成，共 ${data.chunk_count} 个分块`, 'success');
-                        await loadDocuments(kbId);
-                        await loadKBs();
-                    } else if (data.status === 'failed') {
-                        clearInterval(_docPollTimer);
-                        _docPollTimer = null;
-                        showToast(`处理失败: ${data.error || '未知错误'}`, 'error');
-                        await loadDocuments(kbId);
-                        await loadKBs();
-                    } else if (pollCount > 120) {
-                        clearInterval(_docPollTimer);
-                        _docPollTimer = null;
-                        showToast('处理超时，请查看文档列表确认状态', 'warning');
-                        await loadDocuments(kbId);
-                    }
-                } catch (e) {
-                    clearInterval(_docPollTimer);
-                    _docPollTimer = null;
-                }
-            }, 3000);
+// ── 弹窗：删除 ──
+let deleteKbId = null;
+function showDeleteModal(kbId, kbName) {
+    deleteKbId = kbId;
+    document.getElementById('delete-modal-text').textContent = `确定要删除「${kbName}」吗？此操作不可撤销。`;
+    document.getElementById('delete-modal').classList.add('show');
+    document.getElementById('delete-backdrop').classList.add('show');
+    document.getElementById('delete-confirm-btn').onclick = handleDelete;
+}
+function hideDeleteModal() {
+    document.getElementById('delete-modal').classList.remove('show');
+    document.getElementById('delete-backdrop').classList.remove('show');
+    deleteKbId = null;
+    deleteDocInfo = null;
+}
+async function handleDelete() {
+    if (!deleteKbId) return;
+    try {
+        await deleteKB(deleteKbId);
+        showToast('知识库已删除', 'success');
+        if (selectedKbId === deleteKbId) {
+            selectedKbId = null;
+            document.getElementById('doc-section').classList.remove('show');
         }
+        hideDeleteModal();
+        loadKBs();
+    } catch (err) {
+        showToast('删除失败: ' + err.message, 'error');
+    }
+}
 
-        // ====== Upload Document ======
-        async function handleUpload(event) {
-            const file = event.target.files[0];
-            if (!file || !selectedKbId) {
-                if (!selectedKbId) showToast('请先选择一个知识库', 'warning');
-                return;
-            }
-
-            // 前端大小限制，避免无效上传
-            if (file.size > window._maxUploadSize) {
-                showToast(`文件超过 ${(window._maxUploadSize / 1024 / 1024).toFixed(0)}MB 上限（当前 ${(file.size / 1024 / 1024).toFixed(1)}MB）`, 'error', 5000);
-                event.target.value = '';
-                return;
-            }
-
-            document.getElementById('upload-loading').style.display = 'flex';
-
-            // 等待浏览器渲染 loading 遮罩层后再发起上传
-            await new Promise(resolve => requestAnimationFrame(resolve));
-
-            try {
-                await uploadDocument(selectedKbId, file);
-                document.getElementById('upload-loading').style.display = 'none';
-                showToast('上传成功', 'success');
-                await new Promise(r => setTimeout(r, 1000));
-                await loadDocuments(selectedKbId);
-                await loadKBs();
-            } catch (err) {
-                document.getElementById('upload-loading').style.display = 'none';
-                hideToast();
-                showToast('上传失败: ' + err.message, 'error');
-            }
-            event.target.value = '';
-        }
-
-        // ====== Chunk Preview (server-side pagination) ======
-        let _chunkCurrentPage = 1;
-        let _chunkTotal = 0;
-        let _chunkKbId = '';
-        let _chunkDocId = '';
-        const _chunkPageSize = 50;
-
-        async function showChunkPreview(kbId, docId, filename) {
-            _chunkKbId = kbId;
-            _chunkDocId = docId;
-            _chunkCurrentPage = 1;
-
-            document.getElementById('chunk-modal-title').textContent = `📄 ${filename}`;
-            document.getElementById('chunk-modal-subtitle').textContent = '加载分块数据...';
-            document.getElementById('chunk-count-badge').classList.add('hidden');
-            document.getElementById('chunk-pagination').classList.add('hidden');
-            document.getElementById('chunk-list').innerHTML = `
-                <div class="chunk-loading">
-                    <div class="spinner"></div>
-                    <span>加载分块数据...</span>
-                </div>`;
-            document.getElementById('chunk-modal').classList.remove('hidden');
-
-            await renderChunkPage();
-        }
-
-        async function renderChunkPage() {
-            const page = _chunkCurrentPage;
-            const listEl = document.getElementById('chunk-list');
-            const paginationEl = document.getElementById('chunk-pagination');
-            const badge = document.getElementById('chunk-count-badge');
-
-            // Show loading state
-            listEl.innerHTML = `
-                <div class="chunk-loading">
-                    <div class="spinner"></div>
-                    <span>加载分块数据...</span>
-                </div>`;
-            paginationEl.classList.add('hidden');
-
-            try {
-                const traceId = generateTraceId();
-                const resp = await fetch(`${API_BASE}/kbs/documents/chunks`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-Trace-ID': traceId },
-                    body: JSON.stringify({ kb_id: _chunkKbId, doc_id: _chunkDocId, page, page_size: _chunkPageSize }),
-                });
-                const body = await resp.json();
-                const data = body.data || {};
-                const items = data.items || [];
-                _chunkTotal = data.total || 0;
-                const totalPages = Math.ceil(_chunkTotal / _chunkPageSize) || 1;
-
-                // Update badge (only on first load)
-                badge.textContent = `${_chunkTotal} 个分块`;
-                badge.classList.remove('hidden');
-                document.getElementById('chunk-modal-subtitle').textContent = '';
-
-                if (_chunkTotal === 0) {
-                    listEl.innerHTML = `
-                        <div class="flex flex-col items-center justify-center py-16 text-slate-400">
-                            <div class="text-4xl mb-3">📄</div>
-                            <p class="text-sm font-medium">暂无分块数据</p>
-                        </div>`;
-                    paginationEl.classList.add('hidden');
-                    return;
-                }
-
-                // Update page info
-                const start = (page - 1) * _chunkPageSize;
-                document.getElementById('chunk-page-info').textContent =
-                    `第 ${page} / ${totalPages} 页，共 ${_chunkTotal} 条`;
-
-                // Enable/disable buttons
-                document.getElementById('chunk-prev-btn').disabled = page <= 1;
-                document.getElementById('chunk-next-btn').disabled = page >= totalPages;
-                paginationEl.classList.remove('hidden');
-
-                // 计算父块分组（基于 parent_key）
-                function hashGroupColor(key) {
-                    let hash = 0;
-                    for (let i = 0; i < key.length; i++) {
-                        hash = ((hash << 5) - hash) + key.charCodeAt(i);
-                        hash = hash & hash;
-                    }
-                    const hue = (Math.abs(hash) * 137.508) % 360;
-                    return { hue, badge: `hsl(${hue}, 55%, 92%)`, badgeText: `hsl(${hue}, 60%, 35%)`, headerBg: `hsl(${hue}, 40%, 96%)`, bar: `hsl(${hue}, 55%, 55%)` };
-                }
-                const parentMap = data.parent_map || {};
-                const groups = [];
-                let lastKey = null;
-                items.forEach((chunk) => {
-                    const key = chunk.parent_key || '__none__';
-                    if (key !== lastKey) {
-                        groups.push({ key, colors: key.startsWith('p') ? hashGroupColor(key) : null });
-                    } else {
-                        groups.push(groups[groups.length - 1]);
-                    }
-                    lastKey = key;
-                });
-
-                // Render chunk cards
-                listEl.innerHTML = items.map((chunk, i) => {
-                    const badgeLabel = chunk.block_type === 'table' ? '表格'
-                        : chunk.block_type === 'qa_pair' ? 'QA'
-                        : '文本';
-                    const badgeColor = chunk.block_type === 'table' ? 'bg-orange-100 text-orange-700'
-                        : chunk.block_type === 'qa_pair' ? 'bg-green-100 text-green-700'
-                        : 'bg-purple-100 text-purple-700';
-                    const g = groups[i];
-                    const inGroup = chunk.parent_key && g && g.colors;
-                    const samePrev = i > 0 && groups[i - 1].key === g.key;
-                    const sameNext = i < items.length - 1 && groups[i + 1].key === g.key;
-                    const barColor = inGroup ? g.colors.bar : '';
-                    const headerBg = inGroup ? g.colors.headerBg : '';
-                    const radiusClass = samePrev ? 'rounded-t-none' : '';
-                    const radiusClass2 = sameNext ? 'rounded-b-none' : '';
-                    const marginClass = samePrev ? 'mt-0 border-t-0' : '';
-                    return `
-                    <div class="chunk-card ${radiusClass} ${radiusClass2} ${marginClass}" style="animation-delay: ${i * 0.06}s${barColor ? ';border-left:3px solid ' + barColor : ''}">
-                        <div class="chunk-card-header" style="${headerBg ? 'background:' + headerBg : ''}">
-                            <span class="flex items-center gap-2">
-                                <span class="chunk-card-number">分块 ${start + i + 1}</span>
-                                ${inGroup ? `<span class="text-[10px] px-2 py-0.5 rounded-full font-semibold" style="background:${g.colors.badge};color:${g.colors.badgeText}">父块 ${chunk.parent_key}</span>` : ''}
-                                <span class="text-[10px] px-1.5 py-0.5 rounded-full ${badgeColor}">${badgeLabel}</span>
-                            </span>
-                            <span class="chunk-card-meta">
-                                ${chunk.page ? `<span><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/></svg>第 ${chunk.page} 页</span>` : ''}
-                                <span><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/></svg>${chunk.char_count || 0} 字符</span>
-                                ${chunk.tokens ? `<span><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>${chunk.tokens} tokens</span>` : ''}
-                            </span>
-                        </div>
-                        <div class="chunk-card-body">
-                            <pre>${escapeHtml(chunk.content)}</pre>
-                        </div>
-                        ${chunk.parent_key && parentMap[chunk.parent_key] ? `
-                        <details class="border-t border-slate-100">
-                            <summary class="px-4 py-2 text-xs text-slate-500 cursor-pointer hover:bg-slate-50 font-medium select-none">查看父段落上下文</summary>
-                            <div class="px-4 py-3 bg-slate-50 border-t border-slate-100">
-                                <pre class="text-xs text-slate-600 leading-relaxed whitespace-pre-wrap font-mono">${escapeHtml(parentMap[chunk.parent_key])}</pre>
-                            </div>
-                        </details>` : ''}
-                    </div>
-                `;
-                }).join('');
-
-                // Reset animations
-                document.querySelectorAll('.chunk-card').forEach((el) => {
-                    el.style.animation = 'none';
-                    el.offsetHeight;
-                    el.style.animation = '';
-                });
-            } catch (err) {
-                listEl.innerHTML = `
-                    <div class="flex flex-col items-center justify-center py-16 text-slate-400">
-                        <div class="text-4xl mb-3">⚠</div>
-                        <p class="text-sm font-medium text-red-400 mb-3">加载分块失败: ${err.message}</p>
-                        <button onclick="renderChunkPage()" class="text-xs text-blue-600 hover:text-blue-700 font-medium underline underline-offset-2">重试</button>
-                    </div>`;
-            }
-        }
-
-        function changeChunkPage(delta) {
-            const totalPages = Math.ceil(_chunkTotal / _chunkPageSize) || 1;
-            const newPage = _chunkCurrentPage + delta;
-            if (newPage < 1 || newPage > totalPages) return;
-            _chunkCurrentPage = newPage;
-            renderChunkPage();
-        }
-
-        function hideChunkPreview() {
-            document.getElementById('chunk-modal').classList.add('hidden');
-            _chunkCurrentPage = 1;
-            _chunkTotal = 0;
-            _chunkKbId = '';
-            _chunkDocId = '';
-        }
-
-        function escapeHtml(str) {
-            const div = document.createElement('div');
-            div.textContent = str;
-            return div.innerHTML;
-        }
-
-        // ====== Utilities ======
-        function formatSize(bytes) {
-            if (!bytes) return '未知';
-            if (bytes < 1024) return bytes + 'B';
-            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + 'KB';
-            return (bytes / 1024 / 1024).toFixed(1) + 'MB';
-        }
-
-        // Close modals on Escape
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                hideCreateModal();
-                hideDeleteModal();
-                hideChunkPreview();
-                hideEvalModal();
-                hideEvalBroken();
-            }
+// ── 删除文档 ──
+let deleteDocInfo = null;
+function showDeleteDocModal(kbId, docId, filename) {
+    deleteDocInfo = { kbId, docId };
+    document.getElementById('delete-modal-text').textContent = `确定要删除「${filename}」吗？此操作不可撤销。`;
+    document.getElementById('delete-modal').classList.add('show');
+    document.getElementById('delete-backdrop').classList.add('show');
+    document.getElementById('delete-confirm-btn').onclick = handleDeleteDoc;
+}
+async function handleDeleteDoc() {
+    if (!deleteDocInfo) return;
+    const { kbId, docId } = deleteDocInfo;
+    hideDeleteModal();
+    try {
+        const r = await apiRequest('/kbs/documents/delete', {
+            method: 'POST',
+            body: JSON.stringify({ kb_id: kbId, doc_id: docId }),
         });
+        if (!r.success) throw new Error('删除失败');
+        showToast('文档已删除', 'success');
+        deleteDocInfo = null;
+        setTimeout(() => {
+            loadDocuments(selectedKbId);
+            loadKBs();
+        }, 2000);
+    } catch (err) {
+        showToast('删除失败: ' + err.message, 'error');
+    }
+}
 
-        // ====== Init ======
-        document.addEventListener('DOMContentLoaded', async () => {
-            // 加载前端配置
-            window._maxUploadSize = 10 * 1024 * 1024;  // 默认 10MB
-            try {
-                const res = await fetch('/api/config', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
-                const body = await res.json();
-                if (body && body.max_upload_size) window._maxUploadSize = body.max_upload_size;
-            } catch (e) {
-                // 静默降级，使用默认值
-            }
+// ── 选中 KB ──
+async function selectKB(kbId, name) {
+    selectedKbId = kbId;
+    selectedKbName = name;
+    document.getElementById('doc-section').classList.add('show');
+    document.getElementById('doc-section-title').textContent = `文档列表 · ${name}`;
+    document.getElementById('doc-section-subtitle').textContent = `知识库 ID: ${kbId} · 点击文档行查看分块预览`;
 
-            // Surface script errors instead of silently failing
-            window.addEventListener('error', (e) => {
-                if (e.error) console.error('SCRIPT ERROR:', e.error.message, e.error.stack);
+    loadKBs(); // 刷新侧栏高亮 + 网格选中态
+
+    // 加载态
+    document.getElementById('doc-list').innerHTML = `
+        <div style="padding: 20px;">
+            <div class="skeleton" style="height:48px; margin-bottom:8px"></div>
+            <div class="skeleton" style="height:48px; margin-bottom:8px"></div>
+            <div class="skeleton" style="height:48px; width:75%"></div>
+        </div>`;
+
+    if (window.innerWidth < 768) toggleSidebar();
+
+    await loadDocuments(kbId);
+    loadRagasEval(kbId);
+}
+
+// ── 加载文档 ──
+async function loadDocuments(kbId) {
+    try {
+        const docs = await listDocuments(kbId);
+        const list = document.getElementById('doc-list');
+        window._evalDocs = [];
+
+        if (docs.length === 0) {
+            list.innerHTML = `<div class="doc-empty">
+                <div class="big">📄</div>
+                <p style="font-size:13px; margin-bottom:2px">暂无文档</p>
+                <p style="font-size:12px">点击右上角「上传文档」添加</p>
+            </div>`;
+            return;
+        }
+
+        list.innerHTML = docs.map((doc, i) => {
+            window._evalDocs[i] = doc.eval_detail || null;
+            const evalFailedBg = doc.eval_passed === false ? 'style="background:rgba(254,226,226,0.35);"' : '';
+            const t = (doc.file_type || doc.type || 'txt').toLowerCase();
+            const tCls = t === 'pdf' ? 'pdf' : t === 'docx' ? 'docx' : 'txt';
+            const tLabel = (t === 'pdf' || t === 'docx') ? t.toUpperCase() : 'TXT';
+            return `
+            <div class="doc-row" ${evalFailedBg} ${doc.status === 'ready' ? `onclick="showChunkPreview('${kbId}','${doc.id}','${escapeAttr(doc.filename)}')"` : ''} style="${doc.status === 'ready' ? 'cursor:pointer' : 'cursor:default'}">
+                <div class="doc-info">
+                    <div class="doc-type ${tCls}">${tLabel}</div>
+                    <div class="doc-meta">
+                        <div class="doc-name">${escapeHtml(doc.filename)}</div>
+                        <div class="doc-sub">
+                            <span>${escapeHtml(formatSize(doc.size))}</span>
+                            ${doc.chunk_count ? `<span>· ${doc.chunk_count} 分块</span>` : ''}
+                            ${doc.created_at ? `<span>· ${new Date(doc.created_at).toLocaleDateString()}</span>` : ''}
+                            ${doc.eval_score != null ? `<span class="score ${doc.eval_passed ? 'pass' : 'fail'}">分块评分 ${doc.eval_score.toFixed(2)} ${doc.eval_passed ? '✓' : '✗'}</span>` : ''}
+                        </div>
+                    </div>
+                </div>
+                <div class="doc-actions">
+                    <span class="status-badge ${doc.status === 'ready' ? 'ready' : (doc.status === 'error' || doc.status === 'failed') ? 'error' : 'processing'}">
+                        ${doc.status === 'ready' ? '✓ 就绪' : (doc.status === 'error' || doc.status === 'failed') ? '✕ 失败' : '⋯ 处理中'}
+                    </span>
+                    ${doc.eval_detail ? '<button type="button" onclick="event.stopPropagation();showEvalModal(window._evalDocs[' + i + '])" class="btn btn-ghost" style="font-size:12px; padding:3px 10px; color:var(--primary); font-weight:500" title="查看评估详情">详情</button>' : ''}
+                    ${doc.status === 'ready' || doc.status === 'error' || doc.status === 'failed' ? `<button type="button" onclick="event.stopPropagation();showDeleteDocModal('${kbId}','${doc.id}','${escapeAttr(doc.filename)}')" class="icon-btn" title="删除文档">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                    </button>` : ''}
+                </div>
+            </div>`;
+        }).join('');
+
+        startDocPolling(kbId, docs);
+    } catch (err) {
+        const list = document.getElementById('doc-list');
+        list.innerHTML = `<div class="doc-empty" style="color:var(--danger)">
+            <div class="big">⚠</div>
+            <p style="font-size:13px">加载文档失败</p>
+            <button type="button" onclick="loadDocuments('${kbId}')" style="margin-top:10px; font-size:12px; color:var(--primary)">重试</button>
+        </div>`;
+        showToast('加载文档失败: ' + err.message, 'error');
+    }
+}
+
+// ── 文档处理轮询 ──
+function startDocPolling(kbId, docs) {
+    if (_docPollTimer) { clearInterval(_docPollTimer); _docPollTimer = null; }
+    const pending = docs
+        .filter(d => d.status !== 'ready' && d.status !== 'error' && d.status !== 'failed')
+        .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))[0];
+    if (!pending) return;
+
+    let pollCount = 0;
+    _docPollTimer = setInterval(async () => {
+        pollCount++;
+        try {
+            const traceId = generateTraceId();
+            const resp = await fetch(`${API_BASE}/kbs/documents/status`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Trace-ID': traceId },
+                body: JSON.stringify({ kb_id: kbId, doc_id: pending.id }),
             });
-            loadKBs();
+            const body = await resp.json();
+            const data = body.data || {};
+            if (data.status === 'ready') {
+                clearInterval(_docPollTimer); _docPollTimer = null;
+                showToast(`文档处理完成，共 ${data.chunk_count} 个分块`, 'success');
+                await loadDocuments(kbId);
+                await loadKBs();
+            } else if (data.status === 'failed') {
+                clearInterval(_docPollTimer); _docPollTimer = null;
+                showToast(`处理失败: ${data.error || '未知错误'}`, 'error');
+                await loadDocuments(kbId);
+                await loadKBs();
+            } else if (pollCount > 120) {
+                clearInterval(_docPollTimer); _docPollTimer = null;
+                showToast('处理超时，请查看文档列表确认状态', 'warning');
+                await loadDocuments(kbId);
+            }
+        } catch (e) {
+            clearInterval(_docPollTimer); _docPollTimer = null;
+        }
+    }, 3000);
+}
+
+// ── 上传文档 ──
+async function handleUpload(event) {
+    const file = event.target.files[0];
+    if (!file || !selectedKbId) {
+        if (!selectedKbId) showToast('请先选择一个知识库', 'warning');
+        return;
+    }
+    if (file.size > window._maxUploadSize) {
+        showToast(`文件超过 ${(window._maxUploadSize / 1024 / 1024).toFixed(0)}MB 上限（当前 ${(file.size / 1024 / 1024).toFixed(1)}MB）`, 'error', 5000);
+        event.target.value = '';
+        return;
+    }
+
+    document.getElementById('upload-loading').style.display = 'flex';
+    await new Promise(resolve => requestAnimationFrame(resolve));
+
+    try {
+        await uploadDocument(selectedKbId, file);
+        document.getElementById('upload-loading').style.display = 'none';
+        showToast('上传成功', 'success');
+        await new Promise(r => setTimeout(r, 1000));
+        await loadDocuments(selectedKbId);
+        await loadKBs();
+    } catch (err) {
+        document.getElementById('upload-loading').style.display = 'none';
+        hideToast();
+        showToast('上传失败: ' + err.message, 'error');
+    }
+    event.target.value = '';
+}
+
+// ── 分块预览 ──
+let _chunkCurrentPage = 1;
+let _chunkTotal = 0;
+let _chunkKbId = '';
+let _chunkDocId = '';
+const _chunkPageSize = 50;
+
+function showChunkPreview(kbId, docId, filename) {
+    _chunkKbId = kbId;
+    _chunkDocId = docId;
+    _chunkCurrentPage = 1;
+    document.getElementById('chunk-modal-title').textContent = filename;
+    document.getElementById('chunk-modal-subtitle').textContent = '加载分块数据...';
+    document.getElementById('chunk-count-badge').classList.add('hidden');
+    document.getElementById('chunk-pagination').classList.add('hidden');
+    document.getElementById('chunk-list').innerHTML = `<div class="chunk-loading"><div class="spinner"></div><span>加载分块数据...</span></div>`;
+    document.getElementById('chunk-modal').classList.add('show');
+    document.getElementById('chunk-backdrop').classList.add('show');
+    renderChunkPage();
+}
+
+async function renderChunkPage() {
+    const page = _chunkCurrentPage;
+    const listEl = document.getElementById('chunk-list');
+    const paginationEl = document.getElementById('chunk-pagination');
+    const badge = document.getElementById('chunk-count-badge');
+    listEl.innerHTML = `<div class="chunk-loading"><div class="spinner"></div><span>加载分块数据...</span></div>`;
+    paginationEl.classList.add('hidden');
+    try {
+        const traceId = generateTraceId();
+        const resp = await fetch(`${API_BASE}/kbs/documents/chunks`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Trace-ID': traceId },
+            body: JSON.stringify({ kb_id: _chunkKbId, doc_id: _chunkDocId, page, page_size: _chunkPageSize }),
         });
+        const body = await resp.json();
+        const data = body.data || {};
+        const items = data.items || [];
+        _chunkTotal = data.total || 0;
+        const totalPages = Math.ceil(_chunkTotal / _chunkPageSize) || 1;
+        badge.textContent = `${_chunkTotal} 个分块`;
+        badge.classList.remove('hidden');
+        document.getElementById('chunk-modal-subtitle').textContent = '';
+        if (_chunkTotal === 0) {
+            listEl.innerHTML = `<div class="doc-empty"><div class="big">📄</div><p style="font-size:13px; font-weight:500">暂无分块数据</p></div>`;
+            return;
+        }
+        const start = (page - 1) * _chunkPageSize;
+        document.getElementById('chunk-page-info').textContent = `第 ${page} / ${totalPages} 页，共 ${_chunkTotal} 条`;
+        document.getElementById('chunk-prev-btn').disabled = page <= 1;
+        document.getElementById('chunk-next-btn').disabled = page >= totalPages;
+        paginationEl.classList.remove('hidden');
 
-        // ====== Eval Detail Modal ======
-        function showEvalModal(evalDataRaw) {
-            const detail = typeof evalDataRaw === 'string' ? JSON.parse(evalDataRaw) : evalDataRaw;
-            const body = document.getElementById('eval-detail-body');
-            const score = detail.overall_score;
-            const passed = detail.passed;
-            const si = detail.structure_integrity || {};
-            const sbr = detail.sbr || {};
-            const cv = detail.granularity_cv || {};
-
-            const scoreColor = passed ? 'text-emerald-600' : 'text-red-500';
-            const passIcon = passed ? '✓' : '✗';
-            const passBg = passed ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200';
-
-            function metricRow(label, score, brokenCount, brokenData, onClick) {
-                const color = score >= 0.7 ? 'text-emerald-600' : score >= 0.5 ? 'text-amber-600' : 'text-red-500';
-                const barColor = score >= 0.7 ? 'bg-emerald-500' : score >= 0.5 ? 'bg-amber-500' : 'bg-red-500';
-                const brokenHtml = brokenCount > 0
-                    ? `<button onclick="${onClick}" class="ml-2 text-xs text-blue-600 hover:text-blue-700 font-medium underline underline-offset-2">${brokenCount}个断裂 → 查看</button>`
-                    : `<span class="ml-2 text-xs text-slate-400">无断裂</span>`;
-                return `
-                    <div class="flex items-center justify-between py-2">
-                        <div class="flex items-center gap-2 min-w-0 flex-1">
-                            <span class="text-sm text-slate-700 font-medium whitespace-nowrap">${label}</span>
-                            <div class="flex-1 h-1.5 bg-slate-100 rounded-full mx-2 max-w-[120px]">
-                                <div class="h-full rounded-full ${barColor} transition-all" style="width:${Math.round(score * 100)}%"></div>
-                            </div>
-                        </div>
-                        <div class="flex items-center gap-1 flex-shrink-0">
-                            <span class="text-sm font-bold ${color}">${score.toFixed(2)}</span>
-                            ${brokenHtml}
-                        </div>
-                    </div>`;
-            }
-
-            body.innerHTML = `
-                <div class="flex items-center justify-between p-4 rounded-xl border ${passBg} mb-4">
-                    <div>
-                        <div class="text-xs text-slate-500 font-medium mb-1">综合评分</div>
-                        <div class="text-3xl font-bold ${scoreColor}">${score != null ? score.toFixed(2) : 'N/A'}</div>
-                    </div>
-                    <div class="text-2xl ${scoreColor} font-bold">${passIcon}</div>
+        listEl.innerHTML = items.map((chunk, i) => {
+            const badgeLabel = chunk.block_type === 'table' ? '表格' : chunk.block_type === 'qa_pair' ? 'QA' : '文本';
+            return `
+            <div class="chunk-card" style="animation-delay: ${i * 0.04}s">
+                <div class="chunk-card-header">
+                    <span style="display:flex; align-items:center; gap:6px">
+                        <span class="chunk-card-number">分块 ${start + i + 1}</span>
+                        <span style="font-size:10px; padding:1px 6px; border-radius:999px; background:var(--surface); color:var(--text-secondary); border:1px solid var(--border)">${badgeLabel}</span>
+                        ${chunk.parent_key ? `<span style="font-size:10px; padding:1px 6px; border-radius:999px; background:#EEF2FF; color:#3730A3">父块 ${chunk.parent_key}</span>` : ''}
+                    </span>
+                    <span class="chunk-card-meta">
+                        ${chunk.page ? `<span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>第 ${chunk.page} 页</span>` : ''}
+                        <span>${chunk.char_count || 0} 字符</span>
+                        ${chunk.tokens ? `<span>${chunk.tokens} tokens</span>` : ''}
+                    </span>
                 </div>
-
-                <div class="border border-slate-200 rounded-xl p-4 space-y-1">
-                    <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">结构完整性</div>
-                    ${(si.table && si.table.total > 0) ? metricRow('表格', si.table.score, si.table.broken.length, si.table.broken, "showEvalBrokenFromAttr('structure_integrity', 'table')") : ''}
-                    ${(si.heading && si.heading.total > 0) ? metricRow('标题', si.heading.score, si.heading.broken.length, si.heading.broken, "showEvalBrokenFromAttr('structure_integrity', 'heading')") : ''}
-                    ${(si.clause && si.clause.total > 0) ? metricRow('条款', si.clause.score, si.clause.broken.length, si.clause.broken, "showEvalBrokenFromAttr('structure_integrity', 'clause')") : ''}
-                    ${(!si.table || si.table.total === 0) && (!si.heading || si.heading.total === 0) && (!si.clause || si.clause.total === 0) ? '<div class="text-xs text-slate-400 py-1">无结构数据</div>' : ''}
+                <div class="chunk-card-body">
+                    <pre>${escapeHtml(chunk.content)}</pre>
                 </div>
+            </div>`;
+        }).join('');
 
-                <div class="border border-slate-200 rounded-xl p-4">
-                    <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">语义断裂率 SBR</div>
-                    ${sbr.score != null ? metricRow('SBR', sbr.score, (sbr.broken_boundaries || []).length, sbr.broken_boundaries, "showEvalBrokenFromAttr('sbr')") : '<div class="text-xs text-slate-400 py-1">未评估</div>'}
-                </div>
+        listEl.querySelectorAll('.chunk-card').forEach((el) => {
+            el.style.animation = 'none'; el.offsetHeight; el.style.animation = '';
+        });
+    } catch (err) {
+        listEl.innerHTML = `<div class="doc-empty" style="color:var(--danger)">
+            <div class="big">⚠</div>
+            <p style="font-size:13px; margin-bottom:8px">加载分块失败: ${escapeHtml(err.message)}</p>
+            <button type="button" onclick="renderChunkPage()" style="font-size:12px; color:var(--primary)">重试</button>
+        </div>`;
+    }
+}
 
-                <div class="border border-slate-200 rounded-xl p-4">
-                    <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">粒度均匀性</div>
-                    ${cv.score != null ? metricRow('CV', cv.score, (cv.extreme_chunks || []).length, cv.extreme_chunks, "showEvalBrokenFromAttr('granularity_cv')") : '<div class="text-xs text-slate-400 py-1">未评估</div>'}
-                </div>
-            `;
+function changeChunkPage(delta) {
+    const totalPages = Math.ceil(_chunkTotal / _chunkPageSize) || 1;
+    const newPage = _chunkCurrentPage + delta;
+    if (newPage < 1 || newPage > totalPages) return;
+    _chunkCurrentPage = newPage;
+    renderChunkPage();
+}
 
-            // Store detail for sub-modal access
-            document.getElementById('eval-detail-body').dataset.detail = JSON.stringify(detail);
-            document.getElementById('eval-modal').style.display = 'block';
-        }
+function hideChunkPreview() {
+    document.getElementById('chunk-modal').classList.remove('show');
+    document.getElementById('chunk-backdrop').classList.remove('show');
+    _chunkCurrentPage = 1; _chunkTotal = 0; _chunkKbId = ''; _chunkDocId = '';
+}
 
-        function hideEvalModal() {
-            document.getElementById('eval-modal').style.display = 'none';
-        }
+function escapeHtml(str) {
+    if (str == null) return '';
+    const div = document.createElement('div');
+    div.textContent = String(str);
+    return div.innerHTML;
+}
 
-        function showEvalBrokenFromAttr(...path) {
-            const raw = document.getElementById('eval-detail-body').dataset.detail;
-            if (!raw) return;
-            const detail = JSON.parse(raw);
-            let data = detail;
-            for (const key of path) {
-                data = data[key];
-                if (!data) break;
-            }
-            if (!data) return;
-            // Determine type from path
-            const typeKey = path[path.length - 1];
-            const typeMap = { table: 'table', heading: 'heading', clause: 'clause', sbr: 'sbr', granularity_cv: 'granularity' };
-            const brokenType = typeMap[typeKey] || typeKey;
-            showEvalBroken(brokenType, JSON.stringify(data));
-        }
+function formatSize(bytes) {
+    if (!bytes) return '未知';
+    if (bytes < 1024) return bytes + 'B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + 'KB';
+    return (bytes / 1024 / 1024).toFixed(1) + 'MB';
+}
 
-        function showEvalBroken(type, dataJson) {
-            const data = JSON.parse(dataJson);
-            const body = document.getElementById('eval-broken-body');
-            const title = document.getElementById('eval-broken-title');
+// ── RAGAS 评估（KB 头部徽标） ──
+async function loadRagasEval(kbId) {
+    const wrap = document.getElementById('ragas-summary');
+    const faithEl = document.getElementById('ragas-faith');
+    const recallEl = document.getElementById('ragas-recall');
+    const iconEl = document.getElementById('ragas-pass-icon');
+    try {
+        const r = await apiRequest('/kbs/eval/latest', {
+            method: 'POST',
+            body: JSON.stringify({ kb_id: kbId }),
+        });
+        if (!r.success || !r.data) { wrap.style.display = 'none'; return; }
+        const data = r.data;
+        if (data.faithfulness == null && data.context_recall == null) { wrap.style.display = 'none'; return; }
+        faithEl.textContent = data.faithfulness != null ? data.faithfulness.toFixed(2) : '—';
+        recallEl.textContent = data.context_recall != null ? data.context_recall.toFixed(2) : '—';
+        const passed = (data.faithfulness ?? 0) >= 0.7 && (data.context_recall ?? 0) >= 0.7;
+        iconEl.className = passed ? 'ragas-pass' : 'ragas-fail';
+        iconEl.textContent = passed ? '✓' : '✗';
+        wrap.style.display = '';
+    } catch (e) {
+        wrap.style.display = 'none';
+    }
+}
 
-            const labels = { table: '表格断裂详情', heading: '标题断裂详情', clause: '条款断裂详情', sbr: '语义断裂详情', granularity: '极端分块详情' };
-            title.textContent = labels[type] || '断裂详情';
+// ── 评估详情弹窗 ──
+function showEvalModal(evalDataRaw) {
+    if (!evalDataRaw) return;
+    const body = document.getElementById('eval-detail-body');
+    const data = evalDataRaw;
+    const overall = data.overall_score;
+    const passed = data.passed;
+    const overallCls = overall >= 0.7 ? 'pass' : 'fail';
+    const fmt = v => v != null ? v.toFixed(2) : '—';
+    const meterCls = v => v >= 0.7 ? '' : v >= 0.5 ? 'warn' : 'fail';
 
-            if (type === 'table' || type === 'heading' || type === 'clause') {
-                const items = data.broken || [];
-                if (items.length === 0) {
-                    body.innerHTML = '<div class="text-sm text-slate-500 text-center py-6">无断裂项</div>';
-                } else {
-                    body.innerHTML = items.map((item, i) => {
-                        const parts = [];
-                        if (item.pages) parts.push(item.pages.length > 1 ? `第 ${item.pages.join(' → ')} 页` : `第 ${item.pages[0]} 页`);
-                        else if (item.page != null) parts.push(`第 ${item.page} 页`);
-                        if (item.break_position) parts.push(`断裂: ${item.break_position}`);
-                        const tag = parts.length > 0 ? ' · ' + parts.join(' · ') : '';
-                        return `
-                        <div class="border border-slate-200 rounded-lg p-3 bg-slate-50">
-                            <div class="text-xs font-medium text-slate-500 mb-1">断裂 ${i + 1}${tag}</div>
-                            <div class="text-xs text-slate-700 bg-white rounded border border-slate-100 p-2 font-mono leading-relaxed">${escapeHtml(item.text || item.preview || '')}</div>
-                        </div>
-                    `;
-                    }).join('');
-                }
-            } else if (type === 'sbr') {
-                const items = data.broken_boundaries || [];
-                if (items.length === 0) {
-                    body.innerHTML = '<div class="text-sm text-slate-500 text-center py-6">无语义断裂边界</div>';
-                } else {
-                    body.innerHTML = items.map((item, i) => {
-                        const parts = [];
-                        if (item.page_before != null || item.page_after != null) {
-                            const pb = item.page_before != null ? `第 ${item.page_before} 页` : '?';
-                            const pa = item.page_after != null ? `第 ${item.page_after} 页` : '?';
-                            parts.push(`${pb} → ${pa}`);
-                        }
-                        const tag = parts.length > 0 ? ' · ' + parts.join(' · ') : '';
-                        return `
-                        <div class="border border-slate-200 rounded-lg p-3 bg-slate-50">
-                            <div class="text-xs font-medium text-slate-500 mb-1">边界 ${i + 1}（相似度: ${item.similarity.toFixed(2)}）${tag}</div>
-                            <div class="space-y-1">
-                                <div class="text-xs text-slate-700 bg-white rounded border border-slate-100 p-2 font-mono leading-relaxed">${escapeHtml(item.preview_before || '')}</div>
-                                <div class="text-xs text-slate-400 text-center">↓</div>
-                                <div class="text-xs text-slate-700 bg-white rounded border border-slate-100 p-2 font-mono leading-relaxed">${escapeHtml(item.preview_after || '')}</div>
-                            </div>
-                        </div>
-                    `;
-                    }).join('');
-                }
-            } else if (type === 'granularity') {
-                const items = data.extreme_chunks || [];
-                if (items.length === 0) {
-                    body.innerHTML = '<div class="text-sm text-slate-500 text-center py-6">无极端分块</div>';
-                } else {
-                    body.innerHTML = `
-                        <div class="text-xs text-slate-500 mb-3">CV: ${data.cv != null ? data.cv.toFixed(4) : '—'} · 最小: ${data.min_tokens || 0} token · 最大: ${data.max_tokens || 0} token</div>
-                        ${items.map((item, i) => `
-                        <div class="border border-slate-200 rounded-lg p-3 bg-slate-50">
-                            <div class="text-xs font-medium ${item.type === 'tiny' ? 'text-amber-600' : 'text-red-500'}">分块 ${item.index} — ${item.type === 'tiny' ? '极小块' : '超大块'}（${item.tokens} token）</div>
-                        </div>
-                    `).join('')}`;
-                }
-            }
+    const sections = [
+        { key: 'structure', title: '结构完整性', scores: [
+            { label: '表格', val: data.table_score, link: data.table_broken, count: data.table_broken_count },
+            { label: '标题', val: data.heading_score },
+            { label: '条款', val: data.clause_score },
+        ]},
+        { key: 'semantic', title: '语义断裂率（SBR）', scores: [
+            { label: 'SBR', val: data.sbr_score, link: data.sbr_broken, count: data.sbr_broken_count },
+        ]},
+        { key: 'granularity', title: '粒度均匀性', scores: [
+            { label: 'CV', val: data.granularity_score, sub: data.granularity_cv != null ? `CV: ${data.granularity_cv.toFixed(2)}` : null },
+        ]},
+    ];
 
-            document.getElementById('eval-broken-modal').style.display = 'block';
-        }
+    body.innerHTML = `
+        <div class="eval-summary-card" style="margin-bottom:14px">
+            <div>
+                <div style="font-size:11px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px">综合评分</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px">${passed ? '通过评估' : '需关注'}</div>
+            </div>
+            <div class="score ${overallCls}">${fmt(overall)} ${passed ? '✓' : '✗'}</div>
+        </div>
+        ${sections.map(sec => `
+        <div class="eval-section" style="margin-bottom:10px">
+            <div class="eval-section-title">${sec.title}</div>
+            ${sec.scores.map(s => `
+            <div class="eval-row">
+                <span class="row-label">${s.label}</span>
+                <div class="meter"><span style="width:${s.val != null ? Math.max(0, Math.min(1, s.val)) * 100 : 0}%; background:var(--success)" class="${meterCls(s.val)}"></span></div>
+                <span class="row-score">${fmt(s.val)}</span>
+                ${s.count > 0 ? `<span class="row-link" onclick="showEvalBroken('${sec.key}')">${s.count} 个断裂 → 查看</span>` : `<span style="font-size:11px; color:var(--text-muted)">无断裂</span>`}
+            </div>
+            ${s.sub ? `<div style="font-size:11px; color:var(--text-muted); padding-left:90px; margin-top:-2px">${s.sub}</div>` : ''}
+            `).join('')}
+        </div>
+        `).join('')}
+    `;
+    window._evalBrokenData = data;
+    document.getElementById('eval-modal').classList.add('show');
+    document.getElementById('eval-backdrop').classList.add('show');
+}
 
-        function hideEvalBroken() {
-            document.getElementById('eval-broken-modal').style.display = 'none';
-        }
+function hideEvalModal() {
+    document.getElementById('eval-modal').classList.remove('show');
+    document.getElementById('eval-backdrop').classList.remove('show');
+}
 
-        // ====== KB Level RAGAS Eval Summary ======
-        async function loadRagasEval(kbId) {
-            try {
-                const report = await apiRequest('/kbs/eval/latest', {
-                    method: 'POST',
-                    body: JSON.stringify({ kb_id: kbId }),
-                });
-                const summary = document.getElementById('ragas-summary');
-                // Handle wrapped response (BaseResponse may add nested data)
-                const evalData = (report && report.data !== undefined) ? report.data : report;
-                if (!evalData || !evalData.faithfulness) {
-                    summary.classList.add('hidden');
-                    return;
-                }
-                summary.classList.remove('hidden');
-                document.getElementById('ragas-faith').textContent = `Faith ${(evalData.faithfulness || 0).toFixed(2)}`;
-                document.getElementById('ragas-recall').textContent = `Recall ${(evalData.context_recall || 0).toFixed(2)}`;
-                const icon = document.getElementById('ragas-pass-icon');
-                if (evalData.passed) {
-                    icon.textContent = '✓';
-                    icon.className = 'text-emerald-500 font-bold';
-                } else {
-                    icon.textContent = '✗';
-                    icon.className = 'text-red-500 font-bold';
-                }
-            } catch (e) {
-                // KB eval not available - hide
-                document.getElementById('ragas-summary').classList.add('hidden');
-            }
-        }
-    </script>
+function showEvalBroken(kind) {
+    const data = window._evalBrokenData;
+    if (!data) return;
+    const body = document.getElementById('eval-broken-body');
+    const titleEl = document.getElementById('eval-broken-title');
+    let title = '断裂详情';
+    let html = '';
+    const items = {
+        table: data.table_broken,
+        heading: data.heading_broken,
+        clause: data.clause_broken,
+        sbr: data.sbr_broken,
+        granularity: data.granularity_broken,
+    };
+    const item = items[kind];
+    if (kind === 'table' || kind === 'heading' || kind === 'clause') {
+        title = kind === 'table' ? '表格断裂详情' : kind === 'heading' ? '标题断裂详情' : '条款断裂详情';
+        html = (item || []).map((text, i) => `<div style="margin-bottom:6px"><div style="font-size:11px; color:var(--text-muted); margin-bottom:4px">断裂 ${i + 1}</div><div class="eval-broken-item">${escapeHtml(text)}</div></div>`).join('');
+    } else if (kind === 'sbr') {
+        title = '语义断裂详情';
+        html = (item || []).map((b, i) => `
+            <div style="margin-bottom:14px">
+                <div style="font-size:11px; color:var(--text-muted); margin-bottom:6px">边界 ${i + 1}${b.score != null ? `（相似度: ${b.score.toFixed(2)}）` : ''}</div>
+                <div class="eval-broken-item">${escapeHtml(b.before || '')}</div>
+                <div class="eval-broken-arrow">↓</div>
+                <div class="eval-broken-item">${escapeHtml(b.after || '')}</div>
+            </div>
+        `).join('');
+    } else if (kind === 'granularity') {
+        title = '极端分块详情';
+        const tiny = data.granularity_tiny || [];
+        const huge = data.granularity_huge || [];
+        html = `
+            <div style="font-size:12px; color:var(--text-secondary); margin-bottom:10px">
+                ${data.granularity_cv != null ? `CV: ${data.granularity_cv.toFixed(4)} · ` : ''}
+                ${data.granularity_min != null ? `最小: ${data.granularity_min} token · ` : ''}
+                ${data.granularity_max != null ? `最大: ${data.granularity_max} token` : ''}
+            </div>
+            ${tiny.map(t => `<div style="font-size:12px; margin-bottom:4px">分块 <b>${t.idx}</b> — 极小块（${t.tokens} token）</div>`).join('')}
+            ${huge.map(h => `<div style="font-size:12px; margin-bottom:4px">分块 <b>${h.idx}</b> — 超大块（${h.tokens} token）</div>`).join('')}
+        `;
+    }
+    titleEl.textContent = title;
+    body.innerHTML = html || '<div style="text-align:center; color:var(--text-muted); padding:24px 0">暂无断裂数据</div>';
+    document.getElementById('eval-broken-modal').classList.add('show');
+    document.getElementById('eval-broken-backdrop').classList.add('show');
+}
+
+function hideEvalBroken() {
+    document.getElementById('eval-broken-modal').classList.remove('show');
+    document.getElementById('eval-broken-backdrop').classList.remove('show');
+}
+
+// ── Toast ──
+function showToast(msg, type = 'success', duration = 3000) {
+    const el = document.getElementById('toast');
+    el.className = 'toast ' + type;
+    el.style.display = 'flex';
+    el.querySelector('.toast-text').textContent = msg;
+    el.querySelector('.toast-icon').textContent = type === 'error' ? '✕' : type === 'warning' ? '!' : '✓';
+    if (window._toastTimer) clearTimeout(window._toastTimer);
+    window._toastTimer = setTimeout(() => { el.style.display = 'none'; }, duration);
+}
+function hideToast() {
+    const el = document.getElementById('toast');
+    el.style.display = 'none';
+    if (window._toastTimer) { clearTimeout(window._toastTimer); window._toastTimer = null; }
+}
+
+// Esc 关闭弹窗
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        hideCreateModal();
+        hideDeleteModal();
+        hideChunkPreview();
+        hideEvalModal();
+        hideEvalBroken();
+        closeUserDropdown();
+    }
+});
+
+// ── Init ──
+document.addEventListener('DOMContentLoaded', async () => {
+    window._maxUploadSize = 10 * 1024 * 1024;
+    try {
+        const res = await fetch('/api/config', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
+        const body = await res.json();
+        if (body && body.max_upload_size) window._maxUploadSize = body.max_upload_size;
+    } catch (e) { /* 静默降级 */ }
+
+    window.addEventListener('error', (e) => {
+        if (e.error) console.error('SCRIPT ERROR:', e.error.message, e.error.stack);
+    });
+    loadKBs();
+});
+</script>
 </body>
 </html>

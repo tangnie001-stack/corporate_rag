@@ -46,8 +46,15 @@
 | abstention 转人工 | `agentic-clarification.md` | amber 提示条 + accent 橙 outline 按钮 |
 | 答案反馈 feedback | `agentic-clarification.md` | 28×28 SVG 按钮、选中 primary 高亮 |
 | 模型信息 model_info | `agentic-clarification.md` | 11px muted、fallback amber 徽标 |
-| 引用卡片 citation | `agentic-clarification.md` | 编号 badge + 来源 + snippet、hover primary 边框 |
+| 引用卡片 citation | `agentic-clarification.md`（组件）+ `chat-harness.md`（页面形态） | 末尾一体来源横条「来源 [n] ›」+ 右侧抽屉（fixed right，380px，滑出动画，不遮挡对话）；正文 `[n]` 点击打开抽屉并高亮定位 |
 | 深度思考开关 thinking-toggle | `agentic-clarification.md` | 输入区紧凑 chip、选中 primary、控制 `enable_thinking` |
 | Markdown 渲染 | `chat-markdown.md` | 助手消息 `.bubble-content.md` 富文本渲染（标题/加粗/列表/代码块/引用/表格）、marked+DOMPurify 安全、流式节流重渲染 |
+
+## 页面索引
+
+| 页面 | 规格文档 | 说明 |
+|------|---------|------|
+| Chat 页面（聊天主界面 `/`） | `pages/chat-harness.md` | 左侧栏 + 新对话/历史对话双页面、KB 会话级绑定、引用悬浮卡交互 |
+| KB 管理页面（`/Knowledgebase`） | `pages/kb-harness-page.md` | 与 chat 同款浅色布局与侧栏（含左下角用户模块），功能不变 |
 
 新组件/页面设计时：全局基线更新到本文件，页面级规格写入 `pages/<name>.md`，效果预览输出 `docs/design/<name>-mockup.html`。

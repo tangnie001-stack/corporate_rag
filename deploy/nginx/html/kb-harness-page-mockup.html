@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>设计稿 — KB 管理页（浅色 harness 风格 · 功能不变）</title>
+<link href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600;700&family=Source+Sans+3:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* ═══ 设计系统（浅色 · 与 chat.html / MASTER.md 一致）═══ */
+  :root {
+    --primary: #3B82F6;
+    --primary-hover: #2563EB;
+    --primary-light: #DBEAFE;
+    --primary-border: #93C5FD;
+    --bg: #F8FAFC;
+    --surface: #FFFFFF;
+    --surface-muted: #F1F5F9;
+    --text: #1E293B;
+    --text-secondary: #64748B;
+    --text-muted: #94A3B8;
+    --border: #E2E8F0;
+    --success: #059669;
+    --success-light: #ECFDF5;
+    --danger: #DC2626;
+    --danger-light: #FEF2F2;
+    --shadow: 0 1px 3px rgba(0,0,0,0.08);
+    --shadow-lg: 0 4px 12px rgba(0,0,0,0.08);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: 'Source Sans 3', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 14px; line-height: 1.5;
+    color: var(--text); background: var(--bg);
+    -webkit-font-smoothing: antialiased;
+  }
+  svg { display: block; }
+  button { font-family: inherit; }
+
+  .app { display: flex; min-height: 100vh; }
+
+  /* ── 侧栏（全量复刻 chat.html） ── */
+  .sidebar {
+    width: 280px; background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; flex-shrink: 0;
+    position: fixed; top: 0; bottom: 0; z-index: 30;
+  }
+  .sidebar-header { padding: 16px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); }
+  .logo {
+    width: 32px; height: 32px; border-radius: 8px;
+    background: linear-gradient(135deg, #3B82F6, #7C3AED);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 700; font-family: Lexend; font-size: 14px;
+  }
+  .brand { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .brand-name { font-family: Lexend; font-weight: 600; font-size: 14px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .brand-version { font-size: 11px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
+
+  .feature-block { padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; border-bottom: 1px solid var(--border); }
+  .feature-btn {
+    width: 100%; padding: 9px 12px; background: var(--surface-muted);
+    border: 1px solid var(--border); border-radius: 10px;
+    color: var(--text); font-size: 13px; font-weight: 500;
+    display: flex; align-items: center; gap: 8px; cursor: pointer;
+    transition: background 150ms; text-decoration: none;
+  }
+  .feature-btn:hover { background: #E2E8F0; }
+  .feature-btn svg { width: 15px; height: 15px; color: var(--text-secondary); flex-shrink: 0; }
+  .feature-btn .label { flex: 1; text-align: left; }
+  .feature-btn.active { background: var(--primary-light); border-color: var(--primary-border); color: var(--primary); }
+  .feature-btn.active svg { color: var(--primary); }
+
+  .section-title { padding: 16px 16px 8px; font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .kb-side-list { flex: 1; overflow-y: auto; padding: 0 8px 12px; }
+  .kb-side-item {
+    display: flex; align-items: center; gap: 8px;
+    width: 100%; padding: 8px 12px; border: none; border-radius: 8px;
+    background: transparent; font-size: 13px; color: var(--text-secondary);
+    cursor: pointer; margin-bottom: 2px; transition: background 150ms;
+    text-align: left; font-family: inherit;
+  }
+  .kb-side-item:hover { background: var(--surface-muted); color: var(--text); }
+  .kb-side-item.active { background: var(--primary); color: #fff; }
+  .kb-side-item .kb-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kb-side-item .kb-count { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+  .kb-side-item.active .kb-count { color: rgba(255,255,255,0.8); }
+  .kb-side-empty { padding: 16px 12px; font-size: 12px; color: var(--text-muted); text-align: center; }
+
+  .sidebar-footer { padding: 12px 16px; border-top: 1px solid var(--border); }
+  .user-avatar {
+    display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px;
+    cursor: pointer; transition: background 150ms; text-decoration: none; color: inherit;
+    background: none; border: none; width: 100%; font-size: 14px; font-family: inherit;
+  }
+  .user-avatar:hover { background: var(--surface-muted); }
+  .avatar {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: var(--primary-light); border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--primary); font-size: 13px; font-weight: 600; flex-shrink: 0;
+  }
+  .user-meta { display: flex; flex-direction: column; min-width: 0; }
+  .user-name { font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .user-action { font-size: 11px; color: var(--text-muted); }
+
+  /* ── 主区 ── */
+  .main { flex: 1; margin-left: 280px; padding: 28px 32px 40px; background: var(--bg); min-width: 0; }
+
+  .page-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+  .page-header h2 { font-family: Lexend; font-size: 20px; font-weight: 600; color: var(--text); }
+  .page-sub { font-size: 12.5px; color: var(--text-muted); margin-top: 2px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 8px 14px; border-radius: 10px; font-size: 13px; font-weight: 500;
+    cursor: pointer; transition: background 150ms, border-color 150ms; border: none;
+  }
+  .btn svg { width: 15px; height: 15px; }
+  .btn-primary { background: var(--primary); color: #fff; }
+  .btn-primary:hover { background: var(--primary-hover); }
+
+  /* KB 网格卡片 */
+  .kb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .kb-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px; cursor: pointer; transition: border-color 150ms, box-shadow 150ms;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .kb-card:hover { border-color: var(--primary-border); box-shadow: var(--shadow); }
+  .kb-card.selected { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(59,130,246,0.15); }
+  .kb-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  .kb-card-id { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .kb-ic {
+    width: 38px; height: 38px; border-radius: 10px; background: var(--primary-light);
+    color: var(--primary); display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-family: Lexend; font-size: 15px; flex-shrink: 0;
+  }
+  .kb-card-name { font-weight: 600; color: var(--text); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kb-card-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+  .kb-del {
+    width: 28px; height: 28px; border: none; border-radius: 8px; background: transparent;
+    color: var(--text-muted); cursor: pointer; opacity: 0; transition: opacity 150ms, background 150ms, color 150ms;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .kb-card:hover .kb-del, .kb-del:focus { opacity: 1; }
+  .kb-del:hover { background: var(--danger-light); color: var(--danger); }
+  .kb-del svg { width: 16px; height: 16px; }
+  .kb-card-desc { font-size: 12.5px; color: var(--text-secondary); line-height: 1.55; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .kb-card-foot { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--text-muted); }
+  .kb-empty {
+    grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 56px 0; color: var(--text-muted);
+  }
+  .kb-empty .big { font-size: 40px; margin-bottom: 12px; opacity: 0.6; }
+  .kb-empty p { font-size: 13px; }
+  .kb-empty .hint { font-size: 12px; margin-top: 4px; }
+
+  /* 文档区 */
+  .doc-section { display: none; }
+  .doc-section.show { display: block; }
+  .doc-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .doc-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+    padding: 16px 20px; border-bottom: 1px solid var(--border);
+  }
+  .doc-head-title h3 { font-size: 15px; font-weight: 600; color: var(--text); }
+  .doc-head-title p { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+  .doc-head-actions { display: flex; align-items: center; gap: 10px; }
+  .ragas-tag {
+    display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px;
+    background: var(--primary-light); border: 1px solid var(--primary-border);
+    border-radius: 8px; font-size: 12px; color: var(--text-secondary);
+  }
+  .ragas-tag b { color: var(--primary); font-weight: 600; }
+  .ragas-tag .dot { color: var(--primary-border); }
+  .ragas-tag .pass { color: var(--success); font-weight: 700; }
+  .ragas-tag .fail { color: var(--danger); font-weight: 700; }
+
+  .doc-list { display: flex; flex-direction: column; }
+  .doc-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 12px 20px; transition: background 150ms; cursor: pointer;
+  }
+  .doc-row:hover { background: var(--surface-muted); }
+  .doc-row + .doc-row { border-top: 1px solid var(--border); }
+  .doc-info { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1; }
+  .doc-type {
+    width: 34px; height: 34px; border-radius: 8px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700;
+  }
+  .doc-type.pdf { background: #FEE2E2; color: #DC2626; }
+  .doc-type.docx { background: #DBEAFE; color: #2563EB; }
+  .doc-type.txt { background: var(--surface-muted); color: var(--text-muted); }
+  .doc-meta { min-width: 0; }
+  .doc-name { font-size: 13.5px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .doc-sub { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--text-muted); margin-top: 2px; flex-wrap: wrap; }
+  .doc-sub .score { font-weight: 600; }
+  .doc-sub .score.pass { color: var(--success); }
+  .doc-sub .score.fail { color: var(--danger); }
+  .doc-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  .status-badge { font-size: 11px; padding: 2px 10px; border-radius: 999px; font-weight: 500; }
+  .status-badge.ready { background: var(--success-light); color: var(--success); }
+  .status-badge.processing { background: var(--primary-light); color: var(--primary); }
+  .status-badge.error { background: var(--danger-light); color: var(--danger); }
+  .detail-btn { padding: 4px 10px; font-size: 12px; color: var(--primary); background: transparent; border: none; border-radius: 6px; cursor: pointer; transition: background 150ms; }
+  .detail-btn:hover { background: var(--primary-light); }
+  .icon-btn {
+    width: 28px; height: 28px; border: none; border-radius: 8px; background: transparent;
+    color: var(--text-muted); cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: background 150ms, color 150ms;
+  }
+  .icon-btn:hover { background: var(--danger-light); color: var(--danger); }
+  .icon-btn svg { width: 15px; height: 15px; }
+  .doc-empty { display: flex; flex-direction: column; align-items: center; padding: 48px 0; color: var(--text-muted); }
+  .doc-empty .big { font-size: 36px; margin-bottom: 10px; opacity: 0.6; }
+
+  /* 弹窗 */
+  .modal-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,0.4); z-index: 40; display: none; }
+  .modal-backdrop.show { display: block; }
+  .modal {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    z-index: 50; background: var(--surface); border-radius: 12px;
+    box-shadow: var(--shadow-lg); width: min(92vw, 440px); padding: 22px; display: none;
+  }
+  .modal.show { display: block; }
+  .modal h3 { font-size: 16px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+  .modal .modal-sub { font-size: 13px; color: var(--text-muted); margin-bottom: 16px; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 13px; font-weight: 500; color: var(--text); margin-bottom: 6px; }
+  .field label .req { color: var(--danger); }
+  .input {
+    width: 100%; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px;
+    font-size: 13.5px; font-family: inherit; color: var(--text); outline: none; background: var(--surface);
+    transition: border-color 150ms, box-shadow 150ms; resize: none;
+  }
+  .input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(59,130,246,0.15); }
+  .modal-foot { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+  .btn-ghost { background: transparent; color: var(--text-secondary); }
+  .btn-ghost:hover { background: var(--surface-muted); }
+  .btn-danger { background: var(--danger); color: #fff; }
+  .btn-danger:hover { background: #B91C1C; }
+
+  .mock-help {
+    position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%);
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text-secondary); font-size: 11px; padding: 6px 14px; border-radius: 20px;
+    box-shadow: var(--shadow); z-index: 60; white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ========== 左侧栏（全量复刻 chat.html） ========== -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">FQ</div>
+      <div class="brand">
+        <div class="brand-name">Corporate Agent Harness</div>
+        <div class="brand-version">v0.1.0</div>
+      </div>
+    </div>
+
+    <div class="feature-block">
+      <a class="feature-btn" href="/">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-5l-5 5v-5z"/></svg>
+        <span class="label">智能问答</span>
+      </a>
+      <button class="feature-btn active" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+        <span class="label">知识库管理</span>
+      </button>
+    </div>
+
+    <div class="section-title">知识库</div>
+    <div class="kb-side-list" id="kbSideList"></div>
+
+    <div class="sidebar-footer">
+      <button class="user-avatar" type="button" onclick="toggleUserMenu(event)">
+        <div class="avatar">T</div>
+        <div class="user-meta">
+          <div class="user-name">test_user</div>
+          <div class="user-action">退出登录</div>
+        </div>
+      </button>
+    </div>
+  </aside>
+
+  <!-- ========== 主区 ========== -->
+  <main class="main">
+    <div class="page-header">
+      <div>
+        <h2>知识库管理</h2>
+        <div class="page-sub">管理知识库与其中的文档，供智能问答检索引用</div>
+      </div>
+      <button class="btn btn-primary" type="button" onclick="openCreate()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+        新建知识库
+      </button>
+    </div>
+
+    <!-- KB 网格 -->
+    <div class="kb-grid" id="kbGrid"></div>
+
+    <!-- 文档区 -->
+    <div class="doc-section" id="docSection">
+      <div class="doc-card">
+        <div class="doc-head">
+          <div class="doc-head-title">
+            <h3 id="docTitle">文档列表</h3>
+            <p id="docSub"></p>
+          </div>
+          <div class="doc-head-actions">
+            <span class="ragas-tag" id="ragasTag" style="display:none">
+              RAGAS <b id="ragasFaith">—</b> <span class="dot">·</span> <b id="ragasRecall">—</b> <span id="ragasIcon" class="pass">✓</span>
+            </span>
+            <button class="btn btn-primary" type="button">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+              上传文档
+            </button>
+          </div>
+        </div>
+        <div class="doc-list" id="docList"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- ====== 新建知识库 Modal ====== -->
+<div class="modal-backdrop" id="createBackdrop" onclick="closeCreate()"></div>
+<div class="modal" id="createModal">
+  <h3>新建知识库</h3>
+  <div class="modal-sub">创建一个新的知识库来管理文档</div>
+  <div class="field">
+    <label>知识库名称 <span class="req">*</span></label>
+    <input class="input" id="kbName" placeholder="例如：2024年年报">
+  </div>
+  <div class="field">
+    <label>描述（可选）</label>
+    <textarea class="input" id="kbDesc" rows="2" placeholder="简要描述知识库内容"></textarea>
+  </div>
+  <div class="modal-foot">
+    <button class="btn btn-ghost" type="button" onclick="closeCreate()">取消</button>
+    <button class="btn btn-primary" type="button" onclick="closeCreate()">创建</button>
+  </div>
+</div>
+
+<div class="mock-help">设计稿演示：点知识库（卡片或侧栏项）→ 展开文档列表；右上角「新建知识库」→ 弹窗；左下角为用户模块</div>
+
+<script>
+  // 静态演示数据
+  const KBS = [
+    { id: 'kb_test234', name: '腾讯 2024 年报', doc_count: 3, desc: '腾讯控股 2024 年度报告：营收/净利润/分部业务数据，用于业绩类问答检索。', created: '2026-08-20', docs: [
+      { name: 'tencent_2024_annual.pdf', type: 'pdf', size: '8.4MB', chunks: 214, status: 'ready', score: 0.92, pass: true },
+      { name: 'tencent_2024_press.docx', type: 'docx', size: '1.2MB', chunks: 46, status: 'ready', score: null },
+      { name: '财务摘要_notes.txt', type: 'txt', size: '36KB', chunks: 12, status: 'processing', score: null },
+    ], ragas: { faith: 0.92, recall: 0.87 } },
+    { id: 'kb_2023', name: '东软 2024 年报', doc_count: 2, desc: '东软集团年度经营数据与业务亮点。', created: '2026-08-02', docs: [
+      { name: 'neusoft_2024_annual.pdf', type: 'pdf', size: '6.1MB', chunks: 180, status: 'ready', score: 0.85, pass: true },
+      { name: 'board_resolution.docx', type: 'docx', size: '240KB', chunks: 9, status: 'ready', score: 0.71, pass: true },
+    ], ragas: { faith: 0.88, recall: 0.79 } },
+    { id: 'kb_empty', name: '合规政策文档', doc_count: 0, desc: '（暂无文档）待上传合规制度与流程文件。', created: '2026-09-01', docs: [], ragas: null },
+  ];
+
+  let activeKbId = null;
+
+  function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+  function renderSidebar() {
+    const el = document.getElementById('kbSideList');
+    if (!KBS.length) { el.innerHTML = '<div class="kb-side-empty">暂无知识库</div>'; return; }
+    el.innerHTML = KBS.map(kb => `
+      <button class="kb-side-item ${kb.id === activeKbId ? 'active' : ''}" type="button" onclick="selectKB('${kb.id}')">
+        <span class="kb-name">${esc(kb.name)}</span>
+        <span class="kb-count">${kb.doc_count} 文档</span>
+      </button>`).join('');
+  }
+
+  function renderGrid() {
+    const el = document.getElementById('kbGrid');
+    if (!KBS.length) {
+      el.innerHTML = '<div class="kb-empty"><div class="big">📂</div><p>暂无知识库</p><p class="hint">点击右上角「新建知识库」开始</p></div>';
+      return;
+    }
+    el.innerHTML = KBS.map(kb => `
+      <div class="kb-card ${kb.id === activeKbId ? 'selected' : ''}" onclick="selectKB('${kb.id}')">
+        <div class="kb-card-head">
+          <div class="kb-card-id">
+            <div class="kb-ic">${esc(kb.name.charAt(0))}</div>
+            <div>
+              <div class="kb-card-name">${esc(kb.name)}</div>
+              <div class="kb-card-meta">${kb.doc_count} 个文档 · ${kb.created}</div>
+            </div>
+          </div>
+          <button class="kb-del" type="button" title="删除知识库" onclick="event.stopPropagation()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+          </button>
+        </div>
+        <div class="kb-card-desc">${esc(kb.desc)}</div>
+        <div class="kb-card-foot">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
+          ID: ${kb.id.slice(0, 8)}...
+        </div>
+      </div>`).join('');
+  }
+
+  function selectKB(id) {
+    activeKbId = id;
+    renderSidebar();
+    renderGrid();
+    renderDocs(id);
+  }
+
+  function typeCls(t) { return t === 'pdf' ? 'pdf' : t === 'docx' ? 'docx' : 'txt'; }
+  function typeLabel(t) { return (t === 'pdf' || t === 'docx') ? t.toUpperCase() : 'TXT'; }
+  function statusHtml(st) {
+    if (st === 'ready') return '<span class="status-badge ready">✓ 就绪</span>';
+    if (st === 'processing') return '<span class="status-badge processing">⋯ 处理中</span>';
+    return '<span class="status-badge error">✕ 失败</span>';
+  }
+  function scoreHtml(doc) {
+    if (doc.score == null) return '';
+    const cls = doc.pass ? 'pass' : 'fail';
+    return `<span class="score ${cls}">分块评分 ${doc.score.toFixed(2)} ${doc.pass ? '✓' : '✗'}</span>`;
+  }
+
+  function renderDocs(kbId) {
+    const kb = KBS.find(k => k.id === kbId);
+    const sec = document.getElementById('docSection');
+    if (!kb || !kb.docs.length) { sec.classList.remove('show'); return; }
+    sec.classList.add('show');
+    document.getElementById('docTitle').textContent = '文档列表 · ' + kb.name;
+    document.getElementById('docSub').textContent = '知识库 ID: ' + kb.id + ' · 点击文档行查看分块预览';
+    const ragas = document.getElementById('ragasTag');
+    if (kb.ragas) {
+      ragas.style.display = '';
+      document.getElementById('ragasFaith').textContent = kb.ragas.faith.toFixed(2);
+      document.getElementById('ragasRecall').textContent = kb.ragas.recall.toFixed(2);
+    } else {
+      ragas.style.display = 'none';
+    }
+    document.getElementById('docList').innerHTML = kb.docs.map(d => `
+      <div class="doc-row">
+        <div class="doc-info">
+          <div class="doc-type ${typeCls(d.type)}">${typeLabel(d.type)}</div>
+          <div class="doc-meta">
+            <div class="doc-name">${esc(d.name)}</div>
+            <div class="doc-sub">
+              <span>${d.size}</span>
+              <span>· ${d.chunks} 分块</span>
+              ${scoreHtml(d)}
+            </div>
+          </div>
+        </div>
+        <div class="doc-actions">
+          ${statusHtml(d.status)}
+          ${d.score != null ? '<button class="detail-btn" type="button">详情</button>' : ''}
+          <button class="icon-btn" type="button" title="删除文档">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+          </button>
+        </div>
+      </div>`).join('');
+  }
+
+  // 新建知识库弹窗
+  function openCreate() { document.getElementById('createModal').classList.add('show'); document.getElementById('createBackdrop').classList.add('show'); }
+  function closeCreate() { document.getElementById('createModal').classList.remove('show'); document.getElementById('createBackdrop').classList.remove('show'); }
+  function toggleUserMenu() { /* mock：不做展开 */ }
+
+  // 初始选中第一个非空 KB
+  renderSidebar();
+  renderGrid();
+  selectKB(KBS[0].id);
+</script>
+</body>
+</html>

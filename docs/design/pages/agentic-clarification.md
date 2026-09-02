@@ -52,10 +52,14 @@
 
 ### 6. 引用卡片 citation
 
-- 编号 badge：22×22px、`--primary-light` 底、primary 数字、6px 圆角
-- 元信息：文件名 + 页码（medium 权重 `--text`）；snippet 12px `--text-muted`
-- hover：边框变 primary + `--shadow`
-- 点击可展开（可选增强）
+> v3 交互（2026-09-02）：由「消息下方展开来源卡列表」→「末尾逐个胶囊 [n]」→「**末尾一体来源横条 + 右侧引用抽屉**」。整体形态：消息末尾一条整体按钮（不占纵向空间），点击从**屏幕右侧**滑出抽屉列出全部引用，**不遮挡中间对话**。页面级形态见 `chat-harness.md`「消息流 - 引用」。
+
+- **SSE 数据**：`SSECitationEvent` 提供 `source`（文件名）/`page`（页码）/`snippet`（摘要）/`index`（序号）；前端按 index 顺序累计
+- **正文内联引用号**：markdown 渲染后的 `[n]` 为可点击元素（12px primary 加粗，hover primary-light 圆角底），点击打开右侧抽屉并**高亮定位**到对应条目
+- **末尾来源横条（一体按钮）**：AI 回复 markdown 之后**一条**整体按钮「来源 [1] [2] ›」；`--surface-muted` 底、1px `--border`、圆角 8px、padding 5×12px；hover 边变 primary 底变 `--primary-light`；**整条可点击**
+- **右侧引用抽屉（drawer）**：fixed right 0、宽 380px（max 88vw）、左 1px `--border` 描边、阴影 `-8px 0 28px`；滑出动画 translateX 220ms ease；遮罩 `rgba(15,23,42,0.24)`；头部（文件夹图标 + 标题"引用来源" + ✕ 关闭）；列表区列出**全部**引用条目（左侧 [n] 编号方块，focus 时 primary 底白字；右侧文件名 + 「第N页」徽标 + 摘要）
+- 点击外部遮罩 / Esc / ✕ 关闭；同屏单开
+- 无引用（未命中 KB / 纯对话）时不渲染来源横条
 
 ### 7. 深度思考开关 thinking-toggle（新增）
 
