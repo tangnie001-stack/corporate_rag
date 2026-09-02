@@ -128,5 +128,18 @@ async def test_parse_temporal_fallback(monkeypatch):
 
     candidates = [2022, 2023, 2024, 2025]
     result = await parse_temporal("这几年", candidates, FakeLLM())
-    assert result["years"] == [y for y in _recent_years() if y in candidates]
+    assert result["years"] == sorted(y for y in _recent_years() if y in candidates)
     assert result["has_temporal"] is True
+
+
+@pytest.mark.asyncio
+async def test_parse_temporal_empty_output_no_constraint(monkeypatch):
+    """LLM 正常返回空 years（判定无时间约束）→ has_temporal=False，不强加最近 N 年。"""
+
+    class FakeLLM:
+        async def ainvoke(self, messages, **kwargs):
+            return type("R", (), {"content": '{"years": []}'})()
+
+    result = await parse_temporal("这几年", [2022, 2023, 2024, 2025], FakeLLM())
+    assert result["years"] == []
+    assert result["has_temporal"] is False
