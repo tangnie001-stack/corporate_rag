@@ -326,6 +326,85 @@ async def test_verify_node_missing_confirmed_already_guided(monkeypatch):
         current_request_ctx.reset(token)
 
 
+def _search_web_tool_call(queries: list[str]) -> dict:
+    """构造 search_web 工具调用 dict（仅 verify_node 单测读取，不真正执行）。"""
+    return {
+        "name": "search_web",
+        "args": {"queries": queries},
+        "id": "u1",
+        "type": "tool_call",
+    }
+
+
+@pytest.mark.asyncio
+async def test_verify_node_already_guided_partial_queries_sends_hint(monkeypatch):
+    """完整指引已注入但上一轮 search_web queries 带漏 → 重申轮补发独立 hint。
+
+    回归 hint 可达性：hint 是"还缺哪些年 + 一次带全再查"的新信息，不能因 already_guided
+    被静默吞掉（否则 agent 无新指令空转烧保险丝，被误判网络未覆盖）。
+    """
+    monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
+    _ctx, token = _make_ctx(temporal_years=[2023, 2024, 2025], web_confirmed=True)
+    try:
+        state = _make_state(answer="2024年营收3943亿", kb_id="kb1")
+        state.messages = [
+            SystemMessage(
+                content=(
+                    "知识库缺失年份 [2023, 2025]，用户已确认联网，"
+                    "请调用 search_web 工具补充这些年份的数据后再回答。"
+                )
+            ),
+            AIMessage(
+                content="", tool_calls=[_search_web_tool_call(["腾讯2023年报"])]
+            ),  # 上一轮只带 2023，漏 2025
+        ]
+        result = await verify_node(state)
+        assert result["_needs_regenerate"] is True
+        assert result["_verify_regenerations"] == 1
+        assert result["_agent_iterations"] == 0  # regen 轮复位主循环预算（Fix 2）
+        assert len(result["messages"]) == 1  # 只补发 hint，不重复发完整指引
+        hint = result["messages"][0]
+        assert isinstance(hint, SystemMessage)
+        assert "一次带全以下年份" in hint.content  # hint 独立消息标记短语
+        assert "缺失年份 [2023, 2025]" in hint.content  # 点名仍缺年份
+        assert "再调用一次 search_web" in hint.content  # 指示一次带全再查
+        assert "用户已确认联网" not in hint.content  # hint 不含完整指引标记
+    finally:
+        current_request_ctx.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_verify_node_already_guided_hint_deduped(monkeypatch):
+    """hint 已发过 → 重申轮按短语查重命中，不再重复追加（至多发一次）。"""
+    monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
+    _ctx, token = _make_ctx(temporal_years=[2023, 2024, 2025], web_confirmed=True)
+    try:
+        state = _make_state(answer="2024年营收3943亿", kb_id="kb1")
+        state.messages = [
+            SystemMessage(
+                content=(
+                    "知识库缺失年份 [2023, 2025]，用户已确认联网，"
+                    "请调用 search_web 工具补充这些年份的数据后再回答。"
+                )
+            ),
+            AIMessage(content="", tool_calls=[_search_web_tool_call(["腾讯2023年报"])]),
+            SystemMessage(
+                content=(
+                    "缺失年份 [2023, 2025] 仍未补全：search_web 支持一次传入多个查询，"
+                    "请再调用一次 search_web，"
+                    "一次带全以下年份 [2023, 2025] 对应的查询后重新回答。"
+                )
+            ),  # 上一轮已发过 hint
+        ]
+        result = await verify_node(state)
+        assert result["_needs_regenerate"] is True
+        assert result["_verify_regenerations"] == 1
+        assert result["_agent_iterations"] == 0
+        assert "messages" not in result  # hint 查重命中，不再重复追加
+    finally:
+        current_request_ctx.reset(token)
+
+
 @pytest.mark.asyncio
 async def test_verify_node_complete_runs_judge(monkeypatch):
     """完整性通过 → 跑忠实度 judge，标记 _unsupported。"""
@@ -390,6 +469,7 @@ async def test_verify_node_unbound_web_no_citation_guides(monkeypatch):
         assert len(result["messages"]) == 1
         assert isinstance(result["messages"][0], SystemMessage)
         assert "请为联网引用标注来源编号" in result["messages"][0].content
+        assert result["_agent_iterations"] == 0  # 态 A regen 轮同样复位主循环预算
     finally:
         current_request_ctx.reset(token)
 

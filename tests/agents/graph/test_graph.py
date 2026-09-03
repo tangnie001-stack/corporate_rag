@@ -261,15 +261,17 @@ def _search_web_call(queries: list[str] | None = None) -> dict:
     }
 
 
-def _build_test_graph(llm) -> object:
-    """编译测试图：注入 fake search_web 工具，其余依赖全 MagicMock。"""
+def _build_test_graph(llm, tools=None) -> object:
+    """编译测试图：默认注入 fake search_web 工具（tools 可传 spy 覆盖），其余依赖全 MagicMock。"""
+    if tools is None:
+        tools = [fake_search_web]
     return build_graph(
         MagicMock(),  # vector_store
         None,  # bm25
         llm,  # agent LLM（fake，按序响应）
         MagicMock(),  # reranker
         StubPromptManager(),
-        tools=[fake_search_web],
+        tools=tools,
     )
 
 
@@ -457,7 +459,12 @@ async def test_graph_verify_never_searched_injects_guidance(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_graph_verify_partial_queries_reinjects_with_hint(monkeypatch):
-    """决策分支：search_web 已调但 queries 未带全缺失年份 → 注入带"一次带全"提示的重生成。"""
+    """决策分支（canonical 序）：完整指引先行 → agent 带漏搜索 → verify 补发独立 hint。
+
+    断言 hint 是真正送达 agent 的独立 SystemMessage（不在首条完整指引内）：指引注入后
+    agent 调 search_web 只带 [2023]（漏 2025），verify 重申轮必须补发 hint（新信息：
+    还缺哪些年 + 一次带全再查一次），不能再被 already_guided 静默吞掉。
+    """
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
     monkeypatch.setattr(
         "src.agents.graph.verify.ask_confirm._ask_web_confirm",
@@ -472,12 +479,17 @@ async def test_graph_verify_partial_queries_reinjects_with_hint(monkeypatch):
         llm = SequenceChatModel(
             [
                 AIMessage(
+                    content="2024年营收3943亿"
+                ),  # 首答仅覆盖 2024 → verify 注完整指引
+                AIMessage(
                     content="", tool_calls=[_search_web_call(["腾讯2023年报"])]
-                ),  # 已联网但只带 2023，漏 2025
-                AIMessage(content="2024年营收3943亿"),  # 仍缺 2023/2025
+                ),  # 收到指引后带漏搜索：只带 2023，漏 2025
+                AIMessage(
+                    content="2024年营收3943亿，2023年营收3000亿"
+                ),  # 采纳 2023 但仍缺 2025 → verify 补发 hint
                 AIMessage(
                     content="2023年营收3000亿，2024年营收3943亿，2025年营收4500亿"
-                ),  # 重申指引后补全答案
+                ),  # 收到 hint 后带全补答
             ]
         )
         graph = _build_test_graph(llm)
@@ -489,17 +501,30 @@ async def test_graph_verify_partial_queries_reinjects_with_hint(monkeypatch):
         assert node_order[-1] == "format"
         assert last_verify is not None
         assert last_verify["_needs_regenerate"] is False
+        assert "2023" in last_verify["answer"] and "2025" in last_verify["answer"]
         guided = [
             m
             for m in all_messages
             if isinstance(m, SystemMessage) and "用户已确认联网" in (m.content or "")
         ]
-        assert len(guided) == 1  # 首注即带"一次带全"提示，不重复堆积
-        assert "缺失年份 [2023, 2025]" in guided[0].content
-        assert "一次带全" in guided[0].content  # queries 带漏 → 强调一次带全
-        # 首次 verify 注入带提示指引并计数 +1（0→1）
+        assert len(guided) == 1  # 完整指引只在首轮注入一次
+        assert "一次带全以下年份" not in guided[0].content  # hint 已移出指引正文
+        hints = [
+            m
+            for m in all_messages
+            if isinstance(m, SystemMessage) and "一次带全以下年份" in (m.content or "")
+        ]
+        assert len(hints) == 1  # hint 独立成条且至多发一次
+        assert "缺失年份 [2025]" in hints[0].content  # hint 点名仍缺年份
+        assert "再调用一次 search_web" in hints[0].content  # 指示再查一次
+        assert "用户已确认联网" not in hints[0].content  # hint 不含完整指引标记
+        # 首轮注完整指引计数 0→1；重申轮补发 hint 计数 1→2；末轮完整性通过不再计数
         assert verify_updates[0]["_needs_regenerate"] is True
         assert verify_updates[0]["_verify_regenerations"] == 1
+        assert verify_updates[1]["_needs_regenerate"] is True
+        assert verify_updates[1]["_verify_regenerations"] == 2
+        assert verify_updates[1]["messages"][0] is hints[0]  # 重申轮实际送达 hint 消息
+        assert [u.get("_verify_regenerations") for u in verify_updates] == [1, 2, None]
     finally:
         current_request_ctx.reset(token)
 
@@ -545,5 +570,88 @@ async def test_graph_verify_web_exhausted_annotates(monkeypatch):
         assert "仅 [2024, 2025] 有数据" in last_verify["answer"]
         # 第 1 次 verify 注入指引计数 1；第 2 次带全仍缺 → web exhausted 直通，未耗保险丝
         assert [u.get("_verify_regenerations") for u in verify_updates] == [1, None]
+    finally:
+        current_request_ctx.reset(token)
+
+
+def _make_search_web_spy():
+    """构造带调用记录的 search_web 测试工具，返回 (tool, calls)。
+
+    calls 按调用序记录每次执行的 queries（测试桩不发起真实网络请求）；
+    供 V2 回归用例断言 regen 轮的 search_web 确实被执行（而非被 route_agent 吞掉）。
+    """
+    calls: list[list[str]] = []
+
+    @tool("search_web")
+    async def spy_search_web(queries: list[str], top_k: int = 5) -> str:
+        """联网搜索（测试桩）：记录查询并返回含 2023/2025 年份数据的固定文本。"""
+        calls.append(list(queries))
+        return "2023年营收3000亿。2025年营收4500亿。"
+
+    return spy_search_web, calls
+
+
+@pytest.mark.asyncio
+async def test_graph_verify_regen_round_uses_full_iteration_budget(monkeypatch):
+    """回归 change 3.5①（V2 bug）：首轮耗尽主循环预算 → regen 轮 search_web 仍完整执行。
+
+    首轮 agent 反复调 search_web（queries 带漏）直到第 5 次迭代被 route_agent 强制收尾，
+    verify 注指引并 regen。regen 返回必须带 _agent_iterations=0 复位主循环预算：否则回
+    agent 后迭代计数续在触顶值上，本轮的 search_web 工具调用会在 route_agent 被上限吞掉
+    （工具不执行、答案空白），verify 会把空答案误判为"网络均未覆盖"标注直通。
+    """
+    monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
+    monkeypatch.setattr(
+        "src.agents.graph.verify.ask_confirm._ask_web_confirm",
+        AsyncMock(return_value=True),
+    )
+    monkeypatch.setattr(
+        "src.agents.graph.verify.faithfulness.faithfulness_check",
+        AsyncMock(return_value=[]),
+    )
+    _ctx, token = _make_verify_ctx()
+    try:
+        spy_search_web, spy_calls = _make_search_web_spy()
+        # 每次迭代用独立 AIMessage 对象（复用同一对象会被 add_messages 去重吞掉）
+        llm = SequenceChatModel(
+            [
+                AIMessage(
+                    content="", tool_calls=[_search_web_call(["腾讯2024年报"])]
+                ),  # 迭代 1：搜索但 queries 带漏
+                AIMessage(
+                    content="", tool_calls=[_search_web_call(["腾讯2024年报"])]
+                ),  # 迭代 2
+                AIMessage(
+                    content="", tool_calls=[_search_web_call(["腾讯2024年报"])]
+                ),  # 迭代 3
+                AIMessage(
+                    content="", tool_calls=[_search_web_call(["腾讯2024年报"])]
+                ),  # 迭代 4
+                AIMessage(
+                    content="2024年营收3943亿"
+                ),  # 迭代 5：达上限强制收尾，仍缺年份
+                AIMessage(
+                    content="",
+                    tool_calls=[_search_web_call(["腾讯2023年报", "腾讯2025年报"])],
+                ),  # regen 轮：一次带全缺失年份调 search_web（必须真正执行）
+                AIMessage(
+                    content="2023年营收3000亿，2024年营收3943亿，2025年营收4500亿"
+                ),  # 带全后产出完整答案
+            ]
+        )
+        graph = _build_test_graph(llm, tools=[spy_search_web])
+        initial = AgentState.make_initial_state("s1", "kb1", "这几年营收怎么样", [])
+        node_order, last_verify, _all_messages, _verify_updates = await _run_graph(
+            graph, initial
+        )
+
+        assert node_order[-1] == "format"
+        assert last_verify is not None
+        assert last_verify["_needs_regenerate"] is False
+        # 无 Fix 2 时 regen 轮工具调用被吞：spy 只有首轮 4 次、答案带"均未覆盖"标注
+        assert len(spy_calls) == 5  # 首轮 4 次 + regen 轮 1 次（完整执行）
+        assert spy_calls[-1] == ["腾讯2023年报", "腾讯2025年报"]  # regen 轮带全缺失年份
+        assert "网络均未覆盖" not in last_verify["answer"]  # 未被误判为网络穷尽
+        assert "2023" in last_verify["answer"] and "2025" in last_verify["answer"]
     finally:
         current_request_ctx.reset(token)

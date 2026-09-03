@@ -57,6 +57,10 @@ MAX_VERIFY_REGENERATIONS = 2
 # verify 联网指引 SystemMessage 的标记短语：注入与查重共用（避免裸字符串耦合，
 # 注入文案改了而查重漏改会破坏防重复注入逻辑）
 VERIFY_GUIDANCE_MARKER: str = "用户已确认联网"
+# verify "一次带全" hint SystemMessage 的标记短语：完整指引已注入后 agent 上一轮
+# search_web queries 仍带漏缺失年份时，独立补发一条带全提示（重申轮也须送达，
+# 是"还缺哪些年 + 一次带全再查"的新信息；注入与查重共用此短语防重复堆叠）
+VERIFY_HINT_MARKER: str = "一次带全以下年份"
 # verify 联网引用标注指引 SystemMessage 的标记短语（无 KB 场景，2026-09-02）：
 # 本轮调过 search_web 但回答未带 [n] 来源编号时注入，驱动 agent 补标注后重生成一次
 VERIFY_CITATION_MARKER: str = "请为联网引用标注来源编号"

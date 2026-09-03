@@ -16,8 +16,31 @@ from src.agents.graph.verify.checks import (
 )
 from src.agents.graph.verify.guardrails import web_citation_guard
 from src.config import settings
-from src.config.const import MAX_VERIFY_REGENERATIONS, VERIFY_GUIDANCE_MARKER
+from src.config.const import (
+    MAX_VERIFY_REGENERATIONS,
+    VERIFY_GUIDANCE_MARKER,
+    VERIFY_HINT_MARKER,
+)
 from src.infra.llm.request_context import current_request_ctx
+
+
+def _marker_message_sent(state: AgentState, marker: str) -> bool:
+    """查重：messages 中是否已存在含指定标记短语的 SystemMessage。
+
+    遍历查重而非只看末条：指引/hint 注入后，agent 与 tools 的产出会追加到消息末尾，
+    只看末条会误判"未注入过"。注入与查重共用同一标记短语常量，文案改动不破坏查重。
+
+    Args:
+        state: 当前图状态
+        marker: 标记短语（const.py 中 *_MARKER 常量）
+
+    Returns:
+        True 已存在含该短语的 SystemMessage
+    """
+    return any(
+        isinstance(m, SystemMessage) and marker in (m.content or "")
+        for m in state.messages
+    )
 
 
 async def verify_node(state: AgentState) -> dict:
@@ -107,37 +130,43 @@ async def verify_node(state: AgentState) -> dict:
         state._verify_regenerations += 1
 
         # ── 4. 注入/重申联网指引 → regen ──
-        # 防重复注入：指引已在 messages 时只置重生成信号不追加（遍历查重而非看末条，
-        # 因指引后的 agent/tools 产出会追加到末尾）；queries 带漏缺失年份时首注即附
-        # "一次带全"提示，保险丝兜底 agent 持续不执行。计数随返回 dict 持久化。
-        already_guided = any(
-            isinstance(m, SystemMessage) and VERIFY_GUIDANCE_MARKER in (m.content or "")
-            for m in state.messages
-        )
-        if last_queries is not None and not queries_covered:
-            hint = (
-                "（注意：search_web 支持一次传入多个查询，请一次带全以上所有缺失年份）"
+        # 完整指引只在未注入过时追加（_marker_message_sent 遍历查重）；hint 是独立
+        # SystemMessage：agent 上一轮 search_web queries 带漏缺失年份时，即使完整指引
+        # 已注入过也须补发（"还缺哪些年 + 一次带全再查一次"是新信息，不能静默重申），
+        # 按 VERIFY_HINT_MARKER 短语查重至多发一次。计数随返回 dict 持久化；regen 轮
+        # 带 _agent_iterations=0 复位主循环预算，route_agent 不因首轮迭代触顶而吞掉本
+        # 轮 search_web 工具调用（regen 总轮数由保险丝 + web-exhausted 语义封顶）。
+        already_guided = _marker_message_sent(state, VERIFY_GUIDANCE_MARKER)
+        hint_already_sent = _marker_message_sent(state, VERIFY_HINT_MARKER)
+        regen_messages: list[SystemMessage] = []
+        if not already_guided:
+            regen_messages.append(
+                SystemMessage(
+                    content=(
+                        f"知识库缺失年份 {missing}，{VERIFY_GUIDANCE_MARKER}，"
+                        "请调用 search_web 工具补充这些年份的数据后再回答。"
+                    )
+                )
             )
-        else:
-            hint = ""
-        if already_guided:
-            return {
-                "answer": answer,
-                "_needs_regenerate": True,
-                "_verify_regenerations": state._verify_regenerations,
-            }
-        guidance = SystemMessage(
-            content=(
-                f"知识库缺失年份 {missing}，{VERIFY_GUIDANCE_MARKER}，"
-                f"请调用 search_web 工具补充这些年份的数据后再回答。{hint}"
+        if last_queries is not None and not queries_covered and not hint_already_sent:
+            regen_messages.append(
+                SystemMessage(
+                    content=(
+                        f"缺失年份 {missing} 仍未补全：search_web 支持一次传入多个查询，"
+                        "请再调用一次 search_web，"
+                        f"一次带全以下年份 {missing} 对应的查询后重新回答。"
+                    )
+                )
             )
-        )
-        return {
+        result: dict = {
             "answer": answer,
-            "messages": [guidance],
             "_needs_regenerate": True,
             "_verify_regenerations": state._verify_regenerations,
+            "_agent_iterations": 0,
         }
+        if regen_messages:
+            result["messages"] = regen_messages
+        return result
     # 最终答案跑忠实度 judge（仅标记，不驱动流程；P1 输出护栏消费）
     contexts = ctx.tool_contexts if ctx is not None else []
     unsupported = await faithfulness.faithfulness_check(answer, contexts)

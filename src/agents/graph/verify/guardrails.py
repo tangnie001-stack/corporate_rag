@@ -93,4 +93,5 @@ async def web_citation_guard(
         "messages": [guidance],
         "_needs_regenerate": True,
         "_verify_regenerations": state._verify_regenerations + 1,
+        "_agent_iterations": 0,  # regen 轮复位主循环预算，route_agent 不吞本轮的 [n] 补标工具调用
     }
