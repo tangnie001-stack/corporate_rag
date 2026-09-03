@@ -64,6 +64,9 @@ VERIFY_HINT_MARKER: str = "一次带全以下年份"
 # verify 联网引用标注指引 SystemMessage 的标记短语（无 KB 场景，2026-09-02）：
 # 本轮调过 search_web 但回答未带 [n] 来源编号时注入，驱动 agent 补标注后重生成一次
 VERIFY_CITATION_MARKER: str = "请为联网引用标注来源编号"
+# verify KB 强制溯源指引 SystemMessage 的标记短语（态 B）：检索到 KB context 但答案无
+# [n] 时注入，驱动 agent 补标后重生成一次（完整性通过后、judge 前，只引导一次）
+VERIFY_KB_CITATION_MARKER: str = "请为知识库引用标注来源编号"
 ASK_USER_TIMEOUT = 120  # ask_user 等待用户回答超时秒数
 HISTORY_MAX_TURNS = 10  # 历史注入保留最近轮数
 HISTORY_TOKEN_RATIO = 0.3  # 历史 token 占 context 窗口上限比例

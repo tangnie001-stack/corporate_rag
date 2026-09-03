@@ -19,7 +19,11 @@ from src.agents.graph.verify import (
     faithfulness_check,
     verify_node,
 )
-from src.config.const import MAX_VERIFY_ASK_PER_TURN, MAX_VERIFY_REGENERATIONS
+from src.config.const import (
+    MAX_VERIFY_ASK_PER_TURN,
+    MAX_VERIFY_REGENERATIONS,
+    VERIFY_KB_CITATION_MARKER,
+)
 from src.infra.llm.request_context import (
     RequestContext,
     current_request_ctx,
@@ -407,7 +411,7 @@ async def test_verify_node_already_guided_hint_deduped(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_verify_node_complete_runs_judge(monkeypatch):
-    """完整性通过 → 跑忠实度 judge，标记 _unsupported。"""
+    """完整性通过 + 答案已带 [n] → 过 KB 护栏进入忠实度 judge，标记 _unsupported。"""
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
     monkeypatch.setattr(
         "src.agents.graph.verify.faithfulness.faithfulness_check",
@@ -415,10 +419,10 @@ async def test_verify_node_complete_runs_judge(monkeypatch):
     )
     _ctx, token = _make_ctx(temporal_years=[2024], tool_contexts=_make_contexts())
     try:
-        state = _make_state(answer="2024年营收3943亿", kb_id="kb1")
+        state = _make_state(answer="2024年营收3943亿[1]", kb_id="kb1")
         result = await verify_node(state)
         assert result == {
-            "answer": "2024年营收3943亿",
+            "answer": "2024年营收3943亿[1]",
             "_unsupported": ["句X"],
             "_needs_regenerate": False,
         }
@@ -428,7 +432,7 @@ async def test_verify_node_complete_runs_judge(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_verify_node_complete_judge_clean(monkeypatch):
-    """完整性通过且 judge 无标记 → 返回纯 answer。"""
+    """完整性通过 + 答案已带 [n] → 过 KB 护栏且 judge 无标记 → 返回纯 answer。"""
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
     monkeypatch.setattr(
         "src.agents.graph.verify.faithfulness.faithfulness_check",
@@ -436,9 +440,12 @@ async def test_verify_node_complete_judge_clean(monkeypatch):
     )
     _ctx, token = _make_ctx(temporal_years=[2024], tool_contexts=_make_contexts())
     try:
-        state = _make_state(answer="2024年营收3943亿", kb_id="kb1")
+        state = _make_state(answer="2024年营收3943亿[1]", kb_id="kb1")
         result = await verify_node(state)
-        assert result == {"answer": "2024年营收3943亿", "_needs_regenerate": False}
+        assert result == {
+            "answer": "2024年营收3943亿[1]",
+            "_needs_regenerate": False,
+        }
     finally:
         current_request_ctx.reset(token)
 
@@ -547,3 +554,55 @@ async def test_verify_node_unbound_no_web_passthrough(monkeypatch):
         }
     finally:
         current_request_ctx.reset(token)
+
+
+# ── kb_citation_guardrail（态 B KB 强制溯源护栏）──
+
+
+def _make_kb_ctx_contexts() -> list[RAGContext]:
+    """构造含 kind=kb 的引用上下文（RAGContext 默认 kind 即 kb，显式标注防误读）。"""
+    return [
+        RAGContext(
+            content="腾讯2024年营收3943亿元",
+            source="a.pdf",
+            page=1,
+            doc_id="d1",
+            chunk_id="d1:0",
+            kind="kb",
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_kb_guardrail_guides_when_no_citation():
+    """态 B 有 kb context 无 [n] → 注入 KB 溯源指引 regen（复位主循环预算不占保险丝）。"""
+    from src.agents.graph.verify.guardrails import kb_citation_guardrail
+
+    state = AgentState(answer="腾讯2024年营收3943亿")
+    ctx = RequestContext(session_id="s1", tool_contexts=_make_kb_ctx_contexts())
+    decision = await kb_citation_guardrail(state, ctx)
+    assert decision is not None
+    assert decision["_needs_regenerate"] is True
+    assert VERIFY_KB_CITATION_MARKER in decision["messages"][0].content
+    assert decision["_agent_iterations"] == 0  # regen 轮复位主循环预算
+    assert "_verify_regenerations" not in decision  # 不占完整性决策轮保险丝
+
+
+@pytest.mark.asyncio
+async def test_kb_guardrail_skips_when_abstention():
+    """拒答/知识库未覆盖 → 不强灌引用。"""
+    from src.agents.graph.verify.guardrails import kb_citation_guardrail
+
+    state = AgentState(answer="未在文档中找到相关数据")
+    ctx = RequestContext(session_id="s1", tool_contexts=_make_kb_ctx_contexts())
+    assert await kb_citation_guardrail(state, ctx) is None
+
+
+@pytest.mark.asyncio
+async def test_kb_guardrail_passes_when_cited():
+    """答案带 [n] → 直接通过。"""
+    from src.agents.graph.verify.guardrails import kb_citation_guardrail
+
+    state = AgentState(answer="腾讯2024年营收3943亿[1]")
+    ctx = RequestContext(session_id="s1", tool_contexts=_make_kb_ctx_contexts())
+    assert await kb_citation_guardrail(state, ctx) is None
