@@ -540,6 +540,8 @@ class AgentService:
         streaming_manager.clear_buffer(session_id)
 
         ctx = RequestContext(session_id=session_id)
+        ctx.kb_id = kb_id
+        ctx.kb_bound = bool(kb_id)
         launch_context = {
             "history": history,
             "ctx": ctx,

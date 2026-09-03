@@ -120,6 +120,10 @@ async def decide_missing_web(
         )
         return {"answer": answer, "_needs_regenerate": False}
     state._verify_regenerations += 1
+    if ctx is not None:
+        # 标记 verify 指派联网：此后 agent 调 search_web 属正常完成步骤（补数据），
+        # search_web 据此（web_guided=True）排除 to_web 自主降级缺陷信号误报
+        ctx.web_guided = True
 
     # ── 4. 注入/重申联网指引 → regen ──
     # 完整指引只在未注入过时追加（_marker_message_sent 遍历查重）；hint 是独立

@@ -196,3 +196,49 @@ async def test_search_web_all_failures_returns_empty(monkeypatch, ctx):
 
     assert out == ""
     assert ctx.web_count == 1
+
+
+@pytest.mark.asyncio
+async def test_search_web_verify_guided_no_to_web_signal(monkeypatch, ctx):
+    """verify 指派联网（web_guided=True）→ 不产 to_web 缺陷信号。"""
+    captured: dict = {}
+
+    def _fake_signal(signal, query, iteration, **fields):
+        """mock retrieval_signal：捕获调用参数。"""
+        captured["signal"] = signal
+
+    monkeypatch.setattr("src.core.logging.retrieval_signal", _fake_signal)
+    monkeypatch.setattr(web_tools, "tavily_search", _fake_tavily_search)
+    monkeypatch.setattr(web_tools, "tavily_extract", _fake_tavily_extract)
+    ctx.kb_id = "kb1"
+    ctx.kb_bound = True
+    ctx.web_guided = True  # verify 已指派联网
+
+    out = await search_web.ainvoke({"queries": ["腾讯2023年报"]})
+
+    assert out.startswith("[1] 来源: https://a.com")
+    assert "signal" not in captured  # verify 指派联网不产 to_web
+
+
+@pytest.mark.asyncio
+async def test_search_web_autonomous_emits_to_web_signal(monkeypatch, ctx):
+    """agent 自主降级调 search_web（web_guided=False）→ 产 to_web 缺陷信号。"""
+    captured: dict = {}
+
+    def _fake_signal(signal, query, iteration, **fields):
+        """mock retrieval_signal：捕获调用参数。"""
+        captured["signal"] = signal
+        captured["fields"] = fields
+
+    monkeypatch.setattr("src.core.logging.retrieval_signal", _fake_signal)
+    monkeypatch.setattr(web_tools, "tavily_search", _fake_tavily_search)
+    monkeypatch.setattr(web_tools, "tavily_extract", _fake_tavily_extract)
+    ctx.kb_id = "kb1"
+    ctx.kb_bound = True  # 态 B：绑定 KB；web_guided 默认 False（自主降级）
+
+    await search_web.ainvoke({"queries": ["腾讯2023年报"]})
+
+    assert captured.get("signal") == "to_web"
+    assert captured["fields"]["kb_id"] == "kb1"
+    assert captured["fields"]["result_count"] > 0
+    assert "latency_ms" in captured["fields"]

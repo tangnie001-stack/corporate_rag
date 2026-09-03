@@ -18,7 +18,7 @@ from src.config.const import (
     WEB_BODY_LIMIT,
     SSEInteractionTexts,
 )
-from src.core.logging import log_event
+from src.core import logging as core_logging
 from src.infra.llm.request_context import current_request_ctx
 from src.infra.search.tavily_client import tavily_extract, tavily_search
 from src.rag.context import RAGContext
@@ -138,7 +138,19 @@ async def search_web(queries: list[str], top_k: int = 5) -> str:
             )
         )
         blocks.append(f"[{offset + len(blocks) + 1}] 来源: {r['url']}\n内容: {content}")
-    log_event(
+    # to_web 检索降级缺陷信号：仅态 B（kb_bound=True）且非 verify 指派
+    # （web_guided=False）的自主降级才产；verify 指派联网补数据是正常完成步骤，
+    # 由 web_guided=True 排除在缺陷信号外（态 A 纯对话未绑 KB 也不产）
+    if ctx.web_guided is False and ctx.kb_bound:
+        core_logging.retrieval_signal(
+            "to_web",
+            ", ".join(queries),
+            0,  # iteration 非关键：search_web 无 InjectedState 拿不到，传 0
+            kb_id=ctx.kb_id,
+            result_count=len(blocks),
+            latency_ms=f"{(time.monotonic() - start) * 1000:.0f}",
+        )
+    core_logging.log_event(
         "retrieval",
         "search_web done",
         session_id=ctx.session_id,

@@ -23,6 +23,8 @@ class RequestContext:
     """单次 /chat/stream 请求的共享对象集合，由请求入口创建并 set 到 current_request_ctx。"""
 
     session_id: str  # 会话 ID（请求/URL 参数来源），范围：整个请求生命周期，用途：路由到 registry 挂起澄清
+    kb_id: str = ""  # 知识库 ID（来源：请求入口 kb_id 参数；范围：请求内只读；用途：search_web 产 to_web 信号时携带 + 判定态 B 绑定）
+    kb_bound: bool = False  # 是否绑定知识库（来源：请求入口由 bool(kb_id) 派生；范围：请求内只读；用途：to_web 缺陷信号仅态 B（kb_bound=True）自主降级时产出）
     clarify_channel: asyncio.Queue = field(
         default_factory=asyncio.Queue
     )  # 澄清事件/SSE 事件通道，范围：请求内共享，用途：工具请求澄清时投递事件
