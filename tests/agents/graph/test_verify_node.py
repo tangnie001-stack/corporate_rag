@@ -431,6 +431,40 @@ async def test_verify_node_complete_runs_judge(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_verify_node_unsupported_signal_emitted(monkeypatch):
+    """态 B judge 标记 unsupported → 产 unsupported 行为信号（含 kb_id/迭代/计数）。"""
+    monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
+    monkeypatch.setattr(
+        "src.agents.graph.verify.faithfulness.faithfulness_check",
+        AsyncMock(return_value=["句X"]),
+    )
+    captured: dict = {}
+
+    def _fake_signal(signal, query, iteration, **fields):
+        """mock retrieval_signal：捕获调用参数。"""
+        captured["signal"] = signal
+        captured["query"] = query
+        captured["iteration"] = iteration
+        captured["fields"] = fields
+
+    monkeypatch.setattr("src.core.logging.retrieval_signal", _fake_signal)
+    _ctx, token = _make_ctx(temporal_years=[2024], tool_contexts=_make_contexts())
+    try:
+        state = _make_state(answer="2024年营收3943亿[1]", kb_id="kb1")
+        state.query = "腾讯2024营收"
+        state._agent_iterations = 3
+        result = await verify_node(state)
+        assert result["_unsupported"] == ["句X"]
+        assert captured["signal"] == "unsupported"
+        assert captured["query"] == "腾讯2024营收"
+        assert captured["iteration"] == 3
+        assert captured["fields"]["kb_id"] == "kb1"
+        assert captured["fields"]["unsupported_count"] == 1
+    finally:
+        current_request_ctx.reset(token)
+
+
+@pytest.mark.asyncio
 async def test_verify_node_complete_judge_clean(monkeypatch):
     """完整性通过 + 答案已带 [n] → 过 KB 护栏且 judge 无标记 → 返回纯 answer。"""
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)

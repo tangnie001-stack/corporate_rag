@@ -453,6 +453,19 @@ async def _run_generation(
             tool_contexts=capture.final_contexts,
         )
         if _is_abstention(final_state):
+            # abstain_after_retrieve 行为信号：绑 KB 且检索过却拒答 → 检索质量缺陷
+            # （检索结果不足以支撑作答，供 P1 检索质量诊断）
+            has_kb_retrieved = bool(capture.final_contexts) and bool(kb_id)
+            if has_kb_retrieved:
+                from src.core.logging import retrieval_signal
+
+                retrieval_signal(
+                    "abstain_after_retrieve",
+                    query,
+                    0,  # iteration 非关键：capture 未存迭代数，传 0（YAGNI 不做 capture 改造）
+                    kb_id=kb_id,
+                    tool_context_count=len(capture.final_contexts or []),
+                )
             abstention_event = SSEAbstentionEvent()
             manager.add_event(
                 session_id,

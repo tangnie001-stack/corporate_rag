@@ -64,6 +64,18 @@ async def verify_node(state: AgentState) -> dict:
     contexts = ctx.tool_contexts if ctx is not None else []
     unsupported = await faithfulness.faithfulness_check(answer, contexts)
     if unsupported:
+        from src.core.logging import retrieval_signal
+
+        if state.kb_id:
+            # unsupported 行为信号：绑 KB judge 标记无支撑句 → 检索质量缺陷
+            # （检索上下文不足以支撑答案内容，供 P1 检索质量诊断）
+            retrieval_signal(
+                "unsupported",
+                state.query,
+                state._agent_iterations,
+                kb_id=state.kb_id,
+                unsupported_count=len(unsupported),
+            )
         return {
             "answer": answer,
             "_unsupported": unsupported,

@@ -696,6 +696,84 @@ async def test_run_generation_buffers_abstention_from_captured_final_answer():
 
 
 @pytest.mark.asyncio
+async def test_run_generation_emits_abstain_after_retrieve_signal(monkeypatch):
+    """绑 KB 检索过却拒答 → 产 abstain_after_retrieve 行为信号（检索质量缺陷）。
+
+    signal 数据源取 _run_generation 参数 kb_id/query（final_state 临时构造不含）；
+    capture 未存迭代数，iteration 约定传 0。
+    """
+    from src.chat.streaming import StreamingRunManager
+    from src.infra.llm.request_context import RequestContext
+    from src.services.agent_service import _run_generation
+
+    captured: dict = {}
+
+    def _fake_signal(signal, query, iteration, **fields):
+        """mock retrieval_signal：捕获调用参数。"""
+        captured["signal"] = signal
+        captured["query"] = query
+        captured["iteration"] = iteration
+        captured["fields"] = fields
+
+    monkeypatch.setattr("src.core.logging.retrieval_signal", _fake_signal)
+    mgr = StreamingRunManager()
+
+    async def fake_astream(*args, **kwargs):
+        yield _chat_model_start_item()
+        yield _chat_model_stream_item("未在文档中找到相关数据")
+        yield _chat_model_end_item("qwen-max")
+        yield _finalize_end_item("未在文档中找到相关数据", has_contexts=True)
+
+    fake_graph = Mock()
+    fake_graph.astream_events = fake_astream
+    ctx = RequestContext(session_id="s1")
+    ctx.clarify_channel = asyncio.Queue()
+
+    await _run_generation(
+        "s1", "kb1", "腾讯2024营收", [], False, ctx, mgr, graph=fake_graph
+    )
+
+    # 检索过且绑 KB → 信号携带 kb_id 与上下文数；abstention 事件照常入缓冲
+    assert captured["signal"] == "abstain_after_retrieve"
+    assert captured["query"] == "腾讯2024营收"
+    assert captured["iteration"] == 0
+    assert captured["fields"]["kb_id"] == "kb1"
+    assert captured["fields"]["tool_context_count"] == 1
+    events = mgr.get_events_since("s1", 0)
+    assert any(et == "abstention" for _, et, _ in events)
+
+
+@pytest.mark.asyncio
+async def test_run_generation_no_abstain_signal_when_not_retrieved(monkeypatch):
+    """拒答但未检索到上下文（final_contexts 空）→ 不发 abstain_after_retrieve 信号。"""
+    from src.chat.streaming import StreamingRunManager
+    from src.infra.llm.request_context import RequestContext
+    from src.services.agent_service import _run_generation
+
+    captured: dict = {}
+
+    def _fake_signal(signal, query, iteration, **fields):
+        """mock retrieval_signal：捕获调用参数。"""
+        captured["signal"] = signal
+
+    monkeypatch.setattr("src.core.logging.retrieval_signal", _fake_signal)
+    mgr = StreamingRunManager()
+
+    async def fake_astream(*args, **kwargs):
+        yield _finalize_end_item("未在文档中找到相关数据", has_contexts=False)
+
+    fake_graph = Mock()
+    fake_graph.astream_events = fake_astream
+    ctx = RequestContext(session_id="s1")
+    ctx.clarify_channel = asyncio.Queue()
+
+    await _run_generation("s1", "kb1", "q", [], False, ctx, mgr, graph=fake_graph)
+
+    assert "signal" not in captured  # 无检索行为 → 非检索质量缺陷，不发信号
+    assert any(et == "abstention" for _, et, _ in mgr.get_events_since("s1", 0))
+
+
+@pytest.mark.asyncio
 async def test_run_generation_buffers_model_info_when_model_captured():
     """agent 节点 on_chat_model_end 捕获 model_used → 循环结束后 model_info 事件入缓冲。"""
     from src.chat.streaming import StreamingRunManager
