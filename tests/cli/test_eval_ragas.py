@@ -64,14 +64,24 @@ class TestGenerateAnswers:
             return {
                 "answer": f"Answer for: {state['query'][:10]}",
                 "tool_contexts": [
-                    MagicMock(to_prompt_text=lambda: "Context about 茅台营收1,741亿元"),
-                    MagicMock(to_prompt_text=lambda: "Context about 同比增长15.66%"),
+                    MagicMock(
+                        to_prompt_text=lambda: "Context about 茅台营收1,741亿元",
+                        source="kweichow.pdf",
+                        score=0.91,
+                        kind="kb",
+                    ),
+                    MagicMock(
+                        to_prompt_text=lambda: "Context about 同比增长15.66%",
+                        source="kweichow.pdf",
+                        score=0.87,
+                        kind="kb",
+                    ),
                 ],
             }
 
         mock_graph.ainvoke = AsyncMock(side_effect=mock_ainvoke)
 
-        answers, contexts, trace_ids = asyncio.run(
+        answers, contexts, trace_ids, retrieval_details = asyncio.run(
             generate_answers_and_contexts(
                 mock_graph,
                 "test_kb",
@@ -83,9 +93,19 @@ class TestGenerateAnswers:
         assert len(answers) == 2
         assert len(contexts) == 2
         assert len(trace_ids) == 2
+        assert len(retrieval_details) == 2
         assert trace_ids[0].startswith("eval_")
         assert "Answer for" in answers[0]
         assert len(contexts[0]) == 2
+        # 检索明细与 contexts 一一对应，逐条含 source/score/kind 三键
+        assert retrieval_details[0] == [
+            {"source": "kweichow.pdf", "score": 0.91, "kind": "kb"},
+            {"source": "kweichow.pdf", "score": 0.87, "kind": "kb"},
+        ]
+        assert retrieval_details[1] == [
+            {"source": "kweichow.pdf", "score": 0.91, "kind": "kb"},
+            {"source": "kweichow.pdf", "score": 0.87, "kind": "kb"},
+        ]
 
     def test_generate_partial_failure(self) -> None:
         """部分问题失败时应返回错误标记，不中断整体流程。"""
@@ -102,12 +122,19 @@ class TestGenerateAnswers:
                 raise ValueError("模拟错误")
             return {
                 "answer": "正常回答",
-                "tool_contexts": [MagicMock(to_prompt_text=lambda: "ctx")],
+                "tool_contexts": [
+                    MagicMock(
+                        to_prompt_text=lambda: "ctx",
+                        source="s.pdf",
+                        score=0.5,
+                        kind="kb",
+                    )
+                ],
             }
 
         mock_graph.ainvoke = AsyncMock(side_effect=mock_ainvoke)
 
-        answers, contexts, trace_ids = asyncio.run(
+        answers, contexts, trace_ids, retrieval_details = asyncio.run(
             generate_answers_and_contexts(
                 mock_graph,
                 "kb",
@@ -118,10 +145,13 @@ class TestGenerateAnswers:
 
         assert len(answers) == 3
         assert len(trace_ids) == 3
+        assert len(retrieval_details) == 3
         assert "[ERROR]" in answers[1]
         assert contexts[1] == []
-        # 失败的问题也要有 trace_id，便于回溯
+        # 失败的问题也要有 trace_id，便于回溯；检索明细异常分支为空列表
         assert trace_ids[1].startswith("eval_")
+        assert retrieval_details[0] == [{"source": "s.pdf", "score": 0.5, "kind": "kb"}]
+        assert retrieval_details[1] == []
 
 
 class TestRunEvaluation:

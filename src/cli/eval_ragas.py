@@ -105,7 +105,7 @@ async def generate_answers_and_contexts(
     kb_id: str,
     session_id: str,
     questions: list[str],
-) -> tuple[list[str], list[list[str]], list[str]]:
+) -> tuple[list[str], list[list[str]], list[str], list[list[dict]]]:
     """对每个问题生成回答，并收集检索到的上下文.
 
     Args:
@@ -115,15 +115,19 @@ async def generate_answers_and_contexts(
         questions: 问题列表
 
     Returns:
-        (answers, contexts, trace_ids) 元组：
+        (answers, contexts, trace_ids, retrieval_details) 元组：
         - answers: 每个问题的完整回答文本列表
         - contexts: 每个问题对应的检索上下文列表（每个元素是文档片段列表）
         - trace_ids: 每个问题对应的 trace_id 列表（与 answers/contexts 一一对应，
           可用于在日志 / Langfuse 中回溯该问题的完整链路）
+        - retrieval_details: 每个问题对应的结构化检索明细列表（与 answers/contexts
+          一一对应；每个元素是该 query 最终上下文（rerank 后）的
+          [{source, score, kind}, ...]，供 detail_json 低分下钻）
     """
     answers: list[str] = []
     contexts: list[list[str]] = []
     trace_ids: list[str] = []
+    retrieval_details: list[list[dict]] = []
 
     for i, q in enumerate(questions):
         logger.info("Generating answer for Q{}: {}...", i + 1, q[:40])
@@ -154,6 +158,19 @@ async def generate_answers_and_contexts(
                 c.to_prompt_text() for c in final_state.get("tool_contexts", [])
             ]
             contexts.append(ctx_list)
+            # 结构化检索明细（detail_json 下钻用：rerank 后来源+分数+类型）
+            # getattr 兜底：tool_contexts 来自图状态，约定为 RAGContext，防御性
+            # 容忍异常对象，保证明细字段不缺键
+            retrieval_details.append(
+                [
+                    {
+                        "source": getattr(c, "source", ""),
+                        "score": getattr(c, "score", 0.0),
+                        "kind": getattr(c, "kind", "kb"),
+                    }
+                    for c in final_state.get("tool_contexts", [])
+                ]
+            )
 
             logger.info(
                 "  Answer length: {} chars, contexts: {}",
@@ -165,10 +182,11 @@ async def generate_answers_and_contexts(
             logger.warning("Failed to generate answer for Q{}: {}", i + 1, e)
             answers.append(f"[ERROR] {e}")
             contexts.append([])
+            retrieval_details.append([])
         finally:
             current_trace_id.reset(token)
 
-    return answers, contexts, trace_ids
+    return answers, contexts, trace_ids, retrieval_details
 
 
 def run_evaluation(
@@ -523,7 +541,7 @@ def main() -> None:
     graph = build_graph(vector_store, bm25, llm, reranker, prompt_manager)
 
     logger.info("Generating answers for {} questions...", len(questions))
-    answers, contexts, trace_ids = asyncio.run(
+    answers, contexts, trace_ids, retrieval_details = asyncio.run(
         generate_answers_and_contexts(
             graph,
             kb_id,
@@ -541,13 +559,19 @@ def main() -> None:
         embeddings_wrapper,
     )
 
+    # 指标均值输出到 stdout：compare_retrieval / compare_dedup 等 A/B 脚本以
+    # 子进程方式调用本脚本，靠 stdout 解析指标（parse_metrics）；logger 只写
+    # 文件不落 stdout，故此处显式 print。--gate 模式下 check_gate 已打印指标行。
+    if not args.gate:
+        _print_metric_averages(result)
+
     output_path = save_results_csv(
         result, questions, ground_truth, output_path, trace_ids
     )
     save_markdown_report(result, questions, output_path, trace_ids)
 
     # _save_eval_report 需要 questions 长度
-    _save_eval_report(kb_id, result, len(questions), output_path)
+    _save_eval_report(kb_id, result, len(questions), output_path, retrieval_details)
 
     if args.gate:
         check_gate(result, questions)
@@ -555,11 +579,34 @@ def main() -> None:
     logger.info("Evaluation complete.")
 
 
+def _print_metric_averages(result: Any) -> None:
+    """把四指标均值逐行打印到 stdout（供 A/B 子进程解析）。
+
+    compare_retrieval / compare_dedup 通过 subprocess 调用本脚本并用
+    parse_metrics 解析 stdout 里的指标均值；logger 只写日志文件，因此
+    均值需显式 print。行格式与 check_gate 对齐：一行一指标、
+    `指标名: 数值`，便于按指标名前缀匹配取值。
+
+    Args:
+        result: RAGAS evaluate() 返回的结果对象
+    """
+    df = result.to_pandas()
+    for col in [
+        "faithfulness",
+        "answer_relevancy",
+        "context_precision",
+        "context_recall",
+    ]:
+        if col in df.columns:
+            print(f"  {col}: {df[col].mean():.4f}")
+
+
 def _save_eval_report(
     kb_id: str,
     result,
     qa_count: int,
     output_path: str,
+    retrieval_details: list[list[dict]] | None = None,
 ) -> None:
     """将 RAGAS 评估结果持久化到 eval_report 表.
 
@@ -568,6 +615,8 @@ def _save_eval_report(
         result: RAGAS evaluate() 返回的结果对象
         qa_count: QA 对数
         output_path: CSV 报告文件路径
+        retrieval_details: 每 query 的检索明细（与 detail 数组按 q_index 对齐），
+            传入后并入对应 detail_json 条目，供低分 query 下钻检索环节
     """
     try:
         from src.infra.db.models.eval_report import EvalReportModel as EvalReportEntity
@@ -588,6 +637,8 @@ def _save_eval_report(
             for col in metric_cols:
                 if col in df.columns:
                     entry[col] = float(df[col].iloc[i])
+            if retrieval_details is not None and i < len(retrieval_details):
+                entry["retrieval_details"] = retrieval_details[i]
             detail.append(entry)
 
         avg = {}
