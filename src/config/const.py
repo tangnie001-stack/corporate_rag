@@ -51,6 +51,9 @@ MAX_ASK_PER_TURN = 2  # 单 turn 内 ask_user 最大调用次数
 MAX_VERIFY_ASK_PER_TURN = (
     1  # verify"是否联网"询问每轮上限（独立计数，不计入 MAX_ASK_PER_TURN）
 )
+# verify 修订保险丝上限：正常被决策化（看 agent 上一轮 search_web queries）提前终止，
+# 仅在 agent 反复不按指引执行时兜底防死循环
+MAX_VERIFY_REGENERATIONS = 2
 # verify 联网指引 SystemMessage 的标记短语：注入与查重共用（避免裸字符串耦合，
 # 注入文案改了而查重漏改会破坏防重复注入逻辑）
 VERIFY_GUIDANCE_MARKER: str = "用户已确认联网"

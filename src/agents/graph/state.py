@@ -45,6 +45,7 @@ class AgentState:
         default_factory=list
     )  # 对话历史（注入 prompt 用）
     _token_usage: dict = field(default_factory=dict)  # token 用量统计
+    _verify_regenerations: int = 0  # verify 修订保险丝计数（来源：verify 决策化兜底；范围：单轮执行；用途：防 verify→agent 无限往返，正常被决策化提前终止）
     _needs_regenerate: bool = False  # 验证循环重生成信号（来源：verify 节点置位；范围：单轮执行；用途：条件边回 agent 重生成）
     _unsupported: list = field(
         default_factory=list

@@ -19,7 +19,7 @@ from src.agents.graph.verify import (
     faithfulness_check,
     verify_node,
 )
-from src.config.const import MAX_VERIFY_ASK_PER_TURN
+from src.config.const import MAX_VERIFY_ASK_PER_TURN, MAX_VERIFY_REGENERATIONS
 from src.infra.llm.request_context import (
     RequestContext,
     current_request_ctx,
@@ -193,15 +193,13 @@ async def test_ask_web_confirm_slot_occupied(monkeypatch):
 def _make_state(
     answer: str = "",
     kb_id: str = "",
-    iterations: int = 0,
-    max_iter: int = 5,
+    regenerations: int = 0,
 ) -> AgentState:
     """构造 verify_node 测试用 AgentState（kb_id="" = 未绑定 KB，态 A）。"""
     return AgentState(
         answer=answer,
         kb_id=kb_id,
-        _agent_iterations=iterations,
-        _max_agent_iterations=max_iter,
+        _verify_regenerations=regenerations,
     )
 
 
@@ -276,8 +274,11 @@ async def test_verify_node_missing_confirmed_regenerates(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_verify_node_missing_iteration_limit_annotate(monkeypatch):
-    """确认联网但 _agent_iterations 已超限 → 标注缺失直通，不重生成不询问。"""
+async def test_verify_node_missing_fuse_exhausted_annotate(monkeypatch):
+    """确认联网但修订保险丝已耗尽 → 标注"知识库与网络均未覆盖"直通，不重生成不询问。
+
+    决策化语义：修订计数上限接管原 _agent_iterations 终止条件（防 verify→agent 无限往返）。
+    """
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
     monkeypatch.setattr(
         "src.agents.graph.verify.ask_confirm._ask_web_confirm",
@@ -286,13 +287,15 @@ async def test_verify_node_missing_iteration_limit_annotate(monkeypatch):
     _ctx, token = _make_ctx(temporal_years=[2023, 2024, 2025], web_confirmed=True)
     try:
         state = _make_state(
-            answer="2024年营收3943亿", kb_id="kb1", iterations=5, max_iter=5
+            answer="2024年营收3943亿",
+            kb_id="kb1",
+            regenerations=MAX_VERIFY_REGENERATIONS,
         )
         result = await verify_node(state)
         assert result == {
             "answer": (
                 "2024年营收3943亿\n\n"
-                "> 注：知识库仅覆盖 [2024]，缺失 [2023, 2025] 未联网补充。"
+                "> 注：知识库与网络均未覆盖 [2023, 2025]，仅 [2024] 有数据。"
             ),
             "_needs_regenerate": False,
         }
@@ -408,12 +411,18 @@ async def test_verify_node_unbound_web_with_citation_passthrough(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_verify_node_unbound_web_iteration_limit_passthrough(monkeypatch):
-    """未绑定 KB + 回答无引用但迭代已超限 → 直通不注入（防死循环）。"""
+async def test_verify_node_unbound_web_fuse_exhausted_passthrough(monkeypatch):
+    """未绑定 KB + 回答无引用但修订保险丝已耗尽 → 直通不注入（防死循环）。
+
+    语义随态 A 保险丝换源：上限判断由 _agent_iterations 改为 _verify_regenerations。
+    """
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
     _ctx, token = _make_ctx(tool_contexts=_make_web_contexts())
     try:
-        state = _make_state(answer="建议选择 2核2G 配置", iterations=5, max_iter=5)
+        state = _make_state(
+            answer="建议选择 2核2G 配置",
+            regenerations=MAX_VERIFY_REGENERATIONS,
+        )
         result = await verify_node(state)
         assert result == {
             "answer": "建议选择 2核2G 配置",

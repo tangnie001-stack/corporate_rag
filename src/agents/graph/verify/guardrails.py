@@ -1,7 +1,7 @@
 """输出护栏校验器 — 联网引用标注引导（态 A）；KB 强制溯源在态 B 接入。
 
-态 A 保险丝用迭代上限判断（state._agent_iterations < state._max_agent_iterations）：
-调过 search_web 但答案无 [n] 引用且未达迭代上限时，注入一次标注指引驱动重生成。
+态 A 保险丝用 verify 修订计数判断（state._verify_regenerations < MAX_VERIFY_REGENERATIONS）：
+调过 search_web 但答案无 [n] 引用且未达保险丝上限时，注入一次标注指引驱动重生成。
 """
 
 import re
@@ -10,7 +10,11 @@ from langchain_core.messages import SystemMessage
 from loguru import logger
 
 from src.agents.graph.state import AgentState
-from src.config.const import VERIFY_CITATION_MARKER, SSEInteractionTexts
+from src.config.const import (
+    MAX_VERIFY_REGENERATIONS,
+    VERIFY_CITATION_MARKER,
+    SSEInteractionTexts,
+)
 from src.infra.llm.request_context import RequestContext
 
 
@@ -68,7 +72,7 @@ async def web_citation_guard(
     if (
         not _has_web_context(ctx)
         or _answer_has_citation(answer)
-        or not (state._agent_iterations < state._max_agent_iterations)
+        or state._verify_regenerations >= MAX_VERIFY_REGENERATIONS
         or _citation_guidance_already_injected(state)
     ):
         return None
@@ -88,4 +92,5 @@ async def web_citation_guard(
         "answer": answer,
         "messages": [guidance],
         "_needs_regenerate": True,
+        "_verify_regenerations": state._verify_regenerations + 1,
     }
