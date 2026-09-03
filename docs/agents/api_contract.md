@@ -192,6 +192,10 @@ event: error
 data: {"error": "错误消息"}
 ```
 
+> `status` 事件 data 可选字段 `detail?: string`：工具调用入参明细，仅非空时序列化（向后兼容），
+> 由 `_convert_event` 的 TOOL_START 分支填充——`retrieve_kb` 为 `query=...`、`search_web` 为 `queries=[...]`，
+> 与实时流同构写入事件缓冲，历史回放（2.4.4）原样带出，供前端展示工具调用明细。
+
 追问路径（~~当 classify 检测到缺失实体时~~ ⚠️ 已退役，agent 化后由 `ask_user` 事件 + `POST /chat/clarify-answer` 接管，见下文 2.3.2 与 ask_user 事件详情）：
 
 ```json
