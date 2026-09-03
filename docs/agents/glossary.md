@@ -30,6 +30,8 @@
 - **rerank**：精排，对召回结果重排，产出 `contexts` 进入 LLM
 - **contexts**：精排后拼入 LLM prompt 的上下文片段
 - **kb**：知识库（knowledge base），文档与向量的隔离单位
+- **dedup（按 doc_id 去重）**：`src/rag/retrieval.py::_dedup_by_doc_id` 对召回结果按文档分组，每文档至多保留前 N 条，提升上下文多样性；N 取 `RETRIEVAL_MAX_PER_DOC`（`src/config/settings.py`，环境变量可覆盖，默认 1 与旧行为一致）
+- **RETRIEVAL_MAX_PER_DOC**：检索去重上限配置项，含义见「dedup」；为 A/B 实验变量（N=1 vs N=2/3，结论待真实 KB 评估后写入 change 记录）
 
 ## Agent 状态图（LangGraph）
 
