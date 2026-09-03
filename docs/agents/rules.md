@@ -33,21 +33,7 @@ AppError (基类)
 
 ## 日志约定
 
-### 事件消息格式
-
-- **语言**：事件消息一律英文小写 k=v（`key=value` 空格分隔）；中文仅限展示给最终用户的文案（集中在 `SSEInteractionTexts`），不得进入日志 message
-- **分层前缀**：日志行以 `[层名]` 开头标识事件归属，同一类事件全系统只有一个统一前缀与措辞
-
-| 前缀 | 归属 |
-|---|---|
-| `[retrieval]` | 检索层（rag_tools / web_tools / retrieval.py） |
-| `[verify]` | 验证节点（verify 包） |
-| `[agent]` | agent 主循环（agent_node / workflow） |
-| `[session]` | 会话管理（chat manager / persistence） |
-| `[db]` | DB 层（repo / engine） |
-| `[llm]` | LLM 调用层 |
-
-示例：`[retrieval] search start query="腾讯2024年报" kb_id=k1 top_k=8`
+**格式准绳**：统一格式（行模板 / 前缀表 / 值引号与 JSON 转义 / 事件命名 / query 完整记录 / helper / 固定事件行）以 `CLAUDE.md`「日志格式（统一）」为准——新增或修改日志先对照该节。本节保留前缀表之外的深度语义。
 
 ### 级别语义
 
@@ -65,7 +51,11 @@ trace_id 由 `src/core/logging.py` 的 patcher 自动注入日志行第三段，
 
 ### 检索行为信号日志
 
-前缀 `retrieval_signal:`，信号类型：`reretrieve` / `to_web` / `abstain_after_retrieve` / `unsupported` / `cited` / `empty_result`。格式：`retrieval_signal: signal={} query="{}" iteration={} kb_id={} result_count={} ...`。经 `src/core/logging.py` 的 `retrieval_signal()` helper 统一输出（query 截断 40），不在埋点处手拼。
+前缀 `retrieval_signal:`，信号类型：`reretrieve` / `to_web` / `abstain_after_retrieve` / `unsupported` / `cited` / `empty_result`。行格式与字段见 `CLAUDE.md`「日志格式（统一）」固定事件行，经 `src/core/logging.py` 的 `retrieval_signal()` helper 统一输出（query 完整记录 + JSON 转义），不在埋点处手拼。
+
+### 检索重放上下文
+
+每次 `retrieve_kb` 执行经 `log_retrieve_replay()` 落一条 `[retrieval] retrieve replay` 事件行（query 全文 / kb_id / iteration / top_k / dedup_max_per_doc / hybrid / rerank），是该 trace 离线重放（`replay_trace` CLI）的机器输入。
 
 ## API 路由类型标注
 
