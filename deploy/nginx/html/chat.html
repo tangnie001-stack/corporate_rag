@@ -435,6 +435,9 @@
     display: inline-block; width: 6px; height: 6px; border-radius: 50%;
     background: var(--primary); animation: pulse 1.2s ease-in-out infinite;
   }
+  .status-detail {
+    opacity: 0.75; font-size: 0.9em; margin-left: 4px;
+  }
   @keyframes pulse {
     0%, 100% { opacity: 0.4; }
     50% { opacity: 1; }
@@ -970,10 +973,14 @@ function renderUserBubble(text) {
   scrollToBottom();
 }
 
-function renderStatusTag(stage, message) {
+function renderStatusTag(stage, message, detail) {
   const div = document.createElement('div');
   div.className = 'status-tag';
-  div.innerHTML = `<span class="status-dot"></span> ${escapeHtml(message)}`;
+  let text = escapeHtml(message);
+  if (detail) {
+    text += ' <span class="status-detail">' + escapeHtml(detail) + '</span>';
+  }
+  div.innerHTML = `<span class="status-dot"></span> ${text}`;
   chatContainer.appendChild(div);
   scrollToBottom();
 }
@@ -1534,7 +1541,7 @@ function buildStreamHandlers() {
       try {
         state.lastSeq = (data.seq !== undefined) ? data.seq : state.lastSeq;
         closeThinkRow();
-        renderStatusTag(data.stage, data.message);
+        renderStatusTag(data.stage, data.message, data.detail);
       } catch (err) { /* ignore */ }
     },
     reasoning: (data) => {
