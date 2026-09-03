@@ -2,12 +2,12 @@
 
 ## 1. C1-5 verify 包化（地基，纯重构先行，独立 commit）
 
-- [x] 1.1 `verify_node.py` → `src/agents/graph/verify/` 包：拆分 node/checks/guardrails/ask_confirm/faithfulness/pipeline
-- [x] 1.2 按两态分派管道：态 A `[web_citation_guard]` / 态 B `[completeness, kb_guardrail, faithfulness]`；workflow.py 导入名 `verify_node` 不变
-- [x] 1.3 校验器管道执行器 pipeline.py：遍历 CHECKS 短路返回，校验器返回 None=通过 / dict=决策（注：run_pipeline 目前无调用方，node.py 手动编排，见 report Concerns）
+- [x] 1.1 `verify_node.py` → `src/agents/graph/verify/` 包：拆分 node/checks/guardrails/ask_confirm/faithfulness/regen_decision（注：曾含 pipeline.py 执行器，最终评审删除，见 1.3）
+- [x] 1.2 两态校验编排：态 A `web_citation_guard` / 态 B `completeness → decide_missing_web → kb_citation_guardrail → faithfulness`，由 verify_node 按态直接编排；workflow.py 导入名 `verify_node` 不变
+- [x] 1.3 ~~校验器管道执行器 pipeline.py：遍历 CHECKS 短路返回，校验器返回 None=通过 / dict=决策~~（最终评审已删：与实际编排不符——decide_missing_web 需 required/missing 额外参数、faithfulness 是终端 annotator 不产 regen 决策，执行器无调用方属死代码；现由 verify_node 直接编排，见 design.md D1 实现注）
 - [x] 1.4 纯重构回归：全量 pytest 通过，行为零变化（此时不加新功能，只搬代码）
 - [x] 1.5 **测试 import 兼容**：`verify/__init__.py` re-export `verify_node`/`faithfulness_check`/`_ask_web_confirm` 等，`tests/agents/graph/test_verify_node.py` 顶层 import 与 monkeypatch 路径不变（22 个用例零改或最小改）
-- [x] 1.6 `verify/` 包单测（管道短路、两态分派）（注：两态分派由 node 层用例覆盖；run_pipeline 无直接单测，见 report Concerns）
+- [x] 1.6 `verify/` 包单测（校验模块直连、两态分派）（注：两态分派与各校验模块由 node 层用例覆盖；pipeline.py 执行器已删，无相关单测）
 
 ## 2. C1-1 kb_router 下移（动图删节点）
 

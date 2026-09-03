@@ -23,7 +23,7 @@ P0 遗留三问题：verify regen×迭代耦合（空白答案 bug）、kb_route
 - verify regen 与主循环迭代上限解耦（修复空白答案 bug）
 - kb_router 节点下移，`_resolved_kb_ids` 退役，KBRouter 死代码清理
 - KB 答案强制溯源（态 B 无 [n] → 引导重生成）
-- verify_node.py 结构重组（两态两管道 + 校验器管道），满足 400 行红线
+- verify_node.py 结构重组（verify 包化，两态校验流程由 verify_node 按态直接编排），满足 400 行红线
 
 **Non-Goals:**
 - 不消费 judge `_unsupported` 打回修订（忠实度修订驱动留 P2）
@@ -34,27 +34,36 @@ P0 遗留三问题：verify regen×迭代耦合（空白答案 bug）、kb_route
 
 ## Decisions
 
-### D1: verify 结构 = 两态两管道 + 校验器管道（方案 A+）
+### D1: verify 结构 = 两态校验流程，verify_node 按态直接编排各校验模块
 
-**关键修正**：态 A 与态 B 是**两套不同的校验管道**，不是一套 CHECKS 硬塞。verify 包化后：
+**关键修正**：态 A 与态 B 是**两套不同的校验流程**，不是一套 CHECKS 硬塞。verify 包化后：
 
 ```
 verify/ 包
-├── node.py           verify_node 主函数：按 kb 分派两态管道，<80 行
+├── node.py           verify_node 主函数：按 kb 分派两态流程，<80 行
 ├── checks.py         completeness（按年份覆盖判定）/ extract_years
 ├── guardrails.py     web_citation_guard（态A）/ kb_citation_guardrail（态B）
+├── regen_decision.py decide_missing_web（态B 缺失决策化：询问→决策 regen/直通）
 ├── ask_confirm.py    _ask_web_confirm（态B 询问联网）
-├── faithfulness.py   judge 调用（态B 最终答案）
-└── pipeline.py       校验器管道执行器（遍历 CHECKS，短路返回）
+└── faithfulness.py   judge 调用（态B 最终答案，仅标记不驱动流程）
 
-verify_node 逻辑：
-  if 态 A（无 kb）:  pipeline = [web_citation_guard]
-  if 态 B（有 kb）:  pipeline = [completeness, kb_citation_guardrail, faithfulness]
-  遍历 pipeline → 任一校验器返回决策（regen/直通）→ 短路
-  共享: regen 预算 _verify_regenerations（C1-2）在两管道都生效
+verify_node 编排：
+  if 态 A（无 kb）:  仅 web_citation_guard，通过即直通 format
+  if 态 B（有 kb）:  completeness 缺失 → decide_missing_web；
+                     通过 → kb_citation_guardrail → faithfulness_check
+  共享: regen 预算 _verify_regenerations（C1-2）在两态都生效
 ```
 
-**理由**：态 A 的 verify 语义是"联网引用完整性"（claude-code 式轻量自检由 prompt 覆盖），态 B 是"知识库覆盖性 + 溯源 + 忠实度"——职责本质不同，必须双管道。之前单 CHECKS 设计漏了态 A，本次修正。
+**实现注（2026-09-03 final review）**：早期方案规划的"校验器管道执行器"（pipeline.py：
+遍历校验器列表，None=通过 / dict=决策，短路返回）在最终评审中删除——真实编排是异构
+直连：completeness 缺失分支的决策化需要 required/missing 额外参数，faithfulness 是
+终端 annotator（输出 `_unsupported` 不驱动 regen），都套不进 None=通过/dict=决策 的
+统一协议，pipeline.py 自始至终无调用方，属死代码（YAGNI）。现行形态即上表：
+verify_node 直接编排各态校验模块（web_citation_guard / decide_missing_web /
+kb_citation_guardrail / faithfulness）。若 P2 校验器数量增长使统一协议执行器重新
+有价值，可再评估引入。
+
+**理由**：态 A 的 verify 语义是"联网引用完整性"（claude-code 式轻量自检由 prompt 覆盖），态 B 是"知识库覆盖性 + 溯源 + 忠实度"——职责本质不同，必须按态分派。之前单 CHECKS 设计漏了态 A，本次修正。
 
 ### D2: verify regen 决策化 = 解耦主循环计数 + 依据 agent 动作决策是否重试
 
@@ -152,7 +161,7 @@ state.py:      删 _resolved_kb_ids 字段 + LangGraphNode.KbRouter
 | kb 判定 | `not state.kb_id` → 纯对话（D4 换源后） | `state.kb_id` 非空 → 检索该库 |
 | retrieve_kb | 空返回（KB=RAG 开关，工具内已实现） | 真检索（dense+bm25→rrf→dedup→rerank） |
 | 时间解析 | 不触发（kb_ids 空短路） | 正则粗筛 → LLM 年份解析 |
-| verify 管道 | `[web_citation_guard]`：调过 search_web 但答案无 [n] → 引导补标注重生成 | `[completeness → kb_citation_guardrail → faithfulness]`（D1） |
+| verify 编排 | web_citation_guard：调过 search_web 但答案无 [n] → 引导补标注重生成 | completeness 缺失 → decide_missing_web 决策；通过 → kb_citation_guardrail → faithfulness（D1，node 按态直连） |
 | 完整性 | 不校验（prompt 行为准则覆盖） | 缺失年份 → 询问联网（web_confirmed 单轮记住） |
 | KB 溯源护栏 | 不适用（无 KB context） | D3：有 kb context 无 [n] → 引导（含排除条件） |
 | 忠实度 judge | 不跑 | 最终答案跑 judge（_unsupported 仅记录，修订 P2） |
@@ -163,5 +172,5 @@ state.py:      删 _resolved_kb_ids 字段 + LangGraphNode.KbRouter
 
 - [regen 预算=2 可能不够（联网补一轮 + 护栏补一轮正好耗尽，judge 修订无余量）] → 忠实度修订留 P2 独立预算；若手测发现预算紧张，const 调整即可
 - [KB 护栏误伤"检索了但认为无关"场景] → D3 排除条件（非拒答 ∧ 非"知识库未覆盖"），最坏"该引导没引导"比"强灌无关引用"安全
-- [两态双管道增加 verify 组织复杂度] → 校验器管道（pipeline.py）统一执行语义，新增校验器=往对应管道加函数，主函数不膨胀
+- [两态校验增加 verify 组织复杂度] → 各校验模块独立、由 verify_node 按态直连编排（统一执行器协议已评估删除，见 D1 实现注）；新增校验逻辑=往对应模块加函数或加条件分派，主函数守住红线
 - [verify_node.py 拆包影响测试] → 纯重构零行为变化先行（C1-5 独立 commit + 全量回归），后续改动基于稳定地基
