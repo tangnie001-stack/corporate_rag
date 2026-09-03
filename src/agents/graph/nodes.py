@@ -11,6 +11,7 @@ from loguru import logger
 
 from src.agents.graph.state import AgentState
 from src.config.const import SSEInteractionTexts
+from src.core import logging as core_logging
 
 # 引用片段窗口字符数：过长截取内容不可读，过短丢失上下文
 _SNIPPET_WINDOW = 200
@@ -100,4 +101,19 @@ def format_node(state: AgentState) -> dict:
             }
         )
     logger.info("format_node: citations={}", len(citations))
+    # 对照基线信号：正常引用（kind 区分 kb/web），供检索质量诊断对照；
+    # 态A/态B 只要走到正常引用即产出，故不按 kb_id 区分（保持空串）
+    if hasattr(state, "query"):
+        query_text = state.query
+    else:
+        query_text = ""
+    kinds = {c.get("kind", "kb") for c in citations} or {"kb"}
+    core_logging.retrieval_signal(
+        "cited",
+        query_text,
+        0,
+        kb_id="",
+        citation_count=len(citations),
+        kind="|".join(sorted(kinds)),
+    )
     return {"citations": citations}

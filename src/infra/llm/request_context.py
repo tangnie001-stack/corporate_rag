@@ -41,6 +41,7 @@ class RequestContext:
     web_count: int = (
         0  # search_web 调用计数，范围：请求内累积，用途：限制单轮联网搜索次数上限
     )
+    retrieve_call_seq: int = 0  # 同 turn retrieve_kb 调用次数（来源：retrieve_kb 入口自增；范围：请求内累积；用途：reretrieve 换词信号判定（call_seq >= 2））
     temporal_years: list[int] = field(
         default_factory=list
     )  # 时间解析出的要求覆盖年份（来源：时间解析层；用途：验证循环完整性验收标准）
@@ -49,6 +50,7 @@ class RequestContext:
     )  # 知识库缺失年份（来源：时间解析比对；用途：询问用户是否联网的依据）
     web_confirmed: bool = False  # 本轮请求内已确认联网（来源：验证循环询问用户后置位；用途：本轮后续缺失年份不再询问；跨轮持久化留 P1）
     verify_ask_count: int = 0  # verify"是否联网"询问计数（来源：verify 节点自增；用途：每轮最多询问 1 次，独立于 ask_count）
+    web_guided: bool = False  # 本轮 verify 指派联网检索标记（来源：verify 节点注入联网指引时置位（Task 2）；范围：请求内有效；用途：search_web 据此排除 verify 指派联网的 to_web 误报）
     temporal_parsed: bool = False  # 本轮是否已完成时间解析（来源：retrieve_kb 时间解析块置位；用途：turn 内最多解析一次，避免重复 DB+LLM 且不覆盖已置位约束）
 
 

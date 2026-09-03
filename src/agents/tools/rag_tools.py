@@ -20,7 +20,7 @@ from src.agents.graph.state import AgentState
 from src.agents.tools.ask_tools import AskQuestion, AskUserArgs, ask_user
 from src.config import TOP_K_RERANK, settings
 from src.config.const import ASK_USER_TIMEOUT, RERANK_TIMEOUT
-from src.core.logging import log_event
+from src.core import logging as core_logging
 from src.infra.db.vector_store import VectorStore
 from src.infra.llm.request_context import current_request_ctx
 from src.infra.search.bm25_index import BM25Index
@@ -98,9 +98,14 @@ def make_rag_tools(
         else:
             kb_id = ""
 
+        # 同 turn 检索调用计数：reretrieve 换词信号判定用（retrieve_call_seq >= 2）。
+        # ctx 为 None（无请求上下文）时不计数——计数只为信号服务，无 ctx 即无消费方
+        ctx = current_request_ctx.get()
+        if ctx is not None:
+            ctx.retrieve_call_seq += 1
+
         # 时间结构化约束（grilling 决策）：正则粗筛命中才解析；结果写入 RequestContext。
         # turn 内最多解析一次：首次解析成功后置 temporal_parsed，后续调用跳过 DB+LLM 重复执行
-        ctx = current_request_ctx.get()
         if (
             settings.TEMPORAL_PARSE_ENABLED
             and ctx is not None
@@ -166,7 +171,23 @@ def make_rag_tools(
             iteration = state._agent_iterations
         else:
             iteration = 0
-        log_event(
+
+        # 检索行为信号（态 B 专属缺陷诊断）：独立信号行，不经 log_event 拼装；
+        # 态 A（kb_id 为空）未检索不产任何缺陷信号
+        if kb_id and not results:
+            core_logging.retrieval_signal(
+                "empty_result", query, iteration, kb_id=kb_id, result_count=0
+            )
+        if kb_id and ctx is not None and ctx.retrieve_call_seq >= 2:
+            core_logging.retrieval_signal(
+                "reretrieve",
+                query,
+                iteration,
+                kb_id=kb_id,
+                call_seq=ctx.retrieve_call_seq,
+                result_count=len(results),
+            )
+        core_logging.log_event(
             "retrieval",
             "retrieve_kb done",
             iteration=iteration,

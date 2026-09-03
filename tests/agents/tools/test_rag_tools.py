@@ -283,6 +283,80 @@ async def test_retrieve_kb_temporal_parse_once_per_turn(retrieve_kb, monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_retrieve_kb_emits_empty_result_signal(monkeypatch):
+    """态 B 检索空 → 产 empty_result 信号（检索行为缺陷信号）。"""
+    captured: dict = {}
+
+    def _fake_signal(signal, query, iteration, **fields):
+        """mock retrieval_signal：捕获调用参数。"""
+        captured["signal"] = signal
+        captured["query"] = query
+        captured["iteration"] = iteration
+        captured["fields"] = fields
+
+    monkeypatch.setattr("src.core.logging.retrieval_signal", _fake_signal)
+
+    async def fake_search(query, kb_id, vector_store, bm25):
+        """mock search：返回空列表（检索空）。"""
+        return []
+
+    monkeypatch.setattr(retrieval, "search", fake_search)
+    monkeypatch.setattr(retrieval, "rerank_results", lambda q, r, rk: [])
+
+    tool = make_rag_tools(
+        vector_store=cast(VectorStore, None),
+        bm25=None,
+        reranker=None,
+        prompt_manager=None,
+    )[0]
+    ctx = RequestContext(session_id="s1")
+    token = current_request_ctx.set(ctx)
+    try:
+        out = await tool.ainvoke({"query": "毛利率", "state": _new_state()})
+        assert out == ""  # 空检索返回空串
+        assert captured.get("signal") == "empty_result"
+        assert captured.get("iteration") == 0
+        assert captured["fields"]["kb_id"] == "kb1"
+        assert captured["fields"]["result_count"] == 0
+    finally:
+        current_request_ctx.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_retrieve_kb_no_signal_unbound(monkeypatch):
+    """态 A（未绑定 KB）检索 → 不产 empty_result/reretrieve（设计行为非缺陷）。"""
+    captured: dict = {}
+
+    def _fake_signal(signal, query, iteration, **fields):
+        """mock retrieval_signal：捕获调用参数。"""
+        captured["signal"] = signal
+
+    monkeypatch.setattr("src.core.logging.retrieval_signal", _fake_signal)
+
+    async def fake_search(query, kb_id, vector_store, bm25):
+        """mock search：记录调用（态 A 不应触发搜索）。"""
+        return []
+
+    monkeypatch.setattr(retrieval, "search", fake_search)
+    monkeypatch.setattr(retrieval, "rerank_results", lambda q, r, rk: [])
+
+    tool = make_rag_tools(
+        vector_store=cast(VectorStore, None),
+        bm25=None,
+        reranker=None,
+        prompt_manager=None,
+    )[0]
+    ctx = RequestContext(session_id="s1")
+    token = current_request_ctx.set(ctx)
+    try:
+        state = AgentState.make_initial_state("s1", "", "财务年报毛利率多少", [])
+        await tool.ainvoke({"query": "毛利率", "state": state})  # kb_id="" → 态 A
+        assert "signal" not in captured  # 未产缺陷信号
+    finally:
+        current_request_ctx.reset(token)
+
+
+@pytest.mark.asyncio
 async def test_retrieve_kb_temporal_parse_disabled(retrieve_kb, monkeypatch):
     """TEMPORAL_PARSE_ENABLED=False：含时间词也跳过解析，temporal_years / missing_years 保持空。"""
     from src.agents.tools import rag_tools
