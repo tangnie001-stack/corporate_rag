@@ -14,7 +14,7 @@
 ## 3. 质量门禁
 
 - [x] 3.1 `pytest tests/ -v` 全量通过；ruff / pyright 无新增 error
-- [ ] 3.2 端到端：跑一条绑 KB query，SSE 流里 status 事件带 detail；刷新后 resume 回放 detail 仍在 —— **待真实环境（绑 KB + 真 LLM）人工验证**（本收尾任务未运行：需真实业务 KB 与真 LLM 凭据；前端渲染已用受控 SSE 注入做过 DOM 级验证，见 task-2-report）
+- [ ] 3.2 端到端：跑一条绑 KB query，SSE 流里 status 事件带 detail；刷新后 resume 回放 detail 仍在 —— **待真实环境（绑 KB + 真 LLM）人工验证**（本收尾任务未运行：需真实业务 KB 与真 LLM 凭据；前端渲染已用受控 SSE 注入做过 DOM 级验证，见 task-2-report）→ 承接: e2e-playwright-regression（确定性回归层）
 - [x] 3.3 api_contract.md 补 SSEStatusEvent.detail 说明（历史回放/前端对接用）
 
 ---

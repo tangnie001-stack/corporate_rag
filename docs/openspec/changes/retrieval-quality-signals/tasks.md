@@ -29,7 +29,7 @@
 ## 4. 质量门禁
 
 - [x] 4.1 `pytest tests/ -v` 全量通过；ruff / pyright 无新增 error
-- [ ] 4.2 端到端：跑一条绑 KB query，日志出现对应信号 + trace_id 可回放 —— **待真实 KB + 行为信号日志后验证**（无真实业务 KB、live 日志无 retrieval_signal，未运行）
+- [ ] 4.2 端到端：跑一条绑 KB query，日志出现对应信号 + trace_id 可回放 —— **待真实 KB + 行为信号日志后验证**（无真实业务 KB、live 日志无 retrieval_signal，未运行）→ 承接: e2e-playwright-regression（信号冒烟，受控 KB + 日志断言）
 - [x] 4.3 契约同步：api_contract.md / glossary.md（如新增 RETRIEVAL_MAX_PER_DOC 配置说明）
 
 ---

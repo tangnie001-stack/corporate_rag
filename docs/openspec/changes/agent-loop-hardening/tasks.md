@@ -33,13 +33,13 @@
 - [x] 4.2 `const.py` 加 KB citation marker（区分 web 版）；防重复注入查重复用
 - [x] 4.3 加入态 B 管道（completeness 通过后、faithfulness 前）
 - [x] 4.4 单测：触发引导 / 拒答不触发 / "知识库未覆盖"不触发 / 防重复注入（注：触发/排除/带引用通过三组单测覆盖；防重复注入为 already_guided 代码实现，无直接单测，见 report Concerns）
-- [ ] 4.5 回归：前端 KB 答案带 [n] 后引用横条正常 —— **待人工验证**（需前端 + 真实 KB 文档，本任务未运行）
+- [ ] 4.5 回归：前端 KB 答案带 [n] 后引用横条正常 —— **待人工验证**（需前端 + 真实 KB 文档，本任务未运行）→ 承接: e2e-playwright-regression（确定性回归层，跑通后闭环）
 
 ## 5. 质量门禁
 
 - [x] 5.1 `pytest tests/ -v` 全量通过；`ruff check .` 无错误；`pyright src/` 不新增 error
 - [x] 5.2 契约同步：api_contract.md（如有公共方法签名变化）、glossary.md（如有新术语）、rules.md 无冲突
-- [ ] 5.3 手动验证：绑定 KB 无 [n] 答案被引导补标；未绑定 KB 纯对话不跑 judge；regen 后 search_web 完整执行不空白 —— **待人工验证**（需真实 KB 数据 + 前端，本任务未运行，见 report「Manual validation」）
+- [ ] 5.3 手动验证：绑定 KB 无 [n] 答案被引导补标；未绑定 KB 纯对话不跑 judge；regen 后 search_web 完整执行不空白 —— **待人工验证**（需真实 KB 数据 + 前端，本任务未运行，见 report「Manual validation」）→ 承接: e2e-playwright-regression（行为冒烟层，judge 断言待 logging 3.2）
 
 ---
 ### 勾选说明（Task 5 收尾）
