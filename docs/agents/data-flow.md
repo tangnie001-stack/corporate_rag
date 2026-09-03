@@ -14,26 +14,26 @@
 ## 链路 2：用户问答 → 检索 → 生成 ★
 
 ```
-用户提问 → SSE 建立 → kb_router 选库 → agent 循环（检索 / 追问 / 生成）
+用户提问 → SSE 建立 → agent 循环（检索 / 追问 / 生成；kb_id 由前端绑定，空 = 纯对话不检索）
 → 引用高亮(citations) → 对话历史持久化(Redis + MySQL)
 ```
 
-入口: `GET /api/chat/stream?session_id=&kb_id=&query=`
+入口: `POST /api/chat/stream`（body: `ChatStreamRequest`：session_id / kb_id / query）
 输出: SSE 事件流 `status → token → citation → model_info → done`（澄清时含 `ask_user`，拒答时含 `abstention`）
 
 ### 字段级生产-消费矩阵（StateGraph）
 
-节点通过共享 `AgentState` 间接通信：每个节点消费若干字段、生产若干字段，均以
-`LangGraphNode.*` 常量（定义于 `src/agents/graph/state.py`）作为 key。字段名、
-生产侧（`nodes.py` / `query_router.py`）与消费侧（`agent_service.py`）必须一致，
-否则运行期报错或静默取空。
+节点通过共享 `AgentState` 间接通信：每个节点消费若干字段、生产若干字段，字段 key 定义于
+`src/agents/graph/state.py`（`format` 节点名取 `LangGraphNode.Format.NAME`，其余节点在
+`workflow.build_graph` 以字符串注册）。字段名生产侧（`nodes.py` / `agent_node.py`）与
+消费侧（`agent_service.py`）必须一致，否则运行期报错或静默取空。
 
 | 节点 | 消费字段 | 生产字段 |
 |---|---|---|
-| `kb_router` | `kb_id`, `query` | `_resolved_kb_ids` |
-| `agent` | `messages`, `_history`, `_resolved_kb_ids` | `messages`（LLM 输出含 tool_calls）, `_agent_iterations` |
-| `agent_tools` | `messages`（末条 tool_calls） | `messages`（ToolMessage 追加） |
+| `agent` | `messages`, `_history`, `kb_id` | `messages`（LLM 输出含 tool_calls）, `_agent_iterations` |
+| `tools` | `messages`（末条 tool_calls） | `messages`（ToolMessage 追加） |
 | `agent_finalize` | `messages` | `answer`, `tool_contexts` |
+| `verify` | `answer`, `kb_id`, `tool_contexts` | `answer`, `_needs_regenerate`, `_unsupported` |
 | `format` | `answer`, `tool_contexts` | `citations` |
 
 工具（retrieve_kb / ask_user）不写 state：检索上下文累积到 `RequestContext.tool_contexts`（contextvar），由 `agent_finalize` 读入 `state.tool_contexts`；ask_count / 澄清通道 / abort 信号均经 contextvar 传递。

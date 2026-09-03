@@ -650,35 +650,37 @@ name = f"kb_{kb_id.replace('-', '')}"
 
 ### 5.1 节点定义与输出字段
 
-节点名称和输出字段常量定义在 `src/agents/graph/state.py` 的 `LangGraphNode` 类中。
+节点注册名在 `workflow.build_graph` 以字符串给出（agent / tools / agent_finalize / verify / format），
+`LangGraphNode.Format.NAME` 为 format 节点的常量名。
 
 | 节点 | 节点名 (NAME) | 输出字段 | 说明 |
 |------|--------------|---------|------|
-| **kb_router** | `"kb_router"` | `_resolved_kb_ids: list[str] \| None` | KB 路由穿透/空值不检索 |
-| **agent** | `"agent"` | `messages`, `_agent_iterations` | agent 模型节点：bind_tools 调 LLM，可发起工具调用（retrieve_kb / ask_user / search_web） |
-| **agent_tools** | `"agent_tools"` | `messages`（ToolMessage 追加） | ToolNode 执行工具，错误回喂；工具集：`retrieve_kb`（KB 混合检索）/ `search_web`（Tavily 联网搜索兜底，KB 不达标时补充知识库外事实）/ `ask_user`（澄清追问） |
+| **agent** | `"agent"` | `messages`, `_agent_iterations` | 图入口（`entry_point`）。bind_tools 调 LLM，可发起工具调用（retrieve_kb / ask_user / search_web） |
+| **tools** | `"tools"` | `messages`（ToolMessage 追加） | ToolNode 执行工具，错误回喂；工具集：`retrieve_kb`（KB 混合检索）/ `search_web`（Tavily 联网搜索兜底，KB 不达标时补充知识库外事实）/ `ask_user`（澄清追问） |
 | **agent_finalize** | `"agent_finalize"` | `answer`, `tool_contexts` | 循环结束提取末次 AIMessage content → `answer`，读入 `tool_contexts` |
-| **verify** | `"verify"` | `answer`, `_needs_regenerate`, `_unsupported` | 验证循环节点：完整性校验（缺失年份→询问是否联网/注入 SystemMessage 回 agent 重生成）；最终答案跑忠实度 judge（`_unsupported` 仅标记，P1 输出护栏消费） |
+| **verify** | `"verify"` | `answer`, `_needs_regenerate`, `_unsupported` | 验证节点，按会话 KB 绑定分派两态：态 A（未绑定 KB，纯对话）仅走联网引用标注引导；态 B（绑定 KB）走年份完整性 → 缺失按 agent 上轮 `search_web` queries 决策（未调过/带漏 → 注入指引 regen；带全仍缺 → 标注"知识库与网络均未覆盖"直通）→ KB 溯源护栏（有 kb context 无 [n] → 引导补标 regen）→ 忠实度 judge（`_unsupported` 仅标记，P1 输出护栏消费） |
 | **format** | `"format"` | `citations: list[dict]` | 去重引用列表 |
 
 ### 5.2 agent 循环（model ↔ tools 条件循环）
 
-图结构为 `kb_router → agent → (agent_tools | agent_finalize) → verify → (format | agent)`：
+图结构为 `agent → (tools | agent_finalize) → verify → (format | agent)`（无独立路由节点，
+KB 绑定在请求层已定：`kb_id` 非空检索该库，空串 = 未绑定纯对话不检索）：
 
 ```
-kb_router → agent（LLM + bind_tools）
-              │ 有 tool_calls 且未超限
-              ▼
-         agent_tools（ToolNode 执行 retrieve_kb / ask_user / search_web）
-              │ 工具结果回填 messages
-              ▼
-            agent（下一轮 LLM）
-              │ 无 tool_calls / 达迭代上限
-              ▼
-         agent_finalize（提取 answer + tool_contexts）
-              │ verify：完整性通过 → format；缺失年份 → 询问联网/注入重生成回 agent
-              ▼
-            format（引用去重）
+agent（LLM + bind_tools）← entry_point
+      │ 有 tool_calls 且未超限
+      ▼
+ tools（ToolNode 执行 retrieve_kb / ask_user / search_web）
+      │ 工具结果回填 messages
+      ▼
+    agent（下一轮 LLM）
+      │ 无 tool_calls / 达迭代上限
+      ▼
+ agent_finalize（提取 answer + tool_contexts）
+      │ verify：态 A 联网引用引导 / 态 B 完整性+KB 溯源+忠实度
+      │ 校验通过 → format；_needs_regenerate=True → 回 agent
+      ▼
+    format（引用去重）
 ```
 
 - 迭代上限 `MAX_AGENT_ITERATIONS`（`src/config/const.py`），超限强制收尾
@@ -695,11 +697,11 @@ kb_router → agent（LLM + bind_tools）
 | `session_id` / `kb_id` / `query` | str | 输入：会话 / 知识库 / 用户问题 |
 | `messages` | `list[BaseMessage]` | 模型可见消息（`add_messages` 追加语义） |
 | `tool_contexts` | `list[RAGContext]` | retrieve_kb 累积检索上下文（引用溯源） |
-| `_agent_iterations` | int | 循环迭代计数（护栏） |
+| `_agent_iterations` | int | agent 主循环迭代计数（护栏，只管 agent↔tools，verify 不复用） |
 | `_max_agent_iterations` | int | 迭代上限（默认 `MAX_AGENT_ITERATIONS`） |
+| `_verify_regenerations` | int | verify 重生成保险丝计数（上限 `MAX_VERIFY_REGENERATIONS`，正常被决策化提前终止） |
 | `answer` | str | LLM 生成的完整回答 |
 | `citations` | list[dict] | 去重引用列表 |
-| `_resolved_kb_ids` | list[str] \| None | kb_router 路由结果（None = 未路由/降级） |
 | `_history` | list[ChatMessage] | 对话历史（初始注入数据源，agent 节点入口截断） |
 
 ### 5.4 `RAGContext` 数据类
@@ -732,16 +734,15 @@ kb_router → agent（LLM + bind_tools）
 
 ```
 用户提问 "2024年公司营收多少" (query)
-  → POST /api/chat/stream（body: ChatStreamRequest）
-    → kb_router: 解析 _resolved_kb_ids（空 kb_id → 空列表，不检索）
-    → agent 循环:
+  → POST /api/chat/stream（body: ChatStreamRequest，kb_id = 前端绑定；空 kb_id → 纯对话不检索）
+    → agent 循环（图 entry 直连 agent，无路由节点）:
         1. agent: LLM 思考 → 调用 retrieve_kb
-        2. agent_tools: 检索（hybrid Dense + BM25 + RRF 融合 → rerank 精排 → format_context）
+        2. tools: 检索（hybrid Dense + BM25 + RRF 融合 → rerank 精排 → format_context）
         3. agent: 基于检索上下文生成回答（含引用编号 [n]）
            （检索不达标时可在循环内调用 search_web 联网兜底，产出 kind=web 引用）
            （信息不足时可在循环内调用 ask_user 追问，见 6.2）
     → agent_finalize: 提取 answer + tool_contexts
-    → verify: 完整性校验（缺失年份→询问是否联网/注入重生成回 agent）；最终答案跑忠实度 judge
+    → verify: 态 A（未绑定 KB）联网引用引导；态 B（绑定 KB）完整性 → 缺失决策化（未调 search_web/带漏 → regen；带全仍缺 → 标注直通）→ KB 溯源护栏 → 忠实度 judge；_needs_regenerate=True → 回 agent
     → format_node: 去重引用列表
     → SSE 事件流推送至前端:
         event: status (agent, "正在思考...")
@@ -760,9 +761,9 @@ kb_router → agent（LLM + bind_tools）
 ```
 用户提问 "营收多少"（缺关键信息，agent 判断需澄清）
   → POST /api/chat/stream（body: ChatStreamRequest）
-    → kb_router → agent 循环:
+    → agent 循环:
         1. agent: LLM 判断信息不足 → 调用 ask_user
-        2. agent_tools: ask_user 推送问题 → SSEAskUserEvent，挂起等待（ASK_USER_TIMEOUT）
+        2. tools: ask_user 推送问题 → SSEAskUserEvent，挂起等待（ASK_USER_TIMEOUT）
         3. 前端 composer 渲染问题表单（输入区接管），用户提交 POST /api/chat/clarify-answer
         4. 答案 resolve 挂起 Future → 作为工具结果回喂 → 同一 turn 继续
     → agent: 基于答案 + 检索上下文生成回答
