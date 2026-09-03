@@ -129,6 +129,31 @@ def _is_abstention(state: AgentState) -> bool:
     return has_abstention_marker and not has_citation_marker
 
 
+def _tool_detail_from_input(item: StreamEvent | dict, key: str) -> str | None:
+    """从 LangGraph on_tool_start 事件的 data.input 提取工具入参为可读 detail。
+
+    Args:
+        item: astream_events 事件 dict（ToolStart 事件，含 data.input 入参）
+        key: 要展示的入参键（retrieve_kb→"query"；search_web→"queries"）
+
+    Returns:
+        detail 字符串（如 'query=腾讯2024年报' / 'queries=["腾讯 2023 年报", ...]'）；
+        input 缺失或 key 不在 input 时返回 None
+    """
+    data = item.get(LangGraphKey.DATA) or {}
+    tool_input = data.get("input") or {}
+    if not isinstance(tool_input, dict):
+        return None
+    value = tool_input.get(key)
+    if value is None:
+        return None
+    if isinstance(value, list):
+        shown = [str(v)[:40] for v in value]
+        return f"{key}={shown!r}"
+    text = str(value)[:40]
+    return f"{key}={text}"
+
+
 def _convert_event(
     item: _QueueItem, capture: _StreamCapture | None = None
 ) -> list[SSEEvent]:
@@ -143,7 +168,8 @@ def _convert_event(
       → SSETokenEvent（agent 节点对 LLM 的流式 token）；chunk 带
       additional_kwargs.reasoning_content 时 → SSEReasoningDeltaEvent（思考增量）
       on_chat_model_end（metadata.langgraph_node == "agent"）→ 捕获 model_used 到 capture
-      on_tool_start name == "retrieve_kb" → SSEStatusEvent 检索中；name == "ask_user" → 不发
+      on_tool_start name == "retrieve_kb" → SSEStatusEvent 检索中（detail 携带入参 query）；
+      name == "ask_user" → 不发
       on_tool_end name == "retrieve_kb" → SSEStatusEvent 检索完成
       on_chain_end name == "format" → output.citations 逐个转 SSECitationEvent
       on_chain_end name == "agent_finalize" → 捕获最终 answer/tool_contexts 到 capture
@@ -204,17 +230,21 @@ def _convert_event(
 
     if kind == LangGraphEvent.TOOL_START:
         if name == "search_web":
+            detail = _tool_detail_from_input(item, "queries")
             return [
                 SSEStatusEvent(
                     SSEInteractionTexts.STAGE_WEB_SEARCH,
                     SSEInteractionTexts.WEB_SEARCH_STATUS_START,
+                    detail=detail,
                 )
             ]
         if name == "retrieve_kb":
+            detail = _tool_detail_from_input(item, "query")
             return [
                 SSEStatusEvent(
                     SSEInteractionTexts.STAGE_RETRIEVE,
                     SSEInteractionTexts.AGENT_STATUS_RETRIEVING,
+                    detail=detail,
                 )
             ]
         # ask_user 等其他工具不发状态（composer 接管输入区）

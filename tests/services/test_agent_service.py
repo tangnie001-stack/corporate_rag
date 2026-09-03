@@ -513,6 +513,47 @@ def test_search_web_tool_status_events():
     ]
 
 
+def test_convert_tool_start_retrieve_kb_carries_query_detail():
+    """retrieve_kb on_tool_start → SSEStatusEvent.detail 含 query。"""
+    item = {
+        LangGraphKey.EVENT: LangGraphEvent.TOOL_START,
+        LangGraphKey.NAME: "retrieve_kb",
+        LangGraphKey.DATA: {"input": {"query": "腾讯2024年报 业绩", "top_k": 8}},
+    }
+    events = _convert_event(item)
+    assert len(events) == 1
+    status = events[0]
+    assert isinstance(status, SSEStatusEvent)
+    assert status.detail is not None
+    assert "腾讯2024年报" in status.detail
+    assert "query=" in status.detail
+
+
+def test_convert_tool_start_search_web_carries_queries_detail():
+    """search_web on_tool_start → SSEStatusEvent.detail 含 queries。"""
+    item = {
+        LangGraphKey.EVENT: LangGraphEvent.TOOL_START,
+        LangGraphKey.NAME: "search_web",
+        LangGraphKey.DATA: {"input": {"queries": ["腾讯 2023 年报", "腾讯 2025 年报"]}},
+    }
+    events = _convert_event(item)
+    assert len(events) == 1
+    status = events[0]
+    assert isinstance(status, SSEStatusEvent)
+    assert status.detail is not None
+    assert "腾讯 2023 年报" in status.detail
+    assert "queries=" in status.detail
+
+
+def test_convert_tool_start_ask_user_no_detail():
+    """ask_user 等不展示的工具不填 detail（保持原行为）。"""
+    item = {
+        LangGraphKey.EVENT: LangGraphEvent.TOOL_START,
+        LangGraphKey.NAME: "ask_user",
+    }
+    assert _convert_event(item) == []
+
+
 def test_citation_event_passes_kind():
     """format 输出 citations 的 kind 透传到 SSECitationEvent。"""
     events = _convert_event(
