@@ -22,6 +22,6 @@
 ### 勾选说明（Task 3 收尾质量门禁）
 
 - 勾选项均有实现代码 / 自动化测试 / 已运行的 playwright 验证支撑；item → 证据映射见 `.superpowers/sdd/task-3-report.md`。
-- ⚠ **1.1 部分实现偏差**：`_tool_detail_from_input` 已实现 query/queries 入参要点与 40 字符截断（commit 6730d0d），但「top_k 非默认补」未实现——detail 恒为 `query=...`，未在 top_k ≠ 默认（TOP_K_RERANK=5）时附加。spec 验收场景仅要求 detail 含检索 query，此项属展示细节偏差，已在 task-3-report Concerns 记录，待后续决定是否补。
+- 1.1 已补全：retrieve_kb 的 TOOL_START 分支在入参 top_k ≠ 默认（`TOP_K_RERANK`）时于 detail 附加 ` top_k={n}`（原「部分实现偏差」消除），配套单测见 `test_agent_service.py`。
 - 1.2 走「如需」不满足分支：detail 拼装复用既有 `SSEInteractionTexts.STAGE_*/..._STATUS_*` 常量与 module 级 `_tool_detail_from_input`，未引入新硬编码文案/常量，无需改动 `src/config/const.py`。
 - 未勾项 3.2 依赖**真实绑 KB + 真 LLM**（当前收尾环境未运行全链路）；人工执行步骤见 `.superpowers/sdd/task-3-report.md`「待人工验证步骤」。

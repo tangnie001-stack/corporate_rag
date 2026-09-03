@@ -15,6 +15,7 @@ from src.agents.graph.state import (
     LangGraphKey,
     LangGraphNode,
 )
+from src.config import TOP_K_RERANK
 from src.config.const import SSEInteractionTexts
 from src.rag.context import RAGContext
 from src.services.agent_service import (
@@ -513,20 +514,35 @@ def test_search_web_tool_status_events():
     ]
 
 
-def test_convert_tool_start_retrieve_kb_carries_query_detail():
-    """retrieve_kb on_tool_start → SSEStatusEvent.detail 含 query。"""
+def test_convert_tool_start_retrieve_kb_carries_query_and_non_default_top_k():
+    """retrieve_kb on_tool_start → SSEStatusEvent.detail 含 query 与非默认 top_k。"""
     item = {
         LangGraphKey.EVENT: LangGraphEvent.TOOL_START,
         LangGraphKey.NAME: "retrieve_kb",
-        LangGraphKey.DATA: {"input": {"query": "腾讯2024年报 业绩", "top_k": 8}},
+        LangGraphKey.DATA: {"input": {"query": "腾讯2024年报 业绩", "top_k": 3}},
     }
     events = _convert_event(item)
     assert len(events) == 1
     status = events[0]
     assert isinstance(status, SSEStatusEvent)
-    assert status.detail is not None
-    assert "腾讯2024年报" in status.detail
-    assert "query=" in status.detail
+    assert status.detail == "query=腾讯2024年报 业绩 top_k=3"
+
+
+def test_convert_tool_start_retrieve_kb_omits_default_top_k():
+    """top_k 等于默认（TOP_K_RERANK）时 detail 不附加 top_k（展示冗余省略）。"""
+    item = {
+        LangGraphKey.EVENT: LangGraphEvent.TOOL_START,
+        LangGraphKey.NAME: "retrieve_kb",
+        LangGraphKey.DATA: {
+            "input": {"query": "腾讯2024年报 业绩", "top_k": TOP_K_RERANK}
+        },
+    }
+    events = _convert_event(item)
+    assert len(events) == 1
+    status = events[0]
+    assert isinstance(status, SSEStatusEvent)
+    assert status.detail == "query=腾讯2024年报 业绩"
+    assert "top_k=" not in status.detail
 
 
 def test_convert_tool_start_search_web_carries_queries_detail():

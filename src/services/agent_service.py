@@ -32,6 +32,7 @@ from src.chat.streaming import (
     _subscribe_events,
     streaming_manager,
 )
+from src.config import TOP_K_RERANK
 from src.config.const import SSEInteractionTexts
 from src.infra.db.vector_store import VectorStore
 from src.infra.llm.langfuse_tracing import LangfuseTracer
@@ -168,7 +169,7 @@ def _convert_event(
       → SSETokenEvent（agent 节点对 LLM 的流式 token）；chunk 带
       additional_kwargs.reasoning_content 时 → SSEReasoningDeltaEvent（思考增量）
       on_chat_model_end（metadata.langgraph_node == "agent"）→ 捕获 model_used 到 capture
-      on_tool_start name == "retrieve_kb" → SSEStatusEvent 检索中（detail 携带入参 query）；
+      on_tool_start name == "retrieve_kb" → SSEStatusEvent 检索中（detail 携带入参 query 及非默认 top_k）；
       name == "ask_user" → 不发
       on_tool_end name == "retrieve_kb" → SSEStatusEvent 检索完成
       on_chain_end name == "format" → output.citations 逐个转 SSECitationEvent
@@ -240,6 +241,11 @@ def _convert_event(
             ]
         if name == "retrieve_kb":
             detail = _tool_detail_from_input(item, "query")
+            tool_input = (item.get(LangGraphKey.DATA) or {}).get("input")
+            if isinstance(tool_input, dict):
+                top_k = tool_input.get("top_k")
+                if detail is not None and top_k is not None and top_k != TOP_K_RERANK:
+                    detail = f"{detail} top_k={top_k}"
             return [
                 SSEStatusEvent(
                     SSEInteractionTexts.STAGE_RETRIEVE,
