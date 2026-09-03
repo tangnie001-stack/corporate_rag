@@ -11,6 +11,7 @@ from src.config import (
     RETRY_MAX_ATTEMPTS,
     TOP_K_RERANK,
     TOP_K_RETRIEVAL,
+    settings,
 )
 from src.config.const import ENTITY_OPTIONAL_TYPES, ENTITY_TYPES
 from src.core.logging import log_event
@@ -25,28 +26,34 @@ from src.rag.context import RAGContext
 _ALL_ENTITY_KEYS: tuple[str, ...] = tuple(ENTITY_TYPES) + tuple(ENTITY_OPTIONAL_TYPES)
 
 
-def _dedup_by_doc_id(results: list[ChunkResult]) -> list[ChunkResult]:
-    """按 doc_id 去重检索结果，保留每个文档最先出现的结果。
+def _dedup_by_doc_id(
+    results: list[ChunkResult], max_per_doc: int | None = None
+) -> list[ChunkResult]:
+    """按 doc_id 去重检索结果，每个文档最多保留 max_per_doc 条。
 
-    当前 KB 存在重复入库文档（如 neusoft_2025_q1.pdf×4），不去重会占满
-    top-K 候选、漏掉其他文档内容，破坏"模型读内容判定"的多样性前提。
+    默认（None）读 settings.RETRIEVAL_MAX_PER_DOC（=1 保持现状）；
+    无 doc_id 的项按自身保留，不计入配额。
 
     Args:
         results: 检索结果列表（RRF 融合后）
+        max_per_doc: 每文档保留条数上限，None 时读 settings
 
     Returns:
-        去重后的结果列表，无 doc_id 的项按自身保留
+        去重后的结果列表
     """
-    seen: set[str] = set()
-    deduped = []
+    if max_per_doc is None:
+        max_per_doc = settings.RETRIEVAL_MAX_PER_DOC
+    seen_count: dict[str, int] = {}
+    deduped: list[ChunkResult] = []
     for r in results:
         doc_id = r.metadata.get("doc_id")
         if doc_id is None:
             deduped.append(r)
             continue
-        if doc_id in seen:
+        n = seen_count.get(doc_id, 0)
+        if n >= max_per_doc:
             continue
-        seen.add(doc_id)
+        seen_count[doc_id] = n + 1
         deduped.append(r)
     return deduped
 

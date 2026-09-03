@@ -33,3 +33,27 @@ def test_dedup_keeps_items_without_doc_id():
     ]
     out = _dedup_by_doc_id(results)
     assert [c.id for c in out] == ["a1", "x1"]
+
+
+def test_dedup_default_one_per_doc_keeps_existing_behavior():
+    """默认（max_per_doc 未传）每文档 1 条 — 现状不回归。"""
+    results = [
+        _chunk("a1", "d1"),
+        _chunk("a2", "d1"),
+        _chunk("b1", "d2"),
+        _chunk("a3", "d1"),
+    ]
+    out = _dedup_by_doc_id(results)
+    assert [c.id for c in out] == ["a1", "b1"]
+
+
+def test_dedup_max_per_doc_two():
+    """max_per_doc=2 时每文档保留前 2 条。"""
+    results = [
+        _chunk("a1", "d1"),
+        _chunk("a2", "d1"),
+        _chunk("a3", "d1"),
+        _chunk("b1", "d2"),
+    ]
+    out = _dedup_by_doc_id(results, max_per_doc=2)
+    assert [c.id for c in out] == ["a1", "a2", "b1"]
