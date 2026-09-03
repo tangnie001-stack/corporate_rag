@@ -40,7 +40,7 @@
 
 ### Requirement: 检索行为信号日志
 
-系统 SHALL 提供 `retrieval_signal:` 前缀的结构化信号日志，用于在线诊断"哪条 query 检索质量差"。信号类型：`reretrieve`（同 turn 二次检索）/ `to_web`（转联网）/ `abstain_after_retrieve`（检索后拒答）/ `unsupported`（judge 无支撑）/ `cited`（正常引用，对照基线）/ `empty_result`（检索空）。行格式 SHALL 含 `signal` / `query` / `iteration` / `kb_id` 字段；trace_id SHALL 由日志框架自动注入（不写入 message）；信号埋点 SHALL 经统一 helper 收口（query 截断 40 字符、格式一致）。
+系统 SHALL 提供 `retrieval_signal:` 前缀的结构化信号日志，用于在线诊断"哪条 query 检索质量差"。信号类型：`reretrieve`（同 turn 二次检索）/ `to_web`（转联网）/ `abstain_after_retrieve`（检索后拒答）/ `unsupported`（judge 无支撑）/ `cited`（正常引用，对照基线）/ `empty_result`（检索空）。行格式 SHALL 含 `signal` / `query` / `iteration` / `kb_id` 字段；trace_id SHALL 由日志框架自动注入（不写入 message）；信号埋点 SHALL 经统一 helper 收口（query 完整记录、JSON 转义保持行可解析、格式一致）。
 
 #### Scenario: 定位检索差的问题 query
 
@@ -51,3 +51,35 @@
 
 - **WHEN** 任意埋点记录行为信号
 - **THEN** 均通过统一 helper 输出同构行（前缀 + k=v），不因埋点位置不同而格式漂移
+
+### Requirement: query 完整记录（取消截断）
+
+结构化日志行（`retrieval_signal` 与 `retrieve replay` 事件）中的 query/搜索词 SHALL 完整记录、不按固定长度截断；为保证 k=v 行可机器解析，query SHALL 以双引号包裹并按 JSON 转义（值内 `"` `\` 与换行须转义），不得破坏行的字段切分。
+
+#### Scenario: 长 query 完整保留
+
+- **WHEN** 检索/联网使用的 query 超过 40 字符
+- **THEN** 结构化行中的 query 为原文完整值（JSON 转义后置于引号内），可无歧义用于离线重放
+
+#### Scenario: 含特殊字符不破坏行结构
+
+- **WHEN** query 含双引号/反斜杠/换行
+- **THEN** 日志行经转义后仍为单行、字段可切分，不因特殊字符产生歧义
+
+### Requirement: 检索重放上下文日志
+
+系统每次 `retrieve_kb` 执行 SHALL 落一条 `[retrieval] retrieve replay` 事件行，作为该 trace 的检索重放机器输入；行字段 SHALL 含 `query`（完整 + JSON 转义）/ `query_len` / `kb_id` / `iteration` / `top_k` / `dedup_max_per_doc` / `hybrid` / `rerank`；trace_id 由日志框架自动注入。
+
+#### Scenario: 按 trace 离线重放一次检索
+
+- **WHEN** 拿到一条 trace_id，怀疑检索环节有问题
+- **THEN** 从该 trace 的 `retrieve replay` 事件行可直接取出 query 全文、kb_id、top_k 与去重 N 值，无需回查其它来源即可对当前 KB 重放该次检索
+
+### Requirement: 离线重放 CLI
+
+系统 SHALL 提供重放命令（`python -m src.cli.replay_trace --trace <id>`）：读取该 trace 的日志 → 解析其 `retrieve replay` 事件（按 iteration 顺序）与行为信号 → 对当前 KB 重放检索并打印 top 片段（含来源与分数）；支持 `--max-per-doc N` 对照去重参数。输出 SHALL 标注"对当前 KB 重放（非历史快照）"。
+
+#### Scenario: 一条命令定位检索问题
+
+- **WHEN** 对某 trace 运行重放命令
+- **THEN** 输出按 iteration 还原每次检索的命中片段，可据此分诊（召回漏 / 排序错 / 同文档上下文不足），无需手工抄录 query 与 kb_id

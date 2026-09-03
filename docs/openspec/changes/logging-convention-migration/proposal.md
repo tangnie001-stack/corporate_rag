@@ -23,9 +23,15 @@
 - 统一前缀 `retrieval_signal:`，信号类型：`reretrieve` / `to_web` / `abstain_after_retrieve` / `unsupported` / `cited` / `empty_result`
 - 行格式：`retrieval_signal: signal={} query="{}" iteration={} kb_id={} result_count={} ...`
 - trace_id 由 logging patcher 自动注入第三段（不写入 message）
-- 埋点 helper 收口在 `src/core/`（query 截断 40、格式统一），不在各埋点重复写
+- 埋点 helper 收口在 `src/core/`（query 完整记录并以 JSON 转义保持行可解析、格式统一），不在各埋点重复写
 
-### 3. 存量日志迁移（分批，本次只建机制不扫全量）
+### 3. trace 自包含检索重放（让 trace_id 一条命令可离线重放）
+
+- **取消 query 一律截 40**：query/搜索词在结构化日志行完整记录（配合双引号 + JSON 转义），保证 trace 内数据足以无歧义重放
+- 每次 `retrieve_kb` 执行落一条机器可读的 `[retrieval] retrieve replay` 上下文事件行（query 全文 / kb_id / iteration / top_k / dedup_max_per_doc / hybrid / rerank）
+- 提供 `replay_trace` CLI：输入 trace_id → 读 trace 日志 → 提取 replay 事件与行为信号 → 对当前 KB 离线重放检索打印 top 片段（`--max-per-doc` 可对照 N 值），支撑"怀疑检索问题 → 一条命令定位"
+
+### 4. 存量日志迁移（分批，本次只建机制不扫全量）
 
 - 建迁移清单 + 分批任务；按模块分批改到新前缀体系，每批独立 commit + 回归
 
