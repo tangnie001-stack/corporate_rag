@@ -80,34 +80,12 @@ docker compose build --no-cache app    # 改依赖后重建
 - trace_id 的格式 `trace_<uuid>`，生成优先级：请求头 `X-Trace-ID` → 查询参数 `trace_id` → 自动生成。所有响应头均返回 `X-Trace-ID`（含 401/500）。
 - 容器日志内 `/data/logs/`，按天轮转，trace_id 在日志行第三个 `|` 分隔段：
 
-## 日志格式（统一）
+## 日志简则
 
-日志是机器可读事件流。**新增/修改任何日志先对照本节**；级别语义与迁移批次等深度内容见 `docs/agents/rules.md`「日志约定」。
-
-- **行模板**：`[层名] 事件 键=值 ...`，如 `[retrieval] search done query_len=13 result_count=8`
-- **前缀表**（同一类事件全系统只有一个前缀）：
-
-| 前缀 | 归属 |
-|---|---|
-| `[retrieval]` | 检索/联网（rag_tools / web_tools / retrieval.py / tavily / query_router） |
-| `[verify]` | 验证节点（verify 包） |
-| `[agent]` | agent 主循环（agent_node / workflow） |
-| `[session]` | 会话管理（chat manager / persistence / SSE 端点） |
-| `[db]` | DB / 向量存储 / 文件存储层 |
-| `[llm]` | LLM / 提示词 / 追踪层 |
-| `[cli]` | 命令行工具；入口/API 边界尚未定前缀用 `—`，迁移批次见 migration-inventory.md |
-
-- **语言**：message 一律英文小写 k=v；中文仅限用户可见文案（`SSEInteractionTexts`）
-- **事件名**：英文小写、单词空格分隔（`search done` / `rerank failed` / `lock acquired`）；不用类名前缀或中文自由文本
-- **值格式**：`key=value` 空格分隔；**值含空格 / `"` / `\` / 换行时用双引号包裹并按 JSON 转义**；query/搜索词**完整记录、不截断**（结构化行强制转义）
-- **级别**：`debug` 诊断默认关 / `info` 里程碑 / `warning` 降级可恢复（禁记"正常但少见"）/ `error` 单点已处理 / `exception` 透传带 traceback
-- **统一 helper**：分层事件用 `log_event(prefix, event, **fields)`；检索行为信号用 `retrieval_signal(...)`；检索重放行用 `log_retrieve_replay(...)`；warning/error/exception 直调 `logger` 时同样带 `[层名]` 前缀 + k=v，不裸拼
-- **trace_id**：由 `src/core/logging.py` patcher 自动注入日志行第三段，业务代码不写入 message
-- **固定事件行**：
-  - 行为信号：`retrieval_signal: signal={} query="{}" iteration={} kb_id={} ...`（信号类型 `reretrieve / to_web / abstain_after_retrieve / unsupported / cited / empty_result`）
-  - 检索重放：`[retrieval] retrieve replay query="..." kb_id=.. iteration=.. top_k=.. dedup_max_per_doc=.. hybrid=.. rerank=..`
-
-写日志前自检：前缀选对了吗？事件是英文小写吗？值含特殊字符有转义吗？级别符合语义吗？中文是不是进了 message？
+- 事件消息英文 k=v + `[层名]` 前缀；中文仅限用户可见文案（SSEInteractionTexts）
+- 分级：debug 诊断 / info 里程碑 / warning 降级可恢复 / error 单点 / exception 透传
+- 检索行为信号用 `retrieval_signal:` helper，不手拼
+- 完整规范见 docs/agents/rules.md「日志约定」
 
 ## 验证
 改完代码后自检以下清单：
