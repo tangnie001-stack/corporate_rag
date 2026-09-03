@@ -130,8 +130,9 @@ async def decide_missing_web(
     # SystemMessage：agent 上一轮 search_web queries 带漏缺失年份时，即使完整指引
     # 已注入过也须补发（"还缺哪些年 + 一次带全再查一次"是新信息，不能静默重申），
     # 按 VERIFY_HINT_MARKER 短语查重至多发一次。计数随返回 dict 持久化；regen 轮
-    # 带 _agent_iterations=0 复位主循环预算，route_agent 不因首轮迭代触顶而吞掉本
-    # 轮 search_web 工具调用（regen 总轮数由保险丝 + web-exhausted 语义封顶）。
+    # 带 _agent_iterations=0 复位主循环预算、ctx.web_count=0 复位 search_web 配额
+    # （见下），route_agent 不因首轮迭代触顶而吞掉本轮 search_web 工具调用
+    # （regen 总轮数由保险丝 + web-exhausted 语义封顶）。
     already_guided = _marker_message_sent(state, VERIFY_GUIDANCE_MARKER)
     hint_already_sent = _marker_message_sent(state, VERIFY_HINT_MARKER)
     regen_messages: list[SystemMessage] = []
@@ -154,6 +155,12 @@ async def decide_missing_web(
                 )
             )
         )
+    # regen 轮 = 一段全新主循环：除 _agent_iterations=0 复位迭代预算外，同步归零
+    # search_web 请求级配额（web_count）。ctx.web_count 跨 verify regen 段累积会让
+    # regen 轮的 search_web 达限返回 WEB_SEARCH_LIMIT_TEXT 而不执行，verify 据此误判
+    # "知识库与网络均未覆盖"——与迭代预算未复位同属"regen 轮预算被首段耗尽"缺陷。
+    if ctx is not None:
+        ctx.web_count = 0
     result: dict = {
         "answer": answer,
         "_needs_regenerate": True,

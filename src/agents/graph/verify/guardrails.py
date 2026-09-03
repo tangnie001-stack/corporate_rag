@@ -93,6 +93,11 @@ async def web_citation_guard(
             "（编号须与搜索结果返回的来源列表一致）后重新回答。"
         )
     )
+    if ctx is not None:
+        # regen 轮同步归零 search_web 请求级配额（web_count）：ctx.web_count 跨 verify
+        # regen 段累积会让 regen 轮的 search_web 达限返回 WEB_SEARCH_LIMIT_TEXT 不执行，
+        # 与 _agent_iterations=0 同属"每段 regen 轮全新主循环预算"设计。
+        ctx.web_count = 0
     return {
         "answer": answer,
         "messages": [guidance],

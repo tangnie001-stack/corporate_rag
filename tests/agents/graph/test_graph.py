@@ -9,6 +9,8 @@ from langchain_core.tools import tool
 from src.agents.graph.nodes import format_node
 from src.agents.graph.state import AgentState
 from src.agents.graph.workflow import build_graph
+from src.config import settings
+from src.config.const import SSEInteractionTexts
 from src.infra.llm.request_context import RequestContext, current_request_ctx
 from src.rag.context import RAGContext
 
@@ -651,6 +653,98 @@ async def test_graph_verify_regen_round_uses_full_iteration_budget(monkeypatch):
         # 无 Fix 2 时 regen 轮工具调用被吞：spy 只有首轮 4 次、答案带"均未覆盖"标注
         assert len(spy_calls) == 5  # 首轮 4 次 + regen 轮 1 次（完整执行）
         assert spy_calls[-1] == ["腾讯2023年报", "腾讯2025年报"]  # regen 轮带全缺失年份
+        assert "网络均未覆盖" not in last_verify["answer"]  # 未被误判为网络穷尽
+        assert "2023" in last_verify["answer"] and "2025" in last_verify["answer"]
+    finally:
+        current_request_ctx.reset(token)
+
+
+def _make_quota_aware_search_web_spy():
+    """构造带调用记录 + 真实配额门限语义的 search_web 测试工具，返回 (tool, calls)。
+
+    calls 按执行序记录 queries；工具先按真实 search_web 的门限判断（ctx.web_count >=
+    WEB_SEARCH_PER_TURN_LIMIT → 达限返回 WEB_SEARCH_LIMIT_TEXT 不执行，未达限 +1 后执行），
+    供配额维度回归断言 regen 轮的 search_web 真正执行（首段耗尽不复位 → regen 轮被拦）。
+    """
+    calls: list[list[str]] = []
+
+    @tool("search_web")
+    async def spy_search_web(queries: list[str], top_k: int = 5) -> str:
+        """联网搜索（测试桩）：模拟真实配额门限并记录执行，返回含 2023/2025 的固定文本。"""
+        ctx = current_request_ctx.get()
+        if ctx is not None:
+            if ctx.web_count >= settings.WEB_SEARCH_PER_TURN_LIMIT:
+                return SSEInteractionTexts.WEB_SEARCH_LIMIT_TEXT
+            ctx.web_count += 1
+        calls.append(list(queries))
+        return "2023年营收3000亿。2025年营收4500亿。"
+
+    return spy_search_web, calls
+
+
+@pytest.mark.asyncio
+async def test_graph_verify_regen_round_resets_web_quota(monkeypatch):
+    """回归 review Finding（配额维度）：首段 search_web 配额耗尽 → regen 轮仍完整执行。
+
+    ctx.web_count 是请求级累计计数：第 1 段 4 次 search_web 调用把配额耗尽（预置
+    web_count=limit，首次调用即达限被拦）。若 verify regen 不复位配额，回 agent 后
+    regen 轮的 search_web 同样达限返回 WEB_SEARCH_LIMIT_TEXT 不执行 → verify 误判
+    "知识库与网络均未覆盖"。regen 决策必须带 ctx.web_count=0（与 _agent_iterations=0
+    同为"每段 regen 轮全新主循环预算"设计）：断言 spy 恰好执行一次（仅 regen 轮）。
+    """
+    monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
+    monkeypatch.setattr(
+        "src.agents.graph.verify.ask_confirm._ask_web_confirm",
+        AsyncMock(return_value=True),
+    )
+    monkeypatch.setattr(
+        "src.agents.graph.verify.faithfulness.faithfulness_check",
+        AsyncMock(return_value=[]),
+    )
+    _ctx, token = _make_verify_ctx()
+    try:
+        _ctx.web_count = settings.WEB_SEARCH_PER_TURN_LIMIT  # 第 1 段配额已耗尽
+        spy_search_web, spy_calls = _make_quota_aware_search_web_spy()
+        # 每次迭代用独立 AIMessage 对象（复用同一对象会被 add_messages 去重吞掉）
+        llm = SequenceChatModel(
+            [
+                AIMessage(
+                    content="", tool_calls=[_search_web_call(["腾讯2024年报"])]
+                ),  # 迭代 1：搜索但 queries 带漏（配额已耗尽 → 被拦不执行）
+                AIMessage(
+                    content="", tool_calls=[_search_web_call(["腾讯2024年报"])]
+                ),  # 迭代 2
+                AIMessage(
+                    content="", tool_calls=[_search_web_call(["腾讯2024年报"])]
+                ),  # 迭代 3
+                AIMessage(
+                    content="", tool_calls=[_search_web_call(["腾讯2024年报"])]
+                ),  # 迭代 4
+                AIMessage(
+                    content="2024年营收3943亿"
+                ),  # 迭代 5：达上限强制收尾，仍缺年份
+                AIMessage(
+                    content="",
+                    tool_calls=[_search_web_call(["腾讯2023年报", "腾讯2025年报"])],
+                ),  # regen 轮：配额已复位，带全缺失年份调 search_web（必须真正执行）
+                AIMessage(
+                    content="2023年营收3000亿，2024年营收3943亿，2025年营收4500亿"
+                ),  # 带全后产出完整答案
+            ]
+        )
+        graph = _build_test_graph(llm, tools=[spy_search_web])
+        initial = AgentState.make_initial_state("s1", "kb1", "这几年营收怎么样", [])
+        node_order, last_verify, _all_messages, _verify_updates = await _run_graph(
+            graph, initial
+        )
+
+        assert node_order[-1] == "format"
+        assert last_verify is not None
+        assert last_verify["_needs_regenerate"] is False
+        # 无配额复位时 regen 轮工具达限被拦：spy 一次都不执行（calls 为空）
+        assert len(spy_calls) == 1  # 仅 regen 轮真正执行（第 1 段 4 次全被配额拦下）
+        assert spy_calls[0] == ["腾讯2023年报", "腾讯2025年报"]  # regen 轮带全缺失年份
+        assert _ctx.web_count == 1  # 复位后 regen 轮消耗 1 次新额度
         assert "网络均未覆盖" not in last_verify["answer"]  # 未被误判为网络穷尽
         assert "2023" in last_verify["answer"] and "2025" in last_verify["answer"]
     finally:

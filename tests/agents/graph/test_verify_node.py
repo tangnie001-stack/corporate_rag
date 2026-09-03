@@ -19,6 +19,7 @@ from src.agents.graph.verify import (
     faithfulness_check,
     verify_node,
 )
+from src.config import settings
 from src.config.const import (
     MAX_VERIFY_ASK_PER_TURN,
     MAX_VERIFY_REGENERATIONS,
@@ -273,6 +274,68 @@ async def test_verify_node_missing_confirmed_regenerates(monkeypatch):
         assert isinstance(result["messages"][0], SystemMessage)
         assert "缺失年份 [2023, 2025]" in result["messages"][0].content
         assert ctx.web_confirmed is True  # 本轮已确认，后续缺失不再询问
+    finally:
+        current_request_ctx.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_verify_node_missing_regen_resets_web_quota(monkeypatch):
+    """缺失年份确认联网 → regen 决策复位 search_web 配额（ctx.web_count=0）。
+
+    ctx.web_count 是请求级累计计数：首段 search_web 已耗尽 WEB_SEARCH_PER_TURN_LIMIT
+    配额，若 regen 不复位则回 agent 后工具达限返回 WEB_SEARCH_LIMIT_TEXT 不执行，
+    verify 据此误判"知识库与网络均未覆盖"。regen 轮须同步归零配额（与
+    _agent_iterations=0 同为"每段 regen 轮全新主循环预算"设计）。
+    """
+    monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
+    monkeypatch.setattr(
+        "src.agents.graph.verify.ask_confirm._ask_web_confirm",
+        AsyncMock(side_effect=AssertionError("已确认过联网，不应再次询问")),
+    )
+    ctx, token = _make_ctx(
+        temporal_years=[2023, 2024, 2025],
+        web_confirmed=True,
+        web_count=settings.WEB_SEARCH_PER_TURN_LIMIT,  # 第 1 段配额已耗尽
+    )
+    try:
+        state = _make_state(answer="2024年营收3943亿", kb_id="kb1")
+        result = await verify_node(state)
+        assert result["_needs_regenerate"] is True
+        assert result["_agent_iterations"] == 0
+        assert ctx.web_count == 0  # regen 轮获得全新联网配额
+    finally:
+        current_request_ctx.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_verify_node_web_exhausted_passthrough_keeps_web_quota(monkeypatch):
+    """web-exhausted 标注直通（非 regen）→ 不复位 search_web 配额。
+
+    网络穷尽（上一轮已带全缺失年份仍缺）是终止判定，不进入 regen 轮，web_count 保持
+    原值；仅 regen 决策路径才复位配额，避免把"首段耗尽"误解为可无限刷新的额度。
+    """
+    monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
+    monkeypatch.setattr(
+        "src.agents.graph.verify.ask_confirm._ask_web_confirm",
+        AsyncMock(side_effect=AssertionError("已确认过联网，不应再次询问")),
+    )
+    ctx, token = _make_ctx(
+        temporal_years=[2023, 2024, 2025],
+        web_confirmed=True,
+        web_count=settings.WEB_SEARCH_PER_TURN_LIMIT,
+    )
+    try:
+        state = _make_state(answer="2024年营收3943亿", kb_id="kb1")
+        state.messages = [
+            AIMessage(
+                content="",
+                tool_calls=[_search_web_tool_call(["腾讯2023年报", "腾讯2025年报"])],
+            )  # 上一轮已带全缺失年份仍缺 → 网络已穷尽
+        ]
+        result = await verify_node(state)
+        assert result["_needs_regenerate"] is False
+        assert "知识库与网络均未覆盖" in result["answer"]
+        assert ctx.web_count == settings.WEB_SEARCH_PER_TURN_LIMIT  # 直通不复位
     finally:
         current_request_ctx.reset(token)
 
@@ -588,6 +651,43 @@ async def test_verify_node_unbound_no_web_passthrough(monkeypatch):
         }
     finally:
         current_request_ctx.reset(token)
+
+
+# ── web_citation_guard（态 A 联网引用引导 regen 配额复位）──
+
+
+@pytest.mark.asyncio
+async def test_web_citation_guard_regen_resets_web_quota():
+    """态 A web_citation_guard regen → 同步归零 search_web 配额（web_count=0）。"""
+    from src.agents.graph.verify.guardrails import web_citation_guard
+
+    state = AgentState(answer="建议选择 2核2G 配置")
+    ctx = RequestContext(
+        session_id="s1",
+        tool_contexts=_make_web_contexts(),
+        web_count=settings.WEB_SEARCH_PER_TURN_LIMIT,  # 首段配额已耗尽
+    )
+    decision = await web_citation_guard(state, ctx)
+    assert decision is not None
+    assert decision["_needs_regenerate"] is True
+    assert decision["_agent_iterations"] == 0  # regen 轮复位主循环预算
+    assert ctx.web_count == 0  # regen 轮复位联网配额
+
+
+@pytest.mark.asyncio
+async def test_web_citation_guard_passthrough_keeps_web_quota():
+    """态 A 已带引用直通（None，非 regen）→ 不复位 search_web 配额。"""
+    from src.agents.graph.verify.guardrails import web_citation_guard
+
+    state = AgentState(answer="建议选择 2核2G 配置[1]，性价比较高")
+    ctx = RequestContext(
+        session_id="s1",
+        tool_contexts=_make_web_contexts(),
+        web_count=settings.WEB_SEARCH_PER_TURN_LIMIT,
+    )
+    decision = await web_citation_guard(state, ctx)
+    assert decision is None
+    assert ctx.web_count == settings.WEB_SEARCH_PER_TURN_LIMIT  # 直通不复位
 
 
 # ── kb_citation_guardrail（态 B KB 强制溯源护栏）──
