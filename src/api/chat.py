@@ -13,7 +13,7 @@ from src.api.model.request import ChatStreamRequest
 from src.chat.streaming import StreamingRunManager, streaming_manager
 from src.config.const import SESSION_LOCK_TTL
 from src.infra.llm.request_context import RequestContext, current_request_ctx
-from src.infra.llm.trace_context import current_trace_id
+from src.infra.llm.trace_context import current_session_id, current_trace_id
 from src.services.agent_service import _run_generation
 from src.services.app_service import AppService
 from src.utils.sse import (
@@ -164,11 +164,13 @@ async def _run_with_finalize(
     """后台任务主体：跑生成，完成后按结果收尾落库，finally 释放锁并注销。
 
     后台任务与调用方处于不同 asyncio task，contextvars 不会自动传播，因此本
-    函数在入口显式 set current_request_ctx / current_trace_id（工具与节点经
-    contextvar 读取 clarify_channel / tool_contexts 等），finally 中 reset。
+    函数在入口显式 set current_request_ctx / current_trace_id /
+    current_session_id（工具与节点经 contextvar 读取 clarify_channel /
+    tool_contexts / 日志格式段等），finally 中 reset。
     trace_id 由调用方在 create_task 前从 current_trace_id.get() 捕获并显式
     传入，任务内据此 set contextvar 并写 done 终态事件，保证与请求 trace_id
-    一致（单一事实来源）。
+    一致（单一事实来源）。session_id 直接取 ctx.session_id，供日志 patcher
+    注入固定格式段。
 
     收尾分三支：
     - 正常结束：完整回答落 complete（MySQL）+ 写 Redis 对话历史（供下一轮
@@ -189,7 +191,8 @@ async def _run_with_finalize(
         manager: StreamingRunManager（终态事件写入缓冲）
         abort_signal: 请求级中止信号（由 cancel 端点置位，任务内当前不消费）
         release_lock: per-session 并发锁释放回调（幂等，任务完成时调用）
-        ctx: 请求上下文（含 clarify_channel），任务入口 set 到 current_request_ctx
+        ctx: 请求上下文（含 clarify_channel / session_id），任务入口 set 到
+            current_request_ctx / current_session_id
         trace_id: 请求级 trace_id（调用方启动任务前捕获），任务入口 set 到
             current_trace_id，done 终态事件据此写入
     """
@@ -199,6 +202,7 @@ async def _run_with_finalize(
     )
     ctx_token = current_request_ctx.set(ctx)
     trace_token = current_trace_id.set(trace_id or None)
+    session_token = current_session_id.set(ctx.session_id)
     try:
         full_answer = await answer_builder()
     except asyncio.CancelledError:
@@ -240,6 +244,7 @@ async def _run_with_finalize(
     finally:
         current_request_ctx.reset(ctx_token)
         current_trace_id.reset(trace_token)
+        current_session_id.reset(session_token)
         release_lock()
         manager.unregister_if_current(session_id, task)
 

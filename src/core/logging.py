@@ -35,7 +35,7 @@ class InterceptHandler(logging.Handler):
         )
 
 
-_LOG_FORMAT = "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<7} | {extra[trace_id]:36} | {name}:{function}:{line} - {message}"
+_LOG_FORMAT = "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<7} | {extra[trace_id]:36} | {extra[session_id]:36} | {name}:{function}:{line} - {message}"
 _LOG_DIR = os.getenv("LOG_DIR", "logs")
 
 # ==== 数据链路追踪日志常量 ====
@@ -87,9 +87,9 @@ def log_sql_result(method: str, sql, rows, **extra) -> None:
 
 
 def _setup_trace_id_patcher() -> None:
-    """配置 Loguru patcher，自动注入当前请求的 trace_id。
+    """配置 Loguru patcher，自动注入当前请求的 trace_id / session_id。
 
-    从 trace_context 模块的 ContextVar 中读取当前 trace_id，
+    从 trace_context 模块的 ContextVar 中读取当前 trace_id 与 session_id，
     写入每一条日志记录的 extra 字段。
     如果 ContextVar 为空（CLI 模式），自动生成一个 trace_id。
     """
@@ -102,9 +102,17 @@ def _setup_trace_id_patcher() -> None:
         _trace_var.set(f"trace_{uuid.uuid4()}")
 
     def _patcher(record):
-        record["extra"]["trace_id"] = _trace_var.get() or ""
+        from src.infra.llm.trace_context import (
+            current_session_id as _session_var,
+        )
+        from src.infra.llm.trace_context import (
+            current_trace_id as _trace_var,
+        )
 
-    logger.configure(extra={"trace_id": ""}, patcher=_patcher)
+        record["extra"]["trace_id"] = _trace_var.get() or ""
+        record["extra"]["session_id"] = _session_var.get() or ""
+
+    logger.configure(extra={"trace_id": "", "session_id": ""}, patcher=_patcher)
 
 
 def setup_logging(configure_trace_id: bool = False) -> None:
@@ -122,8 +130,8 @@ def setup_logging(configure_trace_id: bool = False) -> None:
     # 移除默认 sink，防止重复
     logger.remove()
 
-    # 确保 extra 字典至少包含 trace_id 键（即使未配置 patcher）
-    logger.configure(extra={"trace_id": ""})
+    # 确保 extra 字典至少包含 trace_id / session_id 键（即使未配置 patcher）
+    logger.configure(extra={"trace_id": "", "session_id": ""})
 
     logger.add(
         f"{_LOG_DIR}/app_{{time:YYYY-MM-DD}}.log",
