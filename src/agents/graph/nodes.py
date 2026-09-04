@@ -7,12 +7,10 @@
 import re
 from difflib import SequenceMatcher
 
-from loguru import logger
-
 from src.agents.graph.state import AgentState
 from src.config.const import SSEInteractionTexts
 from src.core import logging as core_logging
-from src.core.log_events import Signal
+from src.core.log_events import Event, Signal
 
 # 引用片段窗口字符数：过长截取内容不可读，过短丢失上下文
 _SNIPPET_WINDOW = 200
@@ -72,14 +70,14 @@ def format_node(state: AgentState) -> dict:
     )
     has_citation_marker = re.search(r"\[\d+\]", answer) is not None
     if has_abstention_marker and not has_citation_marker:
-        logger.info("format_node: answer is abstention, citations=[]")
+        core_logging.log_event(Event.FORMAT_DONE, citations=0, reason="abstention")
         return {"citations": []}
 
     # 提取回答中引用的编号 [n]，非法编号（超出 context 范围）忽略
     cited_numbers = {int(m) for m in re.findall(r"\[(\d+)\]", answer)}
     valid_numbers = {n for n in cited_numbers if 1 <= n <= len(contexts)}
     if not valid_numbers:
-        logger.info("format_node: no valid citation markers, citations=[]")
+        core_logging.log_event(Event.FORMAT_DONE, citations=0, reason="no_markers")
         return {"citations": []}
 
     # 按编号升序取对应 context，按 (source, page) 去重
@@ -101,7 +99,7 @@ def format_node(state: AgentState) -> dict:
                 "kind": ctx.kind,
             }
         )
-    logger.info("format_node: citations={}", len(citations))
+    core_logging.log_event(Event.FORMAT_DONE, citations=len(citations))
     # 对照基线信号：正常引用（kind 区分 kb/web），供检索质量诊断对照；
     # 态A/态B 只要走到正常引用即产出，故不按 kb_id 区分（保持空串）
     if hasattr(state, "query"):

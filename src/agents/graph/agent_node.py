@@ -4,17 +4,20 @@
 末轮无 tool_calls → agent_finalize（提取 answer + 读入 tool_contexts）→ format。
 """
 
+import time
 from collections.abc import Callable
 
 from langchain_core.messages import AIMessage, BaseMessage
 from langgraph.prebuilt import ToolNode
-from loguru import logger
 
 from src.agents.graph.state import AgentState
 from src.config.const import HISTORY_MAX_TURNS, HISTORY_TOKEN_RATIO
+from src.core import logging as core_logging
+from src.core.log_events import Event
 from src.infra.llm.chat_message import ChatMessage
 from src.infra.llm.request_context import current_request_ctx
 from src.rag.prompt import build_prompt
+from src.rag.stream import estimate_usage
 
 
 def _truncate_history(
@@ -76,13 +79,16 @@ def make_agent_model_node(llm, tools, prompt_manager) -> Callable:
         else:
             messages = _initial_messages(state)
         iteration = state._agent_iterations + 1
-        logger.info("agent iteration={} msgs={}", iteration, len(messages))
+        core_logging.log_event(
+            Event.ITERATION_DONE, iteration=iteration, msgs=len(messages)
+        )
         # 流式聚合：astream 逐块产出，经 AIMessageChunk 的 += 合并 content 与
         # tool_call_chunks，最终消息带 tool_calls（若模型发起工具调用），
         # 同时驱动 on_chat_model_stream 事件把 token 流式下发前端。
         # 注意：per-call extra_body 在 langchain-openai 1.3.3 中整体覆盖构造时的
         # extra_body（_get_request_payload 浅合并），故本模型不宜在 LLM_KWARGS
         # 里配置其他 extra_body 参数（会被本处覆盖丢弃）。
+        turn_start = time.monotonic()
         chunks = []
         async for chunk in model.astream(
             messages, extra_body={"enable_thinking": state.deep_thinking}
@@ -91,11 +97,40 @@ def make_agent_model_node(llm, tools, prompt_manager) -> Callable:
         result = chunks[0]
         for chunk in chunks[1:]:
             result = result + chunk
+        # 主 agent 每轮推理 model turn 摘要：usage 优先取流聚合后的真实计数，
+        # 缺失时以文本长度估算兜底并标注 usage_estimated（成本口径区分估算值）。
+        meta = result.usage_metadata
+        if meta and (meta.get("input_tokens") or meta.get("output_tokens")):
+            usage_in = int(meta.get("input_tokens", 0))
+            usage_out = int(meta.get("output_tokens", 0))
+            usage_estimated = False
+        else:
+            est = estimate_usage(messages, _extract_text(result))
+            usage_in = est.prompt_tokens
+            usage_out = est.completion_tokens
+            usage_estimated = True
+        resp_meta = result.response_metadata
+        if isinstance(resp_meta, dict):
+            model_name = resp_meta.get("model_name", "")
+            if not isinstance(model_name, str):
+                model_name = resp_meta.get("model", "")
+        else:
+            model_name = ""
+        if not isinstance(model_name, str):
+            model_name = ""
+        core_logging.log_event(
+            Event.MODEL_TURN,
+            model=model_name,
+            usage_in=usage_in,
+            usage_out=usage_out,
+            usage_estimated=usage_estimated,
+            fallback=False,
+            latency_ms=int((time.monotonic() - turn_start) * 1000),
+            iteration=iteration,
+        )
         if iteration >= state._max_agent_iterations:
-            logger.warning(
-                "agent iteration limit reached query={} iteration={}",
-                state.query,
-                iteration,
+            core_logging.log_event(
+                Event.ITERATION_LIMIT, query=state.query, iteration=iteration
             )
         if state.messages:
             update_messages = [result]

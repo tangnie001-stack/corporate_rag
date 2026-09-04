@@ -3,7 +3,6 @@
 
 from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
-from loguru import logger
 
 from src.agents.graph.agent_node import (
     make_agent_finalize_node,
@@ -15,6 +14,8 @@ from src.agents.graph.nodes import format_node
 from src.agents.graph.state import AgentState, LangGraphNode
 from src.agents.graph.verify import verify_node
 from src.agents.tools.rag_tools import make_rag_tools
+from src.core import logging as core_logging
+from src.core.log_events import Event
 from src.infra.db.vector_store import VectorStore
 from src.infra.search.bm25_index import BM25Index
 
@@ -82,5 +83,5 @@ def build_graph(
     builder.add_edge(LangGraphNode.Format.NAME, END)
 
     graph = builder.compile()
-    logger.info("LangGraph StateGraph compiled: agent 循环 → verify → format")
+    core_logging.log_event(Event.GRAPH_COMPILED)
     return graph

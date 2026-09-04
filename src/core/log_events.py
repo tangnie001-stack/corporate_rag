@@ -52,6 +52,15 @@ class Event(str, Enum):
     WEB_SEARCH_DONE = "web search done"
     RETRIEVE_REPLAY = "retrieve replay"
 
+    # [agent] agent 循环 / 图 / 编排事件（3.3 批迁移登记）
+    ITERATION_DONE = "iteration done"
+    ITERATION_LIMIT = "iteration limit"
+    MODEL_TURN = "model turn"
+    GRAPH_COMPILED = "graph compiled"
+    FORMAT_DONE = "format done"
+    EVENT_CONVERT_FAILED = "event convert failed"
+    SERVICE_READY = "service ready"
+
     # [verify] 验证管道事件（3.2 批迁移登记：态A 引用引导 / 态B 完整性+judge）
     SKIP = "skip"
     COMPLETENESS_CHECK = "completeness check"
@@ -141,6 +150,41 @@ EVENT_SPECS: dict[str, EventSpec] = {
             "rerank",
         ),
     ),
+    # [agent] agent 循环 / 图 / 编排（3.3 批）
+    Event.ITERATION_DONE.value: EventSpec(
+        Event.ITERATION_DONE.value, "agent", "info", ("iteration", "msgs")
+    ),
+    Event.ITERATION_LIMIT.value: EventSpec(
+        Event.ITERATION_LIMIT.value,
+        "agent",
+        "warning",
+        ("query", "iteration"),
+    ),
+    Event.MODEL_TURN.value: EventSpec(
+        Event.MODEL_TURN.value,
+        "agent",
+        "info",
+        (
+            "model",
+            "usage_in",
+            "usage_out",
+            "usage_estimated",
+            "fallback",
+            "latency_ms",
+            "iteration",
+        ),
+    ),
+    Event.GRAPH_COMPILED.value: EventSpec(Event.GRAPH_COMPILED.value, "agent", "info"),
+    Event.FORMAT_DONE.value: EventSpec(
+        Event.FORMAT_DONE.value, "agent", "info", ("citations", "reason")
+    ),
+    Event.EVENT_CONVERT_FAILED.value: EventSpec(
+        Event.EVENT_CONVERT_FAILED.value,
+        "agent",
+        "warning",
+        ("item_type", "err"),
+    ),
+    Event.SERVICE_READY.value: EventSpec(Event.SERVICE_READY.value, "agent", "info"),
     # [verify] 验证管道（3.2 批）
     Event.SKIP.value: EventSpec(Event.SKIP.value, "verify", "info", ("reason",)),
     Event.COMPLETENESS_CHECK.value: EventSpec(

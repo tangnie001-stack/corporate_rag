@@ -16,7 +16,6 @@ from typing import TypeAlias
 from langchain_core.messages import BaseMessage
 from langchain_core.runnables.schema import StreamEvent
 from langgraph.graph.state import CompiledStateGraph
-from loguru import logger
 
 from src.agents.graph.state import (
     AgentState,
@@ -35,7 +34,7 @@ from src.chat.streaming import (
 from src.config import TOP_K_RERANK
 from src.config.const import SSEInteractionTexts
 from src.core import logging as core_logging
-from src.core.log_events import Signal
+from src.core.log_events import Event, Signal
 from src.infra.db.vector_store import VectorStore
 from src.infra.llm.langfuse_tracing import LangfuseTracer
 from src.infra.llm.prompt_manager import PromptManager
@@ -384,10 +383,10 @@ async def _drain_clarify_channel(
             for event in _convert_event(item, capture):
                 manager.add_event(session_id, event.type, event.payload_for_buffer())
         except Exception as exc:  # noqa: BLE001  # 单条转换失败不终止消费
-            logger.warning(
-                "clarify item convert failed item_type={} err={}",
-                type(item).__name__,
-                exc,
+            core_logging.log_event(
+                Event.EVENT_CONVERT_FAILED,
+                item_type=type(item).__name__,
+                err=str(exc),
             )
 
 
@@ -549,7 +548,7 @@ class AgentService:
             self._reranker,
             self._prompt_manager,
         )
-        logger.info("AgentService initialized with compiled graph")
+        core_logging.log_event(Event.SERVICE_READY)
 
     async def stream_chat(
         self,
