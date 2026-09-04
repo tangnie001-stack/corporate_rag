@@ -34,6 +34,8 @@ from src.chat.streaming import (
 )
 from src.config import TOP_K_RERANK
 from src.config.const import SSEInteractionTexts
+from src.core import logging as core_logging
+from src.core.log_events import Signal
 from src.infra.db.vector_store import VectorStore
 from src.infra.llm.langfuse_tracing import LangfuseTracer
 from src.infra.llm.prompt_manager import PromptManager
@@ -493,10 +495,8 @@ async def _run_generation(
             # （检索结果不足以支撑作答，供 P1 检索质量诊断）
             has_kb_retrieved = bool(capture.final_contexts) and bool(kb_id)
             if has_kb_retrieved:
-                from src.core.logging import retrieval_signal
-
-                retrieval_signal(
-                    "abstain_after_retrieve",
+                core_logging.retrieval_signal(
+                    Signal.ABSTAIN_AFTER_RETRIEVE,
                     query,
                     0,  # iteration 非关键：capture 未存迭代数，传 0（YAGNI 不做 capture 改造）
                     kb_id=kb_id,

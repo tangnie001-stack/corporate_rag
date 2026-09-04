@@ -19,6 +19,7 @@ from src.config.const import (
     SSEInteractionTexts,
 )
 from src.core import logging as core_logging
+from src.core.log_events import Event, Signal
 from src.infra.llm.request_context import current_request_ctx
 from src.infra.search.tavily_client import tavily_extract, tavily_search
 from src.rag.context import RAGContext
@@ -143,19 +144,17 @@ async def search_web(queries: list[str], top_k: int = 5) -> str:
     # 由 web_guided=True 排除在缺陷信号外（态 A 纯对话未绑 KB 也不产）
     if ctx.web_guided is False and ctx.kb_bound:
         core_logging.retrieval_signal(
-            "to_web",
+            Signal.TO_WEB,
             ", ".join(queries),
             0,  # iteration 非关键：search_web 无 InjectedState 拿不到，传 0
             kb_id=ctx.kb_id,
             result_count=len(blocks),
-            latency_ms=f"{(time.monotonic() - start) * 1000:.0f}",
+            latency_ms=int((time.monotonic() - start) * 1000),
         )
     core_logging.log_event(
-        "retrieval",
-        "search_web done",
-        session_id=ctx.session_id,
+        Event.WEB_SEARCH_DONE,
         query_count=len(queries),
         result_count=len(blocks),
-        latency_ms=f"{(time.monotonic() - start) * 1000:.0f}",
+        latency_ms=int((time.monotonic() - start) * 1000),
     )
     return "\n\n".join(blocks)

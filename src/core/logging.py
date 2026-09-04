@@ -4,10 +4,14 @@
 提供 InterceptHandler 将标准库 logging 路由至 Loguru。
 """
 
+import json
 import logging
 import os
+import re
 
 from loguru import logger
+
+from src.core.log_events import EVENT_SPECS, SIGNAL_PREFIX, Event, Signal
 
 
 class InterceptHandler(logging.Handler):
@@ -152,77 +156,69 @@ def setup_logging(configure_trace_id: bool = False) -> None:
         _setup_trace_id_patcher()
 
 
-# ==== 统一事件日志 helper ====
+# ==== 统一事件日志 helper（注册表驱动） ====
 
-# 分层前缀允许值（与 rules.md「日志约定」前缀表一致）
-_LOG_PREFIXES = {"retrieval", "verify", "agent", "session", "db", "llm"}
-
-# 行为信号类型（与 rules.md「检索行为信号日志」一致）
-_RETRIEVAL_SIGNALS = {
-    "reretrieve",
-    "to_web",
-    "abstain_after_retrieve",
-    "unsupported",
-    "cited",
-    "empty_result",
-}
-
-# query/搜索词截断长度（与 rules.md 约定一致）
-_LOG_QUERY_TRUNCATE = 40
+# token 安全字符集：命中则裸写，否则引号 + JSON 转义（logging-rules.md）
+_TOKEN_SAFE = re.compile(r"^[A-Za-z0-9_./:@-]+$")
 
 
-def _truncate(value: str, limit: int = _LOG_QUERY_TRUNCATE) -> str:
-    """按字符截断长字段，超出加省略号。"""
-    if len(value) <= limit:
-        return value
-    return value[:limit] + "…"
+def encode_value(value: object) -> str:
+    """按值类型编码日志字段文本（helper 唯一实现，`需要才引`）。
 
-
-def log_event(prefix: str, event: str, **fields: object) -> None:
-    """输出带分层前缀的英文 k=v 事件日志。
-
-    规范（rules.md「日志约定」）：
-      - prefix 必须是 _LOG_PREFIXES 内层名
-      - message = [层名] 事件 + 各字段 k=v
-      - trace_id 由 logging patcher 注入，不在此写入
-
-    Args:
-        prefix: 层名前缀（retrieval/verify/agent/session/db/llm）
-        event: 事件名（如 "search start" / "rerank done"）
-        fields: k=v 字段（值会被 str() 化后拼入）
+    int/bool 裸写；token 安全字符串裸写；其余字符串 `json.dumps`
+    （引号 + JSON 转义）；数组/容器紧凑 JSON（无空格）。query 等长文本
+    由调用方完整传入，本函数不截断。
     """
-    if prefix not in _LOG_PREFIXES:
-        logger.warning("log_event unknown prefix={}", prefix)
-        prefix = "core"
-    kv = " ".join(f"{k}={v}" for k, v in fields.items())
-    message = f"[{prefix}] {event}"
-    if kv:
-        message += f" {kv}"
-    logger.info(message)
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, str):
+        if _TOKEN_SAFE.fullmatch(value):
+            return value
+        return json.dumps(value, ensure_ascii=False)
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
-def retrieval_signal(signal: str, query: str, iteration: int, **fields: object) -> None:
-    """输出检索行为信号日志（P1 检索质量诊断地基）。
+def log_event(event: Event, **fields: object) -> None:
+    """按注册表驱动输出分层前缀英文 k=v 事件日志。
 
-    规范（rules.md「检索行为信号日志」）：
-      - 前缀 retrieval_signal:
-      - signal 必须是 _RETRIEVAL_SIGNALS 内类型
-      - query 截断 40 字符
-      - trace_id 由 logging patcher 注入，不在此写入
+    事件 key = Event 枚举成员（log_events import 校验保证必然已登记），
+    前缀/事件词/级别取 EVENT_SPECS，调用点不传前缀与级别。
+
+    首行 Event(event) 收口：裸字符串合法值规范化为枚举成员；非法值抛
+    ValueError（堵住绕过枚举的自由文本路径，无任何兜底落盘）。
 
     Args:
-        signal: 行为信号类型（reretrieve/to_web/abstain_after_retrieve/unsupported/cited/empty_result）
-        query: 用户查询文本（自动截断）
+        event: 事件枚举成员（值 = 事件名）
+        fields: k=v 字段，经 encode_value 值类型编码
+    """
+    event = Event(event)  # 收口：裸字符串合法值规范化，非法值抛 ValueError
+    spec = EVENT_SPECS[event.value]
+    parts = [f"{k}={encode_value(v)}" for k, v in fields.items()]
+    message = f"[{spec.prefix}] {spec.name}"
+    if parts:
+        message += " " + " ".join(parts)
+    # spec.level 为小写逻辑级别，Loguru logger.log 须用大写级别名
+    logger.log(spec.level.upper(), message)
+
+
+def retrieval_signal(
+    signal: Signal, query: str, iteration: int, **fields: object
+) -> None:
+    """输出检索行为信号日志（P1 Change 2 保留前缀，info 级）。
+
+    Args:
+        signal: Signal 枚举成员（reretrieve/to_web/...）
+        query: 用户查询文本（完整记录，不截断，JSON 转义保持行可解析）
         iteration: agent 迭代序号
-        fields: 附加字段（kb_id/result_count/reason 等）
+        fields: 附加字段（kb_id/result_count/reason 等），与 log_event 同走值编码
     """
-    if signal not in _RETRIEVAL_SIGNALS:
-        logger.warning("retrieval_signal unknown signal={}", signal)
-    kv = " ".join(f"{k}={v}" for k, v in fields.items())
+    parts = [f"{k}={encode_value(v)}" for k, v in fields.items()]
     message = (
-        f'retrieval_signal: signal={signal} query="{_truncate(query)}" '
-        f"iteration={iteration}"
+        f"{SIGNAL_PREFIX} signal={signal.value} "
+        f"query={json.dumps(query, ensure_ascii=False)} iteration={iteration}"
     )
-    if kv:
-        message += f" {kv}"
+    if parts:
+        message += " " + " ".join(parts)
     logger.info(message)

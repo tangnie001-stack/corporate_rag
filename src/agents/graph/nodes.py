@@ -12,6 +12,7 @@ from loguru import logger
 from src.agents.graph.state import AgentState
 from src.config.const import SSEInteractionTexts
 from src.core import logging as core_logging
+from src.core.log_events import Signal
 
 # 引用片段窗口字符数：过长截取内容不可读，过短丢失上下文
 _SNIPPET_WINDOW = 200
@@ -109,7 +110,7 @@ def format_node(state: AgentState) -> dict:
         query_text = ""
     kinds = {c.get("kind", "kb") for c in citations} or {"kb"}
     core_logging.retrieval_signal(
-        "cited",
+        Signal.CITED,
         query_text,
         0,
         kb_id="",

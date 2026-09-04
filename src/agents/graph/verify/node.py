@@ -15,6 +15,8 @@ from src.agents.graph.verify.checks import completeness_check
 from src.agents.graph.verify.guardrails import kb_citation_guardrail, web_citation_guard
 from src.agents.graph.verify.regen_decision import decide_missing_web
 from src.config import settings
+from src.core import logging as core_logging
+from src.core.log_events import Signal
 from src.infra.llm.request_context import current_request_ctx
 
 
@@ -64,13 +66,11 @@ async def verify_node(state: AgentState) -> dict:
     contexts = ctx.tool_contexts if ctx is not None else []
     unsupported = await faithfulness.faithfulness_check(answer, contexts)
     if unsupported:
-        from src.core.logging import retrieval_signal
-
         if state.kb_id:
             # unsupported 行为信号：绑 KB judge 标记无支撑句 → 检索质量缺陷
             # （检索上下文不足以支撑答案内容，供 P1 检索质量诊断）
-            retrieval_signal(
-                "unsupported",
+            core_logging.retrieval_signal(
+                Signal.UNSUPPORTED,
                 state.query,
                 state._agent_iterations,
                 kb_id=state.kb_id,

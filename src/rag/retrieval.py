@@ -2,8 +2,6 @@
 
 import asyncio
 
-from loguru import logger
-
 from src.config import (
     HYBRID_SEARCH_ENABLED,
     RETRY_BACKOFF_FACTOR,
@@ -14,6 +12,7 @@ from src.config import (
     settings,
 )
 from src.config.const import ENTITY_OPTIONAL_TYPES, ENTITY_TYPES
+from src.core.log_events import Event
 from src.core.logging import log_event
 from src.infra.db.vector_store import VectorStore
 from src.infra.db.vector_store.types import ChunkResult
@@ -83,8 +82,7 @@ async def search(
         d, b = await asyncio.gather(dense_t, bm25_t)
         results = rrf_fusion(d or [], b or [])
         log_event(
-            "retrieval",
-            "hybrid done",
+            Event.HYBRID_DONE,
             kb_id=kb_id,
             query_len=len(query),
             result_count=len(results),
@@ -105,8 +103,7 @@ async def search(
     else:
         result_count = 0
     log_event(
-        "retrieval",
-        "search done",
+        Event.SEARCH_DONE,
         kb_id=kb_id or "all",
         query_len=len(query),
         result_count=result_count,
@@ -132,7 +129,7 @@ def rerank_results(
         取前 TOP_K_RERANK 条相对结果，不应用绝对分数阈值过滤
     """
     if not results:
-        log_event("retrieval", "rerank skip", reason="empty_input")
+        log_event(Event.RERANK_SKIP, reason="empty_input")
         return []
 
     docs = [r.content for r in results]
@@ -144,11 +141,11 @@ def rerank_results(
             backoff=RETRY_BACKOFF_FACTOR,
         )(docs, query)
     except Exception as e:  # noqa: BLE001
-        logger.warning(
-            "[retrieval] rerank failed after {} attempts query={}: {}",
-            RETRY_MAX_ATTEMPTS,
-            query[:40],
-            e,
+        log_event(
+            Event.RERANK_FAILED,
+            attempts=RETRY_MAX_ATTEMPTS,
+            query=query,
+            err=str(e),
         )
         reranked = []
         for i, r in enumerate(results):
@@ -184,8 +181,7 @@ def rerank_results(
         )
     if contexts:
         log_event(
-            "retrieval",
-            "rerank done",
+            Event.RERANK_DONE,
             doc_count=len(results),
             query_len=len(query),
         )

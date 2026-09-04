@@ -13,7 +13,6 @@ from typing import Annotated
 
 from langchain_core.tools import BaseTool, tool
 from langgraph.prebuilt import InjectedState
-from loguru import logger
 from pydantic import BaseModel, Field
 
 from src.agents.graph.state import AgentState
@@ -21,6 +20,7 @@ from src.agents.tools.ask_tools import AskQuestion, AskUserArgs, ask_user
 from src.config import TOP_K_RERANK, settings
 from src.config.const import ASK_USER_TIMEOUT, RERANK_TIMEOUT
 from src.core import logging as core_logging
+from src.core.log_events import Event, Signal
 from src.infra.db.vector_store import VectorStore
 from src.infra.llm.request_context import current_request_ctx
 from src.infra.search.bm25_index import BM25Index
@@ -137,10 +137,10 @@ def make_rag_tools(
                 timeout=RERANK_TIMEOUT,
             )
         except TimeoutError:
-            logger.warning(
-                "[retrieval] rerank timeout after {}s query={}",
-                RERANK_TIMEOUT,
-                query[:40],
+            core_logging.log_event(
+                Event.RERANK_TIMEOUT,
+                timeout_s=RERANK_TIMEOUT,
+                query=query,
             )
             contexts = []
             for r in results:
@@ -176,11 +176,11 @@ def make_rag_tools(
         # 态 A（kb_id 为空）未检索不产任何缺陷信号
         if kb_id and not results:
             core_logging.retrieval_signal(
-                "empty_result", query, iteration, kb_id=kb_id, result_count=0
+                Signal.EMPTY_RESULT, query, iteration, kb_id=kb_id, result_count=0
             )
         if kb_id and ctx is not None and ctx.retrieve_call_seq >= 2:
             core_logging.retrieval_signal(
-                "reretrieve",
+                Signal.RERETRIEVE,
                 query,
                 iteration,
                 kb_id=kb_id,
@@ -188,12 +188,11 @@ def make_rag_tools(
                 result_count=len(results),
             )
         core_logging.log_event(
-            "retrieval",
-            "retrieve_kb done",
+            Event.RETRIEVE_DONE,
             iteration=iteration,
-            query=query[:40],
+            query=query,
             result_count=len(contexts),
-            latency_ms=f"{(time.monotonic() - start) * 1000:.0f}",
+            latency_ms=int((time.monotonic() - start) * 1000),
         )
 
         # 全局递增编号：同步块内读取偏移并追加，无 await，asyncio 单线程保证原子
