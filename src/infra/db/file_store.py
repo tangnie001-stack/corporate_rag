@@ -1,10 +1,11 @@
 from io import BytesIO
 
-from loguru import logger
 from minio import Minio
 from minio.error import S3Error
 
 from src.config import settings
+from src.core import logging as core_logging
+from src.core.log_events import Event
 
 
 class FileStore:
@@ -23,7 +24,7 @@ class FileStore:
     def _ensure_bucket(self) -> None:
         if not self._client.bucket_exists(self._bucket):
             self._client.make_bucket(self._bucket)
-            logger.info("Created MinIO bucket '{}'", self._bucket)
+            core_logging.log_event(Event.BUCKET_CREATED, bucket=self._bucket)
 
     @staticmethod
     def build_path(user_id: str, kb_id: str, doc_id: str, filename: str) -> str:
@@ -38,7 +39,7 @@ class FileStore:
             )
             return True
         except S3Error as e:
-            logger.warning("MinIO upload failed: {} - {}", key, e)
+            core_logging.log_event(Event.FILE_UPLOAD_FAILED, key=key, err=str(e))
             return False
 
     def download(self, key: str) -> bytes | None:
@@ -49,7 +50,7 @@ class FileStore:
             resp.release_conn()
             return data
         except S3Error as e:
-            logger.warning("MinIO download failed: {} - {}", key, e)
+            core_logging.log_event(Event.FILE_DOWNLOAD_FAILED, key=key, err=str(e))
             return None
 
     def delete(self, key: str) -> bool:
@@ -57,5 +58,5 @@ class FileStore:
             self._client.remove_object(self._bucket, key)
             return True
         except S3Error as e:
-            logger.warning("MinIO delete failed: {} - {}", key, e)
+            core_logging.log_event(Event.FILE_DELETE_FAILED, key=key, err=str(e))
             return False

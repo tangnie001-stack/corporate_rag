@@ -22,6 +22,8 @@ from src.config.prompts import (
     FINANCIAL_SYSTEM_PROMPT,
     USER_PROMPT_TEMPLATE,
 )
+from src.core import logging as core_logging
+from src.core.log_events import Event
 
 # 本地兜底的 prompt 常量（与 src/config/prompts.py 一致）
 # 引用编号指令：无论来源（知识库文档或联网搜索结果）都必须在句末标注来源编号，
@@ -125,14 +127,14 @@ class PromptManager:
             data = json.loads(resp.read())
             prompt_text: str = data.get("prompt", "")
             if prompt_text:
-                logger.info(
-                    "Fetched prompt '{}' from Langfuse (v{})", name, data.get("version")
+                core_logging.log_event(
+                    Event.PROMPT_FETCHED, name=name, version=data.get("version")
                 )
             return prompt_text
         except URLError as e:
-            logger.warning("Failed to fetch prompt '{}' from Langfuse: {}", name, e)
+            core_logging.log_event(Event.PROMPT_FETCH_FAILED, name=name, err=str(e))
         except (json.JSONDecodeError, KeyError) as e:
-            logger.warning("Invalid response for prompt '{}': {}", name, e)
+            core_logging.log_event(Event.PROMPT_FETCH_FAILED, name=name, err=str(e))
         return None
 
     def _get(self, name: str, fallback: str) -> str:
@@ -163,7 +165,7 @@ class PromptManager:
                 return prompt_text
 
         # 兜底到本地
-        logger.info("Using fallback prompt for '{}'", name)
+        core_logging.log_event(Event.PROMPT_FALLBACK, name=name)
         self._cache[name] = (fallback, now + self._cache_ttl)
         return fallback
 

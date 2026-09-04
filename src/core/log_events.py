@@ -72,6 +72,43 @@ class Event(str, Enum):
     REGEN_STOP = "regen stop"
     CITATION_GUIDE = "citation guide"
 
+    # [session] 会话管理事件（3.4 批迁移登记：chat manager / persistence / streaming）
+    REDIS_READY = "redis ready"
+    REDIS_FALLBACK = "redis fallback"
+    HISTORY_WRITE_FAILED = "history write failed"
+    HISTORY_READ_FAILED = "history read failed"
+    HISTORY_CLEAR_FAILED = "history clear failed"
+    SESSION_SAVE_FAILED = "session save failed"
+    MESSAGE_SAVE_FAILED = "message save failed"
+    TASK_REGISTERED = "task registered"
+
+    # [db] 数据库层事件（3.4 批迁移登记：vector_store / file_store）
+    CHROMA_CLIENT_READY = "chroma client ready"
+    BUCKET_CREATED = "bucket created"
+    FILE_UPLOAD_FAILED = "file upload failed"
+    FILE_DOWNLOAD_FAILED = "file download failed"
+    FILE_DELETE_FAILED = "file delete failed"
+    CHUNKS_ADDED = "chunks added"
+    CHUNKS_DELETED = "chunks deleted"
+    CHUNKS_READ = "chunks read"
+    CHUNKS_READ_FAILED = "chunks read failed"
+    COLLECTION_DELETED = "collection deleted"
+    COLLECTION_DELETE_FAILED = "collection delete failed"
+    SEARCH_STATS = "search stats"
+    SEARCH_RESULT = "search result"
+    SEARCH_ALL_DONE = "search all done"
+    SEARCH_COLLECTION_FAILED = "search collection failed"
+
+    # [llm] LLM 调用层事件（3.4 批迁移登记：langfuse / prompt / LLM 内容深日志）
+    TRACE_READY = "trace ready"
+    TRACE_INIT_FAILED = "trace init failed"
+    TRACE_SKIP = "trace skip"
+    PROMPT_FETCHED = "prompt fetched"
+    PROMPT_FETCH_FAILED = "prompt fetch failed"
+    PROMPT_FALLBACK = "prompt fallback"
+    CONTENT_START = "content start"
+    CONTENT_END = "content end"
+
 
 @dataclass(frozen=True)
 class EventSpec:
@@ -229,6 +266,125 @@ EVENT_SPECS: dict[str, EventSpec] = {
         "verify",
         "info",
         ("kind", "answer_len"),
+    ),
+    # [session] 会话管理（3.4 批）
+    Event.REDIS_READY.value: EventSpec(Event.REDIS_READY.value, "session", "info"),
+    Event.REDIS_FALLBACK.value: EventSpec(
+        Event.REDIS_FALLBACK.value, "session", "warning", ("err",)
+    ),
+    Event.HISTORY_WRITE_FAILED.value: EventSpec(
+        Event.HISTORY_WRITE_FAILED.value, "session", "warning", ("err",)
+    ),
+    Event.HISTORY_READ_FAILED.value: EventSpec(
+        Event.HISTORY_READ_FAILED.value, "session", "warning", ("err",)
+    ),
+    Event.HISTORY_CLEAR_FAILED.value: EventSpec(
+        Event.HISTORY_CLEAR_FAILED.value, "session", "warning", ("err",)
+    ),
+    Event.SESSION_SAVE_FAILED.value: EventSpec(
+        Event.SESSION_SAVE_FAILED.value, "session", "warning", ("err",)
+    ),
+    Event.MESSAGE_SAVE_FAILED.value: EventSpec(
+        Event.MESSAGE_SAVE_FAILED.value, "session", "warning", ("role", "err")
+    ),
+    Event.TASK_REGISTERED.value: EventSpec(
+        Event.TASK_REGISTERED.value, "session", "info"
+    ),
+    # [db] 向量检索 / 文件存储（3.4 批）
+    Event.CHROMA_CLIENT_READY.value: EventSpec(
+        Event.CHROMA_CLIENT_READY.value,
+        "db",
+        "info",
+        ("persist_dir", "model"),
+    ),
+    Event.BUCKET_CREATED.value: EventSpec(
+        Event.BUCKET_CREATED.value, "db", "info", ("bucket",)
+    ),
+    Event.FILE_UPLOAD_FAILED.value: EventSpec(
+        Event.FILE_UPLOAD_FAILED.value, "db", "warning", ("key", "err")
+    ),
+    Event.FILE_DOWNLOAD_FAILED.value: EventSpec(
+        Event.FILE_DOWNLOAD_FAILED.value, "db", "warning", ("key", "err")
+    ),
+    Event.FILE_DELETE_FAILED.value: EventSpec(
+        Event.FILE_DELETE_FAILED.value, "db", "warning", ("key", "err")
+    ),
+    Event.CHUNKS_ADDED.value: EventSpec(
+        Event.CHUNKS_ADDED.value,
+        "db",
+        "info",
+        ("kb_id", "doc_id", "count"),
+    ),
+    Event.CHUNKS_DELETED.value: EventSpec(
+        Event.CHUNKS_DELETED.value, "db", "info", ("doc_id", "count")
+    ),
+    Event.CHUNKS_READ.value: EventSpec(
+        Event.CHUNKS_READ.value,
+        "db",
+        "info",
+        ("doc_id", "kb_id", "page", "total", "count"),
+    ),
+    Event.CHUNKS_READ_FAILED.value: EventSpec(
+        Event.CHUNKS_READ_FAILED.value,
+        "db",
+        "warning",
+        ("doc_id", "kb_id", "err"),
+    ),
+    Event.COLLECTION_DELETED.value: EventSpec(
+        Event.COLLECTION_DELETED.value, "db", "info", ("name",)
+    ),
+    Event.COLLECTION_DELETE_FAILED.value: EventSpec(
+        Event.COLLECTION_DELETE_FAILED.value, "db", "warning", ("name",)
+    ),
+    Event.SEARCH_STATS.value: EventSpec(
+        Event.SEARCH_STATS.value,
+        "db",
+        "info",
+        ("kb_id", "collection_name", "collection_count", "top_k"),
+    ),
+    Event.SEARCH_RESULT.value: EventSpec(
+        Event.SEARCH_RESULT.value,
+        "db",
+        "info",
+        ("kb_id", "query_len", "result_count", "model"),
+    ),
+    Event.SEARCH_ALL_DONE.value: EventSpec(
+        Event.SEARCH_ALL_DONE.value,
+        "db",
+        "info",
+        ("collections", "query_len", "result_count"),
+    ),
+    Event.SEARCH_COLLECTION_FAILED.value: EventSpec(
+        Event.SEARCH_COLLECTION_FAILED.value,
+        "db",
+        "warning",
+        ("kb_id", "err"),
+    ),
+    # [llm] Langfuse 追踪 / prompt 拉取 / LLM 内容深日志（3.4 批）
+    Event.TRACE_READY.value: EventSpec(Event.TRACE_READY.value, "llm", "info"),
+    Event.TRACE_INIT_FAILED.value: EventSpec(
+        Event.TRACE_INIT_FAILED.value, "llm", "warning", ("err",)
+    ),
+    Event.TRACE_SKIP.value: EventSpec(
+        Event.TRACE_SKIP.value,
+        "llm",
+        "warning",
+        ("stage", "reason"),
+    ),
+    Event.PROMPT_FETCHED.value: EventSpec(
+        Event.PROMPT_FETCHED.value, "llm", "info", ("name", "version")
+    ),
+    Event.PROMPT_FETCH_FAILED.value: EventSpec(
+        Event.PROMPT_FETCH_FAILED.value, "llm", "warning", ("name", "err")
+    ),
+    Event.PROMPT_FALLBACK.value: EventSpec(
+        Event.PROMPT_FALLBACK.value, "llm", "info", ("name",)
+    ),
+    Event.CONTENT_START.value: EventSpec(
+        Event.CONTENT_START.value, "llm", "info", ("model", "prompt")
+    ),
+    Event.CONTENT_END.value: EventSpec(
+        Event.CONTENT_END.value, "llm", "info", ("model", "output")
     ),
 }
 

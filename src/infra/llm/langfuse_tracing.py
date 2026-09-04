@@ -12,8 +12,9 @@ from typing import cast
 
 from langfuse import Langfuse
 from langfuse.model import ModelUsage
-from loguru import logger
 
+from src.core import logging as core_logging
+from src.core.log_events import Event
 from src.infra.llm.token_usage import TokenUsage
 from src.infra.llm.trace_context import current_trace_id, current_tracer
 
@@ -106,18 +107,16 @@ class LangfuseTracer:
             )
 
             if not LANGFUSE_SECRET_KEY or not LANGFUSE_PUBLIC_KEY:
-                logger.warning(
-                    "LangfuseTracer: LANGFUSE_SECRET_KEY or LANGFUSE_PUBLIC_KEY not set"
-                )
+                core_logging.log_event(Event.TRACE_INIT_FAILED, err="missing_keys")
                 return
             self._client = Langfuse(
                 public_key=LANGFUSE_PUBLIC_KEY,
                 secret_key=LANGFUSE_SECRET_KEY,
                 host=LANGFUSE_HOST.rstrip("/"),
             )
-            logger.info("LangfuseTracer initialized with official SDK")
+            core_logging.log_event(Event.TRACE_READY)
         except Exception as e:  # noqa: BLE001
-            logger.warning("LangfuseTracer init failed: %s", e)
+            core_logging.log_event(Event.TRACE_INIT_FAILED, err=str(e))
 
     def _check_ready(self, method: str) -> bool:
         """检查客户端是否可用，不可用时记警告并返回 False。
@@ -126,7 +125,9 @@ class LangfuseTracer:
             method: 调用方方法名（用于日志标识）
         """
         if self._client is None:
-            logger.warning("LangfuseTracer.{}: skipped (not initialized)", method)
+            core_logging.log_event(
+                Event.TRACE_SKIP, stage=method, reason="not_initialized"
+            )
             return False
         return True
 
@@ -148,7 +149,9 @@ class LangfuseTracer:
             session_id: 关联的会话 ID（可选，TraceInput 传值时自动提取）
         """
         if self._client is None:
-            logger.warning("LangfuseTracer.start_trace: skipped (not initialized)")
+            core_logging.log_event(
+                Event.TRACE_SKIP, stage="start_trace", reason="not_initialized"
+            )
             return
         if isinstance(input_data, TraceInput):
             if session_id is None:
@@ -170,7 +173,9 @@ class LangfuseTracer:
             output: trace 的输出数据（可选）
         """
         if self._client is None:
-            logger.warning("LangfuseTracer.end_trace: skipped (not initialized)")
+            core_logging.log_event(
+                Event.TRACE_SKIP, stage="end_trace", reason="not_initialized"
+            )
             return
         self._client.trace(id=current_trace_id.get(), output=output)
 
@@ -195,7 +200,11 @@ class LangfuseTracer:
             generation ID，未初始化时返回 None
         """
         if self._client is None:
-            logger.warning("LangfuseTracer.start_generation: skipped (not initialized)")
+            core_logging.log_event(
+                Event.TRACE_SKIP,
+                stage="start_generation",
+                reason="not_initialized",
+            )
             return
         return self._client.generation(
             name=name,
@@ -221,10 +230,14 @@ class LangfuseTracer:
             usage: TokenUsage 用量统计（可选）
         """
         if self._client is None:
-            logger.warning("LangfuseTracer.end_generation: skipped (not initialized)")
+            core_logging.log_event(
+                Event.TRACE_SKIP, stage="end_generation", reason="not_initialized"
+            )
             return
         if not gen_id:
-            logger.warning("LangfuseTracer.end_generation: skipped (no gen_id)")
+            core_logging.log_event(
+                Event.TRACE_SKIP, stage="end_generation", reason="no_gen_id"
+            )
             return
         sdk_usage: ModelUsage | None
         if usage:

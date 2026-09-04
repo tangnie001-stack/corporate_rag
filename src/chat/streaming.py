@@ -13,9 +13,9 @@ import asyncio
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from loguru import logger
-
 from src.config.const import SSEInteractionTexts
+from src.core import logging as core_logging
+from src.core.log_events import Event
 from src.utils.sse import SSEErrorEvent, SSEEvent, from_payload, to_sse
 
 
@@ -102,7 +102,7 @@ class StreamingRunManager:
         """登记任务与对应 abort 信号；任务完成时由调用方 unregister。"""
         self._session_tasks[session_id] = task
         self._abort_signals[session_id] = abort_signal
-        logger.info("streaming task registered: session_id={}", session_id)
+        core_logging.log_event(Event.TASK_REGISTERED)
 
     def unregister(self, session_id: str) -> None:
         """注销任务与 abort 信号（任务 done_callback 调用）。"""

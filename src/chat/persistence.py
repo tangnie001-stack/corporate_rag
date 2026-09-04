@@ -2,8 +2,8 @@
 
 import json
 
-from loguru import logger
-
+from src.core import logging as core_logging
+from src.core.log_events import Event
 from src.infra.db.mysql_db import ChatRepo
 
 
@@ -36,7 +36,7 @@ class PersistenceService:
             )
             await self._chat_repo.create_session(session)
         except Exception as e:  # noqa: BLE001
-            logger.warning("Failed to save session async: {}", e)
+            core_logging.log_event(Event.SESSION_SAVE_FAILED, err=str(e))
 
     async def save_messages(
         self,
@@ -66,7 +66,7 @@ class PersistenceService:
                 )
             )
         except Exception as e:  # noqa: BLE001
-            logger.warning("Failed to save messages async: {}", e)
+            core_logging.log_event(Event.MESSAGE_SAVE_FAILED, role="both", err=str(e))
 
     async def save_user_message(
         self, session_id: str, kb_id: str, user_msg: str
@@ -81,7 +81,7 @@ class PersistenceService:
                 )
             )
         except Exception as e:  # noqa: BLE001
-            logger.warning("Failed to save user message async: {}", e)
+            core_logging.log_event(Event.MESSAGE_SAVE_FAILED, role="user", err=str(e))
 
     async def save_assistant_message(
         self,
@@ -107,7 +107,9 @@ class PersistenceService:
                 )
             )
         except Exception as e:  # noqa: BLE001
-            logger.warning("Failed to save assistant message async: {}", e)
+            core_logging.log_event(
+                Event.MESSAGE_SAVE_FAILED, role="assistant", err=str(e)
+            )
 
     def cleanup_session(self, session_id: str) -> None:
         """清理会话相关数据。"""

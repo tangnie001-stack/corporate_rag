@@ -3,6 +3,8 @@
 from loguru import logger
 
 from src.config import EMBEDDING_MODEL, TOP_K_RETRIEVAL
+from src.core import logging as core_logging
+from src.core.log_events import Event
 from src.core.logging import LOG_MAX_BODY
 from src.infra.db.vector_store.types import ChunkQueryResult, ChunkResult
 
@@ -25,12 +27,12 @@ def similarity_search(collection, embed_fn, kb_id, query, k=5) -> list[ChunkResu
     col_count = -1
     try:
         col_count = collection.count()
-        logger.info(
-            "[DIAG] similarity_search: kb_id={} collection_name={} collection_count={} k={}",
-            kb_id,
-            collection.name,
-            col_count,
-            min(k, 100),
+        core_logging.log_event(
+            Event.SEARCH_STATS,
+            kb_id=kb_id,
+            collection_name=collection.name,
+            collection_count=col_count,
+            top_k=min(k, 100),
         )
     except Exception:  # noqa: BLE001, S110
         pass
@@ -54,20 +56,13 @@ def similarity_search(collection, embed_fn, kb_id, query, k=5) -> list[ChunkResu
                     else None,
                 )
             )
-    logger.info(
-        "ChromaDB search: kb_id={} query_len={} results={} model={}",
-        kb_id,
-        len(query),
-        len(formatted),
-        EMBEDDING_MODEL,
+    core_logging.log_event(
+        Event.SEARCH_RESULT,
+        kb_id=kb_id,
+        query_len=len(query),
+        result_count=len(formatted),
+        model=EMBEDDING_MODEL,
     )
-    if not formatted:
-        logger.info(
-            "[DIAG] ChromaDB search returned 0 results! kb_id={} collection_count={} query_len={}",
-            kb_id,
-            col_count,
-            len(query),
-        )
     logger.debug(
         "[CHROMA] method=similarity_search | kb_id={} | rows={} | data={}",
         kb_id,
@@ -100,18 +95,20 @@ def similarity_search_all(
             results = similarity_search(col, embed_fn, kb_id, query, k=k)
             all_results.extend(results)
         except Exception as e:  # noqa: BLE001
-            logger.warning("搜索 collection '{}' 失败: {}", kb_id, e)
+            core_logging.log_event(
+                Event.SEARCH_COLLECTION_FAILED, kb_id=kb_id, err=str(e)
+            )
             continue
 
     all_results.sort(
         key=lambda r: r.distance if r.distance is not None else float("inf")
     )
     result = all_results[:k]
-    logger.info(
-        "ChromaDB search_all: collections={} query_len={} results={}",
-        len(collections_dict),
-        len(query),
-        len(result),
+    core_logging.log_event(
+        Event.SEARCH_ALL_DONE,
+        collections=len(collections_dict),
+        query_len=len(query),
+        result_count=len(result),
     )
     return result
 
@@ -141,14 +138,10 @@ def get_chunks_by_doc_id(collection, doc_id: str) -> list[ChunkResult]:
                     metadata=results["metadatas"][i] if results["metadatas"] else {},
                 )
             )
-        logger.info(
-            "[CHROMA] method=get_chunks_by_doc_id | doc_id={} | rows={}",
-            doc_id,
-            len(chunks),
-        )
+        core_logging.log_event(Event.CHUNKS_READ, doc_id=doc_id, count=len(chunks))
         return chunks
     except Exception as e:  # noqa: BLE001
-        logger.warning("Failed to get chunks for doc_id={}: {}", doc_id, e)
+        core_logging.log_event(Event.CHUNKS_READ_FAILED, doc_id=doc_id, err=str(e))
         return []
 
 
@@ -190,17 +183,12 @@ def get_chunks_paginated(
                     metadata=results["metadatas"][i] if results["metadatas"] else {},
                 )
             )
-        logger.info(
-            "[CHROMA] method=get_chunks_paginated | doc_id={} | page={} | total={}",
-            doc_id,
-            page,
-            total,
-        )
+        core_logging.log_event(Event.CHUNKS_READ, doc_id=doc_id, page=page, total=total)
         return ChunkQueryResult(
             items=items, total=total, page=page, page_size=page_size
         )
     except Exception as e:  # noqa: BLE001
-        logger.warning("Failed to get paginated chunks for doc_id={}: {}", doc_id, e)
+        core_logging.log_event(Event.CHUNKS_READ_FAILED, doc_id=doc_id, err=str(e))
         return ChunkQueryResult(items=[], total=0, page=page, page_size=page_size)
 
 
@@ -228,10 +216,8 @@ def get_all_chunks(collection, kb_id: str) -> list[ChunkResult]:
                     metadata=metadatas[i] if metadatas else {},
                 )
             )
-        logger.info(
-            "[CHROMA] method=get_all_chunks | kb_id={} | rows={}", kb_id, len(chunks)
-        )
+        core_logging.log_event(Event.CHUNKS_READ, kb_id=kb_id, count=len(chunks))
         return chunks
     except Exception as e:  # noqa: BLE001
-        logger.warning("Failed to get all chunks for kb_id={}: {}", kb_id, e)
+        core_logging.log_event(Event.CHUNKS_READ_FAILED, kb_id=kb_id, err=str(e))
         return []

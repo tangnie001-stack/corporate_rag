@@ -15,10 +15,11 @@ import json
 
 import redis as redis_sync
 import redis.asyncio as redis_async
-from loguru import logger
 
 from src.chat.persistence import PersistenceService
 from src.config import REDIS_TTL, REDIS_URL
+from src.core import logging as core_logging
+from src.core.log_events import Event
 from src.infra.db.mysql_db import ChatRepo
 from src.infra.llm.chat_message import ChatMessage
 
@@ -148,15 +149,12 @@ class ChatManager:
             conn.ping()
             conn.close()
             self._redis = redis_async.from_url(redis_url, decode_responses=True)
-            logger.info("ChatManager: Redis async client created at {}", redis_url)
+            core_logging.log_event(Event.REDIS_READY)
         except Exception as e:  # noqa: BLE001
             # Redis 不可用：静默降级为内存存储，不影响程序运行
             self._redis = None
             self._in_memory = True
-            logger.warning(
-                "ChatManager: Redis unavailable ({}), using InMemory fallback",
-                e,
-            )
+            core_logging.log_event(Event.REDIS_FALLBACK, err=str(e))
 
     def _session_key(self, session_id: str) -> str:
         """生成 Redis key，格式为 "chat_history:{session_id}"。
@@ -228,7 +226,7 @@ class ChatManager:
             await self._redis.rpush(key, json.dumps(msg, ensure_ascii=False))
             await self._redis.expire(key, self.ttl)
         except Exception as e:  # noqa: BLE001
-            logger.warning("add_message_async failed: {}", e)
+            core_logging.log_event(Event.HISTORY_WRITE_FAILED, err=str(e))
 
     async def get_history_async(self, session_id: str) -> list[ChatMessage]:
         """异步获取指定会话的完整对话历史。
@@ -250,7 +248,7 @@ class ChatManager:
             raw = await self._redis.lrange(key, 0, -1)
             return [ChatMessage(**json.loads(m)) for m in raw]
         except Exception as e:  # noqa: BLE001
-            logger.warning("get_history_async failed: {}", e)
+            core_logging.log_event(Event.HISTORY_READ_FAILED, err=str(e))
             return []
 
     async def clear_history_async(self, session_id: str) -> None:
@@ -268,4 +266,4 @@ class ChatManager:
         try:
             await self._redis.delete(key)
         except Exception as e:  # noqa: BLE001
-            logger.warning("clear_history_async failed: {}", e)
+            core_logging.log_event(Event.HISTORY_CLEAR_FAILED, err=str(e))

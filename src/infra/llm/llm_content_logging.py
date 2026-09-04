@@ -10,7 +10,9 @@
 """
 
 from langchain_core.callbacks import BaseCallbackHandler
-from loguru import logger
+
+from src.core import logging as core_logging
+from src.core.log_events import Event
 
 # 单次记录的内容截断长度，防止超大 prompt（如表格上下文）刷爆日志
 _CONTENT_LIMIT = 8000
@@ -35,29 +37,16 @@ class LlmContentLoggingHandler(BaseCallbackHandler):
         """LLM 调用开始时记录输入，并缓存模型名供 on_llm_end 使用。"""
         self._model = self._model_name(serialized, kwargs)
         text = _format_prompts(prompts)
-        logger.info(
-            "[LLM:{}] START trace={} 输入: {}",
-            self._model,
-            _trace(),
-            text[:_CONTENT_LIMIT],
+        core_logging.log_event(
+            Event.CONTENT_START, model=self._model, prompt=text[:_CONTENT_LIMIT]
         )
 
     def on_llm_end(self, response, **kwargs) -> None:
         """LLM 调用结束时记录输出。"""
         output = _format_response(response)
-        logger.info(
-            "[LLM:{}] END trace={} 输出: {}",
-            self._model,
-            _trace(),
-            output[:_CONTENT_LIMIT],
+        core_logging.log_event(
+            Event.CONTENT_END, model=self._model, output=output[:_CONTENT_LIMIT]
         )
-
-
-def _trace() -> str:
-    """当前 trace_id（由 loguru patcher 使用，此处显式带出便于排查）。"""
-    from src.infra.llm.trace_context import current_trace_id
-
-    return current_trace_id.get() or "-"
 
 
 def _format_prompts(prompts: list) -> str:

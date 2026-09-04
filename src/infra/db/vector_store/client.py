@@ -8,6 +8,8 @@ from chromadb.config import Settings
 from loguru import logger
 
 from src.config import CHROMA_COLLECTION_PREFIX, CHROMA_PERSIST_DIR, EMBEDDING_MODEL
+from src.core import logging as core_logging
+from src.core.log_events import Event
 from src.infra.db.vector_store.embedding import DashScopeEmbeddingFunction
 
 
@@ -43,10 +45,10 @@ class ChromaClient:
                 path=self._persist_dir,
                 settings=Settings(anonymized_telemetry=False),
             )
-            logger.info(
-                "ChromaDB PersistentClient created: persist_dir={} model={}",
-                self._persist_dir,
-                EMBEDDING_MODEL,
+            core_logging.log_event(
+                Event.CHROMA_CLIENT_READY,
+                persist_dir=self._persist_dir,
+                model=EMBEDDING_MODEL,
             )
         return self._client
 

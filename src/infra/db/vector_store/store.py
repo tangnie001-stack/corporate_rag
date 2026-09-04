@@ -4,6 +4,8 @@ from chromadb.errors import NotFoundError
 from loguru import logger
 
 from src.chunking.validator import ChunkData
+from src.core import logging as core_logging
+from src.core.log_events import Event
 
 
 def add_chunks(
@@ -56,14 +58,11 @@ def add_chunks(
         collection.add(**kwargs)
     except Exception as e:
         logger.exception(
-            "ChromaDB add_chunks failed: kb_id={} doc_id={} error={}", kb_id, doc_id, e
+            "[db] chunks add failed kb_id={} doc_id={} err={}", kb_id, doc_id, e
         )
         raise
-    logger.info(
-        "ChromaDB add_chunks success: kb_id={} doc_id={} count={}",
-        kb_id,
-        doc_id,
-        len(ids),
+    core_logging.log_event(
+        Event.CHUNKS_ADDED, kb_id=kb_id, doc_id=doc_id, count=len(ids)
     )
     return len(ids)
 
@@ -88,7 +87,7 @@ def delete_document(collection, doc_id: str) -> int:
         if results["ids"]:
             collection.delete(ids=results["ids"])
             count = len(results["ids"])
-            logger.info("ChromaDB delete_document: doc_id={} deleted={}", doc_id, count)
+            core_logging.log_event(Event.CHUNKS_DELETED, doc_id=doc_id, count=count)
             return count
         return 0
     except NotFoundError:
@@ -112,8 +111,8 @@ def delete_collection(chroma_client, name: str, cache_key: str, cache: dict) -> 
     try:
         chroma_client.delete_collection(name)
         cache.pop(cache_key, None)
-        logger.info("Deleted collection '{}'", name)
+        core_logging.log_event(Event.COLLECTION_DELETED, name=name)
         return True
     except (NotFoundError, ValueError):
-        logger.warning("Collection '{}' not found for deletion", name)
+        core_logging.log_event(Event.COLLECTION_DELETE_FAILED, name=name)
         return False
