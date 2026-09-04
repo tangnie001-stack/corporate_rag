@@ -2085,8 +2085,9 @@ function newSession() {
 
 // ── User Area（登录/退出，侧栏底部） ──
 
-(function checkAuth() {
-  fetch('/api/auth/verify', {
+// 登录校验：返回当前登录 user_id；未登录 / token 无效 / 请求失败 → null
+function verifyLogin() {
+  return fetch('/api/auth/verify', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Trace-ID': generateTraceId() },
     body: JSON.stringify({}),
@@ -2094,13 +2095,17 @@ function newSession() {
     .then(r => r.json().catch(() => null))
     .then(d => {
       if (d && d.code === 'SUCCESS' && d.data && d.data.valid) {
-        updateUserArea(d.data.user_id);
-      } else {
-        updateUserArea(null);
+        return d.data.user_id;
       }
+      return null;
     })
-    .catch(() => updateUserArea(null));
-})();
+    .catch(() => null);
+}
+
+// 跳登录页并携带当前路径，登录后回跳
+function redirectToLogin() {
+  location.replace('/login.html?redirect=' + encodeURIComponent(location.pathname + location.search));
+}
 
 function updateUserArea(userId) {
   const el = $('userArea');
@@ -2174,58 +2179,66 @@ async function handleLogout() {
   location.href = '/login.html';
 }
 
-// ── Init ──
-// 区分新/旧会话：localStorage 无 rag_session_id 说明是全新对话（新浏览器/未开过对话）
-const hadSavedSession = !!localStorage.getItem('rag_session_id');
-state.sessionId = getOrCreateSessionId();
-
-// 捕获两个 composer 的 HTML 默认 placeholder，setInputState(true) 时还原
-(function capturePlaceholders() {
-  const n = $('newInput');
-  const h = $('historyInput');
-  if (n) _origPlaceholder.new = n.placeholder;
-  if (h) _origPlaceholder.history = h.placeholder;
-})();
-
-// 刷新恢复：加载历史后查任务状态，generating 时从缓冲开头续接当前轮（seq 0 回放）
-async function resumeIfGenerating(sessionId) {
-  try {
-    const res = await fetch('/api/sessions/task-status?session_id=' + encodeURIComponent(sessionId), {
-      method: 'GET',
-      headers: { 'X-Trace-ID': generateTraceId() },
-    });
-    const body = await res.json().catch(() => null);
-    if (body && body.code === 'SUCCESS' && body.data && body.data.status === 'generating') {
-      state.current = STATE.STREAMING;
-      setInputState(false, '正在恢复生成...');
-      resumeStream(sessionId, 0);
-    }
-  } catch (e) { /* 状态查询失败静默，不打断页面 */ }
-}
-
-// 初始化：加载 KB 与会话列表；rag_session_id 命中当前用户真实会话且有消息 →
-// 历史对话页并尝试续接；空壳/他人会话 id 不再拉消息（避免必然的 404 噪音）。
-// loadSessions 成功（返回 true）时以 sessionMap membership 为准；列表拉取失败
-// 时回退旧行为（有历史 id 仍尝试恢复），避免列表故障连带丢失会话恢复能力。
-loadKBs();
-loadSessions().then((listOk) => {
-  const known = listOk ? !!sessionMap[state.sessionId] : hadSavedSession;
-  if (!known) {
-    showNewPage();
+// ── Init（登录门禁：chat 依赖登录态，未登录/校验失败先跳登录页再加载内容）──
+(async function boot() {
+  const authUserId = await verifyLogin();
+  updateUserArea(authUserId);
+  if (!authUserId) {
+    redirectToLogin();
     return;
   }
-  loadSessionMessages(state.sessionId).then((count) => {
-    if (count > 0) {
-      syncHeaderFromSession();
-      showHistoryPage();
-      // 仅历史对话页（有历史消息）才尝试续接生成中的回答；
-      // 新对话页（count === 0）没有可回放的消息流，不应 resume 到隐藏容器
-      resumeIfGenerating(state.sessionId);
-    } else {
+  // 区分新/旧会话：localStorage 无 rag_session_id 说明是全新对话（新浏览器/未开过对话）
+  const hadSavedSession = !!localStorage.getItem('rag_session_id');
+  state.sessionId = getOrCreateSessionId();
+
+  // 捕获两个 composer 的 HTML 默认 placeholder，setInputState(true) 时还原
+  (function capturePlaceholders() {
+    const n = $('newInput');
+    const h = $('historyInput');
+    if (n) _origPlaceholder.new = n.placeholder;
+    if (h) _origPlaceholder.history = h.placeholder;
+  })();
+
+  // 刷新恢复：加载历史后查任务状态，generating 时从缓冲开头续接当前轮（seq 0 回放）
+  async function resumeIfGenerating(sessionId) {
+    try {
+      const res = await fetch('/api/sessions/task-status?session_id=' + encodeURIComponent(sessionId), {
+        method: 'GET',
+        headers: { 'X-Trace-ID': generateTraceId() },
+      });
+      const body = await res.json().catch(() => null);
+      if (body && body.code === 'SUCCESS' && body.data && body.data.status === 'generating') {
+        state.current = STATE.STREAMING;
+        setInputState(false, '正在恢复生成...');
+        resumeStream(sessionId, 0);
+      }
+    } catch (e) { /* 状态查询失败静默，不打断页面 */ }
+  }
+
+  // 初始化：加载 KB 与会话列表；rag_session_id 命中当前用户真实会话且有消息 →
+  // 历史对话页并尝试续接；空壳/他人会话 id 不再拉消息（避免必然的 404 噪音）。
+  // loadSessions 成功（返回 true）时以 sessionMap membership 为准；列表拉取失败
+  // 时回退旧行为（有历史 id 仍尝试恢复），避免列表故障连带丢失会话恢复能力。
+  loadKBs();
+  loadSessions().then((listOk) => {
+    const known = listOk ? !!sessionMap[state.sessionId] : hadSavedSession;
+    if (!known) {
       showNewPage();
+      return;
     }
+    loadSessionMessages(state.sessionId).then((count) => {
+      if (count > 0) {
+        syncHeaderFromSession();
+        showHistoryPage();
+        // 仅历史对话页（有历史消息）才尝试续接生成中的回答；
+        // 新对话页（count === 0）没有可回放的消息流，不应 resume 到隐藏容器
+        resumeIfGenerating(state.sessionId);
+      } else {
+        showNewPage();
+      }
+    });
   });
-});
+})();
 
 // stick 滚动：监听消息流滚动，上滑暂停自动跟随
 chatThread.addEventListener('scroll', onChatScroll);
