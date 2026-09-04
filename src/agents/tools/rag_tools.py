@@ -172,6 +172,21 @@ def make_rag_tools(
         else:
             iteration = 0
 
+        # 检索重放上下文（L1）：query/kb 为重放输入，其余参数为"当时值"供 drift 对照；
+        # 态 A（kb_id 空）不检索、不落 replay 行
+        if kb_id:
+            core_logging.log_event(
+                Event.RETRIEVE_REPLAY,
+                query=query,
+                query_len=len(query),
+                kb_id=kb_id,
+                iteration=iteration,
+                top_k=top_k,
+                dedup_max_per_doc=settings.RETRIEVAL_MAX_PER_DOC,
+                hybrid=settings.HYBRID_SEARCH_ENABLED,
+                rerank=True,
+            )
+
         # 检索行为信号（态 B 专属缺陷诊断）：独立信号行，不经 log_event 拼装；
         # 态 A（kb_id 为空）未检索不产任何缺陷信号
         if kb_id and not results:
