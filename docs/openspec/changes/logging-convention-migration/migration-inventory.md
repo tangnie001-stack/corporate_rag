@@ -1,7 +1,7 @@
 # 存量日志迁移清单
 
 生成日期：2026-09-03（盘点基线更新：227 处 logger 调用；上一版 239 处见 git 历史）
-目标规范：`CLAUDE.md`「日志格式（统一）」→ `docs/agents/rules.md`「日志约定」（分层前缀 / 英文 k=v / 五级语义 / query 完整记录 + 结构化行 JSON 转义）
+目标规范：`docs/agents/logging-rules.md`（分层前缀主表 6 层 + `[cli]` + `[app]` / 英文 k=v / 五级语义 / 值类型编码 + query 完整记录；事件全集以 `src/core/log_events.py` 注册表为准）
 
 > 盘点命令：
 > `grep -rn "logger\.\(debug\|info\|warning\|error\|exception\)(" src/ --include=*.py | grep -v __pycache__`
@@ -19,7 +19,7 @@
 | src/cli/eval_ragas_generate.py | 18 | [cli] | 是（9 行） | 3.5 | 测试集生成（含 9 行中文） |
 | src/services/document_service.py | 17 | — | 否 | 未排期 | 入库链路横跨解析/分块/向量/实体 |
 | src/infra/db/vector_store/search.py | 12 | [db] | 是（1 行） | 3.4 | 向量检索（含 1 行中文降级日志） |
-| src/main.py | 12 | — | 是（8 行） | 3.5（入口中文日志） | 入口启动/异常兜底（8 行中文，前缀待入口边界定义） |
+| src/main.py | 12 | [app] | 是（8 行） | 3.5（入口中文日志） | 入口生命周期 + 全局异常兜底（8 行中文，归 [app]，去 ├─ 制表符） |
 | src/infra/llm/langfuse_tracing.py | 9 | [llm] | 否 | 未排期 | Langfuse 埋点 |
 | src/core/logging.py | 7 | [db] | 否 | 未排期 | 日志基建自身（SQL echo/helper 自检，helper 为 log_event/retrieval_signal 内 warning） |
 | src/api/chat.py | 6 | [session] | 否 | 未排期 | 聊天 SSE 端点 |
@@ -123,5 +123,5 @@
 | 155 | `"未处理的系统异常: {} {}"` | `unhandled exception method={} url={}` |
 | 164 | `"  ├─ 嵌套第{}层: type={} msg={}"` | `exception chain depth={} type={} msg={}` |
 
-> main.py 为入口/异常兜底，前缀表未覆盖；建议只转英文 k=v，分层前缀待入口边界域定义后补（L164 的 `├─` 制表符随迁移一并去除）。
+> main.py 为入口生命周期 + 全局异常兜底，归 `[app]` 前缀（本批登记）；L164 的 `├─` 制表符随迁移去除。
 > workflow.py:85 为图编译入口日志（中文），随 3.3 [agent] 批迁移。
