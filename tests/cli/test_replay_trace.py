@@ -33,6 +33,21 @@ def test_parse_log_line_segment_agnostic():
     assert fields["query"] == "腾讯"
 
 
+def test_parse_log_line_strips_trailing_newline_from_last_bool():
+    # 从文件逐行读取时末字段带 \n（int 字段因 int() 容白不受影响，
+    # 裸 bool 必须剥尾再归一化，否则 rerank 解析成 "true\n" 触发假 drift）
+    line = (
+        "2026-09-03 12:00:00.000 | INFO    | trace_abc                  "
+        "| src.agents.tools.rag_tools:200 - "
+        '[retrieval] retrieve replay query="腾讯" query_len=2 kb_id=k1 iteration=1 '
+        "top_k=8 dedup_max_per_doc=1 hybrid=false rerank=true\n"
+    )
+    fields = parse_log_line(line)
+    assert fields is not None
+    assert fields["rerank"] is True
+    assert fields["hybrid"] is False
+
+
 def test_parse_trace_logs_filters_by_trace(tmp_path):
     other = (
         "2026-09-03 12:00:00.000 | INFO    | trace_zzz                  | "

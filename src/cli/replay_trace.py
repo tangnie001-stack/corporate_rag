@@ -39,7 +39,7 @@ def parse_log_line(line: str) -> dict | None:
     message = line.split(" - ", 1)[-1]  # 取 message（首个 " - " 后即为 message 头）
     if not message.startswith("[retrieval] retrieve replay "):
         return None
-    body = message[len("[retrieval] retrieve replay ") :]
+    body = message[len("[retrieval] retrieve replay ") :].rstrip()
     fields: dict = {}
     for key, raw in _KV.findall(body):
         if raw.startswith('"'):
