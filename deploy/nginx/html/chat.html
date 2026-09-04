@@ -1998,7 +1998,7 @@ function formatRelTime(iso) {
 // 加载会话历史列表（POST /api/sessions/list）
 async function loadSessions() {
   const listEl = $('sessionList');
-  if (!listEl) return;
+  if (!listEl) return false;
   try {
     const res = await fetch('/api/sessions/list', {
       method: 'POST',
@@ -2010,7 +2010,7 @@ async function loadSessions() {
     sessionMap = {};
     if (!sessions.length) {
       listEl.innerHTML = '<div class="sidebar-empty">暂无会话历史</div>';
-      return;
+      return true;
     }
     sessions.forEach(s => { sessionMap[s.id] = s; });
     listEl.innerHTML = sessions.map(s => {
@@ -2021,8 +2021,10 @@ async function loadSessions() {
         <span class="rel-time">${rel}</span>
       </button>`;
     }).join('');
+    return true;
   } catch (e) {
     listEl.innerHTML = '<div class="sidebar-empty">加载失败</div>';
+    return false;
   }
 }
 
@@ -2201,24 +2203,28 @@ async function resumeIfGenerating(sessionId) {
   } catch (e) { /* 状态查询失败静默，不打断页面 */ }
 }
 
-// 初始化：加载 KB 列表与会话列表；已有会话且有消息 → 历史对话页，否则新对话页
+// 初始化：加载 KB 与会话列表；rag_session_id 命中当前用户真实会话且有消息 →
+// 历史对话页并尝试续接；空壳/他人会话 id 不再拉消息（避免必然的 404 噪音）。
+// loadSessions 成功（返回 true）时以 sessionMap membership 为准；列表拉取失败
+// 时回退旧行为（有历史 id 仍尝试恢复），避免列表故障连带丢失会话恢复能力。
 loadKBs();
-Promise.all([
-  loadSessions(),
-  hadSavedSession ? loadSessionMessages(state.sessionId) : Promise.resolve(0),
-]).then((results) => {
-  const count = results[1] || 0;
-  if (count > 0) {
-    syncHeaderFromSession();
-    showHistoryPage();
-  } else {
+loadSessions().then((listOk) => {
+  const known = listOk ? !!sessionMap[state.sessionId] : hadSavedSession;
+  if (!known) {
     showNewPage();
+    return;
   }
-  if (hadSavedSession && count > 0) {
-    // 仅历史对话页（有历史消息）才尝试续接生成中的回答；
-    // 新对话页（count === 0）没有可回放的消息流，不应 resume 到隐藏容器
-    resumeIfGenerating(state.sessionId);
-  }
+  loadSessionMessages(state.sessionId).then((count) => {
+    if (count > 0) {
+      syncHeaderFromSession();
+      showHistoryPage();
+      // 仅历史对话页（有历史消息）才尝试续接生成中的回答；
+      // 新对话页（count === 0）没有可回放的消息流，不应 resume 到隐藏容器
+      resumeIfGenerating(state.sessionId);
+    } else {
+      showNewPage();
+    }
+  });
 });
 
 // stick 滚动：监听消息流滚动，上滑暂停自动跟随
