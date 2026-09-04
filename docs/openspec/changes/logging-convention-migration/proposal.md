@@ -36,7 +36,7 @@
 - **取消 query 一律截 40**：query/搜索词在结构化日志行完整记录（配合双引号 + JSON 转义），保证 trace 内数据足以无歧义重放
 - **L1 检索重放**：每次 `retrieve_kb` 执行落一条 `[retrieval] retrieve replay` 上下文事件行（query 全文 / query_len / kb_id / iteration / top_k / dedup_max_per_doc / hybrid / rerank）——query 全文与 kb_id 是重放输入；top_k/dedup 等参数是"当时值"，供 CLI 重放后并排对照做 drift 检测
 - **L2 生成层可观测（摘要，不进全文）**：主 agent 每轮推理落 `[agent] model turn`（model / usage_in / usage_out / fallback / latency_ms / session_id / iteration，埋 agent_node 主模型调用点）；verify judge 靠 `[verify] judge start|done`（done 带 unsupported_count）边界包住。judge / temporal / query_router 等其余 LLM 调用本期不加摘要（演进：抽统一 LLM 调用层时补 `[llm] model call` 一次性覆盖）。**LLM 原文不进默认日志**（走 SSE `/api/sessions/events` 回放 + MySQL 会话表答案 + `LLM_LOG_CONTENT` 深日志开关）
-- 提供 `replay_trace` CLI：输入 trace_id → 扫全部 `app_*.log`（段位无关解析，兼容新旧格式）→ 提取 replay 事件与行为信号 → 对当前 KB、当前配置重放检索打印 top 片段，并把事件行的"当时参数"并排对照、差异标注（drift 检测）；`--max-per-doc N` 仅覆盖去重参数做对照。本期实现 **L1**；L2 数据源读取（SSE/会话表）作为后续增强扩展点，本期只在设计写明路径
+- 提供 `replay_trace` CLI：输入 trace_id → 扫全部 `app_*.log`（段位无关解析，兼容新旧格式）→ 提取 replay 事件与行为信号 → 对当前 KB、当前配置重放检索打印 top 片段，并把事件行的"当时参数"并排对照、差异标注（drift 检测）。本期实现 **L1**；L2 数据源读取（SSE/会话表）作为后续增强扩展点，本期只在设计写明路径。检索栈内部读模块常量、参数不可覆盖，故 **无 `--max-per-doc`**——N=1 vs N>1 的去重 A/B 属离线实验（改 settings 重启跑整链路），不在 replay CLI 范围
 
 ### 4. 存量日志迁移（分批，3.1 试点已迁，3.2~3.5 在本 change 顺序执行）
 

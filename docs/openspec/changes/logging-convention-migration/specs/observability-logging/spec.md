@@ -110,7 +110,7 @@ session_id SHALL 在请求生命周期内经日志框架统一注入日志行固
 
 ### Requirement: 离线重放 CLI
 
-系统 SHALL 提供重放命令（`python -m src.cli.replay_trace --trace <id>`）：读取该 trace 的日志（扫全部 `app_*.log`，**段位无关解析**：按 trace 子串过滤、取最后一个 ` - ` 之后为 message，兼容 `_LOG_FORMAT` 演进前后的新旧文件混存）→ 解析其 `retrieve replay` 事件（按 iteration 顺序）与行为信号 → 对当前 KB、当前配置重放检索并打印 top 片段（含来源与分数），并把事件行的当时参数并排对照、差异标注（drift 检测）；支持 `--max-per-doc N` 仅覆盖去重参数。trace 无检索轮时 SHALL 给出提示。输出 SHALL 标注"对当前 KB 重放（非历史快照）"。
+系统 SHALL 提供重放命令（`python -m src.cli.replay_trace --trace <id>`）：读取该 trace 的日志（扫全部 `app_*.log`，**段位无关解析**：按 trace 子串过滤、取最后一个 ` - ` 之后为 message，兼容 `_LOG_FORMAT` 演进前后的新旧文件混存）→ 解析其 `retrieve replay` 事件（按 iteration 顺序）与行为信号 → 对当前 KB、当前配置重放检索并打印 top 片段（含来源与分数），并把事件行的当时参数并排对照、差异标注（drift 检测）。SHALL NOT 提供检索参数覆盖项（`--max-per-doc` 等）：检索栈内部读模块常量不可覆盖，去重 N 的 A/B 属离线实验。trace 无检索轮时 SHALL 给出提示。输出 SHALL 标注"对当前 KB 重放（非历史快照）"。
 
 #### Scenario: 一条命令定位检索问题
 
