@@ -9,7 +9,6 @@
 """
 
 from langchain_core.messages import SystemMessage
-from loguru import logger
 
 from src.agents.graph.state import AgentState
 from src.agents.graph.verify import ask_confirm
@@ -22,6 +21,8 @@ from src.config.const import (
     VERIFY_GUIDANCE_MARKER,
     VERIFY_HINT_MARKER,
 )
+from src.core import logging as core_logging
+from src.core.log_events import Event
 from src.infra.llm.request_context import RequestContext
 
 
@@ -68,11 +69,10 @@ async def decide_missing_web(
     confirmed = False
     if ctx is not None and not ctx.web_confirmed:
         confirmed = await ask_confirm._ask_web_confirm(state, missing)
-        logger.info(
-            "verify web_confirm result session_id={} missing={} confirmed={}",
-            state.session_id,
-            missing,
-            confirmed,
+        core_logging.log_event(
+            Event.WEB_CONFIRM_RESULT,
+            missing=missing,
+            confirmed=confirmed,
         )
         if confirmed:
             ctx.web_confirmed = True
@@ -95,10 +95,8 @@ async def decide_missing_web(
     queries_covered = queries_cover_missing(last_queries, missing)
     if last_queries is not None and queries_covered:
         # 上一轮已带全缺失年份调 search_web，答案仍缺 → 网络已穷尽 → 标注直通
-        logger.info(
-            "verify regen stop (web exhausted) session_id={} missing={}",
-            state.session_id,
-            missing,
+        core_logging.log_event(
+            Event.REGEN_STOP, reason="web_exhausted", missing=missing
         )
         covered = [y for y in required if y not in missing]
         answer = (
@@ -108,11 +106,11 @@ async def decide_missing_web(
 
     # ── 3. 保险丝：修订次数达上限 → 标注直通（防 agent 反复不执行/带漏）──
     if state._verify_regenerations >= MAX_VERIFY_REGENERATIONS:
-        logger.info(
-            "verify regen stop (fuse) session_id={} missing={} regenerations={}",
-            state.session_id,
-            missing,
-            state._verify_regenerations,
+        core_logging.log_event(
+            Event.REGEN_STOP,
+            reason="fuse",
+            missing=missing,
+            regenerations=state._verify_regenerations,
         )
         covered = [y for y in required if y not in missing]
         answer = (

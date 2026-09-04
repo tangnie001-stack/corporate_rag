@@ -6,11 +6,11 @@
 
 import asyncio
 
-from loguru import logger
-
 from src.agents.graph.state import AgentState
 from src.agents.tools.ask_tools import wait_with_abort_and_timeout
 from src.config.const import ASK_USER_TIMEOUT, MAX_VERIFY_ASK_PER_TURN
+from src.core import logging as core_logging
+from src.core.log_events import Event
 from src.infra.llm.request_context import current_request_ctx, pending_asks
 
 
@@ -34,11 +34,7 @@ async def _ask_web_confirm(state: AgentState, missing_years: list[int]) -> bool:
     if state.session_id in pending_asks:
         return False
     ctx.verify_ask_count += 1
-    logger.info(
-        "verify web_confirm ask triggered session_id={} missing={}",
-        state.session_id,
-        missing_years,
-    )
+    core_logging.log_event(Event.WEB_CONFIRM_ASK, missing=missing_years)
     payload = {
         "type": "ask_user",
         "questions": [

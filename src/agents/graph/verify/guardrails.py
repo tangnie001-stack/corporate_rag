@@ -11,7 +11,6 @@
 import re
 
 from langchain_core.messages import SystemMessage
-from loguru import logger
 
 from src.agents.graph.state import AgentState
 from src.config.const import (
@@ -20,6 +19,8 @@ from src.config.const import (
     VERIFY_KB_CITATION_MARKER,
     SSEInteractionTexts,
 )
+from src.core import logging as core_logging
+from src.core.log_events import Event
 from src.infra.llm.request_context import RequestContext
 
 
@@ -81,11 +82,7 @@ async def web_citation_guard(
         or _citation_guidance_already_injected(state)
     ):
         return None
-    logger.info(
-        "verify web-citation guide session_id={} answer_len={}",
-        state.session_id,
-        len(answer),
-    )
+    core_logging.log_event(Event.CITATION_GUIDE, kind="web", answer_len=len(answer))
     guidance = SystemMessage(
         content=(
             f"你刚才的回答引用了联网搜索结果，但没有标注来源编号，"
@@ -168,11 +165,7 @@ async def kb_citation_guardrail(
     if already_guided:
         # 已引导过仍无引用：不强灌第二次（避免与模型"判断无关"冲突）
         return None
-    logger.info(
-        "verify kb-citation guide session_id={} answer_len={}",
-        state.session_id,
-        len(answer),
-    )
+    core_logging.log_event(Event.CITATION_GUIDE, kind="kb", answer_len=len(answer))
     guidance = SystemMessage(
         content=(
             f"你刚才的回答基于知识库检索结果，但没有标注来源编号，"

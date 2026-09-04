@@ -52,6 +52,17 @@ class Event(str, Enum):
     WEB_SEARCH_DONE = "web search done"
     RETRIEVE_REPLAY = "retrieve replay"
 
+    # [verify] 验证管道事件（3.2 批迁移登记：态A 引用引导 / 态B 完整性+judge）
+    SKIP = "skip"
+    COMPLETENESS_CHECK = "completeness check"
+    JUDGE_START = "judge start"
+    JUDGE_DONE = "judge done"
+    JUDGE_FAILED = "judge failed"
+    WEB_CONFIRM_ASK = "web confirm ask"
+    WEB_CONFIRM_RESULT = "web confirm result"
+    REGEN_STOP = "regen stop"
+    CITATION_GUIDE = "citation guide"
+
 
 @dataclass(frozen=True)
 class EventSpec:
@@ -129,6 +140,51 @@ EVENT_SPECS: dict[str, EventSpec] = {
             "hybrid",
             "rerank",
         ),
+    ),
+    # [verify] 验证管道（3.2 批）
+    Event.SKIP.value: EventSpec(Event.SKIP.value, "verify", "info", ("reason",)),
+    Event.COMPLETENESS_CHECK.value: EventSpec(
+        Event.COMPLETENESS_CHECK.value,
+        "verify",
+        "info",
+        ("kb_id", "required", "missing", "answer_len"),
+    ),
+    Event.JUDGE_START.value: EventSpec(Event.JUDGE_START.value, "verify", "info"),
+    Event.JUDGE_DONE.value: EventSpec(
+        Event.JUDGE_DONE.value,
+        "verify",
+        "info",
+        ("unsupported_count",),
+    ),
+    Event.JUDGE_FAILED.value: EventSpec(
+        Event.JUDGE_FAILED.value,
+        "verify",
+        "warning",
+        ("answer_len", "err"),
+    ),
+    Event.WEB_CONFIRM_ASK.value: EventSpec(
+        Event.WEB_CONFIRM_ASK.value,
+        "verify",
+        "info",
+        ("missing",),
+    ),
+    Event.WEB_CONFIRM_RESULT.value: EventSpec(
+        Event.WEB_CONFIRM_RESULT.value,
+        "verify",
+        "info",
+        ("missing", "confirmed"),
+    ),
+    Event.REGEN_STOP.value: EventSpec(
+        Event.REGEN_STOP.value,
+        "verify",
+        "info",
+        ("reason", "missing", "regenerations"),
+    ),
+    Event.CITATION_GUIDE.value: EventSpec(
+        Event.CITATION_GUIDE.value,
+        "verify",
+        "info",
+        ("kind", "answer_len"),
     ),
 }
 

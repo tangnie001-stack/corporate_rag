@@ -7,8 +7,6 @@ queries 决策 regen/标注直通），完整性通过后经 KB 溯源护栏（k
 再跑最终答案忠实度 judge。
 """
 
-from loguru import logger
-
 from src.agents.graph.state import AgentState
 from src.agents.graph.verify import faithfulness
 from src.agents.graph.verify.checks import completeness_check
@@ -16,7 +14,7 @@ from src.agents.graph.verify.guardrails import kb_citation_guardrail, web_citati
 from src.agents.graph.verify.regen_decision import decide_missing_web
 from src.config import settings
 from src.core import logging as core_logging
-from src.core.log_events import Signal
+from src.core.log_events import Event, Signal
 from src.infra.llm.request_context import current_request_ctx
 
 
@@ -39,20 +37,19 @@ async def verify_node(state: AgentState) -> dict:
         if decision is not None:
             return decision
         # 纯对话未联网 / 已带引用 / 已达保险丝上限 / 已引导过一次：直通 format
-        logger.info("verify skipped (no kb bound) session_id={}", state.session_id)
+        core_logging.log_event(Event.SKIP, reason="guard_pass")
         return {"answer": state.answer or "", "_needs_regenerate": False}
 
     # ── 态 B：绑定 KB（年份完整性 → 缺失走决策化；通过后 KB 护栏 + 忠实度 judge）──
     answer = state.answer or ""
     required = ctx.temporal_years if ctx is not None else []
     missing = completeness_check(required, answer) if required else []
-    logger.info(
-        "verify_node session_id={} kb_id={} required={} missing={} answer_len={}",
-        state.session_id,
-        state.kb_id,
-        required,
-        missing,
-        len(answer),
+    core_logging.log_event(
+        Event.COMPLETENESS_CHECK,
+        kb_id=state.kb_id,
+        required=required,
+        missing=missing,
+        answer_len=len(answer),
     )
     if missing:
         # 年份缺失：委托决策化（询问联网意愿 → 网络穷尽/保险丝标注直通 → 注入指引/hint
@@ -62,9 +59,12 @@ async def verify_node(state: AgentState) -> dict:
     guardrail = await kb_citation_guardrail(state, ctx)
     if guardrail is not None:
         return guardrail
-    # 最终答案跑忠实度 judge（仅标记，不驱动流程；P1 输出护栏消费）
+    # 最终答案跑忠实度 judge（仅标记，不驱动流程；P1 输出护栏消费）；judge start/done
+    # 边界锚：态 B 跑 judge 即打，为 e2e"态 A 不跑 judge"提供正面对照
     contexts = ctx.tool_contexts if ctx is not None else []
+    core_logging.log_event(Event.JUDGE_START)
     unsupported = await faithfulness.faithfulness_check(answer, contexts)
+    core_logging.log_event(Event.JUDGE_DONE, unsupported_count=len(unsupported))
     if unsupported:
         if state.kb_id:
             # unsupported 行为信号：绑 KB judge 标记无支撑句 → 检索质量缺陷

@@ -1,8 +1,8 @@
 """忠实度校验 — judge LLM 核对答案事实点是否被引用上下文支撑（原 verify_node.py 迁移）。"""
 
-from loguru import logger
-
 from src.config import settings
+from src.core import logging as core_logging
+from src.core.log_events import Event
 
 
 async def faithfulness_check(answer: str, contexts: list) -> list[str]:
@@ -54,9 +54,5 @@ async def faithfulness_check(answer: str, contexts: list) -> list[str]:
             return []
         return [s for s in unsupported if s.strip()]
     except Exception as exc:  # noqa: BLE001  # judge 失败不阻断流程，降级返回无标记，留日志
-        logger.warning(
-            "judge=faithfulness_check 调用或解析失败，降级返回空标记 answer_len={} err={}",
-            len(answer),
-            exc,
-        )
+        core_logging.log_event(Event.JUDGE_FAILED, answer_len=len(answer), err=str(exc))
         return []
