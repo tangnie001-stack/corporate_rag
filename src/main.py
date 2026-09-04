@@ -21,6 +21,8 @@ from src.api import (
 )
 from src.api import ragas_generate as ragas_generate_routes
 from src.config.response_codes import Code
+from src.core import logging as core_logging
+from src.core.log_events import Event
 from src.core.logging import setup_logging
 from src.middleware.auth import auth_middleware
 from src.middleware.response_processor import response_processor_middleware
@@ -40,11 +42,11 @@ async def lifespan(app: FastAPI):
     同时清空残留的 chat_lock:* 键：重启后进程内无任何生成任务，
     残留锁（来自被杀进程，TTL 兜底 180s）会阻塞新请求的并发锁获取。
     """
-    logger.info("财务问答 API 正在启动")
+    core_logging.log_event(Event.APP_STARTING)
     _warmup_chromadb()
     await _clear_stale_chat_locks()
     yield
-    logger.info("财务问答 API 正在关闭")
+    core_logging.log_event(Event.APP_STOPPING)
 
 
 def _warmup_chromadb() -> None:
@@ -61,9 +63,9 @@ def _warmup_chromadb() -> None:
         store = VectorStore()
         # list_collections 会触发 PersistentClient 惰性创建 + 持久化校验
         collections = store.list_collections()
-        logger.info("ChromaDB warmed up: collections={}", len(collections))
+        core_logging.log_event(Event.CHROMA_WARMUP_DONE, collections=len(collections))
     except Exception as e:  # noqa: BLE001
-        logger.warning("ChromaDB warmup failed (will retry lazily): {}", e)
+        core_logging.log_event(Event.CHROMA_WARMUP_FAILED, err=str(e))
 
 
 async def _clear_stale_chat_locks() -> None:
@@ -80,9 +82,9 @@ async def _clear_stale_chat_locks() -> None:
         keys = await redis.keys("chat_lock:*")
         if keys:
             await redis.delete(*keys)
-            logger.info("cleared {} stale chat locks at startup", len(keys))
+            core_logging.log_event(Event.STALE_LOCKS_CLEARED, count=len(keys))
     except Exception as e:  # noqa: BLE001
-        logger.warning("clear stale chat locks failed: {}", e)
+        core_logging.log_event(Event.STALE_LOCKS_CLEAR_FAILED, err=str(e))
 
 
 app = FastAPI(
@@ -105,12 +107,12 @@ setup_logging(configure_trace_id=True)
 async def app_error_handler(request: Request, exc: AppError):
     from starlette.responses import JSONResponse
 
-    # BusinessError 等已知业务异常用 warning 级别
-    # SystemError 等基础设施异常用 exception 级别（含完整 traceback）
+    # >=500 基础设施异常保留 exception 直调（含完整 traceback）
+    # <500 业务异常事件化（code/message 字段，无需 traceback）
     if exc.status >= 500:
-        logger.exception("基础设施异常: {} {}", exc.code, exc.message)
+        logger.exception("[app] infra error code={} message={}", exc.code, exc.message)
     else:
-        logger.warning("业务异常: {} {}", exc.code, exc.message)
+        core_logging.log_event(Event.BIZ_ERROR, code=exc.code, message=exc.message)
 
     # TODO: ARMS Prometheus 接入后在此处打 exception_total.inc()
     return JSONResponse(
@@ -123,7 +125,7 @@ async def app_error_handler(request: Request, exc: AppError):
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     from starlette.responses import JSONResponse
 
-    logger.exception("HTTP 异常: {} {}", exc.status_code, exc.detail)
+    core_logging.log_event(Event.HTTP_ERROR, status=exc.status_code, detail=exc.detail)
     code = Code.NOT_FOUND if exc.status_code == 404 else Code.UNKNOWN_ERROR
     msg = exc.detail or (
         Code.NOT_FOUND_MSG if exc.status_code == 404 else Code.UNKNOWN_ERROR_MSG
@@ -137,7 +139,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     from starlette.responses import JSONResponse
 
-    logger.exception("参数校验异常: {}", exc.errors())
+    core_logging.log_event(Event.VALIDATION_ERROR, errors=exc.errors())
     return JSONResponse(
         {
             "code": Code.VALIDATION_ERROR,
@@ -152,7 +154,9 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 async def unknown_exception_handler(request: Request, exc: Exception):
     from starlette.responses import JSONResponse
 
-    logger.exception("未处理的系统异常: {} {}", request.method, request.url)
+    logger.exception(
+        "[app] unhandled exception method={} url={}", request.method, request.url
+    )
     # 打印异常链根因
     c = exc
     depth = 0
@@ -161,7 +165,12 @@ async def unknown_exception_handler(request: Request, exc: Exception):
         if nxt is None:
             break
         c = nxt
-        logger.error("  ├─ 嵌套第{}层: type={} msg={}", depth + 1, type(c).__name__, c)
+        core_logging.log_event(
+            Event.EXCEPTION_CHAIN,
+            depth=depth + 1,
+            type=type(c).__name__,
+            msg=str(c),
+        )
         depth += 1
     # TODO: ARMS Prometheus 接入后在此处打 exception_total.inc()
     return JSONResponse(

@@ -22,6 +22,8 @@ import sys
 from loguru import logger
 
 from src.config import TOP_K_RERANK
+from src.core import logging as core_logging
+from src.core.log_events import Event
 from src.core.logging import setup_logging
 from src.infra.db.engine import session_factory
 from src.infra.db.mysql_db import KbRepo
@@ -44,7 +46,7 @@ async def main() -> None:
     args = parser.parse_args()
 
     # ====== Step 1: 通过知识库名称查找 kb_id ======
-    logger.info("Looking up knowledge base: {}", args.kb)
+    core_logging.log_event(Event.KB_LOOKUP, name=args.kb)
     repo = KbRepo(session_factory)
     all_kbs = await repo.get_all_kb()
     kb_id = None
@@ -53,19 +55,19 @@ async def main() -> None:
             kb_id = kb.id
             break
     if not kb_id:
-        logger.error("Error: Knowledge base '{}' not found.", args.kb)
+        core_logging.log_event(Event.KB_NOT_FOUND, name=args.kb)
         print("Available KBs:")
         for kb in all_kbs:
             print(f"  - {kb.name} ({kb.id})")
         sys.exit(1)
 
     # ====== Step 2: 在 ChromaDB 中执行语义检索 ======
-    logger.info("Searching for: '{}' (top-k={})", args.query, args.top_k)
+    core_logging.log_event(Event.SEARCH_START, query=args.query, top_k=args.top_k)
     store = VectorStore()
     try:
         results = store.similarity_search(kb_id, args.query, k=args.top_k)
     except Exception as e:  # noqa: BLE001
-        logger.exception("Search failed: {}", e)
+        logger.exception("[cli] search failed query={} err={}", args.query, e)
         print("Hint: Ensure DASHSCOPE_API_KEY is set and documents have been added.")
         sys.exit(1)
 

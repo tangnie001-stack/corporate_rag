@@ -23,14 +23,13 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from loguru import logger
-
 from src.config import settings
+from src.core import logging as core_logging
+from src.core.log_events import Event
 from src.core.logging import setup_logging
 from src.infra.llm.trace_context import current_trace_id
 
 setup_logging(configure_trace_id=True)
-
 
 # Quality gate thresholds
 GATE_THRESHOLDS: dict[str, float] = {
@@ -130,7 +129,7 @@ async def generate_answers_and_contexts(
     retrieval_details: list[list[dict]] = []
 
     for i, q in enumerate(questions):
-        logger.info("Generating answer for Q{}: {}...", i + 1, q[:40])
+        core_logging.log_event(Event.QA_ANSWER_START, index=i + 1, query=q)
 
         # 每个问题一个独立 trace_id，并写入 contextvar —— loguru patcher 会
         # 把它注入到该问题期间的所有日志行，Langfuse trace 也以它为 id
@@ -172,14 +171,15 @@ async def generate_answers_and_contexts(
                 ]
             )
 
-            logger.info(
-                "  Answer length: {} chars, contexts: {}",
-                len(full_answer),
-                len(ctx_list),
+            core_logging.log_event(
+                Event.QA_ANSWER_DONE,
+                index=i + 1,
+                answer_len=len(full_answer),
+                contexts=len(ctx_list),
             )
 
         except Exception as e:  # noqa: BLE001
-            logger.warning("Failed to generate answer for Q{}: {}", i + 1, e)
+            core_logging.log_event(Event.QA_ANSWER_FAILED, index=i + 1, err=str(e))
             answers.append(f"[ERROR] {e}")
             contexts.append([])
             retrieval_details.append([])
@@ -236,7 +236,7 @@ def run_evaluation(
     }
     dataset = Dataset.from_dict(data)
 
-    logger.info("Starting RAGAS evaluation with {} samples...", len(questions))
+    core_logging.log_event(Event.EVALUATION_START, samples=len(questions))
     # ragas.evaluate 无类型标注（推断为 Executor），实际返回 EvaluationResult，显式标注 Any
     # 默认 RunConfig.timeout=180s，长答案的 faithfulness/answer_relevancy 会超时
     # 返回 nan（raise_exceptions=False 吞掉 TimeoutError），故放宽到 10 分钟
@@ -255,7 +255,7 @@ def run_evaluation(
     )
 
     df = result.to_pandas()
-    logger.info("Evaluation completed. Metrics:")
+    core_logging.log_event(Event.EVALUATION_DONE)
     for col in df.columns:
         if col in [
             "faithfulness",
@@ -263,7 +263,11 @@ def run_evaluation(
             "context_recall",
             "context_precision",
         ]:
-            logger.info("  {}: {:.4f}", col, df[col].mean())
+            core_logging.log_event(
+                Event.METRIC_MEAN,
+                metric=col,
+                mean=round(float(df[col].mean()), 4),
+            )
 
     # 显式暴露被吞掉的指标失败：ragas executor 在 raise_exceptions=False 时
     # 会把异常（如 API 额度耗尽 403 / 超时）转成 nan，并记入 "Exception raised
@@ -280,12 +284,7 @@ def run_evaluation(
         if col in df.columns and df[col].isna().any()
     }
     if nan_counts:
-        logger.warning(
-            "部分指标存在 nan（{}）——通常为 API 额度耗尽/限流或单指标超时，"
-            "详见上方 'Exception raised in Job' 日志。nan 计数值: {}",
-            list(nan_counts.keys()),
-            nan_counts,
-        )
+        core_logging.log_event(Event.METRICS_NAN, counts=nan_counts)
 
     return result
 
@@ -322,7 +321,7 @@ def save_results_csv(
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
     df.to_csv(output_path, index=True, encoding="utf-8-sig")
-    logger.info("Results saved to: {}", output_path)
+    core_logging.log_event(Event.RESULTS_SAVED, file=output_path)
     return output_path
 
 
@@ -393,7 +392,7 @@ def save_markdown_report(
     content = "\n".join(lines)
     with open(md_path, "w", encoding="utf-8") as f:
         f.write(content)
-    logger.info("Markdown report saved to: {}", md_path)
+    core_logging.log_event(Event.REPORT_SAVED, file=md_path)
     return md_path
 
 
@@ -480,8 +479,8 @@ def main() -> None:
         print(f"error: {e}")
         sys.exit(1)
 
-    logger.info("加载测试集: {} 条 QA 对", len(questions))
-    logger.info("Evaluating KB '{}'", kb_id)
+    core_logging.log_event(Event.TESTSET_LOADED, count=len(questions))
+    core_logging.log_event(Event.EVALUATION_RUN, kb_id=kb_id)
 
     # ---- 初始化 RAG 组件 ----
     # ragas 0.4.3 + langchain-community>=0.4 兼容：先建 vertexai stub 再导入 ragas
@@ -506,27 +505,25 @@ def main() -> None:
     from src.infra.search.bm25_index import BM25Index
     from src.models import get_embeddings, get_llm, get_rerank
 
-    logger.info("Initializing RAG components...")
+    core_logging.log_event(Event.RAG_COMPONENT_INIT)
     vector_store = VectorStore()
 
-    logger.info("Checking KB vector store...")
+    core_logging.log_event(Event.VECTOR_STORE_CHECK, kb_id=kb_id)
     if vector_store.get_or_create_collection(kb_id).count() == 0:
-        logger.error("Knowledge base '{}' vector store is empty", kb_id)
+        core_logging.log_event(Event.VECTOR_STORE_EMPTY, kb_id=kb_id)
         print("Knowledge base is empty")
         sys.exit(1)
 
     if not settings.RAGAS_LLM_MODEL:
-        logger.error(
-            "RAGAS_LLM_MODEL 未配置，评估需要使用非推理模型（如 qwen-plus 系列）"
-        )
+        core_logging.log_event(Event.RAGAS_MODEL_MISSING)
         sys.exit(1)
     # 选手/裁判分离：
     # - 选手（被测系统）= 生产模型 get_llm()（LLM_MODEL），评估结果反映线上质量
     # - 裁判（评估器）  = RAGAS_LLM_MODEL，独立于选手评分，避免自我评价偏置
-    logger.info(
-        "Initializing eval: SUT={} (LLM_MODEL), judge={} (RAGAS_LLM_MODEL)",
-        settings.LLM_MODEL,
-        settings.RAGAS_LLM_MODEL,
+    core_logging.log_event(
+        Event.EVAL_MODEL_INIT,
+        sut=settings.LLM_MODEL,
+        judge=settings.RAGAS_LLM_MODEL,
     )
     llm = get_llm()  # 选手：生产模型（含生产 temperature）
     reranker = get_rerank()
@@ -540,7 +537,7 @@ def main() -> None:
     bm25 = BM25Index(index_dir=BM25_INDEX_DIR) if HYBRID_SEARCH_ENABLED else None
     graph = build_graph(vector_store, bm25, llm, reranker, prompt_manager)
 
-    logger.info("Generating answers for {} questions...", len(questions))
+    core_logging.log_event(Event.ANSWERS_GENERATION, count=len(questions))
     answers, contexts, trace_ids, retrieval_details = asyncio.run(
         generate_answers_and_contexts(
             graph,
@@ -576,7 +573,7 @@ def main() -> None:
     if args.gate:
         check_gate(result, questions)
 
-    logger.info("Evaluation complete.")
+    core_logging.log_event(Event.EVALUATION_DONE)
 
 
 def _print_metric_averages(result: Any) -> None:
@@ -685,9 +682,9 @@ def _save_eval_report(
             await svc.insert_eval_report(entity)
 
         asyncio.run(_do_insert())
-        logger.info("Eval report saved to eval_report table for KB '{}'", kb_id)
+        core_logging.log_event(Event.EVAL_REPORT_SAVED, kb_id=kb_id)
     except Exception as e:  # noqa: BLE001
-        logger.warning("Failed to save eval report to database: {}", e)
+        core_logging.log_event(Event.EVAL_SAVE_FAILED, err=str(e))
 
 
 async def _list_knowledge_bases() -> None:

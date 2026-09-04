@@ -21,6 +21,8 @@ import asyncio
 from loguru import logger
 
 from src.config import BM25_INDEX_DIR, HYBRID_SEARCH_ENABLED
+from src.core import logging as core_logging
+from src.core.log_events import Event
 from src.core.logging import setup_logging
 from src.infra.db.engine import session_factory
 from src.infra.db.mysql_db import KbRepo
@@ -37,7 +39,7 @@ async def main() -> None:
     args = parser.parse_args()
 
     if not HYBRID_SEARCH_ENABLED:
-        logger.info("HYBRID_SEARCH_ENABLED=false, skip BM25 rebuild")
+        core_logging.log_event(Event.BM25_REBUILD_SKIP)
         return
 
     vector_store = VectorStore()
@@ -49,25 +51,25 @@ async def main() -> None:
     else:
         kbs = await kb_repo.get_all_kb()
         kb_ids = [kb.id for kb in kbs]
-        logger.info("Found {} KBs", len(kb_ids))
+        core_logging.log_event(Event.KBS_FOUND, count=len(kb_ids))
 
     rebuilt = skipped = failed = 0
     for kb_id in kb_ids:
         try:
             chunks = await asyncio.to_thread(vector_store.get_all_chunks, kb_id)
             if not chunks:
-                logger.warning("kb={} has no chunks, skip", kb_id)
+                core_logging.log_event(Event.KB_CHUNKS_MISSING, kb_id=kb_id)
                 skipped += 1
                 continue
             await asyncio.to_thread(bm25.rebuild_from_results, kb_id, chunks)
-            logger.info("rebuilt kb={} chunks={}", kb_id, len(chunks))
+            core_logging.log_event(Event.BM25_REBUILT, kb_id=kb_id, chunks=len(chunks))
             rebuilt += 1
         except Exception as e:  # noqa: BLE001
-            logger.exception("rebuild failed kb={}: {}", kb_id, e)
+            logger.exception("[cli] bm25 rebuild failed kb_id={} err={}", kb_id, e)
             failed += 1
 
-    logger.info(
-        "BM25 rebuild done: rebuilt={} skipped={} failed={}", rebuilt, skipped, failed
+    core_logging.log_event(
+        Event.BM25_REBUILD_DONE, rebuilt=rebuilt, skipped=skipped, failed=failed
     )
 
 

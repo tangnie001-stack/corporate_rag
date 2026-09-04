@@ -109,6 +109,67 @@ class Event(str, Enum):
     CONTENT_START = "content start"
     CONTENT_END = "content end"
 
+    # [cli] 离线工具事件（3.5 批迁移登记：eval_ragas / eval_ragas_generate /
+    # rebuild_bm25 / check_retrieval / compare_rewrite）
+    TESTSET_LOADED = "testset loaded"
+    EVALUATION_RUN = "evaluation run"
+    EVALUATION_START = "evaluation start"
+    EVALUATION_DONE = "evaluation done"
+    EVAL_MODEL_INIT = "eval model init"
+    RAG_COMPONENT_INIT = "rag component init"
+    VECTOR_STORE_CHECK = "vector store check"
+    VECTOR_STORE_EMPTY = "vector store empty"
+    RAGAS_MODEL_MISSING = "ragas model missing"
+    ANSWERS_GENERATION = "answers generation"
+    QA_ANSWER_START = "question answer start"
+    QA_ANSWER_DONE = "question answer done"
+    QA_ANSWER_FAILED = "question answer failed"
+    METRIC_MEAN = "metric mean"
+    METRICS_NAN = "metrics nan"
+    RESULTS_SAVED = "results saved"
+    REPORT_SAVED = "report saved"
+    EVAL_REPORT_SAVED = "eval report saved"
+    EVAL_SAVE_FAILED = "eval save failed"
+    VERTEXAI_STUB_CREATED = "vertexai stub created"
+    QUESTION_PROOFREAD_FAILED = "question proofread failed"
+    QUESTION_PROOFREAD_DONE = "question proofread done"
+    KB_META_FAILED = "kb meta failed"
+    CHUNK_LOAD_START = "chunk load start"
+    CHUNKS_NOT_FOUND = "chunks not found"
+    NO_CHUNK_DATA = "no chunk data"
+    CHUNK_LOAD_DONE = "chunk load done"
+    GENERATOR_INIT = "generator init"
+    TRANSFORMS_SETUP = "transforms setup"
+    KNOWLEDGE_GRAPH_FOUND = "knowledge graph found"
+    KNOWLEDGE_GRAPH_BUILD = "knowledge graph build"
+    KNOWLEDGE_GRAPH_SAVED = "knowledge graph saved"
+    TESTSET_GENERATION_START = "testset generation start"
+    TESTSET_SAVED = "testset saved"
+    BM25_REBUILD_SKIP = "bm25 rebuild skip"
+    KBS_FOUND = "kbs found"
+    KB_CHUNKS_MISSING = "kb chunks missing"
+    BM25_REBUILT = "bm25 rebuilt"
+    BM25_REBUILD_DONE = "bm25 rebuild done"
+    KB_LOOKUP = "kb lookup"
+    KB_NOT_FOUND = "kb not found"
+    SEARCH_START = "search start"
+    SEARCH_FAILED = "search failed"
+    LLM_INVOKE_FAILED = "llm invoke failed"
+    LLM_PARSE_FAILED = "llm parse failed"
+    RERANK_ERROR = "rerank error"
+
+    # [app] 应用边界事件（3.5 批迁移登记：main.py 生命周期 + 全局异常兜底）
+    APP_STARTING = "app starting"
+    APP_STOPPING = "app stopping"
+    CHROMA_WARMUP_DONE = "chroma warmup done"
+    CHROMA_WARMUP_FAILED = "chroma warmup failed"
+    STALE_LOCKS_CLEARED = "stale locks cleared"
+    STALE_LOCKS_CLEAR_FAILED = "locks clear failed"
+    BIZ_ERROR = "biz error"
+    HTTP_ERROR = "http error"
+    VALIDATION_ERROR = "validation error"
+    EXCEPTION_CHAIN = "exception chain"
+
 
 @dataclass(frozen=True)
 class EventSpec:
@@ -385,6 +446,185 @@ EVENT_SPECS: dict[str, EventSpec] = {
     ),
     Event.CONTENT_END.value: EventSpec(
         Event.CONTENT_END.value, "llm", "info", ("model", "output")
+    ),
+    # [cli] 离线工具（3.5 批：eval_ragas / eval_ragas_generate / rebuild_bm25 / check_retrieval / compare_rewrite）
+    Event.TESTSET_LOADED.value: EventSpec(
+        Event.TESTSET_LOADED.value, "cli", "info", ("count",)
+    ),
+    Event.EVALUATION_RUN.value: EventSpec(
+        Event.EVALUATION_RUN.value, "cli", "info", ("kb_id",)
+    ),
+    Event.EVALUATION_START.value: EventSpec(
+        Event.EVALUATION_START.value, "cli", "info", ("samples",)
+    ),
+    Event.EVALUATION_DONE.value: EventSpec(Event.EVALUATION_DONE.value, "cli", "info"),
+    Event.EVAL_MODEL_INIT.value: EventSpec(
+        Event.EVAL_MODEL_INIT.value, "cli", "info", ("sut", "judge")
+    ),
+    Event.RAG_COMPONENT_INIT.value: EventSpec(
+        Event.RAG_COMPONENT_INIT.value, "cli", "info"
+    ),
+    Event.VECTOR_STORE_CHECK.value: EventSpec(
+        Event.VECTOR_STORE_CHECK.value, "cli", "info", ("kb_id",)
+    ),
+    Event.VECTOR_STORE_EMPTY.value: EventSpec(
+        Event.VECTOR_STORE_EMPTY.value, "cli", "error", ("kb_id",)
+    ),
+    Event.RAGAS_MODEL_MISSING.value: EventSpec(
+        Event.RAGAS_MODEL_MISSING.value, "cli", "error"
+    ),
+    Event.ANSWERS_GENERATION.value: EventSpec(
+        Event.ANSWERS_GENERATION.value, "cli", "info", ("count",)
+    ),
+    Event.QA_ANSWER_START.value: EventSpec(
+        Event.QA_ANSWER_START.value, "cli", "info", ("index", "query")
+    ),
+    Event.QA_ANSWER_DONE.value: EventSpec(
+        Event.QA_ANSWER_DONE.value,
+        "cli",
+        "info",
+        ("index", "answer_len", "contexts"),
+    ),
+    Event.QA_ANSWER_FAILED.value: EventSpec(
+        Event.QA_ANSWER_FAILED.value, "cli", "warning", ("index", "err")
+    ),
+    Event.METRIC_MEAN.value: EventSpec(
+        Event.METRIC_MEAN.value, "cli", "info", ("metric", "mean")
+    ),
+    Event.METRICS_NAN.value: EventSpec(
+        Event.METRICS_NAN.value, "cli", "warning", ("counts",)
+    ),
+    Event.RESULTS_SAVED.value: EventSpec(
+        Event.RESULTS_SAVED.value, "cli", "info", ("file",)
+    ),
+    Event.REPORT_SAVED.value: EventSpec(
+        Event.REPORT_SAVED.value, "cli", "info", ("file",)
+    ),
+    Event.EVAL_REPORT_SAVED.value: EventSpec(
+        Event.EVAL_REPORT_SAVED.value, "cli", "info", ("kb_id",)
+    ),
+    Event.EVAL_SAVE_FAILED.value: EventSpec(
+        Event.EVAL_SAVE_FAILED.value, "cli", "warning", ("err",)
+    ),
+    Event.VERTEXAI_STUB_CREATED.value: EventSpec(
+        Event.VERTEXAI_STUB_CREATED.value, "cli", "info", ("file",)
+    ),
+    Event.QUESTION_PROOFREAD_FAILED.value: EventSpec(
+        Event.QUESTION_PROOFREAD_FAILED.value,
+        "cli",
+        "warning",
+        ("question", "err"),
+    ),
+    Event.QUESTION_PROOFREAD_DONE.value: EventSpec(
+        Event.QUESTION_PROOFREAD_DONE.value,
+        "cli",
+        "info",
+        ("cleaned", "total"),
+    ),
+    Event.KB_META_FAILED.value: EventSpec(
+        Event.KB_META_FAILED.value, "cli", "error", ("err",)
+    ),
+    Event.CHUNK_LOAD_START.value: EventSpec(
+        Event.CHUNK_LOAD_START.value, "cli", "info", ("kb_id", "whitelist")
+    ),
+    Event.CHUNKS_NOT_FOUND.value: EventSpec(
+        Event.CHUNKS_NOT_FOUND.value, "cli", "warning", ("doc_id",)
+    ),
+    Event.NO_CHUNK_DATA.value: EventSpec(Event.NO_CHUNK_DATA.value, "cli", "error"),
+    Event.CHUNK_LOAD_DONE.value: EventSpec(
+        Event.CHUNK_LOAD_DONE.value, "cli", "info", ("docs", "chunks")
+    ),
+    Event.GENERATOR_INIT.value: EventSpec(
+        Event.GENERATOR_INIT.value,
+        "cli",
+        "info",
+        ("model", "size", "chunks"),
+    ),
+    Event.TRANSFORMS_SETUP.value: EventSpec(
+        Event.TRANSFORMS_SETUP.value, "cli", "info", ("steps",)
+    ),
+    Event.KNOWLEDGE_GRAPH_FOUND.value: EventSpec(
+        Event.KNOWLEDGE_GRAPH_FOUND.value, "cli", "info", ("file",)
+    ),
+    Event.KNOWLEDGE_GRAPH_BUILD.value: EventSpec(
+        Event.KNOWLEDGE_GRAPH_BUILD.value, "cli", "info", ("chunks",)
+    ),
+    Event.KNOWLEDGE_GRAPH_SAVED.value: EventSpec(
+        Event.KNOWLEDGE_GRAPH_SAVED.value, "cli", "info", ("file",)
+    ),
+    Event.TESTSET_GENERATION_START.value: EventSpec(
+        Event.TESTSET_GENERATION_START.value, "cli", "info", ("size",)
+    ),
+    Event.TESTSET_SAVED.value: EventSpec(
+        Event.TESTSET_SAVED.value,
+        "cli",
+        "info",
+        ("file", "count", "version"),
+    ),
+    Event.BM25_REBUILD_SKIP.value: EventSpec(
+        Event.BM25_REBUILD_SKIP.value, "cli", "info"
+    ),
+    Event.KBS_FOUND.value: EventSpec(Event.KBS_FOUND.value, "cli", "info", ("count",)),
+    Event.KB_CHUNKS_MISSING.value: EventSpec(
+        Event.KB_CHUNKS_MISSING.value, "cli", "warning", ("kb_id",)
+    ),
+    Event.BM25_REBUILT.value: EventSpec(
+        Event.BM25_REBUILT.value, "cli", "info", ("kb_id", "chunks")
+    ),
+    Event.BM25_REBUILD_DONE.value: EventSpec(
+        Event.BM25_REBUILD_DONE.value,
+        "cli",
+        "info",
+        ("rebuilt", "skipped", "failed"),
+    ),
+    Event.KB_LOOKUP.value: EventSpec(Event.KB_LOOKUP.value, "cli", "info", ("name",)),
+    Event.KB_NOT_FOUND.value: EventSpec(
+        Event.KB_NOT_FOUND.value, "cli", "error", ("name",)
+    ),
+    Event.SEARCH_START.value: EventSpec(
+        Event.SEARCH_START.value, "cli", "info", ("query", "top_k")
+    ),
+    Event.SEARCH_FAILED.value: EventSpec(
+        Event.SEARCH_FAILED.value, "cli", "warning", ("query", "err")
+    ),
+    Event.LLM_INVOKE_FAILED.value: EventSpec(
+        Event.LLM_INVOKE_FAILED.value, "cli", "warning", ("err",)
+    ),
+    Event.LLM_PARSE_FAILED.value: EventSpec(
+        Event.LLM_PARSE_FAILED.value, "cli", "warning", ("err", "raw")
+    ),
+    Event.RERANK_ERROR.value: EventSpec(
+        Event.RERANK_ERROR.value, "cli", "warning", ("query", "err")
+    ),
+    # [app] 应用边界（3.5 批：main.py 生命周期 + 全局异常兜底）
+    Event.APP_STARTING.value: EventSpec(Event.APP_STARTING.value, "app", "info"),
+    Event.APP_STOPPING.value: EventSpec(Event.APP_STOPPING.value, "app", "info"),
+    Event.CHROMA_WARMUP_DONE.value: EventSpec(
+        Event.CHROMA_WARMUP_DONE.value, "app", "info", ("collections",)
+    ),
+    Event.CHROMA_WARMUP_FAILED.value: EventSpec(
+        Event.CHROMA_WARMUP_FAILED.value, "app", "warning", ("err",)
+    ),
+    Event.STALE_LOCKS_CLEARED.value: EventSpec(
+        Event.STALE_LOCKS_CLEARED.value, "app", "info", ("count",)
+    ),
+    Event.STALE_LOCKS_CLEAR_FAILED.value: EventSpec(
+        Event.STALE_LOCKS_CLEAR_FAILED.value, "app", "warning", ("err",)
+    ),
+    Event.BIZ_ERROR.value: EventSpec(
+        Event.BIZ_ERROR.value, "app", "error", ("code", "message")
+    ),
+    Event.HTTP_ERROR.value: EventSpec(
+        Event.HTTP_ERROR.value, "app", "error", ("status", "detail")
+    ),
+    Event.VALIDATION_ERROR.value: EventSpec(
+        Event.VALIDATION_ERROR.value, "app", "error", ("errors",)
+    ),
+    Event.EXCEPTION_CHAIN.value: EventSpec(
+        Event.EXCEPTION_CHAIN.value,
+        "app",
+        "error",
+        ("depth", "type", "msg"),
     ),
 }
 

@@ -23,6 +23,8 @@ from typing import cast
 from loguru import logger
 
 from src.config import RAGAS_DATA_DIR, RAGAS_DOC_WHITELIST, RAGAS_TESTSET_DIR
+from src.core import logging as core_logging
+from src.core.log_events import Event
 
 
 def _ensure_vertexai_stub() -> None:
@@ -50,7 +52,7 @@ def _ensure_vertexai_stub() -> None:
             "class VertexAI:\n"
             "    pass\n"
         )
-        logger.info("Created vertexai stub at {}", stub_path)
+        core_logging.log_event(Event.VERTEXAI_STUB_CREATED, file=str(stub_path))
 
     # 测试集 JSON 结构
 
@@ -128,7 +130,9 @@ def _proofread_question(question: str, llm) -> str:
             return question
         return cleaned
     except Exception as e:  # noqa: BLE001
-        logger.warning("校对问题失败，保留原文: {} | {}", question[:30], e)
+        core_logging.log_event(
+            Event.QUESTION_PROOFREAD_FAILED, question=question, err=str(e)
+        )
         return question
 
 
@@ -152,10 +156,10 @@ def _clean_garbled_questions(samples_list: list[dict], llm) -> list[dict]:
             sample["user_input"] = corrected
             cleaned_count += 1
     if cleaned_count:
-        logger.info(
-            "测试集校对完成: {}/{} 条问题有错别字已修正",
-            cleaned_count,
-            len(samples_list),
+        core_logging.log_event(
+            Event.QUESTION_PROOFREAD_DONE,
+            cleaned=cleaned_count,
+            total=len(samples_list),
         )
     return samples_list
 
@@ -255,11 +259,11 @@ def run_generate(
     try:
         kb_name, doc_names_map = asyncio.run(_query_meta())
     except ValueError as e:
-        logger.error("{}", str(e))
+        core_logging.log_event(Event.KB_META_FAILED, err=str(e))
         print(f"✗ {e}")
         sys.exit(1)
     except Exception as e:  # noqa: BLE001
-        logger.error("查询知识库元信息失败: {}", e)
+        core_logging.log_event(Event.KB_META_FAILED, err=str(e))
         print(f"✗ 查询知识库元信息失败: {e}")
         sys.exit(1)
 
@@ -273,8 +277,8 @@ def run_generate(
     from src.utils.desensitize import desensitize
 
     # ---- 1. 从 ChromaDB 按白名单 doc_id 取 chunk ----
-    logger.info(
-        "从 ChromaDB 读取分块: kb_id={}, whitelist={}", kb_id, RAGAS_DOC_WHITELIST
+    core_logging.log_event(
+        Event.CHUNK_LOAD_START, kb_id=kb_id, whitelist=RAGAS_DOC_WHITELIST
     )
     vector_store = VectorStore()
     langchain_chunks: list[LCDocument] = []
@@ -284,7 +288,7 @@ def run_generate(
     for doc_id in RAGAS_DOC_WHITELIST:
         chunks_data = vector_store.get_chunks_by_doc_id(doc_id, kb_id)
         if not chunks_data:
-            logger.warning("ChromaDB 中未找到文档的 chunk: {}", doc_id)
+            core_logging.log_event(Event.CHUNKS_NOT_FOUND, doc_id=doc_id)
             print(f"  ⚠ doc_id={doc_id} 在 ChromaDB 中无数据，已跳过")
             continue
 
@@ -303,27 +307,27 @@ def run_generate(
         print(f"  ✓ doc_id={doc_id} ({len(chunks_data)} 个 chunk)")
 
     if success_count == 0:
-        logger.error("白名单中所有文档在 ChromaDB 中均无 chunk 数据")
+        core_logging.log_event(Event.NO_CHUNK_DATA)
         print("✗ 白名单中所有文档在 ChromaDB 中均无数据")
         sys.exit(1)
 
-    logger.info(
-        "成功读取 {} 份文档，共 {} 个 chunk", success_count, len(langchain_chunks)
+    core_logging.log_event(
+        Event.CHUNK_LOAD_DONE,
+        docs=success_count,
+        chunks=len(langchain_chunks),
     )
 
     # ---- 3. 初始化 RAGAS 组件（带 DiskCacheBackend 缓存） ----
     eval_model = model or settings.RAGAS_LLM_MODEL
     if not eval_model:
-        logger.error(
-            "RAGAS_LLM_MODEL 未配置，测试集生成需要使用非推理模型（如 qwen-plus 系列）"
-        )
+        core_logging.log_event(Event.RAGAS_MODEL_MISSING)
         print("✗ RAGAS_LLM_MODEL 未配置，可通过 --model 或环境变量指定")
         sys.exit(1)
-    logger.info(
-        "初始化 RAGAS 组件 (model={}, size={}, chunks={})...",
-        eval_model,
-        size,
-        len(langchain_chunks),
+    core_logging.log_event(
+        Event.GENERATOR_INIT,
+        model=eval_model,
+        size=size,
+        chunks=len(langchain_chunks),
     )
     print(
         f"\n初始化 RAGAS 组件 ({len(langchain_chunks)} 个 chunk, model={eval_model})..."
@@ -372,8 +376,9 @@ def run_generate(
             NERExtractor(llm=generator.llm, filter_nodes=_filter_chunks),
             OverlapScoreBuilder(threshold=0.01),
         ]
-        logger.info(
-            "使用自定义 transforms 步骤: {}", [type(t).__name__ for t in transforms]
+        core_logging.log_event(
+            Event.TRANSFORMS_SETUP,
+            steps=[type(t).__name__ for t in transforms],
         )
 
     # ---- 5. 构建知识图谱（支持中断恢复） ----
@@ -385,12 +390,14 @@ def run_generate(
     kg_file = os.path.join(RAGAS_DATA_DIR, f"kg_{kb_id}.json")
 
     if os.path.exists(kg_file):
-        logger.info("发现已保存的知识图谱: {}", kg_file)
+        core_logging.log_event(Event.KNOWLEDGE_GRAPH_FOUND, file=kg_file)
         print("  ↻ 加载已有知识图谱，跳过 transforms...")
         kg = KnowledgeGraph.load(kg_file)
         generator.knowledge_graph = kg
     else:
-        logger.info("构建知识图谱 ({} 个 chunk)...", len(langchain_chunks))
+        core_logging.log_event(
+            Event.KNOWLEDGE_GRAPH_BUILD, chunks=len(langchain_chunks)
+        )
         print(f"  → 构建知识图谱 ({len(langchain_chunks)} 个 chunk)...")
 
         nodes = []
@@ -416,17 +423,17 @@ def run_generate(
         # 保存 KG 到磁盘
         os.makedirs(RAGAS_DATA_DIR, exist_ok=True)
         kg.save(kg_file)
-        logger.info("知识图谱已保存: {}", kg_file)
+        core_logging.log_event(Event.KNOWLEDGE_GRAPH_SAVED, file=kg_file)
         print(f"  ✓ 知识图谱已保存 ({len(kg.nodes)} 个节点)")
 
     # ---- 6. 生成测试集 ----
-    logger.info("开始生成测试集 ({} 条)...", size)
+    core_logging.log_event(Event.TESTSET_GENERATION_START, size=size)
     print(f"正在生成测试集 ({size} 条)...")
 
     try:
         testset = cast(Testset, generator.generate(testset_size=size))
     except Exception as e:  # noqa: BLE001
-        logger.exception("TestsetGenerator 调用失败")
+        logger.exception("[cli] testset generator call failed err={}", str(e))
         print(f"✗ 测试集生成失败: {e}")
         print(f"✗ 异常类型: {type(e).__name__}")
         import traceback
@@ -464,7 +471,10 @@ def run_generate(
         json.dump(output, f, ensure_ascii=False, indent=2)
     os.replace(tmp_path, output_path)
 
-    logger.info(
-        "测试集已保存: {} ({} 条, v{})", output_path, len(samples_list), version
+    core_logging.log_event(
+        Event.TESTSET_SAVED,
+        file=output_path,
+        count=len(samples_list),
+        version=version,
     )
     print(f"\n测试集已保存: {output_path} (v{version}, {len(samples_list)} 条)")

@@ -23,10 +23,10 @@ import asyncio
 import json
 import sys
 
-from loguru import logger
-
 from src.config import CLASSIFIER_TEMPERATURE, TOP_K_RETRIEVAL
 from src.config.prompts import CLASSIFIER_SYSTEM_PROMPT, CLASSIFIER_USER_TEMPLATE
+from src.core import logging as core_logging
+from src.core.log_events import Event
 from src.core.logging import setup_logging
 from src.infra.db.engine import session_factory
 from src.infra.db.mysql_db import KbRepo
@@ -276,7 +276,7 @@ def _llm_json(llm, prompt: str) -> tuple[dict, int, int]:
             [HumanMessage(content=prompt)], temperature=CLASSIFIER_TEMPERATURE
         )
     except Exception as e:  # noqa: BLE001
-        logger.warning("LLM invoke failed: {}", e)
+        core_logging.log_event(Event.LLM_INVOKE_FAILED, err=str(e))
         return {}, 0, 0
     raw = (response.content or "").strip()
     if raw.startswith("```"):
@@ -285,7 +285,7 @@ def _llm_json(llm, prompt: str) -> tuple[dict, int, int]:
     try:
         data = json.loads(raw) if raw else {}
     except json.JSONDecodeError as e:
-        logger.warning("LLM JSON parse failed: {} raw={}", e, raw[:200])
+        core_logging.log_event(Event.LLM_PARSE_FAILED, err=str(e), raw=raw[:200])
         return {}, 0, 0
     metadata = getattr(response, "response_metadata", {}) or {}
     usage = metadata.get("token_usage", {})
@@ -375,13 +375,13 @@ async def _score_queries(
                 store.similarity_search, kb_id, q, TOP_K_RETRIEVAL
             )
         except Exception as e:  # noqa: BLE001
-            logger.warning("search failed query={}: {}", q, e)
+            core_logging.log_event(Event.SEARCH_FAILED, query=q, err=str(e))
             continue
         docs = [r.content for r in results]
         try:
             reranked = reranker.rerank(docs, q)
         except Exception as e:  # noqa: BLE001
-            logger.warning("rerank failed query={}: {}", q, e)
+            core_logging.log_event(Event.RERANK_ERROR, query=q, err=str(e))
             continue
         for item in reranked:
             r = results[item["index"]]
