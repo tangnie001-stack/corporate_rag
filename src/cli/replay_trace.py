@@ -3,7 +3,7 @@
 用法（容器内）：docker compose exec app python -m src.cli.replay_trace --trace trace_xxx
 
 读取全部 app_*.log（按天轮转，trace 可跨天），段位无关解析：按 trace_id 子串
-过滤行、取最后一个 " - " 之后为 message（兼容 _LOG_FORMAT 加 session 段前后）。
+过滤行、取首个 " - " 之后为 message（兼容 _LOG_FORMAT 加 session 段前后）。
 输出语义：对当前 KB、当前配置重放（非历史快照）；事件行的 top_k/dedup/hybrid/rerank
 为"当时值"，与本次实际执行参数并排对照并标注差异（drift 检测）。
 """
@@ -17,7 +17,7 @@ import json
 import os
 import re
 
-from src.config import BM25_INDEX_DIR, HYBRID_SEARCH_ENABLED
+from src.config import BM25_INDEX_DIR, HYBRID_SEARCH_ENABLED, TOP_K_RERANK, settings
 from src.infra.db.vector_store import VectorStore
 from src.infra.search.bm25_index import BM25Index
 from src.models import get_rerank
@@ -32,7 +32,7 @@ def parse_log_line(line: str) -> dict | None:
     """从一行日志解析 retrieve replay 字段；非 replay 行返回 None。
 
     段位无关：不依赖 | 分段，直接在整行找 trace 子串与 message；
-    message 取最后一个 " - " 之后的内容，再按事件名定位 replay 行。
+    message 取首个 " - " 之后的内容，再按事件名定位 replay 行。
     """
     if " - [retrieval] retrieve replay " not in line:
         return None
@@ -73,17 +73,32 @@ def parse_trace_logs(log_dir: str, trace_id: str) -> list[dict]:
 def _print_snippets(fields: dict, contexts: list[RAGContext]) -> None:
     """打印一次重放的命中片段与 drift 对照。
 
-    drift：事件行记录的"当时参数"（dedup_max_per_doc 等）与本次实际配置不同
-    时标注差异——检索栈内部读模块常量，无法用事件参数覆盖（Q4/Q3），因此
-    replay 只做对照诊断，不做参数实验。
+    drift：事件行记录的"当时参数"（dedup_max_per_doc/top_k/hybrid/rerank）
+    与本次实际执行（当前 settings 值）不同时标注差异——检索栈内部读模块
+    常量，无法用事件参数覆盖（Q4/Q3），因此 replay 只做对照诊断，不做参数实验。
     """
     print(f"  [iteration={fields.get('iteration')}] query={fields['query']!r}")
-    # 事件记录值 vs 当前实际执行（dedup 等经模块常量，无法在此覆盖）
+    # 事件记录"当时值" vs 本次实际执行（检索栈内部读 settings 常量，无法在此覆盖）
     row_dedup = fields.get("dedup_max_per_doc")
+    row_top_k = fields.get("top_k")
+    row_hybrid = fields.get("hybrid")
+    row_rerank = fields.get("rerank")
     print(
-        f"  params: replay 当时 dedup={row_dedup} / 本次按当前配置执行"
-        f"（差异即 drift，标注供诊断）"
+        f"  params: dedup={row_dedup} top_k={row_top_k} "
+        f"hybrid={row_hybrid} rerank={row_rerank}"
     )
+    current_dedup = settings.RETRIEVAL_MAX_PER_DOC
+    current_top_k = TOP_K_RERANK
+    current_hybrid = settings.HYBRID_SEARCH_ENABLED
+    current_rerank = True
+    for key, row_value, current_value in (
+        ("dedup", row_dedup, current_dedup),
+        ("top_k", row_top_k, current_top_k),
+        ("hybrid", row_hybrid, current_hybrid),
+        ("rerank", row_rerank, current_rerank),
+    ):
+        if row_value is not None and row_value != current_value:
+            print(f"  drift: row {key}={row_value} → 本次 {key}={current_value}")
     for ctx in contexts[: int(fields.get("top_k", 8))]:
         snippet = (ctx.content or "").replace("\n", " ")[:80]
         print(

@@ -19,10 +19,10 @@
 
 ## 日志规范
 
-- **分层前缀**：日志 message 以 `[层名]` 开头标识事件归属，层名 ∈ `{retrieval, verify, agent, session, db, llm}`；同一类事件全系统只有一个统一前缀
-- **retrieval_signal**：检索行为信号日志前缀，类型 ∈ `{reretrieve, to_web, abstain_after_retrieve, unsupported, cited, empty_result}`；格式 `retrieval_signal: signal=... query="..." iteration=... kb_id=...`
-- **五级级别语义**：`debug`（诊断，默认关）/ `info`（里程碑）/ `warning`（降级可恢复）/ `error`（单点已处理）/ `exception`（透传带 traceback）
-- EventSpec 注册表：src/core/log_events.py 中 name/prefix/level/fields 的事件描述，helper 渲染/路由级别的事实源；Event 枚举与注册表 import 期一致性校验
+- **分层前缀**：日志 message 以 `[层名]` 开头标识事件归属，完整前缀集（8 前缀开放登记制）见 docs/agents/logging-rules.md「前缀主表」
+- **retrieval_signal**：检索行为信号日志前缀（独立于 `[层]` 前缀的已知例外），类型集与行格式由 `src/core/log_events.py` 的 `Signal` 枚举与 helper 定义；保留原因与两条 grep 模式见 docs/agents/logging-rules.md「已知例外」
+- **五级级别语义**：debug/info/warning/error/exception 各语义见 docs/agents/logging-rules.md「级别语义」
+- EventSpec 注册表：src/core/log_event_specs.py 中 name/prefix/level/fields 的事件数据表（经 src/core/log_events.py re-export），helper 渲染/路由级别的事实源；Event 枚举与注册表 import 期一致性校验
 - token 安全字符集：`^[A-Za-z0-9_./:@-]+$`，命中则日志字段裸写，否则引号 + JSON 转义
 - replay drift 对照：replay_trace CLI 用当前配置重放，事件行记录的"当时参数"并排对比并标注差异
 

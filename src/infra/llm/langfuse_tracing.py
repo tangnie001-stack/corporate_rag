@@ -118,19 +118,6 @@ class LangfuseTracer:
         except Exception as e:  # noqa: BLE001
             core_logging.log_event(Event.TRACE_INIT_FAILED, err=str(e))
 
-    def _check_ready(self, method: str) -> bool:
-        """检查客户端是否可用，不可用时记警告并返回 False。
-
-        Args:
-            method: 调用方方法名（用于日志标识）
-        """
-        if self._client is None:
-            core_logging.log_event(
-                Event.TRACE_SKIP, stage=method, reason="not_initialized"
-            )
-            return False
-        return True
-
     def start_trace(
         self,
         name: str,

@@ -101,8 +101,8 @@ def make_agent_model_node(llm, tools, prompt_manager) -> Callable:
         # 缺失时以文本长度估算兜底并标注 usage_estimated（成本口径区分估算值）。
         meta = result.usage_metadata
         if meta and (meta.get("input_tokens") or meta.get("output_tokens")):
-            usage_in = int(meta.get("input_tokens", 0))
-            usage_out = int(meta.get("output_tokens", 0))
+            usage_in = int(meta.get("input_tokens") or 0)
+            usage_out = int(meta.get("output_tokens") or 0)
             usage_estimated = False
         else:
             est = estimate_usage(messages, _extract_text(result))

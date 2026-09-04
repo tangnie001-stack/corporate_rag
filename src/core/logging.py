@@ -178,7 +178,9 @@ def encode_value(value: object) -> str:
     由调用方完整传入，本函数不截断。
     """
     if isinstance(value, bool):
-        return "true" if value else "false"
+        if value:
+            return "true"
+        return "false"
     if isinstance(value, int):
         return str(value)
     if isinstance(value, str):
