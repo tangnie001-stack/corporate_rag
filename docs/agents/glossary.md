@@ -22,6 +22,9 @@
 - **分层前缀**：日志 message 以 `[层名]` 开头标识事件归属，层名 ∈ `{retrieval, verify, agent, session, db, llm}`；同一类事件全系统只有一个统一前缀
 - **retrieval_signal**：检索行为信号日志前缀，类型 ∈ `{reretrieve, to_web, abstain_after_retrieve, unsupported, cited, empty_result}`；格式 `retrieval_signal: signal=... query="..." iteration=... kb_id=...`
 - **五级级别语义**：`debug`（诊断，默认关）/ `info`（里程碑）/ `warning`（降级可恢复）/ `error`（单点已处理）/ `exception`（透传带 traceback）
+- EventSpec 注册表：src/core/log_events.py 中 name/prefix/level/fields 的事件描述，helper 渲染/路由级别的事实源；Event 枚举与注册表 import 期一致性校验
+- token 安全字符集：`^[A-Za-z0-9_./:@-]+$`，命中则日志字段裸写，否则引号 + JSON 转义
+- replay drift 对照：replay_trace CLI 用当前配置重放，事件行记录的"当时参数"并排对比并标注差异
 
 ## RAG 流水线
 

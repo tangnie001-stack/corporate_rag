@@ -33,39 +33,7 @@ AppError (基类)
 
 ## 日志约定
 
-### 事件消息格式
-
-- **语言**：事件消息一律英文小写 k=v（`key=value` 空格分隔）；中文仅限展示给最终用户的文案（集中在 `SSEInteractionTexts`），不得进入日志 message
-- **分层前缀**：日志行以 `[层名]` 开头标识事件归属，同一类事件全系统只有一个统一前缀与措辞
-
-| 前缀 | 归属 |
-|---|---|
-| `[retrieval]` | 检索层（rag_tools / web_tools / retrieval.py） |
-| `[verify]` | 验证节点（verify 包） |
-| `[agent]` | agent 主循环（agent_node / workflow） |
-| `[session]` | 会话管理（chat manager / persistence） |
-| `[db]` | DB 层（repo / engine） |
-| `[llm]` | LLM 调用层 |
-
-示例：`[retrieval] search start query="腾讯2024年报" kb_id=k1 top_k=8`
-
-### 级别语义
-
-- `debug` — 诊断细节，默认关闭（检索中间态、token 流）
-- `info` — 正常流程里程碑（请求进出、agent 迭代、检索/联网完成）
-- `warning` — 降级/可恢复异常（fallback 生效、重试、超时）；**禁止用于"正常但少见"的执行分支**
-- `error` — 单点失败已处理（不阻断）
-- `exception` — 透传型异常（带完整 traceback + raise）
-
-与异常三模式联动：**降级型 / 拦截型** → `logger.warning`；**透传型 / 兜底** → `logger.exception`。
-
-### trace_id
-
-trace_id 由 `src/core/logging.py` 的 patcher 自动注入日志行第三段，业务代码不手动写入 message。
-
-### 检索行为信号日志
-
-前缀 `retrieval_signal:`，信号类型：`reretrieve` / `to_web` / `abstain_after_retrieve` / `unsupported` / `cited` / `empty_result`。格式：`retrieval_signal: signal={} query="{}" iteration={} kb_id={} result_count={} ...`。经 `src/core/logging.py` 的 `retrieval_signal()` helper 统一输出（query 截断 40），不在埋点处手拼。
+完整规范见 docs/agents/logging-rules.md（分层前缀主表 / 事件命名 / 值类型编码 / 级别语义 / 已知例外）。
 
 ## API 路由类型标注
 

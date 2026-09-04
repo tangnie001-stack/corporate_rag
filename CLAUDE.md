@@ -23,6 +23,7 @@ Python 3.11+ / FastAPI / ChromaDB / LangChain / DashScope / MySQL 8.0 / Redis 7 
 | 文档 | 归属内容 | 何时查阅 |
 |------|---------|---------|
 | docs/agents/rules.md | 架构规约：异常处理 / 响应包装 / 日志约定 / 排查规范 / 代码注释标准 | 写代码前 |
+| docs/agents/logging-rules.md | 日志格式唯一归属：行模板 / 前缀主表(开放登记制) / 事件命名 / 值类型编码(token 字符集) / 级别语义 / 已知例外(retrieval_signal) | 写任何日志、登记事件/前缀前 |
 | docs/agents/api_contract.md | 接口契约：参数语义、返回值格式、历史踩坑 | 改 API / 公共方法签名前；前端页面对接接口时 |
 | docs/agents/data-flow.md | 数据流链路 | 排查问题、理解系统流程 |
 | docs/agents/codegraph-guide.md | 依赖图查询（比逐文件 grep 高效） | 查询代码关系 |
@@ -85,7 +86,7 @@ docker compose build --no-cache app    # 改依赖后重建
 - 事件消息英文 k=v + `[层名]` 前缀；中文仅限用户可见文案（SSEInteractionTexts）
 - 分级：debug 诊断 / info 里程碑 / warning 降级可恢复 / error 单点 / exception 透传
 - 检索行为信号用 `retrieval_signal:` helper，不手拼
-- 完整规范见 docs/agents/rules.md「日志约定」
+- 完整规范见 docs/agents/logging-rules.md
 
 ## 验证
 改完代码后自检以下清单：
