@@ -14,8 +14,9 @@
 
 ## 响应包装边界
 
-业务层（route / service / infra）只 `raise` 异常，**不** `return JSONResponse`。
-响应的统一包装（`{"code", "message", "data"}`）仅发生在 `ResponseEnvelopeMiddleware` 这一处。
+业务层（route / service / infra）只 `raise` 异常或返回 `ResponseModel`，**不** `return JSONResponse`。
+响应的统一包装（`{"code", "message", "data"}`）由 handler 显式 `return ResponseModel(data=...)`
+（`src/api/schema.py`）或 `src/main.py` 异常处理器产出，不存在统一包装中间件。
 
 ## 异常层次
 
@@ -41,7 +42,7 @@ AppError (基类)
 
 - **请求体**：用 Pydantic `BaseModel` 标注（利用 FastAPI 自动校验）
 - **返回类型**：用 Pydantic `BaseModel` 标注，描述 `data` 字段的结构
-  - 原始返回值直接描述业务数据结构，不包含 `code`/`message` 包装（由 `ResponseEnvelopeMiddleware` 统一包装）
+  - 原始返回值直接描述业务数据结构，不包含 `code`/`message` 包装（用 `ResponseModel` 时返回类型标注 `ResponseModel`，其 `data` 字段承载业务结构）
   - SSE 流式接口标注 `StreamingResponse`
   - 文件上传等返回 `JSONResponse` 的标注 `JSONResponse`
 

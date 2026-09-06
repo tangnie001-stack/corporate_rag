@@ -14,7 +14,7 @@
 
 ## 响应与追踪
 
-- **响应信封**：统一响应包装 `{"code", "message", "data"}`，仅由 `ResponseEnvelopeMiddleware` 产生；业务层只 `raise` 异常，不 `return JSONResponse`
+- **响应信封**：统一响应包装 `{"code", "message", "data"}`。成功响应由各 handler 显式 `return ResponseModel(data=...)` 产生（`src/api/schema.py` 的 `ResponseModel`）；错误响应由 `src/main.py` 异常处理器（AppError / HTTPException / 兜底）产出。业务层只 `raise` 异常或返回 `ResponseModel`，不 `return JSONResponse`
 - **SSE 事件流**：聊天流式输出的事件序列，`status → token → citation → done`
 
 ## 日志规范

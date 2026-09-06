@@ -60,6 +60,7 @@
 **问题**：`MIN_TEXT_CHARS`、`HEADER_FOOTER_MARGIN`、`CROSS_PAGE_TABLE_MERGE_THRESHOLD`、`MAX_TABLE_TOKENS` 等控制参数直接硬编码在 parser/chunker 中，无法通过环境变量调整，也不知道参数含义。
 
 **解决**：统一迁移到 `src/config/settings.py`，支持 `os.getenv` 覆盖，加注释说明用途。
+（注：`HEADER_FOOTER_MARGIN` 迁移时拆分为 `HEADER_MARGIN` + `FOOTER_MARGIN` 两个独立阈值，settings.py:186-187）
 
 ### 2. 表格单元格清洗代码重复
 **问题**：`pymupdf_parser.py` 和 `docx_parser.py` 各自内联了相同的 `str(c or "").replace("\n", " ")` 处理逻辑，新增 parser 容易遗漏。

@@ -69,6 +69,21 @@ extraPaths = ["src"]
 venvPath = "."
 venv = ".venv"
 
+[tool.doc_anchors]
+# 文档防腐检查（src/cli/check_docs.py）排除表。
+# exclude_docs: 整篇跳过校验（意向清单/外部引用）
+# exclude_symbols: 允许出现在文档但不要求代码中存在的标识符
+#   （事故档案中的历史函数名、API 数据枚举值等）
+exclude_docs = ["requirements_pool.md", "reference-projects.md", "codegraph-guide.md"]
+exclude_symbols = [
+    "ci_gate",
+    "handle_chat",
+    "create_kb",
+    # chunking-issues.md 档案中的历史旧名（迁移时已拆分，注记指向现状）
+    "HEADER_FOOTER_MARGIN",
+]
+
+
 [tool.ruff.lint.per-file-ignores]
 # FastAPI 路由的 Depends()/File() 默认参数是官方依赖注入的标准写法，B008 为误报
 "src/api/*.py" = ["B008"]
