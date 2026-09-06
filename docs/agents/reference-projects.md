@@ -40,7 +40,7 @@
 ## 域 3：Agent 编排 / harness（找模式）
 
 > 本站"主从委派 + skill 化业务解耦"升级路线的主参考域。
-> 组内排序：claude-code 提供**委派范式**；deepseek-harness 提供**skill/配置机制层**；两者分工互补，均高价值。
+> 组内分工：claude-code 提供**委派范式**（AgentTool/skill fork）；deepseek-harness 提供**skill/配置机制层**（注册表/scope）；agency-agents 提供**子代理预设内容库**（现成的领域专家人格，可直接转成 registry 条目）。
 
 **claude-code**
 - Anthropic 终端编码 agent（闭源，~51 万行 TS；2026-03 因 npm source map 误发布泄露，本地为社区还原版 `claude-code-best/claude-code`）。
@@ -61,6 +61,11 @@
 **Qwen-Agent**
 - 阿里官方开源 Python agent 应用框架（`qwen_agent/` 仅 1.28 万行）。Agent 基类（269 行）封装工具调用模板/解析器；多智能体三件套：react_chat（ReAct）/ router（MultiAgentRouter 路由）/ group_chat（多 agent 群聊）；集成 RAG/代码解释器/MCP。无 compaction/hooks/沙箱等 harness 基础设施。
 - **何时查阅**：做简单多智能体路由/群聊、工具调用模板时（Python 同语言，参考下限）。
+
+**agency-agents**
+- AI 专家人格合集（The Agency，msitarzewski/agency-agents，MIT）。纯内容仓库：19 个 division（engineering/finance/security...）各含多个"专家 agent"Markdown，每个 = frontmatter（`name`/`description`）+ 正文（身份/使命/规则/交付物模板）；`scripts/convert.sh` 把专家转成各工具格式（claude-code `.claude/agents/*.md`、gemini/opencode/qwen 等）。**非运行时框架，是"子代理预设内容库"**。
+- **与本项目关系**：主从委派方案里 AgentRegistry 的预设内容可直接取自这些 markdown（description 作委派匹配、正文作 system_prompt），finance division 的 5 个财务专家（Financial Analyst / Bookkeeper / FPA / Investment Researcher / Tax Strategist）与本站财务 RAG 场景天然契合。
+- **何时查阅**：做子代理预设/专家人格库、或给委派方案找现成"首批子代理内容"时（内容搬运为主，不涉及机制）。
 
 ---
 
