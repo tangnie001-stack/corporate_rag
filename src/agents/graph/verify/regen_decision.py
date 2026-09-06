@@ -21,6 +21,7 @@ from src.config.const import (
     VERIFY_GUIDANCE_MARKER,
     VERIFY_HINT_MARKER,
 )
+from src.config.prompts import VERIFY_GUIDANCE_PROMPT, VERIFY_HINT_PROMPT
 from src.core import logging as core_logging
 from src.core.log_events import Event
 from src.infra.llm.request_context import RequestContext
@@ -137,19 +138,16 @@ async def decide_missing_web(
     if not already_guided:
         regen_messages.append(
             SystemMessage(
-                content=(
-                    f"知识库缺失年份 {missing}，{VERIFY_GUIDANCE_MARKER}，"
-                    "请调用 search_web 工具补充这些年份的数据后再回答。"
+                content=VERIFY_GUIDANCE_PROMPT.format(
+                    missing=missing, marker=VERIFY_GUIDANCE_MARKER
                 )
             )
         )
     if last_queries is not None and not queries_covered and not hint_already_sent:
         regen_messages.append(
             SystemMessage(
-                content=(
-                    f"缺失年份 {missing} 仍未补全：search_web 支持一次传入多个查询，"
-                    "请再调用一次 search_web，"
-                    f"一次带全以下年份 {missing} 对应的查询后重新回答。"
+                content=VERIFY_HINT_PROMPT.format(
+                    missing=missing, marker=VERIFY_HINT_MARKER
                 )
             )
         )

@@ -43,3 +43,16 @@ repos:
         entry: .venv/bin/pyright
         language: system
         types: [python]
+
+  # 文档防腐（全量扫描，防止"改代码删文件/改名"导致 docs/agents 引用失效）。
+  # always_run + pass_filenames: false = 每次提交扫全部受检文档，而非只看本次
+  # 改动的文件——腐化常发生在"改了代码但没改文档"，只查改动文件会漏检。
+  # 脚本有 error 时退出码 1，由 pre-commit 拦截提交。
+  - repo: local
+    hooks:
+      - id: check-docs
+        name: doc anti-rot (all docs)
+        entry: .venv/bin/python -m src.cli.check_docs
+        language: system
+        always_run: true
+        pass_filenames: false

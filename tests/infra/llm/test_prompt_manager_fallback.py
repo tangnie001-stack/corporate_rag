@@ -1,10 +1,13 @@
 """测试 PromptManager 的兜底 prompt 从 src.config.prompts 正确导入。"""
 
-from src.config.prompts import FINANCIAL_SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
+from src.config.prompts import (
+    FINANCIAL_SYSTEM_PROMPT,
+    INLINE_CITATION_INSTRUCTION,
+    USER_PROMPT_TEMPLATE,
+)
 from src.infra.llm.prompt_manager import (
     _FALLBACK_SYSTEM_PROMPT,
     _FALLBACK_USER_TEMPLATE,
-    _INLINE_CITATION_INSTRUCTION,
 )
 
 
@@ -15,7 +18,7 @@ def test_fallback_system_imported_from_config():
 
 def test_fallback_system_has_citation():
     """_FALLBACK_SYSTEM_PROMPT 应包含引用指令。"""
-    assert _INLINE_CITATION_INSTRUCTION in _FALLBACK_SYSTEM_PROMPT
+    assert INLINE_CITATION_INSTRUCTION in _FALLBACK_SYSTEM_PROMPT
 
 
 def test_fallback_user_imported_from_config():

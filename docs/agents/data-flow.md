@@ -11,34 +11,140 @@
 入口: `POST /api/kbs/documents/upload` → 后台 `asyncio.create_task(_process_document_task)`
 文件类型: `.pdf` / `.docx` / `.txt`，异步返回 `202` + `doc_id`
 
-## 链路 2：用户问答 → 检索 → 生成 ★
+## 链路 2：用户问答 — 绑 KB 检索问答 与 未绑 KB 纯对话 ★
 
 ```
-用户提问 → SSE 建立 → agent 循环（检索 / 追问 / 生成；kb_id 由前端绑定，空 = 纯对话不检索）
-→ 引用高亮(citations) → 对话历史持久化(Redis + MySQL)
+用户提问 → POST /api/chat/stream → SSE 建立 → agent 循环 → verify → format
+→ 引用(citations) → 对话历史持久化(Redis + MySQL)
 ```
 
-入口: `POST /api/chat/stream`（body: `ChatStreamRequest`：session_id / kb_id / query）
-输出: SSE 事件流 `status → token → citation → model_info → done`（澄清时含 `ask_user`，拒答时含 `abstention`）
+入口: `POST /api/chat/stream`（body: `ChatStreamRequest`：session_id / kb_id / query / deep_thinking）
+输出: SSE 事件流 `status → token → citation → model_info → done`（澄清/联网询问时含
+`ask_user`，纯拒答时含 `abstention`，deep_thinking 时含 `reasoning`）
+
+用户问答在入口按 `kb_id` 是否为空分裂为两条实质不同的链路：**链路 2a（绑 KB 问答链，
+RAG 检索 + 验证）** 与 **链路 2b（未绑 KB 纯对话链，联网兜底）**。`kb_id` 由前端绑定，
+`chat_stream` 透传给 `agent_service.stream_chat`，后者写 `ctx.kb_bound = bool(kb_id)`
+（src/api/chat.py:401、src/services/agent_service.py:592）。分裂并非两条独立图，而是同一
+StateGraph 拓扑（`agent ↔ tools 循环 → agent_finalize → verify → format → END`，
+workflow.py:37-87）上的四处分叉：
+
+1. **prompt**：未绑 KB 时在系统指令后追加 `KB_UNBOUND_SYSTEM_PROMPT`，禁止调用检索
+   （src/agents/graph/agent_node.py:68-74 以 `kb_bound=bool(state.kb_id)` 调
+   `build_prompt`；src/rag/prompt.py:42-43 注入）
+2. **retrieve_kb 内部**：`kb_id` 为空直接返回空结果，不检索（rag_tools.py:127-130 硬保证）
+3. **verify 节点**：按 `state.kb_id` 分派态 A / 态 B 两套校验链（verify/node.py:35-84）
+4. **SSE 状态事件**：检索阶段与联网阶段文案不同（agent_service.py `_convert_event`）
+
+工具注册表两条链路相同：retrieve_kb + ask_user 常驻，`WEB_SEARCH_ENABLED` 开时才追加
+search_web（rag_tools.py:226-235）。全局开关影响两条链路：`VERIFY_ENABLED=false` →
+verify 直通（settings.py:68-72）；`WEB_SEARCH_ENABLED=false` → 无联网兜底工具
+（settings.py:99-104）；`TEMPORAL_PARSE_ENABLED=false` → 不解析年份，2a 完整性校验无
+数据源、直接跳过（settings.py:62-66）。
+
+```
+agent ──(末条含 tool_calls 且未超限)→ tools ─→ agent（循环）
+  │
+  └(无 tool_calls / 达迭代上限)→ agent_finalize → verify ─(通过)→ format → END
+                                                    └(_needs_regenerate)→ agent
+```
+
+### 链路 2a：绑 KB 问答链（RAG）
+
+- 触发条件：`kb_id` 非空（前端已绑定知识库），`ctx.kb_bound=True`。
+- 与 2b 的差异：prompt 允许检索；`retrieve_kb` 真正执行 KB 混合检索；verify 走态 B 完整
+  校验链（年份完整性 → 联网询问/决策 → KB 溯源护栏 → faithfulness judge）；SSE 主状态为
+  `retrieve` 检索阶段，引用 `kind=kb`（检索不足联网补数据时混入 `kind=web`）。
+
+```
+agent（bind_tools）
+  ├ retrieve_kb：hybrid 混合检索 + rerank 精排 → ctx.tool_contexts（kind=kb）
+  │   query 含时间词且 TEMPORAL_PARSE_ENABLED 时先 parse_temporal →
+  │   ctx.temporal_years / missing_years（完整性校验数据源，rag_tools.py:109-122）
+  ├ search_web：KB 检索不达标时 agent 自主降级联网（web_guided=False → TO_WEB 信号）；
+  │   下述 verify 指派补年份（ctx.web_guided=True）属正常步骤、不发缺陷信号
+  ├ ask_user：关键实体缺失时澄清（SSEAskUserEvent，前端 composer 接管输入）
+  └ 无 tool_calls → agent_finalize（提取末条 AIMessage → answer，读入 tool_contexts）
+
+verify（态 B，verify/node.py:44-84）按序：
+  A. completeness_check（checks.py:22）：required=ctx.temporal_years 与答案实际年份比对
+     （required 为空 = 时间解析未触发 → 跳过）
+       缺失非空 → decide_missing_web（regen_decision.py:49）并返回其结果，本轮 verify 结束：
+         _ask_web_confirm 询问"缺失年份是否联网补充"（SSE ask_user id=web_confirm）
+           → 拒绝/超时/槽被占：答案追加"仅覆盖 XX 年"注记 → 直通 format
+           → 确认：看 agent 上一轮 search_web queries —— 带全仍缺 → "网络已穷尽"注记直通；
+             未调过/带漏 → 注入 VERIFY_GUIDANCE_PROMPT（带漏再加 VERIFY_HINT_PROMPT）→ regen
+         （保险丝 _verify_regenerations ≥ MAX_VERIFY_REGENERATIONS=2 → 注记直通，防无限往返）
+  B. 无缺失 → kb_citation_guardrail（guardrails.py:137）：有 KB context 但答案无 [n]
+       且非拒答/知识库未覆盖 → 注入 KB 溯源指引 → regen 一次（不占 verify 保险丝）
+  C. 护栏通过 → faithfulness_check（faithfulness.py:8，judge 用 RAGAS_LLM_MODEL）：
+       仅标记 _unsupported，不驱动流程（P1 输出护栏消费）
+→ 通过 → format（nodes.py，[n] → citations 去重，kind=kb/web）
+```
+
+关键代码：态 B 分派 src/agents/graph/verify/node.py:44-84；联网询问
+src/agents/graph/verify/ask_confirm.py:17-72；决策化 src/agents/graph/verify/regen_decision.py:49-168；
+KB 溯源护栏 src/agents/graph/verify/guardrails.py:137-179；judge
+src/agents/graph/verify/faithfulness.py:8-58；检索空结果/reretrieve 缺陷信号
+src/agents/tools/rag_tools.py:192-204；拒答 → SSEAbstentionEvent（含 abstain_after_retrieve
+信号）src/services/agent_service.py:487-509。
+
+### 链路 2b：未绑 KB 纯对话链
+
+- 触发条件：`kb_id` 为空串（会话未绑定知识库），`ctx.kb_bound=False`。
+- 与 2a 的差异：prompt 追加 `KB_UNBOUND_SYSTEM_PROMPT` 明令禁止检索（prompts.py:50）；
+  `retrieve_kb` 即便被调也返回空，不产出 kind=kb 上下文；verify 仅走态 A 联网引用引导，
+  无年份完整性/联网询问/judge；SSE 主状态为 `web_search` 联网阶段，引用仅 `kind=web`
+  （未联网的纯闲聊则无引用）。
+
+```
+agent（bind_tools，同一工具列表）
+  ├ retrieve_kb：禁止调用（prompt 软引导 + kb_id 空返回空硬保证，双保险）
+  ├ search_web：Tavily 并行搜索 + 正文抽取 → ctx.tool_contexts（kind=web），
+  │   每轮最多 WEB_SEARCH_PER_TURN_LIMIT 次调用（web_tools.py:61-67）
+  ├ ask_user：关键实体缺失时澄清（SSEAskUserEvent）
+  └ 无 tool_calls → agent_finalize
+
+verify（态 A，verify/node.py:35-41）：
+  web_citation_guard（guardrails.py:68-104）：
+    本轮调过 search_web 但答案无 [n] 引用（且未引导过 / 未达保险丝）
+      → 注入"请为联网引用标注来源编号"SystemMessage → regen 一次
+    其余（未联网 / 已带 [n] / 已引导过 / 保险丝耗尽）→ 直通 format
+→ format（引用 kind=web）→ END
+```
+
+关键代码：态 A 分派 src/agents/graph/verify/node.py:35-41；联网引用引导
+src/agents/graph/verify/guardrails.py:68-104；未绑 KB 禁检索指令
+src/agents/graph/agent_node.py:68-74 与 src/config/prompts.py:50（KB_UNBOUND_SYSTEM_PROMPT）；
+空 kb_id 不检索 src/agents/tools/rag_tools.py:127-130；web 结果写入
+src/agents/tools/web_tools.py:131-141。
 
 ### 字段级生产-消费矩阵（StateGraph）
 
-节点通过共享 `AgentState` 间接通信：每个节点消费若干字段、生产若干字段，字段 key 定义于
-`src/agents/graph/state.py`（`format` 节点名取 `LangGraphNode.Format.NAME`，其余节点在
-`workflow.build_graph` 以字符串注册）。字段名生产侧（`nodes.py` / `agent_node.py`）与
-消费侧（`agent_service.py`）必须一致，否则运行期报错或静默取空。
+两条链路共享同一拓扑与节点实现，矩阵不区分链路。节点通过共享 `AgentState` 间接通信：
+每个节点消费若干字段、生产若干字段，字段 key 定义于 `src/agents/graph/state.py`（`format`
+节点名取 `LangGraphNode.Format.NAME`，其余节点在 `workflow.build_graph` 以字符串注册）。
+字段名生产侧（`agent_node.py` / `nodes.py` / `verify/`）与消费侧（`agent_service.py`）
+必须一致，否则运行期报错或静默取空。
 
 | 节点 | 消费字段 | 生产字段 |
 |---|---|---|
 | `agent` | `messages`, `_history`, `kb_id` | `messages`（LLM 输出含 tool_calls）, `_agent_iterations` |
 | `tools` | `messages`（末条 tool_calls） | `messages`（ToolMessage 追加） |
 | `agent_finalize` | `messages` | `answer`, `tool_contexts` |
-| `verify` | `answer`, `kb_id`, `tool_contexts` | `answer`, `_needs_regenerate`, `_unsupported` |
+| `verify` | `answer`, `kb_id`, `messages`（查上一轮 search_web 与指引查重） | `answer`, `_needs_regenerate`, `_unsupported`, `messages`（regen 指引 SystemMessage）, `_verify_regenerations` |
 | `format` | `answer`, `tool_contexts` | `citations` |
 
-工具（retrieve_kb / ask_user）不写 state：检索上下文累积到 `RequestContext.tool_contexts`（contextvar），由 `agent_finalize` 读入 `state.tool_contexts`；ask_count / 澄清通道 / abort 信号均经 contextvar 传递。
+工具（retrieve_kb / search_web / ask_user）不写 state：检索上下文累积到
+`RequestContext.tool_contexts`（contextvar），由 `agent_finalize` 读入 `state.tool_contexts`；
+ask_count / verify_ask_count / web_count / 澄清通道 / abort 信号均经 contextvar 传递。
 
-SSE 消费侧按事件类型接线（`LangGraphEvent.*`）：`on_chat_model_start` → "正在思考..."、`on_tool_start/end`（retrieve_kb）→ "正在检索.../检索完成..."；`SSE_STATUS` 节点名映射已删除。
+SSE 消费侧按事件类型接线（`agent_service._convert_event`，src/services/agent_service.py:159）：
+`on_chat_model_start`（节点 `agent`）→ "正在思考..."；`on_chat_model_stream`（节点 `agent`）
+→ `token`（chunk 带 reasoning_content 时另发 `reasoning` 增量）；`on_tool_start/end` 按
+工具名映射：`retrieve_kb` → `retrieve` 阶段（"正在检索相关文档.../检索完成..."）、
+`search_web` → `web_search` 阶段（"正在联网搜索.../联网搜索完成..."）、`ask_user` 不发状态
+（澄清卡由 ask_user/verify 经 clarify_channel 直投）；`on_chain_end`（`format`）→ citations。
 
 ## 链路 3：知识库管理
 
@@ -94,7 +200,8 @@ MySQL 查元信息 → ChromaDB 取分块 → 脱敏 → 构建 KnowledgeGraph
 → 综合评分 → 写入 meta_info.eval（仅记录，不阻塞）
 ```
 
-由 `CHUNK_EVAL_ENABLED` 开关控制，`src/eval/chunk_scorer.py` 实现
+由 `CHUNK_EVAL_ENABLED` 开关控制，`src/chunking/scorer.py` 的 `ChunkQualityScorer` 实现
+（document_service.py 在分块后调用 evaluate）
 
 ## 链路 8：工具性链路
 

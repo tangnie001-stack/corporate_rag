@@ -19,6 +19,10 @@ from src.config.const import (
     VERIFY_KB_CITATION_MARKER,
     SSEInteractionTexts,
 )
+from src.config.prompts import (
+    VERIFY_CITATION_GUIDANCE_PROMPT,
+    VERIFY_KB_CITATION_GUIDANCE_PROMPT,
+)
 from src.core import logging as core_logging
 from src.core.log_events import Event
 from src.infra.llm.request_context import RequestContext
@@ -84,11 +88,7 @@ async def web_citation_guard(
         return None
     core_logging.log_event(Event.CITATION_GUIDE, kind="web", answer_len=len(answer))
     guidance = SystemMessage(
-        content=(
-            f"你刚才的回答引用了联网搜索结果，但没有标注来源编号，"
-            f"{VERIFY_CITATION_MARKER}，请在引用来源的对应句末补上 [n] 编号"
-            "（编号须与搜索结果返回的来源列表一致）后重新回答。"
-        )
+        content=VERIFY_CITATION_GUIDANCE_PROMPT.format(marker=VERIFY_CITATION_MARKER)
     )
     if ctx is not None:
         # regen 轮同步归零 search_web 请求级配额（web_count）：ctx.web_count 跨 verify
@@ -167,10 +167,8 @@ async def kb_citation_guardrail(
         return None
     core_logging.log_event(Event.CITATION_GUIDE, kind="kb", answer_len=len(answer))
     guidance = SystemMessage(
-        content=(
-            f"你刚才的回答基于知识库检索结果，但没有标注来源编号，"
-            f"{VERIFY_KB_CITATION_MARKER}，请在引用来源的对应句末补上 [n] 编号"
-            "（编号须与检索返回的来源列表一致）后重新回答。"
+        content=VERIFY_KB_CITATION_GUIDANCE_PROMPT.format(
+            marker=VERIFY_KB_CITATION_MARKER
         )
     )
     return {

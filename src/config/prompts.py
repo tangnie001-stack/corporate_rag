@@ -1,8 +1,9 @@
 """提示词模板集 — 集中管理所有 LLM prompt。
 
-本模块存放 RAG 问答链路中使用的所有提示词模板，包括：
-  - 系统指令（约束 LLM 行为）
+本模块存放全链路中使用的所有提示词模板，包括：
+  - 系统指令（约束 LLM 行为，含主问答/分类/改写/实体抽取）
   - 用户消息模板（拼接参考文档 + 问题）
+  - agent 运行期注入的 verify 指引指令（与 const.py 的 *_MARKER 查重短语配对）
   - 其他供 LLM 调用的 prompt 片段
 
 设计原则：
@@ -10,6 +11,8 @@
   2. 系统指令与用户模板分离，便于分别调试和优化
   3. 模板中的占位符统一使用 {var} 格式（str.format()）
   4. 每个常量必须有详细注释，说明用途和占位符含义
+  5. 需要跨模块查重的指令文案：完整文案在此，查重标记短语在 const.py
+     （业务代码按标记短语查重防重复注入，改文案不破坏查重逻辑）
 
 与 queries.py 的关系：
   queries.py 管理发给 MySQL 的 SQL 语句
@@ -210,3 +213,61 @@ ENTITY_EXTRACTION_USER_TEMPLATE: str = """文件名：{filename}
   }}
 }}
 """
+
+
+# ====== 内联引用编号指令（系统提示兜底拼接） ======
+
+# 引用编号指令：无论来源（知识库文档或联网搜索结果）都必须在句末标注来源编号，
+# 否则 format_node 按 [n] 正则提取不到引用，前端无来源可展示（2026-09-02 bug 修复）。
+# 无占位符。由 infra/llm/prompt_manager.py 拼接到系统提示兜底文本末尾；
+# get_system_prompt() 会对拉取/兜底后的系统提示做幂等追加，保证指令始终存在。
+INLINE_CITATION_INSTRUCTION: str = (
+    "\n引用知识库文档或联网搜索结果时，请在对应句末标注来源编号 [1][2]，"
+    '编号须与工具返回的来源列表一致，例如："营收3943亿元[1]"。\n'
+)
+
+
+# ====== agent 运行期 verify 指引 ======
+
+# 以下指令由 verify 护栏在 agent 循环运行期注入为 SystemMessage，用于驱动 agent
+# 重生成。每条指令内含一段查重标记短语（const.py 的 *_MARKER）——业务代码遍历
+# messages 查重防重复注入时按该短语匹配。完整文案集中于此、标记短语在 const.py
+# （二者必须保持"短语存在于文案中"，改文案时标记短语随文同步，查重不破）。
+
+# verify 完整联网指引 — 知识库缺失年份且用户已确认联网时注入，驱动 agent 调用
+# search_web 补充缺失年份数据后重新回答。内含 {missing}（缺失年份列表）与
+# {marker}（const.VERIFY_GUIDANCE_MARKER，查重短语）。渲染消息示例：
+#   "知识库缺失年份 [2023, 2025]，用户已确认联网，请调用 search_web 工具补充这些年份的数据后再回答。"
+VERIFY_GUIDANCE_PROMPT: str = (
+    "知识库缺失年份 {missing}，{marker}，"
+    "请调用 search_web 工具补充这些年份的数据后再回答。"
+)
+
+# verify "一次带全" hint — 完整指引已注入但 agent 上一轮 search_web queries 仍带漏
+# 缺失年份时，独立补发一条带全提示（重申轮也须送达）。内含 {missing}（缺失年份
+# 列表）与 {marker}（const.VERIFY_HINT_MARKER，查重短语，值为"一次带全以下年份"，
+# 直接前缀 {missing}，无空格）。渲染消息示例：
+#   "缺失年份 [2023, 2025] 仍未补全：search_web 支持一次传入多个查询，请再调用一次
+#    search_web，一次带全以下年份[2023, 2025] 对应的查询后重新回答。"
+VERIFY_HINT_PROMPT: str = (
+    "缺失年份 {missing} 仍未补全：search_web 支持一次传入多个查询，"
+    "请再调用一次 search_web，"
+    "{marker}{missing} 对应的查询后重新回答。"
+)
+
+# verify 联网引用标注指引（态 A，无 KB 场景）— 本轮调过 search_web 但回答未带 [n]
+# 来源编号时注入，驱动 agent 补标注后重生成一次。内含 {marker}
+# （const.VERIFY_CITATION_MARKER，查重短语）。
+VERIFY_CITATION_GUIDANCE_PROMPT: str = (
+    "你刚才的回答引用了联网搜索结果，但没有标注来源编号，"
+    "{marker}，请在引用来源的对应句末补上 [n] 编号"
+    "（编号须与搜索结果返回的来源列表一致）后重新回答。"
+)
+
+# verify KB 强制溯源指引（态 B）— 检索到 KB context 但答案无 [n] 时注入，驱动 agent
+# 补标后重生成一次。内含 {marker}（const.VERIFY_KB_CITATION_MARKER，查重短语）。
+VERIFY_KB_CITATION_GUIDANCE_PROMPT: str = (
+    "你刚才的回答基于知识库检索结果，但没有标注来源编号，"
+    "{marker}，请在引用来源的对应句末补上 [n] 编号"
+    "（编号须与检索返回的来源列表一致）后重新回答。"
+)

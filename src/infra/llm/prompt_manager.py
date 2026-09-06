@@ -20,20 +20,14 @@ from src.config.prompts import (
     CLASSIFIER_SYSTEM_PROMPT,
     CLASSIFIER_USER_TEMPLATE,
     FINANCIAL_SYSTEM_PROMPT,
+    INLINE_CITATION_INSTRUCTION,
     USER_PROMPT_TEMPLATE,
 )
 from src.core import logging as core_logging
 from src.core.log_events import Event
 
 # 本地兜底的 prompt 常量（与 src/config/prompts.py 一致）
-# 引用编号指令：无论来源（知识库文档或联网搜索结果）都必须在句末标注来源编号，
-# 否则 format_node 按 [n] 正则提取不到引用，前端无来源可展示（2026-09-02 bug 修复）
-_INLINE_CITATION_INSTRUCTION: str = (
-    "\n引用知识库文档或联网搜索结果时，请在对应句末标注来源编号 [1][2]，"
-    '编号须与工具返回的来源列表一致，例如："营收3943亿元[1]"。\n'
-)
-
-_FALLBACK_SYSTEM_PROMPT: str = FINANCIAL_SYSTEM_PROMPT + _INLINE_CITATION_INSTRUCTION
+_FALLBACK_SYSTEM_PROMPT: str = FINANCIAL_SYSTEM_PROMPT + INLINE_CITATION_INSTRUCTION
 _FALLBACK_USER_TEMPLATE: str = USER_PROMPT_TEMPLATE
 
 # 北京时区：金融场景锚定"本报告期/今年"需按北京时间取日期。
@@ -180,8 +174,8 @@ class PromptManager:
         """
         prompt = self._get(self.PROMPT_NAMES["system"], _FALLBACK_SYSTEM_PROMPT)
         # 确保内联引用指令始终存在（无论 prompt 来自 Langfuse 还是本地兜底）
-        if _INLINE_CITATION_INSTRUCTION not in prompt:
-            prompt += _INLINE_CITATION_INSTRUCTION
+        if INLINE_CITATION_INSTRUCTION not in prompt:
+            prompt += INLINE_CITATION_INSTRUCTION
         return _with_current_date(prompt)
 
     def get_user_template(self, context: str = "", query: str = "") -> str:
