@@ -231,7 +231,7 @@ data: {}
 
 | 事件 | 触发条件 | 说明 |
 |------|---------|------|
-| `status` | agent 循环按事件类型接线 | stage 取值：`agent`（on_chat_model_start "正在思考..."）、`retrieve`（on_tool_start/end "正在检索相关文档..." / "检索完成，正在分析..."）、`web_search`（on_tool_start/end "正在联网搜索..." / "联网搜索完成，正在分析..."，KB 不达标时走 search_web 兜底才出现）、`delegate`（delegate_task 委派 fork skill，fork 子代理开始/结束各推一条，见下「`delegate` 状态阶段」） |
+| `status` | agent 循环按事件类型接线 | stage 取值：`agent`（on_chat_model_start "正在思考..."）、`retrieve`（on_tool_start/end "正在检索相关文档..." / "检索完成，正在分析..."）、`web_search`（on_tool_start/end "正在联网搜索..." / "联网搜索完成，正在分析..."，KB 不达标时走 search_web 兜底才出现）、`delegate`（delegate_task 委派 fork skill，fork 子代理开始/结束各推一条，见上「`delegate` 状态阶段」） |
 | `token` | LLM 生成中 | LLM 生成文本片段，前端逐段追加 |
 | **`reasoning`** | **agent 节点 LLM 流式输出思考增量（enable_thinking=true 且模型返回 reasoning_content，经 ChatQwenWithReasoning 提取）** | **思考过程增量（data: {"delta": "..."}），前端累积渲染 Think 折叠行；每轮 LLM 调用一个，默认收起；收到正文 token/状态/ask_user/abstention/done 时定型** |
 | `citation` | format 节点完成 | 引用来源，按 source+page 去重；data 含 `kind`（`kb` 知识库 / `web` 网络搜索，默认 `kb`），前端按来源类型区分展示 |

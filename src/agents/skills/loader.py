@@ -43,7 +43,8 @@ class SkillLoader:
 
         Returns:
             解析成功的 SkillRecord 列表；目录不存在或为空时返回空列表。
-            单文件解析失败记 warning 并跳过（fail-open，坏 skill 不拖垮整体）。
+            单文件解析失败（YAML 非法 / 字段类型不符 / 读取 IO 错误，如挂载卷瞬时
+            读失败或文件被删）记 warning 并跳过（fail-open，坏 skill 不拖垮整体）。
         """
         records: list[SkillRecord] = []
         if not self.skills_root.exists():
@@ -56,7 +57,7 @@ class SkillLoader:
                 continue
             try:
                 records.append(self._parse(path, skill_dir.name))
-            except (yaml.YAMLError, ValueError) as exc:
+            except (yaml.YAMLError, ValueError, OSError) as exc:
                 warnings.warn(f"skill {skill_dir.name} 解析失败，已跳过: {exc}")
         return records
 
@@ -73,6 +74,7 @@ class SkillLoader:
         Raises:
             yaml.YAMLError: frontmatter YAML 无法解析
             ValueError: frontmatter 非 dict / 字段类型不符
+            OSError: 读取 SKILL.md 文件失败（读错误由 load_all 捕获并跳过）
         """
         raw = path.read_text(encoding="utf-8")
         meta, body = self._split_frontmatter(raw)

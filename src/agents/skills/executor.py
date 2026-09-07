@@ -25,6 +25,7 @@ DELEGATE_TIMEOUT_TEXT（ToolMessage 文本引导主 agent 基于现有上下文�
 import asyncio
 
 from langchain_core.messages import HumanMessage
+from langchain_core.runnables.config import var_child_runnable_config
 from langgraph.prebuilt import create_react_agent
 
 from src.agents.skills.models import SkillContext, SkillRecord
@@ -47,12 +48,14 @@ class SkillExecutor:
                 model_name 继承复用；声明 model/thinking 时经 get_llm 新建）
         """
         self._main_llm = main_llm
-        # 主 agent llm 为 ChatOpenAI 族（get_llm 产物），model_name 为标准属性；
-        # 测试替身需显式设 main_llm.model_name（缺省 None 走 get_llm 默认模型）
-        name = main_llm.model_name
-        if not isinstance(name, str) or not name:
-            name = None
-        self._main_model_name = name
+        # 主 agent llm 为 ChatOpenAI 族（get_llm 产物）时 model_name 为标准属性；
+        # 测试替身/无该属性的模型对象按 None 处理（缺省 None 走 get_llm 默认模型）
+        model_name = None
+        if hasattr(main_llm, "model_name"):
+            model_name = main_llm.model_name
+        if not isinstance(model_name, str) or not model_name:
+            model_name = None
+        self._main_model_name = model_name
 
     async def execute(self, record: SkillRecord, task: str) -> str:
         """执行一个 skill，返回给主 agent 的文本。
@@ -101,6 +104,11 @@ class SkillExecutor:
             tools=[],  # 零工具硬保证（design D7）：防递归 + 不污染主 ctx
             prompt=record.agent_prompt,
         )
+        # 隔离子代理回调传播：不 reset 会经 var_child_runnable_config 把外层
+        # callback handler 传进 create_react_agent，子代理 LLM 事件（on_chat_model_*）
+        # 泄漏到外层 graph.astream_events（SSE token 污染 + full_answer 累积子代理
+        # 原文，见 final review Critical）；reset 后子代理事件只走其自身 handler
+        token = var_child_runnable_config.set(None)
         try:
             result = await asyncio.wait_for(
                 sub_agent.ainvoke({"messages": [HumanMessage(content=task)]}),
@@ -108,6 +116,8 @@ class SkillExecutor:
             )
         except TimeoutError:
             return SSEInteractionTexts.DELEGATE_TIMEOUT_TEXT
+        finally:
+            var_child_runnable_config.reset(token)
         messages = result.get("messages", []) if isinstance(result, dict) else []
         text = self._last_message_text(messages)
         return self._truncate(text)
