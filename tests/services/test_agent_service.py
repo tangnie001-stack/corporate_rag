@@ -1054,3 +1054,16 @@ def test_convert_status_unknown_phase_uses_end_text():
     ev = events[0]
     assert isinstance(ev, SSEStatusEvent)
     assert ev.message == SSEInteractionTexts.DELEGATE_STATUS_END
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_sets_ctx_deep_thinking():
+    """deep_thinking 应写入 launch_ctx 的 RequestContext（fork thinking 跟随来源）。"""
+    service, _ = _make_service()
+    service._graph = Mock()
+    _, launch_ctx = await service.stream_chat("", "s1", "q", deep_thinking=True)
+    assert launch_ctx["ctx"].deep_thinking is True
+    assert launch_ctx["deep_thinking"] is True
+    # 默认 False 档
+    _, launch_ctx2 = await service.stream_chat("", "s1", "q")
+    assert launch_ctx2["ctx"].deep_thinking is False

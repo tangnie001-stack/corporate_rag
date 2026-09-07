@@ -226,6 +226,15 @@ REDIS_TTL: int = int(os.getenv("REDIS_TTL", "604800"))
 # ====== Skill 委派 ======
 # skill 内容库根目录（delegate_task 工具读源），空 = 缺省项目根 skills/（<name>/SKILL.md）
 SKILLS_DIR: str = os.getenv("SKILLS_DIR", "")
+# fork 子代理事件级空闲阈值（秒）：超时无任一增量事件（reasoning/content/工具）即断，
+# 正常长思考为流式增量不误杀，仅完全静默才断
+DELEGATE_MAX_IDLE_S: float = float(os.getenv("DELEGATE_MAX_IDLE_S", "60"))
+# fork 子代理总时长保险丝（秒，deep_thinking=false 档）；deep_thinking=true 走下一条
+DELEGATE_TOTAL_TIMEOUT_S: float = float(os.getenv("DELEGATE_TOTAL_TIMEOUT_S", "240"))
+# fork 子代理总时长保险丝（秒，deep_thinking=true 档）：深思考长题放宽
+DELEGATE_TOTAL_TIMEOUT_THINKING_S: float = float(
+    os.getenv("DELEGATE_TOTAL_TIMEOUT_THINKING_S", "600")
+)
 
 # ====== 重试策略 ======
 # 外部调用（DashScope / MySQL / Redis）失败时的指数退避参数

@@ -46,3 +46,12 @@ def test_request_context_temporal_fields_defaults():
     assert ctx.missing_years == []
     assert ctx.web_confirmed is False
     assert ctx.verify_ask_count == 0
+
+
+def test_request_context_new_fields_defaults():
+    from src.infra.llm.request_context import RequestContext
+
+    ctx = RequestContext(session_id="s1")
+    assert ctx.deep_thinking is False
+    assert ctx.delegate_id == ""
+    assert ctx.fork_stop_reason is None

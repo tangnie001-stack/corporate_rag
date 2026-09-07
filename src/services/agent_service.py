@@ -634,6 +634,9 @@ class AgentService:
         ctx = RequestContext(session_id=session_id)
         ctx.kb_id = kb_id
         ctx.kb_bound = bool(kb_id)
+        ctx.deep_thinking = (
+            deep_thinking  # fork thinking 跟随的请求级来源（executor 读取）
+        )
         launch_context = {
             "history": history,
             "ctx": ctx,

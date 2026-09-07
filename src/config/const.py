@@ -1,5 +1,8 @@
 """诊断日志标签、业务常量。"""
 
+from enum import Enum
+from typing import ClassVar
+
 
 class _Labels(dict):
     """标签字典，get() 无值时返回空字符串。"""
@@ -78,12 +81,16 @@ SESSION_LOCK_TTL = ASK_USER_TIMEOUT + 60
 TEMPORAL_RECENT_N_YEARS = 3
 
 # ── delegate（主从委派）护栏常量 ──
-# 来源：agent-delegation-skills change；用途：fork 子代理超时/结果截断/inline 规模约束
+# 来源：agent-delegation-skills change（fork 超时/结果截断/inline 规模约束）+
+# delegate-hardening-observability change（三层防失控：事件级空闲 / 总时长保险丝 / turn 上限）
 MAX_DELEGATE_BONUS = (
     2  # delegate 轮后主 agent 迭代上限放宽轮数（整合余量，单请求总上限仍封顶）
 )
 DELEGATE_TIMEOUT = (
     120  # fork 子代理执行总超时秒数（asyncio.wait_for，防外部 API 挂起烧钱）
+)
+DELEGATE_DEFAULT_MAX_TURNS = (
+    5  # fork 零工具默认 turn 上限（防御；开放工具后由 skill max_iterations 覆盖）
 )
 DELEGATE_RESULT_LIMIT = 1000  # fork 结果回流主 agent 的截断阈值（字符）
 INLINE_PROMPT_MAX_CHARS = (
@@ -92,6 +99,22 @@ INLINE_PROMPT_MAX_CHARS = (
 # 专家分析标记短语：fork 子代理"无源分析观点"由 4.1 引导主 agent 措辞（design D9），
 # kb_citation_guardrail 据此豁免（防纯分析型 fork 答案被误触发补标 regen，M7）
 EXPERT_ANALYSIS_MARKER = "基于领域经验的分析"
+
+
+class DelegateStopReason(str, Enum):
+    """fork 结束原因统一枚举（delegate end ok/reason 与 task 注册表终态共用词表）。
+
+    取值：normal=正常完成 / idle=流空闲超时 / total=总时长保险丝 /
+    turn=轮次上限 / failed=执行异常 / cancelled=请求取消。
+    契约/文档/前端文案不得另起原因词（spec delegate-execution-controls）。
+    """
+
+    NORMAL = "normal"
+    IDLE = "idle"
+    TOTAL = "total"
+    TURN = "turn"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 # ── 检索精排超时 ──
@@ -187,6 +210,16 @@ class SSEInteractionTexts:
     DELEGATE_UNKNOWN_SKILL: str = "skill 不存在: {skill}，可用 skill: {available}"
     # fork 超时文案（delegate_task 返回给 LLM，促其基于现有上下文作答）
     DELEGATE_TIMEOUT_TEXT: str = "Error: 领域专家分析超时，请基于已有检索上下文作答"
+    # fork 中断/委派终态文案：中断时以 {reason} 填 DELEGATE_REASON_TEXT 的中文短词
+    DELEGATE_INTERRUPT_TEXT: str = "领域专家分析中断 · {reason}"
+    # DelegateStopReason → 前端可读中文短词（双通道：文字 + 颜色）
+    DELEGATE_REASON_TEXT: ClassVar[dict[str, str]] = {
+        "idle": "空闲超时",
+        "total": "超时",
+        "turn": "轮次上限",
+        "failed": "失败",
+        "cancelled": "已取消",
+    }
     # fork 结果截断前缀模板：{total}=完整字数；{truncated}=截断后的摘要文本
     DELEGATE_TRUNCATED_PREFIX: str = (
         "子代理已产出完整分析 {total} 字，摘要如下：\n{truncated}"
