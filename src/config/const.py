@@ -77,6 +77,22 @@ SESSION_LOCK_TTL = ASK_USER_TIMEOUT + 60
 # 解析出 [2023, 2025] 等缺失年份触发联网询问
 TEMPORAL_RECENT_N_YEARS = 3
 
+# ── delegate（主从委派）护栏常量 ──
+# 来源：agent-delegation-skills change；用途：fork 子代理超时/结果截断/inline 规模约束
+MAX_DELEGATE_BONUS = (
+    2  # delegate 轮后主 agent 迭代上限放宽轮数（整合余量，单请求总上限仍封顶）
+)
+DELEGATE_TIMEOUT = (
+    120  # fork 子代理执行总超时秒数（asyncio.wait_for，防外部 API 挂起烧钱）
+)
+DELEGATE_RESULT_LIMIT = 1000  # fork 结果回流主 agent 的截断阈值（字符）
+INLINE_PROMPT_MAX_CHARS = (
+    500  # inline skill 正文规模上限（字符，防上下文累积膨胀，超出仅记 warning）
+)
+# 专家分析标记短语：fork 子代理"无源分析观点"由 4.1 引导主 agent 措辞（design D9），
+# kb_citation_guardrail 据此豁免（防纯分析型 fork 答案被误触发补标 regen，M7）
+EXPERT_ANALYSIS_MARKER = "基于领域经验的分析"
+
 
 # ── 检索精排超时 ──
 # Reranker 精排总超时秒数：rerank 为同步 HTTP 调用（dashscope 无默认超时），
@@ -119,6 +135,13 @@ class SSEInteractionTexts:
     # on_tool_start/on_tool_end（retrieve_kb）对应 stage：检索中/完成
     STAGE_RETRIEVE: str = "retrieve"
 
+    # delegate_task 工具（fork 路径）对应 stage：仅 fork 命中时推送（inline 命中不推，见 design D14）
+    STAGE_DELEGATE: str = "delegate"
+
+    # fork 执行开始/完成文案（delegate_task 工具体内经 ctx 通道投递 status dict，_convert_event 转 SSEStatusEvent）
+    DELEGATE_STATUS_START: str = "正在调用领域专家分析..."
+    DELEGATE_STATUS_END: str = "领域专家分析完成"
+
     # ── Agent 状态事件文案 ──
     # on_chat_model_start（agent 节点）→ SSEStatusEvent(STAGE_AGENT)：模型开始思考
     AGENT_STATUS_THINKING: str = "正在思考..."
@@ -158,3 +181,13 @@ class SSEInteractionTexts:
 
     # /chat/clarify-answer 404 文案：POST 解析挂起澄清时查无该 session 或 Future 已结束（超时/取消）
     CLARIFY_ANSWER_NOT_FOUND_TEXT: str = "该澄清问题已超时或不存在"
+
+    # ── delegate_task 工具返回主 agent 的文本 ──
+    # 未知 skill 返回模板：{skill}=请求的 skill 名；{available}=可用 skill 列表（空列表显示"无"）
+    DELEGATE_UNKNOWN_SKILL: str = "skill 不存在: {skill}，可用 skill: {available}"
+    # fork 超时文案（delegate_task 返回给 LLM，促其基于现有上下文作答）
+    DELEGATE_TIMEOUT_TEXT: str = "Error: 领域专家分析超时，请基于已有检索上下文作答"
+    # fork 结果截断前缀模板：{total}=完整字数；{truncated}=截断后的摘要文本
+    DELEGATE_TRUNCATED_PREFIX: str = (
+        "子代理已产出完整分析 {total} 字，摘要如下：\n{truncated}"
+    )
