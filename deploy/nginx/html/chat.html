@@ -1635,6 +1635,15 @@ function buildStreamHandlers() {
     onError: (e) => {
       onStreamError(e);
     },
+    onClose: () => {
+      // 干净 EOF：主 POST 流若在 STREAMING 态未收终态（done/error），说明服务端
+      // 因长静默/代理掐断收流但任务仍存活——按 lastSeq 自动续接（终态必达前不卡死输入框）。
+      // 已收终态（state.current 已被 done/error 切回 IDLE）的 EOF 不续接，正常收尾。
+      if (state.current === STATE.STREAMING) {
+        streamRetryCount = 0;
+        resumeStream(state.sessionId, state.lastSeq);
+      }
+    },
   };
 }
 
