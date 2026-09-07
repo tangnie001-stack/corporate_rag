@@ -23,7 +23,7 @@ async def _subscribe_events(
     session_id: str,
     manager: StreamingRunManager,
     after_seq: int = 0,
-    max_idle: float = 180.0,
+    max_idle: float | None = 180.0,
 ) -> AsyncGenerator[SSEEvent, None]:
     """SSE 消费者（事件对象版）：回放缓冲中 seq>after_seq 的事件并 tail 新事件直到终态。
 
@@ -31,7 +31,10 @@ async def _subscribe_events(
         session_id: 会话 ID
         manager: StreamingRunManager
         after_seq: 起始 seq（新一轮 POST 为 0，同页重连为 lastSeq）
-        max_idle: tail 空闲超时秒数（无新事件超时返回续传超时 error）
+        max_idle: tail 空闲超时秒数（无新事件超时返回续传超时 error）；
+            None = 不按空闲收流，终态由任务生命周期（done/error）提供，
+            仅在 manager.has_terminal() 为 True 时结束。主 POST 流用 None，
+            resume 端点保留默认值 180 作"无任务僵尸续接"兜底。
 
     Yields:
         SSEEvent: 从缓冲还原的事件对象（token / citation / status / error / done），
@@ -53,7 +56,7 @@ async def _subscribe_events(
             if manager.has_terminal(session_id):
                 return
             idle_loops += 1
-            if idle_loops * 0.3 > max_idle:
+            if max_idle is not None and idle_loops * 0.3 > max_idle:
                 yield SSEErrorEvent(SSEInteractionTexts.RESUME_TIMEOUT_TEXT)
                 return
             await asyncio.sleep(0.3)

@@ -643,4 +643,8 @@ class AgentService:
             "query": query,
             "deep_thinking": deep_thinking,
         }
-        return _subscribe_events(session_id, streaming_manager), launch_context
+        # 主 POST 订阅不按 180s 空闲收流（长静默由任务生命周期收口，含 ask_user
+        # 等待、fork 长跑等合法静默）；resume 端点（sessions/events）保留空闲兜底
+        return _subscribe_events(
+            session_id, streaming_manager, max_idle=None
+        ), launch_context

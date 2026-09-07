@@ -81,3 +81,56 @@ async def test_buffer_ttl_sweep(mgr):
     mgr._buffer_done_at["s1"] -= StreamingRunManager.TTL_SECONDS + 1
     mgr.sweep_expired()
     assert mgr.buffer_exists("s1") is False
+
+
+async def _collect(agen, into):
+    """收集生成器全部事件直到结束。"""
+    async for ev in agen:
+        into.append(ev)
+
+
+@pytest.mark.asyncio
+async def test_subscribe_without_idle_keeps_flowing_until_terminal(mgr):
+    """主 POST 流：max_idle=None 时长静默不断流，终态到达后正常返回。"""
+    from src.chat.streaming import _subscribe_events
+    from src.config.const import SSEInteractionTexts
+    from src.utils.sse import SSEErrorEvent
+
+    mgr.add_event("s1", "status", {"stage": "agent", "message": "thinking"})  # 非终态
+    collected = []
+    consumer = asyncio.create_task(
+        _collect(_subscribe_events("s1", mgr, max_idle=None), collected)
+    )
+    await asyncio.sleep(0.9)  # 远大于旧 0.3*loop 的判定节拍，仍不应因空闲收流
+    # 预置的 status 事件会被消费者首轮消费，故不能断言空——只断言期间无超时错误/终态
+    assert not any(
+        isinstance(ev, SSEErrorEvent)
+        and ev.error == SSEInteractionTexts.RESUME_TIMEOUT_TEXT
+        for ev in collected
+    )
+    mgr.add_event("s1", "done", {"trace_id": ""})
+    await asyncio.wait_for(consumer, timeout=2)
+    assert any(getattr(ev, "type", "") == "done" for ev in collected)
+    assert not any(
+        isinstance(ev, SSEErrorEvent)
+        and ev.error == SSEInteractionTexts.RESUME_TIMEOUT_TEXT
+        for ev in collected
+    )
+
+
+@pytest.mark.asyncio
+async def test_subscribe_with_idle_still_times_out_when_no_terminal(mgr):
+    """resume 端点（保留默认 max_idle）：无终态仍按空闲返回续传超时错误。"""
+    from src.chat.streaming import _subscribe_events
+    from src.config.const import SSEInteractionTexts
+    from src.utils.sse import SSEErrorEvent
+
+    mgr.add_event("s1", "status", {"stage": "agent", "message": "thinking"})
+    events = []
+    async for ev in _subscribe_events("s1", mgr, max_idle=0.6):
+        events.append(ev)
+    assert any(
+        isinstance(ev, SSEErrorEvent)
+        and ev.error == SSEInteractionTexts.RESUME_TIMEOUT_TEXT
+        for ev in events
+    )
