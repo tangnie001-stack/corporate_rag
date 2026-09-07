@@ -26,6 +26,7 @@ warn 档仅提示需人工 triage，不影响退出码。
   exclude_paths: 文档中允许指向不存在代码的路径前缀
   exclude_routes: 文档中允许声明但代码无注册的路由
   exclude_symbols: 允许出现在文档但无需在代码中存在的标识符
+  exclude_skill_tools: skill frontmatter allowed-tools 中允许引用但代码不存在的工具名
 """
 
 import argparse
@@ -39,6 +40,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _DOCS_DIR = _PROJECT_ROOT / "docs" / "agents"
 _SRC_DIR = _PROJECT_ROOT / "src"
 _API_DIR = _SRC_DIR / "api"
+_SKILLS_DIR = _PROJECT_ROOT / "skills"
 
 # ── 默认排除表（pyproject.toml 可覆盖/扩展）──
 # requirements_pool.md 是"意向清单"，常写未来模块；reference-projects.md 指外部仓库
@@ -67,6 +69,8 @@ _DEFAULT_EXCLUDE_SYMBOLS = {
     "kb_id",
     "doc_id",
 }
+# skill allowed-tools 中允许引用但代码不存在的工具名（示例/伪代码）
+_DEFAULT_EXCLUDE_SKILL_TOOLS: set[str] = set()
 
 # ── 正则锚点提取 ──
 _PATH_RE = re.compile(
@@ -91,7 +95,7 @@ class DocFinding:
 
     Attributes:
         severity: 严重级别（error=引用失效需修文档；warn=启发式需人 triage）
-        kind: 锚点类别（path / route / symbol）
+        kind: 锚点类别（path / route / symbol / skill_tool）
         doc_file: 来源文档文件名
         doc_line: 锚点在文档中的行号
         anchor: 文档中出现的锚点原文
@@ -106,32 +110,47 @@ class DocFinding:
     message: str
 
 
-def _load_config() -> tuple[set[str], set[str], set[str], set[str]]:
+def _load_config() -> tuple[set[str], set[str], set[str], set[str], set[str]]:
     """从 pyproject.toml [tool.doc_anchors] 读取排除表（不存在则用默认值）。
 
     直接读文本定位 section，按 key 正则取数组体后用 ast.literal_eval 解析
     TOML list（兼容多行与注释）。
 
     Returns:
-        (exclude_docs, exclude_paths, exclude_routes, exclude_symbols)
+        (exclude_docs, exclude_paths, exclude_routes, exclude_symbols,
+         exclude_skill_tools)
     """
     exclude_docs = set(_DEFAULT_EXCLUDE_DOCS)
     exclude_paths = set(_DEFAULT_EXCLUDE_PATHS)
     exclude_routes = set(_DEFAULT_EXCLUDE_ROUTES)
     exclude_symbols = set(_DEFAULT_EXCLUDE_SYMBOLS)
+    exclude_skill_tools = set(_DEFAULT_EXCLUDE_SKILL_TOOLS)
     pyproject = _PROJECT_ROOT / "pyproject.toml"
     if not pyproject.exists():
-        return exclude_docs, exclude_paths, exclude_routes, exclude_symbols
+        return (
+            exclude_docs,
+            exclude_paths,
+            exclude_routes,
+            exclude_symbols,
+            exclude_skill_tools,
+        )
     try:
         text = pyproject.read_text(encoding="utf-8")
         m = re.search(r"\[tool\.doc_anchors\](.*?)(?=\n\[|\Z)", text, re.DOTALL)
         if not m:
-            return exclude_docs, exclude_paths, exclude_routes, exclude_symbols
+            return (
+                exclude_docs,
+                exclude_paths,
+                exclude_routes,
+                exclude_symbols,
+                exclude_skill_tools,
+            )
         for key, dest in (
             ("exclude_docs", exclude_docs),
             ("exclude_paths", exclude_paths),
             ("exclude_routes", exclude_routes),
             ("exclude_symbols", exclude_symbols),
+            ("exclude_skill_tools", exclude_skill_tools),
         ):
             km = re.search(
                 rf"^\s*{key}\s*=\s*\[(.*?)\]", m.group(1), re.DOTALL | re.MULTILINE
@@ -139,14 +158,18 @@ def _load_config() -> tuple[set[str], set[str], set[str], set[str]]:
             if not km:
                 continue
             try:
-                import ast
-
                 dest |= set(ast.literal_eval(f"[{km.group(1)}]"))
             except (ValueError, SyntaxError):
                 continue
     except OSError:
         pass
-    return exclude_docs, exclude_paths, exclude_routes, exclude_symbols
+    return (
+        exclude_docs,
+        exclude_paths,
+        exclude_routes,
+        exclude_symbols,
+        exclude_skill_tools,
+    )
 
 
 def _iter_doc_lines(doc_path: Path):
@@ -324,6 +347,112 @@ def _symbol_exists_in_code(symbol: str) -> bool:
     return False
 
 
+def _collect_known_tool_names() -> set[str]:
+    """收集代码中实际注册的工具名（registry.register / @tool("...") 字面量）。
+
+    极简 AST/文本扫描 src/agents/tools/ 与 src/agents/skills/：匹配
+    registry.register("<name>", ...) 与 @tool("<name>", ...) 字面量。
+
+    Returns:
+        实际工具名集合，如 {"retrieve_kb", "ask_user", "search_web", "delegate_task"}
+    """
+    names: set[str] = set()
+    roots = (
+        _PROJECT_ROOT / "src" / "agents" / "tools",
+        _PROJECT_ROOT / "src" / "agents" / "skills",
+    )
+    for root in roots:
+        if not root.exists():
+            continue
+        for py in root.rglob("*.py"):
+            if "__" in py.name:
+                continue
+            try:
+                text = py.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            # register("name", / @tool("name") 字面量
+            for m in re.finditer(r'(?:register|tool)\(\s*"([^"]+)"', text):
+                names.add(m.group(1))
+    return names
+
+
+def _parse_skill_frontmatter_tools(path: Path) -> list[tuple[int, str]]:
+    """从 SKILL.md 提取 allowed-tools 引用（行号 + 工具名）。
+
+    Args:
+        path: SKILL.md 文件路径
+
+    Returns:
+        [(行号, 工具名)] 列表
+    """
+    lines = path.read_text(encoding="utf-8").splitlines()
+    inside = False
+    current: list[str] = []
+    start_line = 0
+    for idx, line in enumerate(lines, start=1):
+        if line.strip() == "---":
+            if not inside:
+                inside = True
+                current = []
+                start_line = idx
+                continue
+            # 闭合：解析收集到的 frontmatter 行
+            body = "\n".join(current)
+            tools: list[tuple[int, str]] = []
+            for m in re.finditer(r"allowed-tools\s*:\s*\[([^\]]*)\]", body):
+                # YAML 允许 [a, b] 与 ["a", "b"] 两种写法，逐项剥引号/空白
+                for raw in m.group(1).split(","):
+                    tool = raw.strip().strip("\"'")
+                    if tool:
+                        tools.append((start_line, tool))
+            return tools
+        if inside:
+            current.append(line)
+    return []
+
+
+def _check_skill_tool_anchors(
+    skills_root: Path, known_tools: set[str], exclude: set[str]
+) -> list[DocFinding]:
+    """校验 skill frontmatter allowed-tools 引用的工具名是否在代码实际注册。
+
+    design D18 防腐扩展：工具改名后 skill 若仍引用旧名会静默失效，本函数机械
+    检出。只做单向存在性校验（skill 声称存在 → 代码必须找得到）。
+
+    Args:
+        skills_root: skills 内容库根目录
+        known_tools: 代码中实际注册的工具名集合
+        exclude: 允许引用但代码不存在的工具名（示例/伪代码，pyproject 排除表）
+
+    Returns:
+        error 档列表（引用代码不存在工具名的 skill frontmatter）
+    """
+    findings: list[DocFinding] = []
+    if not skills_root.exists():
+        return findings
+    for skill_dir in sorted(skills_root.iterdir()):
+        if not skill_dir.is_dir():
+            continue
+        path = skill_dir / "SKILL.md"
+        if not path.exists():
+            continue
+        for lineno, tool_name in _parse_skill_frontmatter_tools(path):
+            if tool_name in exclude or tool_name in known_tools:
+                continue
+            findings.append(
+                DocFinding(
+                    severity="error",
+                    kind="skill_tool",
+                    doc_file=f"skills/{skill_dir.name}/SKILL.md",
+                    doc_line=lineno,
+                    anchor=tool_name,
+                    message=f"skill allowed-tools 引用工具 {tool_name} 但代码未注册（已改名/删除？）",
+                )
+            )
+    return findings
+
+
 def main() -> None:
     """CLI 入口 — 解析参数、执行三类锚点校验、汇总打印。"""
     parser = argparse.ArgumentParser(description="Documentation anti-rot checker")
@@ -339,6 +468,7 @@ def main() -> None:
         exclude_paths,
         exclude_routes,
         exclude_symbols,
+        exclude_skill_tools,
     ) = _load_config()
 
     if args.doc:
@@ -357,6 +487,15 @@ def main() -> None:
         findings.extend(_check_path_anchors(doc, exclude_paths))
         findings.extend(_check_route_anchors(doc, code_routes, exclude_routes))
         findings.extend(_check_symbol_anchors(doc, exclude_symbols))
+
+    # skill 防腐（design D18）：frontmatter allowed-tools vs 实际工具注册
+    findings.extend(
+        _check_skill_tool_anchors(
+            _SKILLS_DIR,
+            _collect_known_tool_names(),
+            exclude_skill_tools,
+        )
+    )
 
     errors = [f for f in findings if f.severity == "error"]
     warns = [f for f in findings if f.severity == "warn"]

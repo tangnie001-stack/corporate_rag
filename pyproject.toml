@@ -74,6 +74,8 @@ venv = ".venv"
 # exclude_docs: 整篇跳过校验（意向清单/外部引用）
 # exclude_symbols: 允许出现在文档但不要求代码中存在的标识符
 #   （事故档案中的历史函数名、API 数据枚举值等）
+# exclude_skill_tools: skill frontmatter allowed-tools 中允许引用但代码不存在的工具名
+#   （如文档/示例中的历史工具名）
 exclude_docs = ["requirements_pool.md", "reference-projects.md", "codegraph-guide.md"]
 exclude_symbols = [
     "ci_gate",
@@ -82,6 +84,7 @@ exclude_symbols = [
     # chunking-issues.md 档案中的历史旧名（迁移时已拆分，注记指向现状）
     "HEADER_FOOTER_MARGIN",
 ]
+exclude_skill_tools = []
 
 
 [tool.ruff.lint.per-file-ignores]
