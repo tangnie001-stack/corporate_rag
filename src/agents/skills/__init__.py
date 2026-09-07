@@ -3,8 +3,15 @@
 入口：make_delegate_task（Task 6）→ SkillRegistry（懒重载）+ SkillExecutor。
 """
 
+from src.agents.skills.executor import SkillExecutor
 from src.agents.skills.loader import SkillLoader
 from src.agents.skills.models import SkillContext, SkillRecord
 from src.agents.skills.registry import SkillRegistry
 
-__all__ = ["SkillContext", "SkillLoader", "SkillRecord", "SkillRegistry"]
+__all__ = [
+    "SkillContext",
+    "SkillExecutor",
+    "SkillLoader",
+    "SkillRecord",
+    "SkillRegistry",
+]
