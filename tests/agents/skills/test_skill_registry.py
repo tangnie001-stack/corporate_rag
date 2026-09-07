@@ -18,7 +18,10 @@ def _write_skill(
     """在 root/<name>/SKILL.md 写入合法 skill；frontmatter_name 覆盖 frontmatter 的 name。"""
     d = root / name
     d.mkdir(parents=True, exist_ok=True)
-    fm_name = frontmatter_name if frontmatter_name is not None else name
+    if frontmatter_name is not None:
+        fm_name = frontmatter_name
+    else:
+        fm_name = name
     (d / "SKILL.md").write_text(
         f"---\nname: {fm_name}\ndescription: {name} 规则\ncontext: {context}\n---\n\n{body}",
         encoding="utf-8",
