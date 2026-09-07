@@ -62,6 +62,10 @@
 | inline 执行 | skill `context=inline`：方法论注入主 agent 上下文，主 agent 自己执行 | — |
 | fork 执行 | skill `context=fork`：`SkillExecutor` 生成零工具子代理独立深度分析，结果纯文本回主 agent | — |
 | `delegate_task` | 主 agent 委派工具 `delegate_task(task, skill)`，按命中 skill 的 context 分发 inline/fork；unknown 返回"skill 不存在 + 可用列表" | 引用会指向子代理产出（实际引用仍只指向主 agent 自身检索来源） |
+| `delegate_id` | 单次 delegate_task fork 的唯一标识（短 uuid），随该次委派的 start/增量/end 与 task execution 条目贯穿；同一次回答内多次委派互不相同 | ❌ 各事件各自随机生成导致无法关联 |
+| `DelegateStopReason` | fork 结束原因统一枚举：`normal / idle / total / turn / failed / cancelled`（const 定义）；delegate end `ok/reason` 与 task 注册表终态共用同一词表 | ❌ 各层另起一套原因词 |
+| delegate end `ok/reason` | 委派结束事件语义：`ok=true` 文案"领域专家分析完成"；`ok=false` 携带 reason，文案"分析中断·原因" | ❌ 无条件推"完成"（原实现缺陷） |
+| task `type=plan|execution` | 任务看板条目类型：`plan`=主 agent 经 Task 工具建的跟踪项；`execution`=delegate 自动登记的执行追踪（`task_id=delegate_id`） | ❌ 两类混排不区分、互相覆盖 |
 
 ## 推理思考文本
 

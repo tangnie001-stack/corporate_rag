@@ -49,12 +49,16 @@
 | 引用卡片 citation | `agentic-clarification.md`（组件）+ `chat-harness.md`（页面形态） | 末尾一体来源横条「来源 [n] ›」+ 右侧抽屉（fixed right，380px，滑出动画，不遮挡对话）；正文 `[n]` 点击打开抽屉并高亮定位 |
 | 深度思考开关 thinking-toggle | `agentic-clarification.md` | 输入区紧凑 chip、选中 primary、控制 `enable_thinking` |
 | Markdown 渲染 | `chat-markdown.md` | 助手消息 `.bubble-content.md` 富文本渲染（标题/加粗/列表/代码块/引用/表格）、marked+DOMPurify 安全、流式节流重渲染 |
+| 分析过程折叠区 delegate-progress | `chat-delegate-progress-2026-09-07.md` | AI 气泡内按 delegate_id 分节：思考二级折叠 + 正文流式；运行呼吸点/完成/中断(原因) 文案 |
+| 委派状态文案 | `chat-delegate-progress-2026-09-07.md` | "领域专家分析完成" / "分析中断·原因"（取代无条件"完成"） |
+| 任务/进度看板 task-board | `chat-delegate-progress-2026-09-07.md` | 顶栏"任务"chip（进行中计数）→ 右侧 360px 只读面板；引用抽屉互斥单开；快照接口初始化 |
 
 ## 页面索引
 
 | 页面 | 规格文档 | 说明 |
 |------|---------|------|
 | Chat 页面（聊天主界面 `/`） | `pages/chat-harness.md` | 左侧栏 + 新对话/历史对话双页面、KB 会话级绑定、引用悬浮卡交互 |
+| Chat 子代理过程 + 任务看板 | `pages/chat-delegate-progress-2026-09-07.md` | 委派过程折叠区（分节/流式/完成·中断文案）+ 任务/进度看板（chip + 右侧只读面板） |
 | KB 管理页面（`/Knowledgebase`） | `pages/kb-harness-page.md` | 与 chat 同款浅色布局与侧栏（含左下角用户模块），功能不变 |
 
 新组件/页面设计时：全局基线更新到本文件，页面级规格写入 `pages/<name>.md`，效果预览输出 `docs/design/<name>-mockup.html`。

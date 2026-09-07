@@ -11,6 +11,8 @@
 2. **页面级设计**：写入 `docs/design/pages/<page-name>.md`（中文），包含视觉规格和交互说明
 
 3. **效果预览**：只出独立 HTML 文件（`docs/design/<名字>-mockup.html`），不截图
-   通过 `http://localhost/<mockup文件名>.html` 查看
+   用户直接用 Chrome 打开本地文件查看（无需挂 nginx/localhost）
 
 4. 所有设计文档用中文，提交到 git
+5. **知识防腐**：前端（chat.html 等 UI）一旦变动，必须同步更新 `docs/design/MASTER.md` 与对应 `pages/*` 规格，防止设计与实现脱节
+6. **文件名日期后缀**：新建设计文件（`.md` 规格与 `.html` 预览）文件名以生成日期 `-YYYY-MM-DD` 结尾（扩展名前，如 `chat-delegate-progress-2026-09-07.md`），便于识别文件生成时间；历史文件不追溯改名

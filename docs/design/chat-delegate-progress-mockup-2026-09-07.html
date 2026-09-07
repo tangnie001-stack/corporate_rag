@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Chat · 子代理过程区 + 任务/进度看板 mockup</title>
+<style>
+  :root{
+    --primary:#3B82F6; --primary-light:#EFF6FF; --primary-hover:#2563EB;
+    --accent:#F97316; --bg:#F8FAFC; --surface:#FFFFFF; --surface-muted:#F1F5F9;
+    --text:#1E293B; --text-secondary:#64748B; --text-muted:#94A3B8;
+    --border:#E2E8F0; --error:#EF4444; --amber:#F59E0B; --success:#10B981;
+    --radius:12px; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  body{background:var(--bg); color:var(--text); font:16px/1.5 "Source Sans 3","Segoe UI",system-ui,sans-serif}
+  .page{max-width:1120px;margin:0 auto;display:grid;grid-template-columns:240px 1fr;min-height:100vh;position:relative}
+  /* sidebar */
+  aside{border-right:1px solid var(--border);padding:20px 12px;background:var(--surface)}
+  .brand{font-family:Lexend,sans-serif;font-weight:600;font-size:18px;margin-bottom:18px}
+  .side-label{font-size:12px;color:var(--text-muted);margin:14px 6px 6px;text-transform:uppercase;letter-spacing:.05em}
+  .side-item{padding:8px 10px;border-radius:8px;font-size:14px;color:var(--text-secondary);cursor:pointer}
+  .side-item.active{background:var(--primary-light);color:var(--primary);font-weight:600}
+  main{padding:24px 32px 96px;max-width:860px;margin:0 auto;width:100%}
+  /* header row: mode badge + tasks chip */
+  .chat-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+  .titles strong{font-family:Lexend,sans-serif;font-size:17px;display:block}
+  .titles span{font-size:12px;color:var(--text-muted)}
+  .tasks-chip{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--border);background:var(--surface);
+    border-radius:24px;padding:7px 14px;font-size:14px;cursor:pointer;transition:border-color .15s, background .15s}
+  .tasks-chip:hover{border-color:var(--primary);background:var(--primary-light)}
+  .tasks-chip .count{background:var(--primary);color:#fff;border-radius:10px;padding:0 7px;font-size:12px;line-height:18px}
+  .dot-live{width:7px;height:7px;border-radius:50%;background:var(--primary);animation:pulse 1.2s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  /* user msg */
+  .bubble{margin:14px 0;padding:12px 16px;border-radius:16px;box-shadow:var(--shadow);max-width:92%}
+  .user{background:var(--primary-light);margin-left:auto;border-top-right-radius:6px}
+  .assistant{background:var(--surface);border-top-left-radius:6px}
+  .who{font-size:12px;color:var(--text-muted);margin-bottom:4px}
+  /* delegate progress block */
+  .delegate{border:1px solid var(--border);border-radius:10px;background:var(--surface-muted);margin:10px 0;overflow:hidden}
+  .d-head{display:flex;align-items:center;gap:8px;padding:9px 12px;cursor:pointer;font-size:14px;user-select:none}
+  .d-head:hover{background:rgba(59,130,246,.06)}
+  .d-title{font-weight:600;flex:1}
+  .d-state{font-size:12px;display:inline-flex;align-items:center;gap:6px}
+  .dot{width:7px;height:7px;border-radius:50%}
+  .dot.run{background:var(--primary);animation:pulse 1.2s infinite}
+  .dot.ok{background:var(--text-secondary)}
+  .dot.err{background:var(--error)}
+  .dot.amber{background:var(--amber)}
+  .chev{transition:transform .15s;color:var(--text-muted)}
+  .delegate.open .chev{transform:rotate(180deg)}
+  .d-body{padding:2px 12px 12px;display:none}
+  .delegate.open .d-body{display:block}
+  .think{border-left:3px solid var(--primary-light);background:var(--surface);border-radius:6px;padding:8px 10px;
+    font-size:13px;color:var(--text-secondary);line-height:1.6;margin-bottom:10px;font-style:normal}
+  .think summary{font-size:12px;cursor:pointer;color:var(--text-secondary);margin-bottom:6px;user-select:none}
+  .content{padding:6px 2px;font-size:15px;line-height:1.65}
+  /* task drawer */
+  .drawer{position:fixed;top:0;right:0;height:100%;width:360px;max-width:88vw;background:var(--surface);
+    border-left:1px solid var(--border);box-shadow:-8px 0 28px rgba(15,23,42,.12);transform:translateX(0);
+    transition:transform .22s ease;display:flex;flex-direction:column;z-index:30}
+  .dr-head{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border)}
+  .dr-head strong{font-family:Lexend,sans-serif;font-size:15px}
+  .icon-btn{border:none;background:none;cursor:pointer;color:var(--text-secondary);border-radius:6px;padding:4px}
+  .icon-btn:hover{background:var(--surface-muted)}
+  .dr-body{flex:1;overflow:auto;padding:10px 16px 20px}
+  .task{display:flex;gap:10px;padding:10px 4px;border-bottom:1px solid var(--border);align-items:flex-start}
+  .task:last-child{border-bottom:none}
+  .t-type{font-size:10px;line-height:16px;border-radius:4px;padding:0 5px;border:1px solid var(--border);color:var(--text-secondary);margin-top:2px;white-space:nowrap}
+  .t-type.exe{background:var(--primary-light);border-color:var(--primary);color:var(--primary)}
+  .t-title{font-weight:600;font-size:14px}
+  .t-meta{font-size:12px;color:var(--text-secondary);margin-top:3px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .badge{font-size:11px;line-height:18px;padding:0 8px;border-radius:10px}
+  .b-run{background:var(--primary-light);color:var(--primary)}
+  .b-ok{background:#ECFDF5;color:var(--success)}
+  .b-err{background:#FEF2F2;color:var(--error)}
+  .b-amber{background:#FFFBEB;color:#B45309}
+  .empty{color:var(--text-muted);font-size:13px;padding:24px 4px;text-align:center}
+  .kbd-note{margin-top:8px;font-size:12px;color:var(--text-muted)}
+</style>
+</head>
+<body>
+<div class="page">
+  <aside>
+    <div class="brand">FQ · Harness</div>
+    <div class="side-label">会话</div>
+    <div class="side-item">腾讯 2025 业绩优劣势分析</div>
+    <div class="side-item active">腾讯 2024 年报杜邦分析</div>
+    <div class="side-item">通用闲聊 · 市场观点</div>
+  </aside>
+
+  <main>
+    <div class="chat-head">
+      <div class="titles"><strong>腾讯 2024 年报杜邦分析</strong><span>知识库 · test234</span></div>
+      <button class="tasks-chip" type="button" aria-expanded="true">
+        <span class="dot-live" aria-hidden="true"></span> 任务
+        <span class="count" aria-label="进行中任务数">1</span>
+        <!-- 展开时 SVG chevron-up；收拢时 chevron-down -->
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>
+      </button>
+    </div>
+
+    <!-- 用户消息 -->
+    <div class="bubble user"><div class="who">你</div>请调用财务分析专家，对腾讯 2024 年报做一份杜邦分析拆解。</div>
+
+    <!-- AI 消息：委托过程区（完成态） -->
+    <div class="bubble assistant">
+      <div class="who">FQ</div>
+      <!-- 状态标签：先"正在调用领域专家分析..." 后转完成 -->
+      <div class="delegate open">
+        <div class="d-head" role="button" tabindex="0" aria-expanded="true">
+          <span class="dot ok" aria-hidden="true"></span>
+          <span class="d-title">finance-analyst · 领域专家分析</span>
+          <span class="d-state">分析完成</span>
+          <svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <div class="d-body">
+          <details class="think" open>
+            <summary>思考过程 · 关于拆解口径与非国际财务报告准则归属</summary>
+            需要把 ROE 拆成销售净利率×资产周转率×权益乘数；先用非国际财务报告准则的年度权益持有人应占盈利口径；总资产与权益取年初年末平均……
+          </details>
+          <div class="content">按检索到的腾讯 2024 年报数据，我先确定拆解口径：净利润取 2,227 亿元（非国际财务报告准则）……</div>
+        </div>
+      </div>
+
+      <!-- 委托过程区（运行中态，演示） -->
+      <div class="delegate open">
+        <div class="d-head" role="button" tabindex="0" aria-expanded="true">
+          <span class="dot run" aria-hidden="true"></span>
+          <span class="d-title">finance-analyst · 领域专家分析</span>
+          <span class="d-state">正在分析…</span>
+          <svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <div class="d-body">
+          <details class="think" open>
+            <summary>思考过程 · 持续推理中（live reasoning）</summary>
+            权益乘数需要把少数股东权益排除，只保留归属母公司口径…… 资本开支 768 亿元对资产周转的拖累需要量化……
+          </details>
+          <div class="content">平均总资产 ≈ (年初 15,772 + 年末 17,810) / 2 ≈ 16,791 亿元 …</div>
+        </div>
+      </div>
+
+      <!-- 委托过程区（中断态，演示） -->
+      <div class="delegate open">
+        <div class="d-head" role="button" tabindex="0" aria-expanded="true">
+          <span class="dot err" aria-hidden="true"></span>
+          <span class="d-title">finance-analyst · 领域专家分析</span>
+          <span class="d-state">分析中断 · 超时</span>
+          <svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <div class="d-body">
+          <div class="think"><summary>思考过程 · 推理在 240s 总时长处被中断</summary></div>
+          <div class="content">（过程到中断点为止；主 agent 已收到"领域专家分析超时，基于已有上下文作答"提示）</div>
+        </div>
+      </div>
+
+      <div class="kbd-note">过程区：Esc/点击节头折叠收起 · 运行中自动跟随，完成后保留用户选择 · 历史重载不重建过程区</div>
+    </div>
+  </main>
+
+  <!-- 右侧任务/进度看板 -->
+  <div class="drawer" role="dialog" aria-label="任务与进度">
+    <div class="dr-head">
+      <strong>任务 / 进度</strong>
+      <button class="icon-btn" type="button" aria-label="关闭任务面板">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div class="dr-body">
+      <div class="task">
+        <span class="t-type exe">执行</span>
+        <div style="flex:1">
+          <div class="t-title">finance-analyst · 领域专家分析</div>
+          <div class="t-meta"><span class="dot run" style="width:6px;height:6px"></span> 正在分析 ROE 拆解</div>
+          <div class="t-meta"><span class="badge b-run">运行中</span><span>12s</span></div>
+        </div>
+      </div>
+      <div class="task">
+        <span class="t-type exe">执行</span>
+        <div style="flex:1">
+          <div class="t-title">finance-analyst · 领域专家分析</div>
+          <div class="t-meta"><span class="badge b-ok">完成</span><span>刚刚</span></div>
+        </div>
+      </div>
+      <div class="task">
+        <span class="t-type exe">执行</span>
+        <div style="flex:1">
+          <div class="t-title">finance-analyst · 领域专家分析</div>
+          <div class="t-meta"><span class="badge b-err">超时</span><span>总时长 240s</span></div>
+        </div>
+      </div>
+      <div class="task">
+        <span class="t-type">计划</span>
+        <div style="flex:1">
+          <div class="t-title">复核杜邦拆解口径与引用</div>
+          <div class="t-meta"><span class="badge b-amber">进行中</span><span>主 agent</span></div>
+        </div>
+      </div>
+      <div class="kbd-note">只读面板：与右侧引用抽屉互斥单开；刷新/切会话后经快照接口恢复</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
