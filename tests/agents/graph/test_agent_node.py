@@ -244,3 +244,84 @@ def test_make_initial_state_deep_thinking_true():
     """传 deep_thinking=True 时状态字段为 True。"""
     state = AgentState.make_initial_state("s1", "kb1", "q", [], deep_thinking=True)
     assert state.deep_thinking is True
+
+
+def test_route_agent_delegate_budget_relaxed():
+    """delegate 轮后：迭代上限 +2（整合余量），未 delegate 行为不变。"""
+    from src.agents.graph.agent_node import route_agent
+    from src.agents.graph.state import AgentState
+    from src.config.const import MAX_AGENT_ITERATIONS, MAX_DELEGATE_BONUS
+
+    # 未 delegate：达上限直接收尾
+    s = AgentState()
+    s._agent_iterations = MAX_AGENT_ITERATIONS
+    s._delegate_used = False
+    s.messages = [AIMessage(content="final")]
+    assert route_agent(s) == "agent_finalize"
+
+    # 已 delegate：达原上限仍给 +2 余量（有 tool_calls 走 tools）
+    s2 = AgentState()
+    s2._agent_iterations = MAX_AGENT_ITERATIONS
+    s2._delegate_used = True
+    tool_call_msg = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "retrieve_kb",
+                "args": {"query": "x"},
+                "id": "1",
+                "type": "tool_call",
+            }
+        ],
+    )
+    s2.messages = [tool_call_msg]
+    assert route_agent(s2) == "tools"
+
+    # 超过放宽后上限：收尾
+    s3 = AgentState()
+    s3._agent_iterations = MAX_AGENT_ITERATIONS + MAX_DELEGATE_BONUS
+    s3._delegate_used = True
+    s3.messages = [AIMessage(content="final")]
+    assert route_agent(s3) == "agent_finalize"
+
+
+@pytest.mark.asyncio
+async def test_agent_model_sets_delegate_used_flag():
+    """agent 输出含 delegate_task tool_call → state._delegate_used 置位。"""
+    fake_response = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "delegate_task",
+                "args": {"task": "分析", "skill": "x"},
+                "id": "t1",
+                "type": "tool_call",
+            }
+        ],
+    )
+    llm = MockChatModel(fake_response)
+    node = make_agent_model_node(llm, [], StubPromptManager())
+    state = AgentState.make_initial_state("s1", "kb1", "q", [])
+    out = await node(state)
+    assert out["_delegate_used"] is True
+
+
+@pytest.mark.asyncio
+async def test_agent_model_non_delegate_keeps_flag_false():
+    """普通工具轮不置位 _delegate_used（缺省保持 False）。"""
+    fake_response = AIMessage(
+        content="需要检索",
+        tool_calls=[
+            {
+                "name": "retrieve_kb",
+                "args": {"query": "x"},
+                "id": "t1",
+                "type": "tool_call",
+            }
+        ],
+    )
+    llm = MockChatModel(fake_response)
+    node = make_agent_model_node(llm, [], StubPromptManager())
+    state = AgentState.make_initial_state("s1", "kb1", "q", [])
+    out = await node(state)
+    assert out.get("_delegate_used", False) is False

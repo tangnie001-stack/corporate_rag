@@ -14,6 +14,7 @@ from langchain_core.messages import SystemMessage
 
 from src.agents.graph.state import AgentState
 from src.config.const import (
+    EXPERT_ANALYSIS_MARKER,
     MAX_VERIFY_REGENERATIONS,
     VERIFY_CITATION_MARKER,
     VERIFY_KB_CITATION_MARKER,
@@ -101,6 +102,7 @@ async def web_citation_guard(
         "_needs_regenerate": True,
         "_verify_regenerations": state._verify_regenerations + 1,
         "_agent_iterations": 0,  # regen 轮复位主循环预算，route_agent 不吞本轮的 [n] 补标工具调用
+        "_delegate_used": False,  # regen=全新 5 轮预算，不复位则 delegate 放宽 +2 会放大每段 regen 上限
     }
 
 
@@ -139,23 +141,27 @@ async def kb_citation_guardrail(
 ) -> dict | None:
     """态 B KB 答案强制溯源：有 kb context 但答案无 [n] → 注入指引重生成一次。
 
-    排除拒答/知识库未覆盖（答案无 KB 事实可标引用）与已引导过（防与模型"判断无关"
-    冲突，不重复灌第二次）。不占 verify 修订保险丝：本护栏靠 already_guided 至多触发
-    一次，共享保险丝会饿死完整性决策轮的重生成额度，两条 regen 路径计数保持独立。
+    排除拒答/知识库未覆盖（答案无 KB 事实可标引用）、专家分析观点（含
+    EXPERT_ANALYSIS_MARKER 的分析 fork 答案视为不需溯源的观点表述，M7）与已引导过
+    （防与模型"判断无关"冲突，不重复灌第二次）。不占 verify 修订保险丝：本护栏靠
+    already_guided 至多触发一次，共享保险丝会饿死完整性决策轮的重生成额度，两条
+    regen 路径计数保持独立。
 
     Args:
         state: 当前图状态
         ctx: 请求上下文
 
     Returns:
-        None 通过（无 kb context / 已带引用 / 拒答或未覆盖 / 已引导过）；
-        注入指引的 regen 决策 dict（含 _agent_iterations=0 复位主循环预算）
+        None 通过（无 kb context / 已带引用 / 拒答或未覆盖 / 专家分析观点 / 已引导过）；
+        注入指引的 regen 决策 dict（含 _agent_iterations=0 复位主循环预算、
+        _delegate_used=False 复位 delegate 放宽，防 +2 放大每段 regen 上限）
     """
     answer = state.answer or ""
     if (
         not _has_kb_context(ctx)
         or _answer_has_citation(answer)
         or _is_abstention_or_kb_uncovered(answer)
+        or EXPERT_ANALYSIS_MARKER in answer  # 专家分析观点豁免（design D9 / M7）
     ):
         return None
     already_guided = any(
@@ -176,4 +182,5 @@ async def kb_citation_guardrail(
         "messages": [guidance],
         "_needs_regenerate": True,
         "_agent_iterations": 0,  # regen 轮复位主循环预算，route_agent 不吞本轮补标
+        "_delegate_used": False,  # regen=全新 5 轮预算，不复位则 delegate 放宽 +2 会放大每段 regen 上限
     }

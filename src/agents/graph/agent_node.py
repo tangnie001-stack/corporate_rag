@@ -11,7 +11,7 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langgraph.prebuilt import ToolNode
 
 from src.agents.graph.state import AgentState
-from src.config.const import HISTORY_MAX_TURNS, HISTORY_TOKEN_RATIO
+from src.config.const import HISTORY_MAX_TURNS, HISTORY_TOKEN_RATIO, MAX_DELEGATE_BONUS
 from src.core import logging as core_logging
 from src.core.log_events import Event
 from src.infra.llm.chat_message import ChatMessage
@@ -128,7 +128,17 @@ def make_agent_model_node(llm, tools, prompt_manager) -> Callable:
             latency_ms=int((time.monotonic() - turn_start) * 1000),
             iteration=iteration,
         )
-        if iteration >= state._max_agent_iterations:
+        delegate_used = any(
+            call.get("name") == "delegate_task"
+            for call in (result.tool_calls or [])
+            if isinstance(call, dict)
+        )
+        # delegate 轮放宽上限（design D15）：本轮或此前已 delegate → 上限 +MAX_DELEGATE_BONUS
+        if delegate_used or state._delegate_used:
+            effective_max = state._max_agent_iterations + MAX_DELEGATE_BONUS
+        else:
+            effective_max = state._max_agent_iterations
+        if iteration >= effective_max:
             core_logging.log_event(
                 Event.ITERATION_LIMIT, query=state.query, iteration=iteration
             )
@@ -136,10 +146,14 @@ def make_agent_model_node(llm, tools, prompt_manager) -> Callable:
             update_messages = [result]
         else:
             update_messages = [*messages, result]
-        return {
+        update = {
             "messages": update_messages,
             "_agent_iterations": iteration,
         }
+        if delegate_used:
+            # delegate 轮置位：route_agent 据此放宽迭代上限（design D15）
+            update["_delegate_used"] = True
+        return update
 
     return agent_model
 
@@ -211,13 +225,21 @@ def _extract_text(message: BaseMessage | None) -> str:
 def route_agent(state: AgentState) -> str:
     """agent 条件边：有 tool_calls 且未超限 → tools；否则 → agent_finalize。
 
+    超限判定含 delegate 放宽：_delegate_used 置位时上限 +MAX_DELEGATE_BONUS
+    （delegate 后主 agent 需整合子代理结果，design D15）；单请求总上限仍由
+    verify 保险丝 + 图级 recursion_limit 兜底。
+
     Args:
         state: 当前图状态
 
     Returns:
         下一节点名："tools" 或 "agent_finalize"
     """
-    if state._agent_iterations >= state._max_agent_iterations:
+    if state._delegate_used:
+        effective_max = state._max_agent_iterations + MAX_DELEGATE_BONUS
+    else:
+        effective_max = state._max_agent_iterations
+    if state._agent_iterations >= effective_max:
         return "agent_finalize"
     if not state.messages:
         return "agent_finalize"

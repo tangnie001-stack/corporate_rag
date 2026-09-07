@@ -33,6 +33,7 @@ class AgentState:
         0  # 循环迭代计数（来源：agent 节点自增；范围：单轮执行；用途：调试与护栏判断）
     )
     _max_agent_iterations: int = MAX_AGENT_ITERATIONS  # 迭代上限（来源：src/config/const.py；用途：超限强制收尾）
+    _delegate_used: bool = False  # 本轮是否已调用过 delegate_task（来源：agent 节点在 LLM 输出含 delegate tool_call 时置位；范围：单轮执行；用途：route_agent 放宽迭代上限 +2 整合余量）
     _ask_count: int = 0  # 本 turn ask_user 调用次数（来源：ask_user 节点自增；范围：单 turn；用途：日志/兜底，实际检查走 contextvar）
     # ── 输出 ──
     answer: str = ""  # LLM 生成的完整回答

@@ -740,3 +740,39 @@ async def test_kb_guardrail_passes_when_cited():
     state = AgentState(answer="腾讯2024年营收3943亿[1]")
     ctx = RequestContext(session_id="s1", tool_contexts=_make_kb_ctx_contexts())
     assert await kb_citation_guardrail(state, ctx) is None
+
+
+# ── kb_citation_guardrail delegate 语义（regen 复位 + 专家分析豁免，M7）──
+
+
+@pytest.mark.asyncio
+async def test_kb_guardrail_regen_resets_delegate_used():
+    """kb_citation_guardrail regen dict 复位 _delegate_used（防 regen 预算被 +2 放大）。"""
+    from src.agents.graph.verify.guardrails import kb_citation_guardrail
+
+    ctx = RequestContext(
+        session_id="s1",
+        tool_contexts=_make_kb_ctx_contexts(),
+    )
+    state = AgentState(answer="腾讯2024年营收3943亿")
+    state._delegate_used = True  # 模拟 delegate 已发生
+    decision = await kb_citation_guardrail(state, ctx)
+    assert decision is not None
+    assert decision["_delegate_used"] is False  # regen=全新 5 轮预算
+    assert decision["_agent_iterations"] == 0
+
+
+@pytest.mark.asyncio
+async def test_kb_guardrail_skips_expert_analysis():
+    """纯分析型 fork 答案（含 EXPERT_ANALYSIS_MARKER）不被溯源护栏误触发 regen（M7）。"""
+    from src.agents.graph.verify.guardrails import kb_citation_guardrail
+    from src.config.const import EXPERT_ANALYSIS_MARKER
+
+    ctx = RequestContext(
+        session_id="s1",
+        tool_contexts=_make_kb_ctx_contexts(),
+    )
+    state = AgentState(
+        answer=f"建议关注流动性风险（{EXPERT_ANALYSIS_MARKER}，材料未覆盖）"
+    )
+    assert await kb_citation_guardrail(state, ctx) is None

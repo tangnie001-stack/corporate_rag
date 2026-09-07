@@ -162,6 +162,7 @@ async def decide_missing_web(
         "_needs_regenerate": True,
         "_verify_regenerations": state._verify_regenerations,
         "_agent_iterations": 0,
+        "_delegate_used": False,  # regen=全新 5 轮预算，不复位则 delegate 放宽 +2 会放大每段 regen 上限
     }
     if regen_messages:
         result["messages"] = regen_messages
