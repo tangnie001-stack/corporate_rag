@@ -41,7 +41,8 @@ Python 3.11+ / FastAPI / ChromaDB / LangChain / DashScope / MySQL 8.0 / Redis 7 
 src/
 ├── api/          # 纯路由层：请求校验→调 service→返回（不写业务逻辑）
 ├── services/     # 业务编排 app_service → kb / document / chat
-├── agents/       # LangGraph agent 循环：graph（workflow/state/nodes/agent_node）+ tools（retrieve_kb / ask_user）
+├── agents/       # LangGraph agent 循环：graph（workflow/state/nodes/agent_node）+ tools（retrieve_kb / ask_user / delegate_task）
+├── agents/skills/  # 主从委派运行时：skill 加载/注册/执行（SkillRecord / SkillLoader / SkillRegistry / SkillExecutor / make_delegate_task）
 ├── rag/          # 检索与知识库路由：retrieval / kb_router / context / prompt
 ├── chat/         # 对话管理 manager(Redis) + persistence(MySQL)
 ├── core/         # Loguru 日志
@@ -56,6 +57,8 @@ src/
 
 tests/            # 与 src/ 模块一一对应
 ```
+
+顶层 `skills/` 为运行时 skill 内容库（业务侧管理，`<name>/SKILL.md`，compose volume 挂载进容器 `/app/skills`）；`.claude/skills/` 为开发期工具链 skill（如 openspec/openspec-apply-change），两者语义不同。实现与术语见 glossary.md「技能委派」。
 
 ### 层间调用规则
 - ❌ `api/` 不得直接调用 `infra/` 或 `config/`（必须通过 `services/`）

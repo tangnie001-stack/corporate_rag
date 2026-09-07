@@ -49,6 +49,30 @@ agent ──(末条含 tool_calls 且未超限)→ tools ─→ agent（循环�
                                                     └(_needs_regenerate)→ agent
 ```
 
+### delegate 分支（主从委派，两条链路通用）
+
+agent 在循环内判定任务需要领域专家能力（深度分析/专用方法论）时，可调用
+`delegate_task(task, skill)` 委派给对应 skill——skill 库（顶层 `skills/`，volume 挂载）
+有内容才注册该工具（src/services/agent_service.py:571-593），注册表懒重载
+（reload_if_changed）。按命中 skill 的 `context` 分发两种执行形态：
+
+```
+agent 判定需领域专家 → delegate_task(task, skill)
+  ├─ inline：skill 方法论注入 agent 上下文 → agent 自己继续走 2a/2b
+  └─ fork：零工具子代理独立分析（材料由 agent 预检索后随 task 一并传入）
+       → 纯文本结果回 agent → agent 整合进最终答案 → verify → format
+```
+
+- inline 执行无独立子代理，不推状态；fork 执行在子代理开始/结束时各推一条
+  `status(stage=delegate)` 状态事件（经 clarify_channel 直投，不经 on_tool 映射，
+  见 api_contract.md「delegate 状态阶段」）
+- fork 结果为纯文本，**无 [n] 引用**：引用仍只指向主 agent 自身检索来源（tool_contexts），
+  不指向子代理产出
+- delegate 轮放宽迭代上限：`_delegate_used` 置位后 route_agent 上限
+  +`MAX_DELEGATE_BONUS`（整合余量，agent_node.py:131-155）
+- 实现与术语：src/agents/skills/（SkillRecord/SkillLoader/SkillRegistry/
+  SkillExecutor/make_delegate_task），术语见 glossary.md「技能委派」
+
 ### 链路 2a：绑 KB 问答链（RAG）
 
 - 触发条件：`kb_id` 非空（前端已绑定知识库），`ctx.kb_bound=True`。

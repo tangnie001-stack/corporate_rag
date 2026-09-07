@@ -196,6 +196,26 @@ data: {"error": "错误消息"}
 > 由 `_convert_event` 的 TOOL_START 分支填充——`retrieve_kb` 为 `query=...`、`search_web` 为 `queries=[...]`，
 > 与实时流同构写入事件缓冲，历史回放（2.4.4）原样带出，供前端展示工具调用明细。
 
+### `delegate` 状态阶段
+
+`status` 事件的可选 stage（`SSEInteractionTexts.STAGE_DELEGATE`），仅**主 agent 调用
+`delegate_task` 委派 fork skill** 时推送。推送时机：fork 子代理开始
+（message="正在调用领域专家分析..."）与结束（message="领域专家分析完成"）各一条，
+由 delegate_task 工具体经 clarify_channel 直投（`src/agents/skills/delegate_task.py:78-97`），
+不经外层 astream_events 映射；**inline 命中不推**（方法论注入主 agent，无独立子代理）。
+
+```json
+event: status
+data: {"stage": "delegate", "message": "正在调用领域专家分析..."}
+
+event: status
+data: {"stage": "delegate", "message": "领域专家分析完成"}
+```
+
+载荷沿用 `SSEStatusEvent`（stage/message/可选 detail）；本 stage **不带 detail**——与
+sse-tool-detail 的边界：detail 结构由 sse-tool-detail change 定义，本 stage 无工具入参明细可展示。
+fork 结果作为工具返回文本回主 agent，不出现在 SSE 载荷中。
+
 追问路径（~~当 classify 检测到缺失实体时~~ ⚠️ 已退役，agent 化后由 `ask_user` 事件 + `POST /chat/clarify-answer` 接管，见下文 2.3.2 与 ask_user 事件详情）：
 
 ```json
@@ -211,7 +231,7 @@ data: {}
 
 | 事件 | 触发条件 | 说明 |
 |------|---------|------|
-| `status` | agent 循环按事件类型接线 | stage 取值：`agent`（on_chat_model_start "正在思考..."）、`retrieve`（on_tool_start/end "正在检索相关文档..." / "检索完成，正在分析..."）、`web_search`（on_tool_start/end "正在联网搜索..." / "联网搜索完成，正在分析..."，KB 不达标时走 search_web 兜底才出现） |
+| `status` | agent 循环按事件类型接线 | stage 取值：`agent`（on_chat_model_start "正在思考..."）、`retrieve`（on_tool_start/end "正在检索相关文档..." / "检索完成，正在分析..."）、`web_search`（on_tool_start/end "正在联网搜索..." / "联网搜索完成，正在分析..."，KB 不达标时走 search_web 兜底才出现）、`delegate`（delegate_task 委派 fork skill，fork 子代理开始/结束各推一条，见下「`delegate` 状态阶段」） |
 | `token` | LLM 生成中 | LLM 生成文本片段，前端逐段追加 |
 | **`reasoning`** | **agent 节点 LLM 流式输出思考增量（enable_thinking=true 且模型返回 reasoning_content，经 ChatQwenWithReasoning 提取）** | **思考过程增量（data: {"delta": "..."}），前端累积渲染 Think 折叠行；每轮 LLM 调用一个，默认收起；收到正文 token/状态/ask_user/abstention/done 时定型** |
 | `citation` | format 节点完成 | 引用来源，按 source+page 去重；data 含 `kind`（`kb` 知识库 / `web` 网络搜索，默认 `kb`），前端按来源类型区分展示 |

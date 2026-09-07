@@ -53,6 +53,16 @@
 - **search_web**：联网搜索工具，KB 检索不达标时经 Tavily 兜底检索网页，结果与 retrieve_kb 共用 `tool_contexts` 编号（kind=web 区分来源）；受 `WEB_SEARCH_ENABLED` 开关与 `WEB_SEARCH_PER_TURN_LIMIT` 限次控制
 - **web_search**：SSE 状态阶段（`SSEStatusEvent.stage` 取值），联网搜索开始/完成状态提示（"正在联网搜索..." / "联网搜索完成，正在分析..."）
 
+## 技能委派（主从委派）
+
+| 术语 | 定义 | 常见错误 |
+|------|------|---------|
+| `skill` | 磁盘声明式能力文件（`skills/<name>/SKILL.md`，frontmatter 声明元数据 + 正文按 context 存方法论/子代理 prompt）；skill 是内容/配置而非代码 | ❌ 与开发期 `.claude/skills/` 工具链 skill 混为一谈 |
+| `SkillRecord` | skill 文件解析后的运行时对象（name/description/context/inline_prompt/agent_prompt 等），由 `SkillLoader` 产出（`src/agents/skills/models.py`） | ❌ 直接用 SKILL.md 原文当结构体 |
+| inline 执行 | skill `context=inline`：方法论注入主 agent 上下文，主 agent 自己执行 | — |
+| fork 执行 | skill `context=fork`：`SkillExecutor` 生成零工具子代理独立深度分析，结果纯文本回主 agent | — |
+| `delegate_task` | 主 agent 委派工具 `delegate_task(task, skill)`，按命中 skill 的 context 分发 inline/fork；unknown 返回"skill 不存在 + 可用列表" | 引用会指向子代理产出（实际引用仍只指向主 agent 自身检索来源） |
+
 ## 推理思考文本
 
 - **reasoning_content**：模型的流式思考文本（chain-of-thought）。DashScope 等第三方把思考增量放在 `delta.reasoning_content`，OpenRouter 等用 `delta.reasoning`；`ChatQwenWithReasoning` 统一累积到 `AIMessageChunk.additional_kwargs["reasoning_content"]`，供上层读取与展示

@@ -210,6 +210,7 @@ services:
     volumes:
       - app_logs:/data/logs
       - chroma_onnx_cache:/root/.cache/chroma
+      - ./skills:/app/skills
     depends_on:
       mysql:
         condition: service_healthy
