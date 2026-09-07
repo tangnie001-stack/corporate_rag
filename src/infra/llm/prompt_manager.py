@@ -19,6 +19,7 @@ from loguru import logger
 from src.config.prompts import (
     CLASSIFIER_SYSTEM_PROMPT,
     CLASSIFIER_USER_TEMPLATE,
+    DELEGATE_GUIDANCE_SECTION,
     FINANCIAL_SYSTEM_PROMPT,
     INLINE_CITATION_INSTRUCTION,
     USER_PROMPT_TEMPLATE,
@@ -176,6 +177,9 @@ class PromptManager:
         # 确保内联引用指令始终存在（无论 prompt 来自 Langfuse 还是本地兜底）
         if INLINE_CITATION_INSTRUCTION not in prompt:
             prompt += INLINE_CITATION_INSTRUCTION
+        # 确保 delegate 引导段始终存在（Langfuse prompt 未更新时也生效，防委派能力不可见）
+        if DELEGATE_GUIDANCE_SECTION not in prompt:
+            prompt += DELEGATE_GUIDANCE_SECTION
         return _with_current_date(prompt)
 
     def get_user_template(self, context: str = "", query: str = "") -> str:
