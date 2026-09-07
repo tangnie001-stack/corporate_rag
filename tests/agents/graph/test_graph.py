@@ -749,3 +749,27 @@ async def test_graph_verify_regen_round_resets_web_quota(monkeypatch):
         assert "2023" in last_verify["answer"] and "2025" in last_verify["answer"]
     finally:
         current_request_ctx.reset(token)
+
+
+def test_build_graph_passes_delegate_task_to_rag_tools(monkeypatch):
+    """build_graph 默认分支须把 delegate_task 透传给 make_rag_tools（接线守卫）。"""
+    from unittest.mock import MagicMock, sentinel
+
+    from src.agents.graph import workflow as wf
+
+    captured = {}
+
+    def fake_make_rag_tools(vector_store, bm25, reranker, prompt_manager, **kwargs):
+        captured["delegate_task"] = kwargs.get("delegate_task")
+        return []  # 空工具列表即可（本测试只验证透传，不跑图）
+
+    monkeypatch.setattr(wf, "make_rag_tools", fake_make_rag_tools)
+    wf.build_graph(
+        MagicMock(),
+        None,
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
+        delegate_task=sentinel.delegate_tool,
+    )
+    assert captured["delegate_task"] is sentinel.delegate_tool

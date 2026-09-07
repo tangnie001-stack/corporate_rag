@@ -1023,3 +1023,34 @@ async def test_stream_chat_persists_citation_sources_on_complete():
             "index": 1,
         }
     ]
+
+
+def test_convert_status_dict_to_sse_status_event():
+    """_convert_event 把 delegate fork 投递的 status dict 转 SSEStatusEvent。"""
+    from src.config.const import SSEInteractionTexts
+    from src.services.agent_service import _convert_event
+    from src.utils.sse import SSEStatusEvent
+
+    events = _convert_event({"type": "status", "stage": "delegate", "phase": "start"})
+    assert len(events) == 1
+    ev = events[0]
+    assert isinstance(ev, SSEStatusEvent)
+    assert ev.stage == SSEInteractionTexts.STAGE_DELEGATE
+    assert ev.message == SSEInteractionTexts.DELEGATE_STATUS_START
+
+    events = _convert_event({"type": "status", "stage": "delegate", "phase": "end"})
+    ev = events[0]
+    assert isinstance(ev, SSEStatusEvent)
+    assert ev.message == SSEInteractionTexts.DELEGATE_STATUS_END
+
+
+def test_convert_status_unknown_phase_uses_end_text():
+    """未知 phase 回落 end 文案（防御，不抛）。"""
+    from src.config.const import SSEInteractionTexts
+    from src.services.agent_service import _convert_event
+    from src.utils.sse import SSEStatusEvent
+
+    events = _convert_event({"type": "status", "stage": "delegate", "phase": "???"})
+    ev = events[0]
+    assert isinstance(ev, SSEStatusEvent)
+    assert ev.message == SSEInteractionTexts.DELEGATE_STATUS_END

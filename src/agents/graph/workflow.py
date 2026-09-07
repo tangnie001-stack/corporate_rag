@@ -1,6 +1,7 @@
 # src/agents/graph/workflow.py
 """StateGraph 组装 — 节点注册、条件边连接、图编译。"""
 
+from langchain_core.tools import BaseTool
 from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
@@ -41,6 +42,7 @@ def build_graph(
     reranker,
     prompt_manager,
     tools=None,
+    delegate_task: BaseTool | None = None,
 ) -> CompiledStateGraph:
     """构建并编译 agent 循环图：agent → (tools|agent_finalize) → verify → format → END。
 
@@ -52,13 +54,21 @@ def build_graph(
     - format：从回答中提取引用编号，组装 citations
 
     tools 参数可由调用方覆盖；缺省经 make_rag_tools 构建（retrieve_kb + ask_user）。
+    delegate_task 为可选委派工具（skill 库有内容时由 AgentService 注入），
+    tools=None 默认分支原样透传给 make_rag_tools。
     """
     builder = StateGraph(AgentState)
 
     if tools is not None:
         rag_tools = tools
     else:
-        rag_tools = make_rag_tools(vector_store, bm25, reranker, prompt_manager)
+        rag_tools = make_rag_tools(
+            vector_store,
+            bm25,
+            reranker,
+            prompt_manager,
+            delegate_task=delegate_task,
+        )
 
     builder.add_node("agent", make_agent_model_node(llm, rag_tools, prompt_manager))
     builder.add_node("tools", make_agent_tools_node(rag_tools))

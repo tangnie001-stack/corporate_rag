@@ -223,6 +223,10 @@ MEMORY_WINDOW: int = int(os.getenv("MEMORY_WINDOW", "6"))
 # Redis 中对话历史的过期时间（秒），默认 7 天
 REDIS_TTL: int = int(os.getenv("REDIS_TTL", "604800"))
 
+# ====== Skill 委派 ======
+# skill 内容库根目录（delegate_task 工具读源），空 = 缺省项目根 skills/（<name>/SKILL.md）
+SKILLS_DIR: str = os.getenv("SKILLS_DIR", "")
+
 # ====== 重试策略 ======
 # 外部调用（DashScope / MySQL / Redis）失败时的指数退避参数
 # 重试 3 次，初始间隔 1s，每次翻倍：1s → 2s → 4s

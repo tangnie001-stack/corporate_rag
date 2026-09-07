@@ -11,6 +11,7 @@ import asyncio
 import re
 from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TypeAlias
 
 from langchain_core.messages import BaseMessage
@@ -31,7 +32,7 @@ from src.chat.streaming import (
     _subscribe_events,
     streaming_manager,
 )
-from src.config import TOP_K_RERANK
+from src.config import TOP_K_RERANK, settings
 from src.config.const import SSEInteractionTexts
 from src.core import logging as core_logging
 from src.core.log_events import Event, Signal
@@ -82,7 +83,8 @@ class _StreamCapture:
     )  # agent_finalize 产物中的检索上下文列表
 
 
-# 合并队列元素类型：LangGraph 事件（StreamEvent）或 ask_user 事件 dict，或哨兵
+# 合并队列元素类型：LangGraph 事件（StreamEvent）或工具经 ctx.clarify_channel
+# 投递的事件 dict（ask_user/status），或哨兵
 _QueueItem: TypeAlias = StreamEvent | dict | _EndMarker | _ErrorMarker
 
 
@@ -161,9 +163,11 @@ def _convert_event(
 ) -> list[SSEEvent]:
     """把 queue 中的 item 转成 SSE 事件列表（空列表 = 无需产出）。
 
-    queue 中混有两类 item：
+    queue 中混有三类 item：
     - ask_user 工具经 clarify_channel 推送的 {"type": "ask_user", "questions": [...]}
       → SSEAskUserEvent（问题卡片）
+    - delegate_task fork 分支经 clarify_channel 推送的 {"type": "status", ...}
+      → SSEStatusEvent（阶段状态，start/end）
     - LangGraph astream_events 事件 dict（按事件类型接线，不依赖节点名映射）：
       on_chat_model_start（metadata.langgraph_node == "agent"）→ SSEStatusEvent 思考中
       on_chat_model_stream（metadata.langgraph_node == "agent" 且 chunk 内容非空）
@@ -186,6 +190,19 @@ def _convert_event(
     """
     if isinstance(item, dict) and item.get("type") == "ask_user":
         return [SSEAskUserEvent(questions=item.get("questions", []))]
+
+    if isinstance(item, dict) and item.get("type") == "status":
+        stage = item.get("stage", "")
+        if stage == SSEInteractionTexts.STAGE_DELEGATE:
+            # delegate_task fork 分支经 ctx.clarify_channel 投递的 status dict →
+            # SSEStatusEvent（inline 命中不投递，见 design D14）
+            phase = item.get("phase")
+            if phase == "start":
+                message = SSEInteractionTexts.DELEGATE_STATUS_START
+            else:
+                message = SSEInteractionTexts.DELEGATE_STATUS_END
+            return [SSEStatusEvent(stage=stage, message=message)]
+        return []
 
     # 哨兵类已被 _dual_stream 提前消费，此处防御性排除以收窄类型
     if not isinstance(item, dict):
@@ -531,6 +548,12 @@ class AgentService:
         reranker=None,
         prompt_manager: PromptManager | None = None,
     ):
+        from src.agents.skills import (
+            SkillExecutor,
+            SkillLoader,
+            SkillRegistry,
+            make_delegate_task,
+        )
         from src.models import get_llm, get_rerank
 
         self._vector_store = vector_store
@@ -541,12 +564,33 @@ class AgentService:
         self._prompt_manager = prompt_manager or PromptManager()
         self._tracer = LangfuseTracer()
 
+        # skill 委派（agent-delegation-skills）：SKILLS_DIR 环境变量覆盖，缺省项目根 skills/
+        skills_dir = settings.SKILLS_DIR
+        if not skills_dir:
+            skills_dir = str(Path(__file__).resolve().parents[2] / "skills")
+        delegate_task_tool = None
+        if Path(skills_dir).exists():
+            skill_registry = SkillRegistry(SkillLoader(Path(skills_dir)))
+            skill_registry.reload_if_changed()  # description 在 make_delegate_task 时按当前注册表生成
+            if skill_registry.names():
+                skill_executor = SkillExecutor(self._llm)
+                delegate_task_tool = make_delegate_task(skill_registry, skill_executor)
+            else:
+                # skills 目录存在但无任何 skill：delegate_task 不注册（描述会列空列表，注册无意义）
+                core_logging.log_event(Event.DELEGATE_SKIP, reason="registry_empty")
+        else:
+            # skills 目录缺失（volume 未挂载/路径错）→ delegate 静默不可用需可观测
+            core_logging.log_event(
+                Event.DELEGATE_SKIP, reason="skills_dir_missing", skills_dir=skills_dir
+            )
+
         self._graph: CompiledStateGraph = build_graph(
             vector_store,
             bm25,
             self._llm,
             self._reranker,
             self._prompt_manager,
+            delegate_task=delegate_task_tool,
         )
         core_logging.log_event(Event.SERVICE_READY)
 

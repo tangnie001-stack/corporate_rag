@@ -60,6 +60,7 @@ def make_rag_tools(
     bm25: BM25Index | None,
     reranker,
     prompt_manager,
+    delegate_task: BaseTool | None = None,
 ) -> list[BaseTool]:
     """构建工具列表：注册表管理；retrieve_kb 始终注册（KB=RAG 开关在工具内实现）。
 
@@ -68,10 +69,12 @@ def make_rag_tools(
         bm25: BM25 检索引擎实例（闭包注入，混合检索时使用）
         reranker: Reranker 模型实例（闭包注入，rerank_results 使用）
         prompt_manager: 提示词管理器（闭包注入，当前工具未直接使用，保留签名）
+        delegate_task: 可选 delegate_task 工具（skill 库有内容时由调用方注入并注册；
+            无 skill 时传 None 不注册，主 agent 工具集保持固定三件套）
 
     Returns:
         工具列表：retrieve_kb（知识库检索）、ask_user（澄清追问）；开启 web 兜底时追加
-        search_web；经 ToolRegistry.enabled_tools() 过滤启用项
+        search_web；delegate_task 非空时追加 delegate_task；经 ToolRegistry.enabled_tools() 过滤启用项
     """
 
     @tool("retrieve_kb", args_schema=RetrieveKBArgs)
@@ -232,4 +235,6 @@ def make_rag_tools(
         from src.agents.tools.web_tools import search_web
 
         registry.register("search_web", search_web)
+    if delegate_task is not None:
+        registry.register("delegate_task", delegate_task)
     return registry.enabled_tools()

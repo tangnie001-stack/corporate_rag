@@ -285,4 +285,7 @@ EVENT_SPECS: dict[str, EventSpec] = {
     "exception chain": EventSpec(
         "exception chain", "app", "error", ("depth", "type", "msg")
     ),
+    "delegate skip": EventSpec(
+        "delegate skip", "app", "warning", ("reason", "skills_dir")
+    ),
 }

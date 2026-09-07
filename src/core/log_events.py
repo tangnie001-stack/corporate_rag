@@ -172,6 +172,8 @@ class Event(str, Enum):
     HTTP_ERROR = "http error"
     VALIDATION_ERROR = "validation error"
     EXCEPTION_CHAIN = "exception chain"
+    # skill 委派跳过（AgentService 装配期：skills 目录缺失/注册表为空）
+    DELEGATE_SKIP = "delegate skip"
 
 
 @dataclass(frozen=True)
