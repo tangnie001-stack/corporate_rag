@@ -322,10 +322,6 @@ async def test_graph_verify_loop_success_terminates_at_format(monkeypatch):
         "src.agents.graph.verify.ask_confirm._ask_web_confirm",
         AsyncMock(return_value=True),
     )
-    monkeypatch.setattr(
-        "src.agents.graph.verify.faithfulness.faithfulness_check",
-        AsyncMock(return_value=[]),
-    )
     _ctx, token = _make_verify_ctx()
     try:
         llm = SequenceChatModel(
@@ -368,10 +364,6 @@ async def test_graph_verify_loop_terminates_at_regen_fuse(monkeypatch):
     monkeypatch.setattr(
         "src.agents.graph.verify.ask_confirm._ask_web_confirm",
         AsyncMock(return_value=True),
-    )
-    monkeypatch.setattr(
-        "src.agents.graph.verify.faithfulness.faithfulness_check",
-        AsyncMock(return_value=[]),
     )
     _ctx, token = _make_verify_ctx()
     try:
@@ -421,10 +413,6 @@ async def test_graph_verify_never_searched_injects_guidance(monkeypatch):
         "src.agents.graph.verify.ask_confirm._ask_web_confirm",
         AsyncMock(return_value=True),
     )
-    monkeypatch.setattr(
-        "src.agents.graph.verify.faithfulness.faithfulness_check",
-        AsyncMock(return_value=[]),
-    )
     _ctx, token = _make_verify_ctx()
     try:
         llm = SequenceChatModel(
@@ -471,10 +459,6 @@ async def test_graph_verify_partial_queries_reinjects_with_hint(monkeypatch):
     monkeypatch.setattr(
         "src.agents.graph.verify.ask_confirm._ask_web_confirm",
         AsyncMock(return_value=True),
-    )
-    monkeypatch.setattr(
-        "src.agents.graph.verify.faithfulness.faithfulness_check",
-        AsyncMock(return_value=[]),
     )
     _ctx, token = _make_verify_ctx()
     try:
@@ -542,10 +526,6 @@ async def test_graph_verify_web_exhausted_annotates(monkeypatch):
         "src.agents.graph.verify.ask_confirm._ask_web_confirm",
         AsyncMock(return_value=True),
     )
-    monkeypatch.setattr(
-        "src.agents.graph.verify.faithfulness.faithfulness_check",
-        AsyncMock(return_value=[]),
-    )
     _ctx, token = _make_verify_ctx()
     try:
         llm = SequenceChatModel(
@@ -606,10 +586,6 @@ async def test_graph_verify_regen_round_uses_full_iteration_budget(monkeypatch):
     monkeypatch.setattr(
         "src.agents.graph.verify.ask_confirm._ask_web_confirm",
         AsyncMock(return_value=True),
-    )
-    monkeypatch.setattr(
-        "src.agents.graph.verify.faithfulness.faithfulness_check",
-        AsyncMock(return_value=[]),
     )
     _ctx, token = _make_verify_ctx()
     try:
@@ -696,10 +672,6 @@ async def test_graph_verify_regen_round_resets_web_quota(monkeypatch):
     monkeypatch.setattr(
         "src.agents.graph.verify.ask_confirm._ask_web_confirm",
         AsyncMock(return_value=True),
-    )
-    monkeypatch.setattr(
-        "src.agents.graph.verify.faithfulness.faithfulness_check",
-        AsyncMock(return_value=[]),
     )
     _ctx, token = _make_verify_ctx()
     try:

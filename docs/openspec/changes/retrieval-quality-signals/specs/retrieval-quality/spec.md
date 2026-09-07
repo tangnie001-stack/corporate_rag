@@ -1,5 +1,9 @@
 # retrieval-quality Specification (Delta)
 
+> **SUPERSEDED（2026-09-07）**：本 Delta 中"judge 无支撑（unsupported）"信号项已随在线
+> 忠实度 judge 移除作废（质量评估转离线另行规划）；其余信号项不变。
+
+
 ## ADDED Requirements
 
 ### Requirement: 在线检索质量诊断（agent 行为信号）

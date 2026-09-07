@@ -14,12 +14,11 @@ def test_core_events_registered():
         assert spec.level in {"info", "warning", "error"}
 
 
-def test_signal_enum_covers_six():
+def test_signal_enum_covers_five():
     assert {s.value for s in le.Signal} == {
         "reretrieve",
         "to_web",
         "abstain_after_retrieve",
-        "unsupported",
         "cited",
         "empty_result",
     }

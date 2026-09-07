@@ -31,7 +31,6 @@ class Signal(str, Enum):
     RERETRIEVE = "reretrieve"
     TO_WEB = "to_web"
     ABSTAIN_AFTER_RETRIEVE = "abstain_after_retrieve"
-    UNSUPPORTED = "unsupported"
     CITED = "cited"
     EMPTY_RESULT = "empty_result"
 
@@ -64,12 +63,9 @@ class Event(str, Enum):
     EVENT_CONVERT_FAILED = "event convert failed"
     SERVICE_READY = "service ready"
 
-    # [verify] 验证管道事件（3.2 批迁移登记：态A 引用引导 / 态B 完整性+judge）
+    # [verify] 验证管道事件（3.2 批迁移登记：态A 引用引导 / 态B 完整性+护栏）
     SKIP = "skip"
     COMPLETENESS_CHECK = "completeness check"
-    JUDGE_START = "judge start"
-    JUDGE_DONE = "judge done"
-    JUDGE_FAILED = "judge failed"
     WEB_CONFIRM_ASK = "web confirm ask"
     WEB_CONFIRM_RESULT = "web confirm result"
     REGEN_STOP = "regen stop"

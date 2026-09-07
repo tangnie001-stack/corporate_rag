@@ -1,5 +1,8 @@
 # observability-logging Specification
 
+> **SUPERSEDED（2026-09-07）**：本 Specification 中 verify judge 边界日志需求
+> （`[verify] judge start / judge done` 及"态 A 不跑 judge"场景）已随在线忠实度 judge 移除作废。
+
 ## Purpose
 
 统一全系统日志规范：分层事件前缀 + 英文 k=v message + 五级级别语义，为检索质量诊断（P1 Change 2 的 agent 行为信号）提供可 grep、可聚合、可定位的日志基础。

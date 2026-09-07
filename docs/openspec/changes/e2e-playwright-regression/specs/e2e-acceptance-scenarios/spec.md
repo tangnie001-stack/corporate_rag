@@ -1,3 +1,6 @@
+> **SUPERSEDED（2026-09-07）**：本规范中"态 A 未跑 judge"相关验收场景已随在线忠实度 judge
+> 移除作废（态 A/B 均不再跑 judge）；其余场景不变。
+
 ## ADDED Requirements
 
 ### Requirement: 受控 KB 造数 fixture

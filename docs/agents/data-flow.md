@@ -76,8 +76,8 @@ agent 判定需领域专家 → delegate_task(task, skill)
 ### 链路 2a：绑 KB 问答链（RAG）
 
 - 触发条件：`kb_id` 非空（前端已绑定知识库），`ctx.kb_bound=True`。
-- 与 2b 的差异：prompt 允许检索；`retrieve_kb` 真正执行 KB 混合检索；verify 走态 B 完整
-  校验链（年份完整性 → 联网询问/决策 → KB 溯源护栏 → faithfulness judge）；SSE 主状态为
+- 与 2b 的差异：prompt 允许检索；`retrieve_kb` 真正执行 KB 混合检索；verify 走态 B 校验链
+  （年份完整性 → 联网询问/决策 → KB 溯源护栏，无在线忠实度 judge）；SSE 主状态为
   `retrieve` 检索阶段，引用 `kind=kb`（检索不足联网补数据时混入 `kind=web`）。
 
 ```
@@ -90,7 +90,7 @@ agent（bind_tools）
   ├ ask_user：关键实体缺失时澄清（SSEAskUserEvent，前端 composer 接管输入）
   └ 无 tool_calls → agent_finalize（提取末条 AIMessage → answer，读入 tool_contexts）
 
-verify（态 B，verify/node.py:44-84）按序：
+verify（态 B，verify/node.py:42-62）按序：
   A. completeness_check（checks.py:22）：required=ctx.temporal_years 与答案实际年份比对
      （required 为空 = 时间解析未触发 → 跳过）
        缺失非空 → decide_missing_web（regen_decision.py:49）并返回其结果，本轮 verify 结束：
@@ -101,15 +101,13 @@ verify（态 B，verify/node.py:44-84）按序：
          （保险丝 _verify_regenerations ≥ MAX_VERIFY_REGENERATIONS=2 → 注记直通，防无限往返）
   B. 无缺失 → kb_citation_guardrail（guardrails.py:137）：有 KB context 但答案无 [n]
        且非拒答/知识库未覆盖 → 注入 KB 溯源指引 → regen 一次（不占 verify 保险丝）
-  C. 护栏通过 → faithfulness_check（faithfulness.py:8，judge 用 RAGAS_LLM_MODEL）：
-       仅标记 _unsupported，不驱动流程（P1 输出护栏消费）
+  C. 护栏通过 → 直通 format（在线忠实度 judge 已移除，质量评估转离线另行规划）
 → 通过 → format（nodes.py，[n] → citations 去重，kind=kb/web）
 ```
 
-关键代码：态 B 分派 src/agents/graph/verify/node.py:44-84；联网询问
+关键代码：态 B 分派 src/agents/graph/verify/node.py:42-62；联网询问
 src/agents/graph/verify/ask_confirm.py:17-72；决策化 src/agents/graph/verify/regen_decision.py:49-168；
-KB 溯源护栏 src/agents/graph/verify/guardrails.py:137-179；judge
-src/agents/graph/verify/faithfulness.py:8-58；检索空结果/reretrieve 缺陷信号
+KB 溯源护栏 src/agents/graph/verify/guardrails.py:137-179；检索空结果/reretrieve 缺陷信号
 src/agents/tools/rag_tools.py:192-204；拒答 → SSEAbstentionEvent（含 abstain_after_retrieve
 信号）src/services/agent_service.py:487-509。
 
@@ -118,7 +116,7 @@ src/agents/tools/rag_tools.py:192-204；拒答 → SSEAbstentionEvent（含 abst
 - 触发条件：`kb_id` 为空串（会话未绑定知识库），`ctx.kb_bound=False`。
 - 与 2a 的差异：prompt 追加 `KB_UNBOUND_SYSTEM_PROMPT` 明令禁止检索（prompts.py:50）；
   `retrieve_kb` 即便被调也返回空，不产出 kind=kb 上下文；verify 仅走态 A 联网引用引导，
-  无年份完整性/联网询问/judge；SSE 主状态为 `web_search` 联网阶段，引用仅 `kind=web`
+  无年份完整性/联网询问；SSE 主状态为 `web_search` 联网阶段，引用仅 `kind=web`
   （未联网的纯闲聊则无引用）。
 
 ```
@@ -156,7 +154,7 @@ src/agents/tools/web_tools.py:131-141。
 | `agent` | `messages`, `_history`, `kb_id` | `messages`（LLM 输出含 tool_calls）, `_agent_iterations` |
 | `tools` | `messages`（末条 tool_calls） | `messages`（ToolMessage 追加） |
 | `agent_finalize` | `messages` | `answer`, `tool_contexts` |
-| `verify` | `answer`, `kb_id`, `messages`（查上一轮 search_web 与指引查重） | `answer`, `_needs_regenerate`, `_unsupported`, `messages`（regen 指引 SystemMessage）, `_verify_regenerations` |
+| `verify` | `answer`, `kb_id`, `messages`（查上一轮 search_web 与指引查重） | `answer`, `_needs_regenerate`, `messages`（regen 指引 SystemMessage）, `_verify_regenerations` |
 | `format` | `answer`, `tool_contexts` | `citations` |
 
 工具（retrieve_kb / search_web / ask_user）不写 state：检索上下文累积到

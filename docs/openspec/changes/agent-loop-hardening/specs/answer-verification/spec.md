@@ -1,5 +1,8 @@
 # answer-verification Specification (Delta)
 
+> **SUPERSEDED（2026-09-07）**：本 Delta 中"忠实度校验 / 态 B 跑 judge"相关内容已随
+> 在线 judge 移除作废（质量评估转离线另行规划）；其余 Requirements 不变。
+
 ## MODIFIED Requirements
 
 ### Requirement: 答案校验节点

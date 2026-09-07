@@ -1,5 +1,8 @@
 # logging-convention-migration Design
 
+> **SUPERSEDED（2026-09-07）**：本文档中 verify judge 相关日志设计（`[verify] judge start/done`）
+> 已随在线忠实度 judge 移除作废；其余日志分层/事件规范不受影响。
+
 ## Context
 
 全系统 239 处 logger 调用无统一 message 格式规范，实测三类混乱：

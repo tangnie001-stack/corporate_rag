@@ -1,5 +1,9 @@
 # agent-loop-hardening Design
 
+> **SUPERSEDED（2026-09-07）**：态 B 管道中的在线忠实度 judge（faithfulness）已从请求路径移除
+> （质量评估转离线另行规划），本文档中 judge / `_unsupported` 相关设计作废；态 A 引用引导、
+> 态 B 完整性决策化与 KB 溯源护栏设计不变。
+
 ## Context
 
 当前查询链路分两态，agent 循环的 verify/检索逻辑在函数内以 `if not state._resolved_kb_ids` 分叉：

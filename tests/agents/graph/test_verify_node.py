@@ -1,7 +1,6 @@
-"""测试验证循环节点 — extract_years / completeness_check / faithfulness_check。
+"""测试验证循环节点 — extract_years / completeness_check / verify 决策化。
 
-faithfulness_check 的 judge LLM 通过 monkeypatch mock src.models.get_llm
-（FakeJudgeLLM），不构造真实 RAGAS_LLM_MODEL，不发真实网络/API 调用。
+judge（faithfulness）已随在线质量评估移除，此处不再覆盖。
 """
 
 import asyncio
@@ -16,7 +15,6 @@ from src.agents.graph.verify import (
     _ask_web_confirm,
     completeness_check,
     extract_years,
-    faithfulness_check,
     verify_node,
 )
 from src.config import settings
@@ -43,51 +41,6 @@ def test_completeness_check():
     """应返回要求年份中答案未覆盖的缺失年份（升序）。"""
     assert completeness_check([2023, 2024, 2025], "2024年营收3943亿") == [2023, 2025]
     assert completeness_check([2024], "2024年营收3943亿") == []
-
-
-class FakeJudgeLLM:
-    """极简 fake judge LLM：ainvoke 返回固定 judge 输出（AIMessage）。
-
-    返回 AIMessage 而非 dict，因为 faithfulness_check 通过
-    getattr(resp, "content", None) 读取响应文本（属性访问）。
-    """
-
-    async def ainvoke(self, messages, **kwargs):
-        """返回带固定 JSON 内容的 AIMessage，等价于真实模型响应。"""
-        return AIMessage(content='{"unsupported": ["句X"]}')
-
-
-def _make_contexts() -> list[RAGContext]:
-    """构造一条含 content 的引用上下文。"""
-    return [
-        RAGContext(
-            content="2024年营收3943亿",
-            source="a.pdf",
-            page=1,
-            doc_id="d1",
-            chunk_id="d1:0",
-        )
-    ]
-
-
-@pytest.mark.asyncio
-async def test_faithfulness_check_returns_unsupported(monkeypatch):
-    """应返回 judge 标出的无支撑句子清单。"""
-    monkeypatch.setattr("src.models.get_llm", lambda *args, **kwargs: FakeJudgeLLM())
-    result = await faithfulness_check("答案", _make_contexts())
-    assert result == ["句X"]
-
-
-@pytest.mark.asyncio
-async def test_faithfulness_check_empty_contexts(monkeypatch):
-    """contexts 为空时应直接返回空清单，不调用 get_llm。"""
-
-    def fail_if_called(*args, **kwargs):
-        raise AssertionError("contexts 为空时不应构造 judge LLM")
-
-    monkeypatch.setattr("src.models.get_llm", fail_if_called)
-    result = await faithfulness_check("答案", [])
-    assert result == []
 
 
 # ── _ask_web_confirm ──
@@ -473,69 +426,10 @@ async def test_verify_node_already_guided_hint_deduped(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_verify_node_complete_runs_judge(monkeypatch):
-    """完整性通过 + 答案已带 [n] → 过 KB 护栏进入忠实度 judge，标记 _unsupported。"""
+async def test_verify_node_complete_passes_through_without_judge(monkeypatch):
+    """态 B 完整性通过 + 答案已带 [n] 过 KB 护栏 → 直通 format（不再跑忠实度 judge）。"""
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
-    monkeypatch.setattr(
-        "src.agents.graph.verify.faithfulness.faithfulness_check",
-        AsyncMock(return_value=["句X"]),
-    )
-    _ctx, token = _make_ctx(temporal_years=[2024], tool_contexts=_make_contexts())
-    try:
-        state = _make_state(answer="2024年营收3943亿[1]", kb_id="kb1")
-        result = await verify_node(state)
-        assert result == {
-            "answer": "2024年营收3943亿[1]",
-            "_unsupported": ["句X"],
-            "_needs_regenerate": False,
-        }
-    finally:
-        current_request_ctx.reset(token)
-
-
-@pytest.mark.asyncio
-async def test_verify_node_unsupported_signal_emitted(monkeypatch):
-    """态 B judge 标记 unsupported → 产 unsupported 行为信号（含 kb_id/迭代/计数）。"""
-    monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
-    monkeypatch.setattr(
-        "src.agents.graph.verify.faithfulness.faithfulness_check",
-        AsyncMock(return_value=["句X"]),
-    )
-    captured: dict = {}
-
-    def _fake_signal(signal, query, iteration, **fields):
-        """mock retrieval_signal：捕获调用参数。"""
-        captured["signal"] = signal
-        captured["query"] = query
-        captured["iteration"] = iteration
-        captured["fields"] = fields
-
-    monkeypatch.setattr("src.core.logging.retrieval_signal", _fake_signal)
-    _ctx, token = _make_ctx(temporal_years=[2024], tool_contexts=_make_contexts())
-    try:
-        state = _make_state(answer="2024年营收3943亿[1]", kb_id="kb1")
-        state.query = "腾讯2024营收"
-        state._agent_iterations = 3
-        result = await verify_node(state)
-        assert result["_unsupported"] == ["句X"]
-        assert captured["signal"] == "unsupported"
-        assert captured["query"] == "腾讯2024营收"
-        assert captured["iteration"] == 3
-        assert captured["fields"]["kb_id"] == "kb1"
-        assert captured["fields"]["unsupported_count"] == 1
-    finally:
-        current_request_ctx.reset(token)
-
-
-@pytest.mark.asyncio
-async def test_verify_node_complete_judge_clean(monkeypatch):
-    """完整性通过 + 答案已带 [n] → 过 KB 护栏且 judge 无标记 → 返回纯 answer。"""
-    monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
-    monkeypatch.setattr(
-        "src.agents.graph.verify.faithfulness.faithfulness_check",
-        AsyncMock(return_value=[]),
-    )
-    _ctx, token = _make_ctx(temporal_years=[2024], tool_contexts=_make_contexts())
+    _ctx, token = _make_ctx(temporal_years=[2024])
     try:
         state = _make_state(answer="2024年营收3943亿[1]", kb_id="kb1")
         result = await verify_node(state)
@@ -543,6 +437,7 @@ async def test_verify_node_complete_judge_clean(monkeypatch):
             "answer": "2024年营收3943亿[1]",
             "_needs_regenerate": False,
         }
+        assert "_unsupported" not in result  # 在线 judge 已移除
     finally:
         current_request_ctx.reset(token)
 

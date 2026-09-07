@@ -5,13 +5,11 @@
 
 from src.agents.graph.verify.ask_confirm import _ask_web_confirm
 from src.agents.graph.verify.checks import completeness_check, extract_years
-from src.agents.graph.verify.faithfulness import faithfulness_check
 from src.agents.graph.verify.node import verify_node
 
 __all__ = [
     "_ask_web_confirm",
     "completeness_check",
     "extract_years",
-    "faithfulness_check",
     "verify_node",
 ]

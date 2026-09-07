@@ -105,11 +105,6 @@ EVENT_SPECS: dict[str, EventSpec] = {
         "info",
         ("kb_id", "required", "missing", "answer_len"),
     ),
-    "judge start": EventSpec("judge start", "verify", "info"),
-    "judge done": EventSpec("judge done", "verify", "info", ("unsupported_count",)),
-    "judge failed": EventSpec(
-        "judge failed", "verify", "warning", ("answer_len", "err")
-    ),
     "web confirm ask": EventSpec("web confirm ask", "verify", "info", ("missing",)),
     "web confirm result": EventSpec(
         "web confirm result", "verify", "info", ("missing", "confirmed")

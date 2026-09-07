@@ -4,29 +4,28 @@
 标注引导；态 B（绑定 KB）先做年份完整性比对，缺失年份走完整性决策化
 （regen_decision.decide_missing_web：询问/记住联网意愿 → 据 agent 上一轮 search_web
 queries 决策 regen/标注直通），完整性通过后经 KB 溯源护栏（kb_citation_guardrail）
-再跑最终答案忠实度 judge。
+即直通 format（在线忠实度 judge 已移除，质量评估转离线另行规划）。
 """
 
 from src.agents.graph.state import AgentState
-from src.agents.graph.verify import faithfulness
 from src.agents.graph.verify.checks import completeness_check
 from src.agents.graph.verify.guardrails import kb_citation_guardrail, web_citation_guard
 from src.agents.graph.verify.regen_decision import decide_missing_web
 from src.config import settings
 from src.core import logging as core_logging
-from src.core.log_events import Event, Signal
+from src.core.log_events import Event
 from src.infra.llm.request_context import current_request_ctx
 
 
 async def verify_node(state: AgentState) -> dict:
-    """验证循环节点：未绑定 KB 直通（态 A 联网引用引导）；绑定 KB 跑完整性/忠实度。
+    """验证循环节点：未绑定 KB 直通（态 A 联网引用引导）；绑定 KB 跑完整性/引用护栏。
 
     Args:
         state: 当前图状态
 
     Returns:
-        {"answer": 答案, "messages": [SystemMessage], "_needs_regenerate": bool,
-         "_unsupported": list}；_needs_regenerate=True 时条件边回 agent 重生成
+        {"answer": 答案, "messages": [SystemMessage], "_needs_regenerate": bool}；
+        _needs_regenerate=True 时条件边回 agent 重生成
     """
     if not settings.VERIFY_ENABLED:
         return {"answer": state.answer or "", "_needs_regenerate": False}
@@ -40,7 +39,7 @@ async def verify_node(state: AgentState) -> dict:
         core_logging.log_event(Event.SKIP, reason="guard_pass")
         return {"answer": state.answer or "", "_needs_regenerate": False}
 
-    # ── 态 B：绑定 KB（年份完整性 → 缺失走决策化；通过后 KB 护栏 + 忠实度 judge）──
+    # ── 态 B：绑定 KB（年份完整性 → 缺失走决策化；通过后 KB 溯源护栏）──
     answer = state.answer or ""
     required = ctx.temporal_years if ctx is not None else []
     missing = completeness_check(required, answer) if required else []
@@ -55,30 +54,9 @@ async def verify_node(state: AgentState) -> dict:
         # 年份缺失：委托决策化（询问联网意愿 → 网络穷尽/保险丝标注直通 → 注入指引/hint
         # 重生成），返回其决策 dict
         return await decide_missing_web(state, ctx, required, missing, answer)
-    # KB 溯源护栏（judge 前）：检索到 KB context 但答案无 [n] 且非拒答 → 引导补标 regen
+    # KB 溯源护栏：检索到 KB context 但答案无 [n] 且非拒答 → 引导补标 regen
     guardrail = await kb_citation_guardrail(state, ctx)
     if guardrail is not None:
         return guardrail
-    # 最终答案跑忠实度 judge（仅标记，不驱动流程；P1 输出护栏消费）；judge start/done
-    # 边界锚：态 B 跑 judge 即打，为 e2e"态 A 不跑 judge"提供正面对照
-    contexts = ctx.tool_contexts if ctx is not None else []
-    core_logging.log_event(Event.JUDGE_START)
-    unsupported = await faithfulness.faithfulness_check(answer, contexts)
-    core_logging.log_event(Event.JUDGE_DONE, unsupported_count=len(unsupported))
-    if unsupported:
-        if state.kb_id:
-            # unsupported 行为信号：绑 KB judge 标记无支撑句 → 检索质量缺陷
-            # （检索上下文不足以支撑答案内容，供 P1 检索质量诊断）
-            core_logging.retrieval_signal(
-                Signal.UNSUPPORTED,
-                state.query,
-                state._agent_iterations,
-                kb_id=state.kb_id,
-                unsupported_count=len(unsupported),
-            )
-        return {
-            "answer": answer,
-            "_unsupported": unsupported,
-            "_needs_regenerate": False,
-        }
+    # 完整性 + 引用护栏通过 → 直通 format
     return {"answer": answer, "_needs_regenerate": False}

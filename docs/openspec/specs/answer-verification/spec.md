@@ -10,7 +10,7 @@ TBD - created by archiving change agent-harness-foundation. Update Purpose after
 #### Scenario: 校验节点挂载
 
 - **WHEN** agent 循环生成最终答案
-- **THEN** 答案先经校验节点检查完整性/忠实度，通过才进入引用格式化
+- **THEN** 答案先经校验节点检查完整性/引用合规，通过才进入引用格式化
 
 ### Requirement: 完整性校验
 
@@ -47,15 +47,6 @@ TBD - created by archiving change agent-harness-foundation. Update Purpose after
 - **WHEN** 本会话用户已确认过"需要联网"（`web_confirmed=true`），后续又检测到缺失年份
 - **THEN** 系统直接调用 search_web 联网补充，不再询问
 
-### Requirement: 忠实度校验
-
-系统 SHALL 检查答案中的事实点是否被检索证据（引用上下文）支撑；无支撑的事实点 SHALL 被标记或触发修订，防止编造。忠实度判断 SHALL 使用独立评估模型（复用 `RAGAS_LLM_MODEL`，temperature 固定 0），与生成模型隔离；judge SHALL 输出无支撑句子清单供修订参考，不直接删除答案内容。**触发时机**：judge SHALL 仅在完整性校验通过后的最终答案运行（中途"询问联网→重生成"的过程答案不跑 judge），一次问答 judge 最多 1-2 次，受 2 轮上限约束。
-
-#### Scenario: 答案包含无支撑断言
-
-- **WHEN** 最终答案某句事实无法从任何引用上下文找到依据
-- **THEN** 忠实度校验用 judge 模型标记该句无支撑（`_unsupported` 写入 state/日志）；P0 仅记录不驱动流程，触发 LLM 删除/修正无支撑内容的修订动作留 P1 输出护栏
-
 ### Requirement: 纯对话轻量自检
 
 会话未绑定知识库（纯对话）时，系统 SHALL 跳过 verify 节点，改用 prompt 行为准则实现轻量自我校验（claude-code 模式，零额外 LLM 调用）：system prompt SHALL 要求模型"不确定/无法验证的内容如实说明、不编造；可联网核实就联网；不把没查证的当查证了"。
@@ -67,7 +58,7 @@ TBD - created by archiving change agent-harness-foundation. Update Purpose after
 
 ### Requirement: 修订终止条件
 
-系统 SHALL 为校验-修订循环设置轮次上限：完整性校验（结构化，快）每次生成后执行；LLM judge 最多 2 轮。达到上限仍不达标 SHALL 转拒答（标注信息不足）或转人工，不得无限循环。**P0 实现**：verify 节点自查 `_agent_iterations >= _max_agent_iterations`（=5）时不再置 `_needs_regenerate`，把缺失标注拼到 answer 直通 format（软拒答）——`route_agent` 的上限检查管不到 verify→agent 边，**必须 verify 自查**；"转人工"升级路径留 P1。
+系统 SHALL 为校验-修订循环设置轮次上限：完整性/引用护栏（结构化，快）每次生成后执行；**在线忠实度 judge 已移除**，无 judge 修订轮。达到上限仍不达标 SHALL 转拒答（标注信息不足）或转人工，不得无限循环。**P0 实现**：verify 节点自查 `_agent_iterations >= _max_agent_iterations`（=5）时不再置 `_needs_regenerate`，把缺失标注拼到 answer 直通 format（软拒答）——`route_agent` 的上限检查管不到 verify→agent 边，**必须 verify 自查**；"转人工"升级路径留 P1。
 
 #### Scenario: 修订轮次耗尽
 

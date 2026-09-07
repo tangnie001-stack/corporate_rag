@@ -1,5 +1,10 @@
 # retrieval-quality-signals Design
 
+> **SUPERSEDED（2026-09-07）**：本设计中 `unsupported` 信号（在线 judge 打标无支撑句）已随
+> 在线忠实度 judge 移除作废（质量评估转离线另行规划）；其余 5 种行为信号（reretrieve /
+> to_web / abstain_after_retrieve / cited / empty_result）不受影响。
+
+
 ## Context
 
 检索质量判定现状（前面 explored）：

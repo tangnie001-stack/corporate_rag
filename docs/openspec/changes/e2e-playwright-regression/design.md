@@ -1,5 +1,8 @@
 # e2e-playwright-regression Design
 
+> **SUPERSEDED（2026-09-07）**：行为冒烟层中"态 A 不跑 judge / judge 日志断言"相关场景已随
+> 在线忠实度 judge 移除作废（态 A/B 均不再跑 judge）；其余确定性回归与冒烟场景不变。
+
 ## Context
 
 前端是纯静态 HTML（`deploy/nginx/html/`，js/api.js 同源相对路径 `API_BASE='/api'`），由 nginx 同源反代到 FastAPI（app:8000）。联调问题只能真实浏览器交互暴露，pytest 覆盖不到。当前 playwright-cli 由 LLM agent 自由走查，无用例指导、不可复现、失败无法按 trace 归因。

@@ -682,7 +682,7 @@ name = f"kb_{kb_id.replace('-', '')}"
 | **agent** | `"agent"` | `messages`, `_agent_iterations` | 图入口（`entry_point`）。bind_tools 调 LLM，可发起工具调用（retrieve_kb / ask_user / search_web） |
 | **tools** | `"tools"` | `messages`（ToolMessage 追加） | ToolNode 执行工具，错误回喂；工具集：`retrieve_kb`（KB 混合检索）/ `search_web`（Tavily 联网搜索兜底，KB 不达标时补充知识库外事实）/ `ask_user`（澄清追问） |
 | **agent_finalize** | `"agent_finalize"` | `answer`, `tool_contexts` | 循环结束提取末次 AIMessage content → `answer`，读入 `tool_contexts` |
-| **verify** | `"verify"` | `answer`, `_needs_regenerate`, `_unsupported` | 验证节点，按会话 KB 绑定分派两态：态 A（未绑定 KB，纯对话）仅走联网引用标注引导；态 B（绑定 KB）走年份完整性 → 缺失按 agent 上轮 `search_web` queries 决策（未调过/带漏 → 注入指引 regen；带全仍缺 → 标注"知识库与网络均未覆盖"直通）→ KB 溯源护栏（有 kb context 无 [n] → 引导补标 regen）→ 忠实度 judge（`_unsupported` 仅标记，P1 输出护栏消费） |
+| **verify** | `"verify"` | `answer`, `_needs_regenerate` | 验证节点，按会话 KB 绑定分派两态：态 A（未绑定 KB，纯对话）仅走联网引用标注引导；态 B（绑定 KB）走年份完整性 → 缺失按 agent 上轮 `search_web` queries 决策（未调过/带漏 → 注入指引 regen；带全仍缺 → 标注"知识库与网络均未覆盖"直通）→ KB 溯源护栏（有 kb context 无 [n] → 引导补标 regen）；完整性 + 护栏通过即直通 format（在线忠实度 judge 已移除，质量评估转离线另行规划） |
 | **format** | `"format"` | `citations: list[dict]` | 去重引用列表 |
 
 ### 5.2 agent 循环（model ↔ tools 条件循环）
@@ -701,7 +701,7 @@ agent（LLM + bind_tools）← entry_point
       │ 无 tool_calls / 达迭代上限
       ▼
  agent_finalize（提取 answer + tool_contexts）
-      │ verify：态 A 联网引用引导 / 态 B 完整性+KB 溯源+忠实度
+      │ verify：态 A 联网引用引导 / 态 B 完整性+KB 溯源（无在线忠实度 judge）
       │ 校验通过 → format；_needs_regenerate=True → 回 agent
       ▼
     format（引用去重）
@@ -766,7 +766,7 @@ agent（LLM + bind_tools）← entry_point
            （检索不达标时可在循环内调用 search_web 联网兜底，产出 kind=web 引用）
            （信息不足时可在循环内调用 ask_user 追问，见 6.2）
     → agent_finalize: 提取 answer + tool_contexts
-    → verify: 态 A（未绑定 KB）联网引用引导；态 B（绑定 KB）完整性 → 缺失决策化（未调 search_web/带漏 → regen；带全仍缺 → 标注直通）→ KB 溯源护栏 → 忠实度 judge；_needs_regenerate=True → 回 agent
+    → verify: 态 A（未绑定 KB）联网引用引导；态 B（绑定 KB）完整性 → 缺失决策化（未调 search_web/带漏 → regen；带全仍缺 → 标注直通）→ KB 溯源护栏；_needs_regenerate=True → 回 agent
     → format_node: 去重引用列表
     → SSE 事件流推送至前端:
         event: status (agent, "正在思考...")
