@@ -5,5 +5,6 @@
 
 from src.agents.skills.loader import SkillLoader
 from src.agents.skills.models import SkillContext, SkillRecord
+from src.agents.skills.registry import SkillRegistry
 
-__all__ = ["SkillContext", "SkillLoader", "SkillRecord"]
+__all__ = ["SkillContext", "SkillLoader", "SkillRecord", "SkillRegistry"]
