@@ -11,6 +11,7 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langgraph.prebuilt import ToolNode
 
 from src.agents.graph.state import AgentState
+from src.config import settings
 from src.config.const import HISTORY_MAX_TURNS, HISTORY_TOKEN_RATIO, MAX_DELEGATE_BONUS
 from src.core import logging as core_logging
 from src.core.log_events import Event
@@ -89,11 +90,22 @@ def make_agent_model_node(llm, tools, prompt_manager) -> Callable:
         # extra_body（_get_request_payload 浅合并），故本模型不宜在 LLM_KWARGS
         # 里配置其他 extra_body 参数（会被本处覆盖丢弃）。
         turn_start = time.monotonic()
+        # 采样温度分档（chat-temperature-policy）：未绑 KB → 非 KB 档（默认 0.6）；
+        # 绑 KB → 不传 temperature，沿用模型构造温度 LLM_TEMPERATURE（默认 0.1），
+        # 同请求档位恒定（kb_id 首轮即固定）
         chunks = []
-        async for chunk in model.astream(
-            messages, extra_body={"enable_thinking": state.deep_thinking}
-        ):
-            chunks.append(chunk)
+        if state.kb_id:
+            async for chunk in model.astream(
+                messages, extra_body={"enable_thinking": state.deep_thinking}
+            ):
+                chunks.append(chunk)
+        else:
+            async for chunk in model.astream(
+                messages,
+                extra_body={"enable_thinking": state.deep_thinking},
+                temperature=settings.NON_KB_MAIN_TEMPERATURE,
+            ):
+                chunks.append(chunk)
         result = chunks[0]
         for chunk in chunks[1:]:
             result = result + chunk

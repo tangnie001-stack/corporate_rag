@@ -39,6 +39,9 @@ LLM_API_KEY: str = os.getenv("LLM_API_KEY") or os.getenv("DASHSCOPE_API_KEY", ""
 LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "http://litellm-proxy:4000")
 # LLM 温度参数：越低回答越确定性（适合金融场景），0.1 几乎不产生随机性
 LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.1"))
+# 主 agent 采样温度（chat-temperature-policy）：绑 KB 沿用 LLM_TEMPERATURE（默认 0.1）；
+# 非 KB 聊天/探讨用中温避免过干（proposal：唯一新增可调参数，KB 档不另设旋钮）
+NON_KB_MAIN_TEMPERATURE: float = float(os.getenv("NON_KB_MAIN_TEMPERATURE", "0.6"))
 # LLM 额外参数（JSON 格式，如 {"extra_body": {"enable_thinking": false}}）
 LLM_KWARGS: str = os.getenv("LLM_KWARGS", "{}")
 # 分类器温度参数：查询路由分类时使用，略高于 LLM 温度以允许少量分类灵活度

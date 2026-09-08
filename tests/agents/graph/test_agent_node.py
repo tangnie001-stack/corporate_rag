@@ -325,3 +325,58 @@ async def test_agent_model_non_delegate_keeps_flag_false():
     state = AgentState.make_initial_state("s1", "kb1", "q", [])
     out = await node(state)
     assert out.get("_delegate_used", False) is False
+
+
+@pytest.mark.asyncio
+async def test_agent_model_temperature_binds_kb_uses_construction_value():
+    """绑 KB（kb_id 非空）→ 不传 per-call temperature（沿用构造温度 LLM_TEMPERATURE=0.1）。"""
+    captured = {}
+
+    class CapturingTempModel(MockChatModel):
+        async def astream(self, messages, **kwargs):
+            captured["temperature"] = kwargs.get("temperature")
+            yield self.response
+
+    llm = CapturingTempModel(AIMessage(content="ok"))
+    node = make_agent_model_node(llm, [], StubPromptManager())
+    state = AgentState.make_initial_state("s1", "kb-1", "2024 营收?", [])
+    await node(state)
+    assert captured["temperature"] is None  # 不覆盖构造值（LLM_TEMPERATURE 默认 0.1）
+
+
+@pytest.mark.asyncio
+async def test_agent_model_temperature_non_kb_uses_default():
+    """未绑 KB（kb_id 空）→ 每轮 astream 传 temperature=NON_KB_MAIN_TEMPERATURE。"""
+    captured = {}
+
+    class CapturingTempModel(MockChatModel):
+        async def astream(self, messages, **kwargs):
+            captured["temperature"] = kwargs.get("temperature")
+            yield self.response
+
+    llm = CapturingTempModel(AIMessage(content="ok"))
+    node = make_agent_model_node(llm, [], StubPromptManager())
+    state = AgentState.make_initial_state("s1", "", "聊聊人生", [])
+    await node(state)
+    from src.config import settings
+
+    assert captured["temperature"] == settings.NON_KB_MAIN_TEMPERATURE
+
+
+@pytest.mark.asyncio
+async def test_agent_model_temperature_same_tier_across_turns():
+    """同请求多轮：kb_id 恒定 → 各轮 temperature 一致（档位不随轮次漂移）。"""
+    captured = []
+
+    class MultiTurnModel(MockChatModel):
+        async def astream(self, messages, **kwargs):
+            captured.append(kwargs.get("temperature"))
+            yield self.response
+
+    llm = MultiTurnModel(AIMessage(content="ok"))
+    node = make_agent_model_node(llm, [], StubPromptManager())
+    state = AgentState.make_initial_state("s1", "", "q", [])
+    state.messages = [HumanMessage(content="q")]  # 后续轮
+    await node(state)
+    await node(state)
+    assert captured == [captured[0], captured[0]]
