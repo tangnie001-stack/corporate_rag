@@ -53,7 +53,8 @@ def build_graph(
     - verify：完整性校验/缺失联网询问；_needs_regenerate=True 时条件边回 agent 重生成
     - format：从回答中提取引用编号，组装 citations
 
-    tools 参数可由调用方覆盖；缺省经 make_rag_tools 构建（retrieve_kb + ask_user）。
+    tools 参数可由调用方覆盖；缺省经 make_rag_tools 构建（retrieve_kb + ask_user 等）
+    并追加 make_task_tools（task_create/get/list/update/output/stop，恒注册）。
     delegate_task 为可选委派工具（skill 库有内容时由 AgentService 注入），
     tools=None 默认分支原样透传给 make_rag_tools。
     """
@@ -62,13 +63,19 @@ def build_graph(
     if tools is not None:
         rag_tools = tools
     else:
-        rag_tools = make_rag_tools(
+        base_tools = make_rag_tools(
             vector_store,
             bm25,
             reranker,
             prompt_manager,
             delegate_task=delegate_task,
         )
+        from src.agents.tools.task_tools import make_task_tools
+
+        # base_tools 经 list 归一化：make_rag_tools 生产必返回 list，但测试会
+        # monkeypatch 成空 list（test_graph.py:726 fake_make_rag_tools return []），
+        # 防御性 list() 防止 None 解包 TypeError
+        rag_tools = [*(base_tools or []), *make_task_tools()]
 
     builder.add_node("agent", make_agent_model_node(llm, rag_tools, prompt_manager))
     builder.add_node("tools", make_agent_tools_node(rag_tools))
