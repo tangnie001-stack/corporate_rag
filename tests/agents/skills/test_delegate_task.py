@@ -196,6 +196,96 @@ async def test_fork_interrupted_end_carries_reason():
 
 
 @pytest.mark.asyncio
+async def test_cancel_during_fork_propagates_cancelled_with_end_reason():
+    """请求取消传播（G carry）：fork 前置位 abort → 抛 CancelledError，delegate end 已推
+    ok=False/reason=cancelled，finally 复位 delegate_id 与 fork_stop_reason。"""
+    rec = _record("finance-analyst", SkillContext.FORK, "你是财务建模专家")
+    reg = _FakeRegistry({"finance-analyst": rec})
+    executor = SkillExecutor(main_llm=MagicMock())
+    tool = make_delegate_task(reg, executor)
+
+    ctx = RequestContext(session_id="s1")
+    ctx.abort_signal.set()  # 进入循环前置位（循环入口即抛，不依赖 FIRST_COMPLETED 竞速）
+    token = current_request_ctx.set(ctx)
+    try:
+        fake_sub = MagicMock(
+            astream_events=lambda *a, **k: _agen(
+                _event("on_chat_model_stream", chunk=AIMessageChunk(content="x")),
+            )
+        )
+        with (
+            patch(
+                "src.agents.skills.executor.create_react_agent", return_value=fake_sub
+            ),
+            pytest.raises(asyncio.CancelledError),
+        ):
+            await tool.ainvoke({"task": "t", "skill": "finance-analyst"})
+    finally:
+        current_request_ctx.reset(token)
+
+    end = [it for it in _drain_channel(ctx) if it.get("action") == "end"][-1]
+    assert end["ok"] is False and end["reason"] == "cancelled"
+    # delegate_task finally 复位已执行：无残留活跃委派/停止原因
+    assert ctx.delegate_id == ""
+    assert ctx.fork_stop_reason is None
+
+
+@pytest.mark.asyncio
+async def test_cancel_mid_wait_abort_race_during_fork():
+    """mid-wait abort 竞速（E carry）：fork 事件源首事件后挂起，兄弟 task 延迟置位
+    abort_signal → executor 阻塞在 FIRST_COMPLETED wait 收到 abort（executor abort-in-done
+    分支，executor.py:229-236）→ CancelledError，end reason=cancelled，finally 复位。"""
+    import src.agents.skills.executor as exec_mod
+
+    first_chunk_seen = asyncio.Event()
+
+    async def _slow(*a, **k):
+        yield _event("on_chat_model_stream", chunk=AIMessageChunk(content="a"))
+        # 仅在 executor 请求第 2 个事件（__anext__ #2）时执行：此刻 executor 必已进入 wait
+        first_chunk_seen.set()
+        await asyncio.sleep(30)  # 挂起等待：__anext__ 长期 pending，等 abort 中断
+        yield _event(
+            "on_chat_model_stream", chunk=AIMessageChunk(content="b")
+        )  # pragma: no cover
+
+    rec = _record("finance-analyst", SkillContext.FORK, "你是财务建模专家")
+    reg = _FakeRegistry({"finance-analyst": rec})
+    executor = SkillExecutor(main_llm=MagicMock())
+    tool = make_delegate_task(reg, executor)
+
+    ctx = RequestContext(session_id="s1")
+    token = current_request_ctx.set(ctx)
+
+    async def _abort_later():
+        await first_chunk_seen.wait()
+        await asyncio.sleep(0.01)  # 留出事件循环切换，保证 executor 已阻塞在 wait 内
+        ctx.abort_signal.set()
+
+    setter = asyncio.create_task(_abort_later())
+    try:
+        with (
+            patch(
+                "src.agents.skills.executor.create_react_agent",
+                return_value=MagicMock(astream_events=_slow),
+            ),
+            # 放大空闲阈值，防止 idle 在 abort 前抢先中断（本用例只测 abort 竞速路径）
+            patch.object(exec_mod.settings, "DELEGATE_MAX_IDLE_S", 5),
+            pytest.raises(asyncio.CancelledError),
+        ):
+            await tool.ainvoke({"task": "分析年报", "skill": "finance-analyst"})
+    finally:
+        setter.cancel()
+        await asyncio.gather(setter, return_exceptions=True)
+        current_request_ctx.reset(token)
+
+    assert ctx.abort_signal.is_set()  # abort 确在运行期间置位（真实竞速，非前置位）
+    end = [it for it in _drain_channel(ctx) if it.get("action") == "end"][-1]
+    assert end["ok"] is False and end["reason"] == "cancelled"
+    assert ctx.delegate_id == ""
+    assert ctx.fork_stop_reason is None
+
+
+@pytest.mark.asyncio
 async def test_delegate_task_description_lists_skills():
     """delegate_task.description 列出可用 skill（spec 2.1 动态描述）。"""
     rec = _record("finance-qa", SkillContext.INLINE, "方法论")
