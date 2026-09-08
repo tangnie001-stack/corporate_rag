@@ -86,9 +86,6 @@ TEMPORAL_RECENT_N_YEARS = 3
 MAX_DELEGATE_BONUS = (
     2  # delegate 轮后主 agent 迭代上限放宽轮数（整合余量，单请求总上限仍封顶）
 )
-DELEGATE_TIMEOUT = (
-    120  # fork 子代理执行总超时秒数（asyncio.wait_for，防外部 API 挂起烧钱）
-)
 DELEGATE_DEFAULT_MAX_TURNS = (
     5  # fork 零工具默认 turn 上限（防御；开放工具后由 skill max_iterations 覆盖）
 )
@@ -157,13 +154,6 @@ class SSEInteractionTexts:
 
     # on_tool_start/on_tool_end（retrieve_kb）对应 stage：检索中/完成
     STAGE_RETRIEVE: str = "retrieve"
-
-    # delegate_task 工具（fork 路径）对应 stage：仅 fork 命中时推送（inline 命中不推，见 design D14）
-    STAGE_DELEGATE: str = "delegate"
-
-    # fork 执行开始/完成文案（delegate_task 工具体内经 ctx 通道投递 status dict，_convert_event 转 SSEStatusEvent）
-    DELEGATE_STATUS_START: str = "正在调用领域专家分析..."
-    DELEGATE_STATUS_END: str = "领域专家分析完成"
 
     # ── Agent 状态事件文案 ──
     # on_chat_model_start（agent 节点）→ SSEStatusEvent(STAGE_AGENT)：模型开始思考

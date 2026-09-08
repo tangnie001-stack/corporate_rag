@@ -2,7 +2,6 @@
 
 from src.config.const import (
     DELEGATE_RESULT_LIMIT,
-    DELEGATE_TIMEOUT,
     INLINE_PROMPT_MAX_CHARS,
     MAX_DELEGATE_BONUS,
     SSEInteractionTexts,
@@ -10,13 +9,9 @@ from src.config.const import (
 
 
 def test_delegate_constants():
-    assert DELEGATE_TIMEOUT > 0
     assert DELEGATE_RESULT_LIMIT == 1000
     assert MAX_DELEGATE_BONUS == 2
     assert INLINE_PROMPT_MAX_CHARS == 500
-    assert SSEInteractionTexts.STAGE_DELEGATE == "delegate"
-    assert SSEInteractionTexts.DELEGATE_STATUS_START.startswith("正在调用")
-    assert SSEInteractionTexts.DELEGATE_STATUS_END.startswith("领域专家分析完成")
 
 
 def test_delegate_unknown_skill_template():
