@@ -672,6 +672,9 @@ async def test_fork_subagent_events_do_not_leak_to_outer_stream():
     子代理 on_chat_model_stream 经 var_child_runnable_config 传播到外层
     astream_events（metadata.langgraph_node == "agent"），token 带 _FORK_ANSWER
     内容泄漏进 SSE 并污染累积的 full_answer。
+
+    注入请求上下文后，子代理原文经 ctx.clarify_channel 走 delegate 通道（可观测）
+    仍不进入 full_answer：scope=delegate 只投 delta，不回灌主 token/落库内容。
     """
     model = _ScenarioChatModel()
 
@@ -690,9 +693,20 @@ async def test_fork_subagent_events_do_not_leak_to_outer_stream():
     init_state = cast(
         MessagesState, {"messages": [{"role": "user", "content": "用户主问题"}]}
     )
-    stream_events = []
-    async for event in compiled.astream_events(init_state, version="v2"):
-        stream_events.append(event)
+    # 注入请求上下文：生产路径中 delegate_task 在请求上下文内执行，fork 增量经
+    # ctx.clarify_channel 投 delegate delta（contextvar 随 graph 同 task 传播）。
+    # ctx 可及且 thinking 未声明 → fork 按 ctx.deep_thinking 新建 llm（get_llm）——
+    # 此处 mock 模型构建边界，复用 scenario 假模型（不发起真实网络调用）
+    ctx = RequestContext(session_id="s1")
+    ctx.delegate_id = "dlg_scope_leak"
+    token = current_request_ctx.set(ctx)
+    try:
+        with patch("src.agents.skills.executor.get_llm", return_value=model):
+            stream_events = []
+            async for event in compiled.astream_events(init_state, version="v2"):
+                stream_events.append(event)
+    finally:
+        current_request_ctx.reset(token)
 
     full_answer, leaked_tokens = _collect_fork_leak_events(stream_events)
     # 1. 外层事件流不得出现携带 fork 内容的 chat_model_stream token（无泄漏）
@@ -700,6 +714,16 @@ async def test_fork_subagent_events_do_not_leak_to_outer_stream():
     # 2. 累积的 full_answer 只含主 agent 整合回答，不含子代理原文（防持久化污染）
     assert _LEAK_MARKER not in full_answer
     assert full_answer == _FINAL_ANSWER
+    # 3. 子代理事件经 ctx.clarify_channel 走 delegate 通道：full_answer 仍不含过程原文
+    #    （防污染不变量：scope=delegate 永不写主 token/full_answer/落库内容）
+    deltas = [it for it in _drain_channel(ctx) if it.get("type") == "delegate"]
+    assert deltas, "fork 子代理原文应经 delegate 通道转发，而非空通道"
+    delta_text = "".join(
+        it.get("delta", "") for it in deltas if it.get("action") == "delta"
+    )
+    assert all(it.get("delegate_id") == "dlg_scope_leak" for it in deltas)
+    assert _LEAK_MARKER in delta_text  # 子代理原文经 delegate 通道以 delta 转发
+    assert _LEAK_MARKER not in full_answer  # 但绝不回灌主 full_answer
 
 
 def _make_streaming_agent_node(model: BaseChatModel):
