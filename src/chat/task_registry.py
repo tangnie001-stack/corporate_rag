@@ -35,17 +35,17 @@ class TaskItem:
         created_at / updated_at: unix 时间戳（updated_at 供 TTL 清理排序）
     """
 
-    task_id: str
-    title: str
-    type: str
-    status: str = TaskStatus.PENDING
-    stage: str = ""
-    summary: str = ""
-    delegate_id: str = ""
-    dependencies: list[str] = field(default_factory=list)
-    reason: str = ""
-    created_at: float = field(default_factory=time.time)
-    updated_at: float = field(default_factory=time.time)
+    task_id: str  # 任务 id（plan=工具生成短 uuid；execution=delegate_id）
+    title: str  # 标题（LLM 提供或 skill 名）
+    type: str  # 条目类型（TaskType.plan|execution）
+    status: str = TaskStatus.PENDING  # 展示状态（done/failed/timeout/cancelled 为终态）
+    stage: str = ""  # coarse 阶段（delegate start/end/中断边界更新）
+    summary: str = ""  # 摘要文本（plan 进展 / execution 活动说明）
+    delegate_id: str = ""  # execution 专属 id（= task_id，关联"分析过程"折叠区）
+    dependencies: list[str] = field(default_factory=list)  # plan 依赖任务 id 列表
+    reason: str = ""  # 中断原因（DelegateStopReason 值；normal 为空串）
+    created_at: float = field(default_factory=time.time)  # 创建时间（unix 时间戳）
+    updated_at: float = field(default_factory=time.time)  # unix 时间戳（TTL 清理排序）
 
     def to_dict(self) -> dict:
         """返回 JSON 可序列化快照（SSE task 事件 payload 的 task 字段）。"""
