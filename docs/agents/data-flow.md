@@ -20,7 +20,8 @@
 
 入口: `POST /api/chat/stream`（body: `ChatStreamRequest`：session_id / kb_id / query / deep_thinking）
 输出: SSE 事件流 `status → token → citation → model_info → done`（澄清/联网询问时含
-`ask_user`，纯拒答时含 `abstention`，deep_thinking 时含 `reasoning`）
+`ask_user`，纯拒答时含 `abstention`，deep_thinking 时含 `reasoning`，delegate 委派 fork
+时穿插 `delegate` 过程事件 start/增量/end）
 
 用户问答在入口按 `kb_id` 是否为空分裂为两条实质不同的链路：**链路 2a（绑 KB 问答链，
 RAG 检索 + 验证）** 与 **链路 2b（未绑 KB 纯对话链，联网兜底）**。`kb_id` 由前端绑定，
@@ -63,15 +64,34 @@ agent 判定需领域专家 → delegate_task(task, skill)
        → 纯文本结果回 agent → agent 整合进最终答案 → verify → format
 ```
 
-- inline 执行无独立子代理，不推状态；fork 执行在子代理开始/结束时各推一条
-  `status(stage=delegate)` 状态事件（经 clarify_channel 直投，不经 on_tool 映射，
-  见 api_contract.md「delegate 状态阶段」）
+- inline 执行无独立子代理，不推事件；fork 执行产生 `delegate` SSE 事件（start/过程增量/
+  end，见 api_contract.md「delegate 事件详情」）
 - fork 结果为纯文本，**无 [n] 引用**：引用仍只指向主 agent 自身检索来源（tool_contexts），
   不指向子代理产出
 - delegate 轮放宽迭代上限：`_delegate_used` 置位后 route_agent 上限
   +`MAX_DELEGATE_BONUS`（整合余量，agent_node.py:131-155）
 - 实现与术语：src/agents/skills/（SkillRecord/SkillLoader/SkillRegistry/
   SkillExecutor/make_delegate_task），术语见 glossary.md「技能委派」
+
+#### delegate 事件双通道与 scope 隔离
+
+fork 过程事件与主图事件分两条通道汇聚到同一 SSE 缓冲，共享转换逻辑仅以 `scope`
+（`main` / `delegate`）区分归属（`agent_service._convert_event`，src/services/agent_service.py:162）：
+
+- **主通道（graph 主循环）**：`_run_generation` 迭代主图 `astream_events`，事件按
+  `scope=main` 转 `status`/`token`/`reasoning`/`citation`/`model_info` 等主语义事件
+- **delegate 通道（clarify_channel）**：delegate_task fork 分支（start/end，
+  delegate_task.py:93-151）与 executor（thinking/content 增量，executor.py `_flush_delegate`）
+  把 `{"type": "delegate", action, delegate_id, skill, kind, delta, ok, reason}` 投进
+  `ctx.clarify_channel`，由 `_drain_clarify_channel`（agent_service.py:393，与主图事件循环
+  并行消费）转 `SSEDelegateEvent` 写入同一缓冲 → 前端收 `event: delegate`；ask_user /
+  web_confirm 澄清卡同走此通道
+
+**scope 隔离**：delegate dict 仅转 delegate 事件，**不写主 token 流 / `full_answer` /
+落库内容**（防污染不变量，回归测试覆盖）；fork 子代理内部 LLM 事件不进主
+`MODEL_TURN`/`status`（改记 `[delegate]` 轮次日志）。delegate 事件与主事件同入缓冲，
+resume 经 `from_payload` 原样回放，保证过程/终态不丢；过程原文不落库，刷新/历史重载
+不恢复过程区。
 
 ### 链路 2a：绑 KB 问答链（RAG）
 

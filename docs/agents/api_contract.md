@@ -196,25 +196,57 @@ data: {"error": "错误消息"}
 > 由 `_convert_event` 的 TOOL_START 分支填充——`retrieve_kb` 为 `query=...`、`search_web` 为 `queries=[...]`，
 > 与实时流同构写入事件缓冲，历史回放（2.4.4）原样带出，供前端展示工具调用明细。
 
-### `delegate` 状态阶段
+### `delegate` 事件详情
 
-`status` 事件的可选 stage（`SSEInteractionTexts.STAGE_DELEGATE`），仅**主 agent 调用
-`delegate_task` 委派 fork skill** 时推送。推送时机：fork 子代理开始
-（message="正在调用领域专家分析..."）与结束（message="领域专家分析完成"）各一条，
-由 delegate_task 工具体经 clarify_channel 直投（`src/agents/skills/delegate_task.py:78-97`），
-不经外层 astream_events 映射；**inline 命中不推**（方法论注入主 agent，无独立子代理）。
+独立 SSE 事件 `event: delegate`，仅**主 agent 调用 `delegate_task` 委派 fork skill** 时产生
+（**inline 命中不推**——方法论注入主 agent，无独立子代理）。事件由 delegate_task fork
+分支与 executor 投递到 `ctx.clarify_channel`，经 `_drain_clarify_channel` 并行消费转
+`SSEDelegateEvent`（`src/utils/sse.py`），**不经外层 astream_events 映射**。action 三态
+`start` / `delta` / `end`，均携带 `delegate_id`（短 uuid，贯穿该次委派）+ `skill`：
 
 ```json
-event: status
-data: {"stage": "delegate", "message": "正在调用领域专家分析..."}
+event: delegate
+data: {"delegate_id": "a1b2c3d4", "action": "start", "skill": "财务建模专家", "kind": "", "delta": "", "ok": true, "reason": ""}
 
-event: status
-data: {"stage": "delegate", "message": "领域专家分析完成"}
+event: delegate
+data: {"delegate_id": "a1b2c3d4", "action": "delta", "skill": "财务建模专家", "kind": "thinking", "delta": "先按营收口径拆解…", "ok": true, "reason": ""}
+
+event: delegate
+data: {"delegate_id": "a1b2c3d4", "action": "delta", "skill": "财务建模专家", "kind": "content", "delta": "2024 年营收同比…", "ok": true, "reason": ""}
+
+event: delegate
+data: {"delegate_id": "a1b2c3d4", "action": "end", "skill": "财务建模专家", "kind": "", "delta": "", "ok": true, "reason": ""}
 ```
 
-载荷沿用 `SSEStatusEvent`（stage/message/可选 detail）；本 stage **不带 detail**——与
-sse-tool-detail 的边界：detail 结构由 sse-tool-detail change 定义，本 stage 无工具入参明细可展示。
-fork 结果作为工具返回文本回主 agent，不出现在 SSE 载荷中。
+中断时 end 帧示例（`ok=false` + reason 取 `DelegateStopReason` 值）：
+
+```json
+event: delegate
+data: {"delegate_id": "a1b2c3d4", "action": "end", "skill": "财务建模专家", "kind": "", "delta": "", "ok": false, "reason": "total"}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `delegate_id` | str | 本次委派唯一 id（短 uuid，贯穿该次委派所有 start/增量/end 与 task execution 条目）；同一次回答内多次委派互不相同 |
+| `action` | str | `start`（委派开始）\| `delta`（过程增量）\| `end`（委派结束） |
+| `skill` | str | 命中的 skill 名 |
+| `kind` | str | 仅 delta 用：`thinking`（思考增量）\| `content`（正文增量）；start/end 为空串 |
+| `delta` | str | 仅 delta 用：增量文本（executor 聚合/节流后投递）；start/end 为空串 |
+| `ok` | bool | end 用：`true`=正常完成；`false`=中断/失败 |
+| `reason` | str | end 用：正常 `ok=true` → `""`；中断 `ok=false` → 取 `DelegateStopReason` 值（`idle`/`total`/`turn`/`failed`/`cancelled`，词表唯一，见 glossary.md） |
+
+**委派终态文案（前端渲染，`deploy/nginx/html/chat.html`）**：收到 `action=end` 时
+`ok=true` → "领域专家分析完成"；`ok=false` → "分析中断 · <原因中文短词>"（原因映射同
+`SSEInteractionTexts.DELEGATE_REASON_TEXT`：idle=空闲超时 / total=超时 / turn=轮次上限 /
+failed=失败 / cancelled=已取消）——不再无条件推"完成"。
+
+**scope 隔离与展示边界**：delegate 事件独立于主 token 流——增量**不写入主回答气泡 /
+`full_answer` / 主 token 事件 / 落库内容**（防污染不变量，回归测试覆盖）；fork 子代理
+内部 LLM 调用**不产生主 `MODEL_TURN`/`status` 事件**（过程观测走 `[delegate]` 日志，
+见 logging-rules.md）。前端在回答内按 `delegate_id` 渲染"领域专家分析过程"折叠区
+（thinking/content 分列、默认折叠），一次回答多次委派按 id 分节不串流。fork 最终结果
+作为工具返回**纯文本**回主 agent 整合（不带 [n] 引用，引用只指向主 agent 自身检索来源），
+不出现在 delegate 事件载荷中。
 
 追问路径（~~当 classify 检测到缺失实体时~~ ⚠️ 已退役，agent 化后由 `ask_user` 事件 + `POST /chat/clarify-answer` 接管，见下文 2.3.2 与 ask_user 事件详情）：
 
@@ -231,9 +263,10 @@ data: {}
 
 | 事件 | 触发条件 | 说明 |
 |------|---------|------|
-| `status` | agent 循环按事件类型接线 | stage 取值：`agent`（on_chat_model_start "正在思考..."）、`retrieve`（on_tool_start/end "正在检索相关文档..." / "检索完成，正在分析..."）、`web_search`（on_tool_start/end "正在联网搜索..." / "联网搜索完成，正在分析..."，KB 不达标时走 search_web 兜底才出现）、`delegate`（delegate_task 委派 fork skill，fork 子代理开始/结束各推一条，见上「`delegate` 状态阶段」） |
+| `status` | agent 循环按事件类型接线 | stage 取值：`agent`（on_chat_model_start "正在思考..."）、`retrieve`（on_tool_start/end "正在检索相关文档..." / "检索完成，正在分析..."）、`web_search`（on_tool_start/end "正在联网搜索..." / "联网搜索完成，正在分析..."，KB 不达标时走 search_web 兜底才出现） |
 | `token` | LLM 生成中 | LLM 生成文本片段，前端逐段追加 |
 | **`reasoning`** | **agent 节点 LLM 流式输出思考增量（enable_thinking=true 且模型返回 reasoning_content，经 ChatQwenWithReasoning 提取）** | **思考过程增量（data: {"delta": "..."}），前端累积渲染 Think 折叠行；每轮 LLM 调用一个，默认收起；收到正文 token/状态/ask_user/abstention/done 时定型** |
+| **`delegate`** | **delegate_task 委派 fork skill 时产生（inline 命中不推）** | **fork 子代理过程事件：`action=start`（开始）\| `delta`（过程增量，`kind=thinking`\|`content`、`delta`=增量文本）\| `end`（结束，`ok` 区分完成/中断）。前端按 delegate_id 分节渲染"分析过程"折叠区，增量不进主 token 流/full_answer（详见「delegate 事件详情」）** |
 | `citation` | format 节点完成 | 引用来源，按 source+page 去重；data 含 `kind`（`kb` 知识库 / `web` 网络搜索，默认 `kb`），前端按来源类型区分展示 |
 | **`clarification`** | ~~classify 检测到缺失实体~~ | **已退役**：classify 已删，无预判来源，不再生产，前端已由 `ask_user` 接管 |
 | **`ask_user`** | **ask_user 工具被调用（agent 需要用户补充信息）** | **问题卡片事件，前端 composer 接管输入区；提交答案后同流续答** |
@@ -426,6 +459,16 @@ Content-Type: `text/event-stream`。事件格式与实时流（2.3.1）一致：
 先回放缓冲中 `seq > after_seq` 的事件，随后 tail 新事件直到 `done` / `error`
 终态；tail 期间无新事件超过 180s（`_subscribe_buffer` 默认 `max_idle`）
 推送续传超时 `error` 事件后结束。缓冲不存在时立即返回单个 `done` 事件。
+
+> **主 POST 流与 resume 的续接语义（delegate-hardening-observability）**：
+> 主 POST 流（2.3.1 `/chat/stream`）订阅 `max_idle=None`（`src/services/agent_service.py`
+> `stream_chat` 经 `_subscribe_events` 订阅），**不按 180s 空闲收流**——流终态由任务生命周期
+> 提供（后台任务正常/异常/取消全路径均补 `done`/`error`），合法静默（ask_user 澄清等待、
+> fork 长跑无事件但任务存活）不断流。本 resume 端点**保留 `max_idle=180` 空闲兜底**：
+> 无活跃任务且持续无事件时仍按空闲阈值返回"续传超时" `error`（防"无任务僵尸续接"）。
+> 前端 `fetchStream` 收到干净 EOF 且本轮未收 `done`/`error` 终态时，`onClose` 按已消费
+> 最大 `seq`（`lastSeq`）自动调 `resumeStream(after_seq=lastSeq)` 接回事件流；已收终态的
+> 正常 EOF 不触发续接。delegate 过程事件与主事件同入缓冲，resume 经 `from_payload` 原样回放。
 
 ```json
 event: token

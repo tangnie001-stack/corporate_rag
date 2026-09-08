@@ -1,3 +1,9 @@
+> **SUPERSEDED（2026-09-08）**：本文档 delegate-observability 相关设计——「D14 SSE 状态」
+> （STAGE_DELEGATE 推送开始/结束）与「D11 fork 可观测性」（同级观测、不产生 MODEL_TURN）
+> ——已由 delegate-hardening-observability 演进（`delegate` 事件 start/delta/end、过程增量、
+> 完成/中断区分、delegate 轮次日志）；其余设计（skill 加载器 / delegate_task 双执行 /
+> fork 上下文隔离 / 迭代预算联动 / 懒重载等）不变。
+
 ## Context
 
 主 agent 是单循环 LangGraph（agent ↔ tools → agent_finalize → verify → format，`src/agents/graph/workflow.py`）。能力全以工具平铺（retrieve_kb/search_web/ask_user）。企业多业务域演进需要"领域专家能力"，但多域专家人格无法全量进主 agent 上下文；领域能力需业务侧可增删改、与代码解耦。

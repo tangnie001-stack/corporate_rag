@@ -1,5 +1,11 @@
 # delegate-observability Specification (Delta)
 
+> **SUPERSEDED（2026-09-08）**：本 Delta 的「SSE 委派状态」与「LLM 调用观测」两
+> Requirement 已由 delegate-hardening-observability 演进——`STAGE_DELEGATE` 状态事件 →
+> `delegate` 事件（start/delta/end，携带 delegate_id/ok-reason，区分完成/中断，新增过程
+> 增量与 delegate 轮次日志）；归档同步时以 delegate-hardening-observability 的 delta 为准。
+> 「迭代预算联动」「委派装配可观测」两 Requirement 不变。
+
 ## ADDED Requirements
 
 ### Requirement: SSE 委派状态
