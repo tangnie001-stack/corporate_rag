@@ -1761,6 +1761,11 @@ function buildStreamHandlers() {
     done: (data) => {
       try {
         state.lastSeq = (data.seq !== undefined) ? data.seq : state.lastSeq;
+        if (data.cancelled === true) {
+          // fork 取消时 delegate end 可能丢失：须在 finalizeAnswer 复位 delegateSections 前兜底置中断态，
+          // 否则 map 已空此调用为空操作，文案退化为泛化的"分析中断 · 中断"
+          finalizePendingDelegateSections('cancelled');
+        }
         finalizeAnswer();
         closeThinkRow();
         if (data.trace_id) state.traceId = data.trace_id;
@@ -1772,7 +1777,6 @@ function buildStreamHandlers() {
         state.current = STATE.IDLE;
         restoreInputArea();
         if (data.cancelled === true) {
-          finalizePendingDelegateSections('cancelled'); // fork 取消时 delegate end 可能丢失，兜底置中断态
           showHint('澄清已失效，请重新提问');
         } else {
           showHint('该问题已超时，请重新提问');
@@ -1790,8 +1794,9 @@ function buildStreamHandlers() {
     },
     error: (data) => {
       state.lastSeq = (data.seq !== undefined) ? data.seq : state.lastSeq;
+      // fork 取消/异常时 delegate end 可能丢失：须在 finalizeAnswer 复位 delegateSections 前兜底置中断态
+      finalizePendingDelegateSections('failed');
       finalizeAnswer();
-      finalizePendingDelegateSections('failed'); // fork 取消/异常时 delegate end 可能丢失，兜底置中断态
       streamRetryCount = 0; // 服务端终态 error，不再重连
       if (state.current === STATE.STREAMING) {
         showError('连接异常，请重试');
