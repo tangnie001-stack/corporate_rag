@@ -121,6 +121,44 @@ async def test_inline_hit_returns_prompt_and_no_status():
 
 
 @pytest.mark.asyncio
+async def test_fork_auto_registers_execution_and_terminal():
+    """fork 自动登记 execution（task_id=delegate_id）；正常结束置 done。"""
+    import src.agents.skills.delegate_task as dt_mod
+    from src.chat.task_registry import SessionTaskRegistry
+    from src.config.const import TaskStatus, TaskType
+
+    reg = SessionTaskRegistry(on_change=None)  # 不写真实 buffer，防污染
+    with patch.object(dt_mod, "task_registry", reg):
+        rec = _record("finance-analyst", SkillContext.FORK, "你是财务建模专家")
+        tool = make_delegate_task(
+            _FakeRegistry({"finance-analyst": rec}), SkillExecutor(main_llm=MagicMock())
+        )
+        fake_sub = _fake_sub_agent(
+            _event("on_chat_model_start"),
+            _event("on_chat_model_stream", chunk=AIMessageChunk(content="分析")),
+            _event("on_chat_model_end", output=AIMessage(content="分析")),
+        )
+        ctx = RequestContext(session_id="s1")
+        token = current_request_ctx.set(ctx)
+        try:
+            with patch(
+                "src.agents.skills.executor.create_react_agent", return_value=fake_sub
+            ):
+                await tool.ainvoke({"task": "分析", "skill": "finance-analyst"})
+        finally:
+            current_request_ctx.reset(token)
+
+    running_items = [
+        it for it in reg.list_session("s1") if it.status == TaskStatus.RUNNING
+    ]
+    assert running_items == []  # 已终态
+    done = reg.list_session("s1")[0]
+    assert done.type == TaskType.EXECUTION
+    assert done.delegate_id and done.task_id == done.delegate_id
+    assert done.status == TaskStatus.DONE and done.reason == ""
+
+
+@pytest.mark.asyncio
 async def test_fork_hit_pushes_delegate_start_end_with_id():
     """fork 命中：推 delegate start + end 事件（带 delegate_id；end ok=True/reason=''）。"""
     rec = _record("finance-analyst", SkillContext.FORK, "你是财务建模专家")

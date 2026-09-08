@@ -85,6 +85,23 @@ def test_ttl_sweep_expired_only(reg):
     assert reg.get_task("s1", t_new.task_id) is not None
 
 
+def test_mark_terminal_skips_already_terminal(reg):
+    """已终态条目跳过覆盖：置 cancelled 后再次 mark_terminal 返回 None 且不覆盖。"""
+    reg.create_task(
+        "s1",
+        TaskType.EXECUTION,
+        title="委派 x",
+        delegate_id="d1",
+        status=TaskStatus.RUNNING,
+    )
+    cancelled = reg.mark_terminal("s1", "d1", TaskStatus.CANCELLED, reason="cancelled")
+    assert cancelled is not None and cancelled.status == "cancelled"
+    # 再次 mark_terminal（如取消后竞速的 done/failed 兜底）不得覆盖已终态
+    assert reg.mark_terminal("s1", "d1", TaskStatus.DONE) is None
+    after = reg.get_task("s1", "d1")
+    assert after.status == "cancelled" and after.reason == "cancelled"
+
+
 def test_new_post_keeps_existing_tasks(reg):
     """同一会话跨轮保留（注册表独立于事件缓冲，clear_buffer 不清表）。"""
     t = reg.create_task("s1", TaskType.PLAN, title="keep")

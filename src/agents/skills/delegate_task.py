@@ -19,7 +19,14 @@ from pydantic import BaseModel, Field
 from src.agents.skills.executor import SkillExecutor
 from src.agents.skills.models import SkillContext
 from src.agents.skills.registry import SkillRegistry
-from src.config.const import DelegateStopReason, SSEInteractionTexts
+from src.chat.task_registry import task_registry
+from src.config.const import (
+    DELEGATE_TASK_TITLE_TMPL,
+    DelegateStopReason,
+    SSEInteractionTexts,
+    TaskStatus,
+    TaskType,
+)
 from src.core import logging as core_logging
 from src.core.log_events import Event
 from src.infra.llm.request_context import current_request_ctx
@@ -90,6 +97,16 @@ def make_delegate_task(skill_registry: SkillRegistry, executor: SkillExecutor):
         delegate_id = uuid.uuid4().hex[:8]
         ctx.delegate_id = delegate_id
         ctx.fork_stop_reason = None
+        # 任务看板自动登记（task-board）：execution 条目 task_id=delegate_id，
+        # stage 仅 coarse 边界更新（此处 start、finally 终态）
+        task_registry.create_task(
+            ctx.session_id,
+            TaskType.EXECUTION,
+            title=DELEGATE_TASK_TITLE_TMPL.format(skill=record.name),
+            delegate_id=delegate_id,
+            status=TaskStatus.RUNNING,
+            stage="正在分析…",
+        )
         await ctx.clarify_channel.put(
             {
                 "type": "delegate",
@@ -156,6 +173,21 @@ def make_delegate_task(skill_registry: SkillRegistry, executor: SkillExecutor):
                 reason=reason.value,
                 elapsed_ms=int((time.monotonic() - started_at) * 1000),
                 result_len=result_len,
+            )
+            # execution 终态映射（展示状态与 DelegateStopReason 词表）
+            if ok:
+                terminal_status = TaskStatus.DONE
+            elif reason is DelegateStopReason.CANCELLED:
+                terminal_status = TaskStatus.CANCELLED
+            elif reason is DelegateStopReason.FAILED:
+                terminal_status = TaskStatus.FAILED
+            else:  # idle / total / turn
+                terminal_status = TaskStatus.TIMEOUT
+            task_registry.mark_terminal(
+                ctx.session_id,
+                delegate_id,
+                terminal_status,
+                reason="" if ok else reason.value,
             )
             ctx.delegate_id = ""
             ctx.fork_stop_reason = None
