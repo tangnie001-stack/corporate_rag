@@ -114,6 +114,37 @@ class DelegateStopReason(str, Enum):
     CANCELLED = "cancelled"
 
 
+class TaskType:
+    """任务看板条目类型（task-board change）。
+
+    分工：plan = 主 agent 经 Task 工具创建的计划/跟踪项；
+    execution = delegate fork 自动登记的执行追踪（task_id=delegate_id）。
+    """
+
+    PLAN: str = "plan"  # 主 agent 计划项
+    EXECUTION: str = "execution"  # delegate 执行追踪
+
+
+class TaskStatus:
+    """任务条目的展示状态（前端胶囊/徽标依据；中断原因另存 reason）。
+
+    终态映射（execution）：reason=normal → done；failed → failed；
+    idle/total/turn → timeout（reason 保留具体枚举值）；cancelled → cancelled。
+    """
+
+    PENDING: str = "pending"  # 待处理（plan 建项默认）
+    RUNNING: str = "running"  # 进行中（execution 运行中 / plan 手动置）
+    DONE: str = "done"  # 完成
+    FAILED: str = "failed"  # 失败
+    TIMEOUT: str = "timeout"  # 超时中断（idle/total/turn）
+    CANCELLED: str = "cancelled"  # 取消
+
+
+# execution 自动登记标题模板（task-board）：{skill} 为命中 skill 名；
+# 放 const 集中管理（CLAUDE.md 硬编码集中规则），delegate_task 登记用
+DELEGATE_TASK_TITLE_TMPL = "{skill} · 领域专家分析"
+
+
 # ── 检索精排超时 ──
 # Reranker 精排总超时秒数：rerank 为同步 HTTP 调用（dashscope 无默认超时），
 # 在事件循环内直连会永久挂起阻塞整个 worker，故经 to_thread + wait_for 兜底；
