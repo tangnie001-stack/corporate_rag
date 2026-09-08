@@ -14,6 +14,9 @@ venv/
 # IDE
 .idea/
 
+# CodeBuddy 本地个人配置（模型/密钥等，不入库）
+.codebuddy/models.json
+
 # Generated indices (auto-regeneratable)
 .codegraph/
 .coverage
