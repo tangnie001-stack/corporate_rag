@@ -1,9 +1,11 @@
 """Sessions 端点测试 — list / messages / delete。"""
 
 import asyncio
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from src.chat.streaming import streaming_manager
+from src.chat.task_registry import SessionTaskRegistry
+from src.config.const import TaskStatus, TaskType
 from tests.api.mock_data import make_message, make_session
 
 
@@ -122,3 +124,30 @@ def test_delete_session_cancels_running_task(auth_client, mock_app_service):
     finally:
         streaming_manager.unregister("s1")
         streaming_manager.clear_buffer("s1")
+
+
+def test_get_session_tasks_empty(auth_client, mock_app_service):
+    """GET /api/sessions/tasks 无任务返回空列表。"""
+    mock_app_service.get_session_by_id = AsyncMock(
+        return_value=make_session("s1", user_id="test-user-id")
+    )
+    with patch("src.api.sessions.task_registry", SessionTaskRegistry(on_change=None)):
+        resp = auth_client.get("/api/sessions/tasks?session_id=s1")
+        assert resp.status_code == 200
+        assert resp.json()["data"] == []
+
+
+def test_get_session_tasks_snapshot(auth_client, mock_app_service):
+    """GET /api/sessions/tasks 返回该会话任务快照。"""
+    mock_app_service.get_session_by_id = AsyncMock(
+        return_value=make_session("s1", user_id="test-user-id")
+    )
+    fake_reg = SessionTaskRegistry(on_change=None)
+    fake_reg.create_task(
+        "s1", TaskType.EXECUTION, title="e", delegate_id="d1", status=TaskStatus.RUNNING
+    )
+    with patch("src.api.sessions.task_registry", fake_reg):
+        resp = auth_client.get("/api/sessions/tasks?session_id=s1")
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert len(data) == 1 and data[0]["delegate_id"] == "d1"

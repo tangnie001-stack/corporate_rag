@@ -18,6 +18,7 @@ from src.api.model.request import (
 from src.api.model.response import MessageItem, SessionDeleteResponse, SessionItem
 from src.api.schema import ResponseModel
 from src.chat.streaming import _subscribe_buffer, streaming_manager
+from src.chat.task_registry import task_registry
 from src.config.response_codes import Code
 from src.services.app_service import AppService
 from src.utils.errors import BusinessError
@@ -204,6 +205,38 @@ async def resume_session_events(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.get("/sessions/tasks", response_model=ResponseModel)
+async def get_session_tasks(
+    request: Request,
+    session_id: str = Query(...),
+    svc: AppService = Depends(get_app_service),
+) -> ResponseModel:
+    """任务快照读取：返回该会话注册表任务列表（页面刷新/切换会话后初始化看板）。
+
+    权限与 sessions/events 一致（会话存在且属于当前用户）。仅读运行期
+    进程内注册表，不落库；无任务返回空列表。拉取前先 sweep_expired
+    （sweep 仅在 create_task 时触发，只读快照需主动清理超 TTL 条目）。
+
+    Args:
+        request: FastAPI 请求（从中提取 user_id）
+        session_id: 会话 ID
+        svc: 应用服务实例（由 FastAPI 注入）
+
+    Returns:
+        ResponseModel: data 为任务快照 dict 列表（TaskItem.to_dict()）
+
+    Raises:
+        BusinessError: 会话不存在或无权访问时返回 404
+    """
+    user_id = getattr(request.state, "user_id", "")
+    session = await svc.get_session_by_id(session_id)
+    if not session or (session.get("user_id") and session["user_id"] != user_id):
+        raise BusinessError(Code.SESSION_NOT_FOUND, Code.SESSION_NOT_FOUND_MSG, 404)
+    task_registry.sweep_expired()
+    items = task_registry.list_session(session_id)
+    return ResponseModel(data=[it.to_dict() for it in items])
 
 
 @router.get("/sessions/task-status", response_model=ResponseModel)
