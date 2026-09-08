@@ -1,9 +1,10 @@
 """测试 delegate_task 工具 — inline 命中 / fork 命中 / 未知 skill / SSE 状态推送。"""
 
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
+from langchain_core.messages import AIMessage, AIMessageChunk
 
 from src.agents.skills.delegate_task import DelegateTaskArgs, make_delegate_task
 from src.agents.skills.executor import SkillExecutor
@@ -88,8 +89,19 @@ async def test_fork_hit_pushes_start_and_end_status():
     executor = SkillExecutor(main_llm=MagicMock())
     tool = make_delegate_task(reg, executor)
 
-    fake_sub = AsyncMock()
-    fake_sub.ainvoke.return_value = {"messages": [MagicMock(content="专家分析")]}
+    async def _events(*args, **kwargs):
+        yield {"event": "on_chat_model_start", "data": {}}
+        yield {
+            "event": "on_chat_model_stream",
+            "data": {"chunk": AIMessageChunk(content="专家分析")},
+        }
+        yield {
+            "event": "on_chat_model_end",
+            "data": {"output": AIMessage(content="专家分析")},
+        }
+
+    fake_sub = MagicMock()
+    fake_sub.astream_events = _events
 
     ctx = RequestContext(session_id="s1")
     token = current_request_ctx.set(ctx)

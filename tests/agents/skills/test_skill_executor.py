@@ -1,11 +1,11 @@
-"""测试 SkillExecutor — inline 注入 / fork 子代理（零工具）/ 截断 / 超时。"""
+"""测试 SkillExecutor — inline 注入 / fork 子代理（零工具 astream）/ 防失控 / thinking 跟随。"""
 
 import asyncio
 import json
 from collections.abc import Iterator
 from pathlib import Path
 from typing import cast
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -23,6 +23,7 @@ from langgraph.prebuilt import ToolNode
 from src.agents.skills.executor import SkillExecutor
 from src.agents.skills.models import SkillContext, SkillRecord
 from src.config.const import SSEInteractionTexts
+from src.infra.llm.request_context import RequestContext, current_request_ctx
 
 
 def _record(**overrides) -> SkillRecord:
@@ -41,6 +42,44 @@ def _record(**overrides) -> SkillRecord:
     }
     defaults.update(overrides)
     return SkillRecord(**defaults)
+
+
+def _event(kind, chunk=None, output=None):
+    """构造 langgraph v2 事件 dict（fake astream_events 事件源元素）。"""
+    data = {}
+    if chunk is not None:
+        data["chunk"] = chunk
+    if output is not None:
+        data["output"] = output
+    return {
+        "event": kind,
+        "name": "agent",
+        "metadata": {"langgraph_node": "agent"},
+        "data": data,
+    }
+
+
+def _agen(*items):
+    async def gen():
+        for it in items:
+            yield it
+
+    return gen()
+
+
+def _fake_sub_agent(*items):
+    """astream_events 版 fake sub-agent（替换旧 fake_sub.ainvoke mock）。"""
+    fake = MagicMock()
+    fake.astream_events = lambda *a, **k: _agen(*items)
+    return fake
+
+
+def _drain_channel(ctx):
+    """排空 ctx.clarify_channel，按序返回全部事件。"""
+    out = []
+    while not ctx.clarify_channel.empty():
+        out.append(ctx.clarify_channel.get_nowait())
+    return out
 
 
 @pytest.mark.asyncio
@@ -62,7 +101,7 @@ async def test_inline_without_placeholder_returns_as_is():
 
 @pytest.mark.asyncio
 async def test_fork_reuses_main_llm_when_model_empty():
-    """fork 且未声明 model：复用主 agent llm 实例（不新建）。"""
+    """fork 且未声明 model/thinking：复用主 agent llm 实例；经 astream_events 聚合结果。"""
     main_llm = MagicMock()
     exe = SkillExecutor(main_llm=main_llm)
     rec = _record(
@@ -70,24 +109,23 @@ async def test_fork_reuses_main_llm_when_model_empty():
         agent_prompt="你是财务建模专家",
         inline_prompt=None,
         model=None,
+        thinking=None,
     )
-
-    fake_sub = AsyncMock()
-    fake_sub.ainvoke.return_value = {
-        "messages": [MagicMock(content="分析结果：营收下降 20%")]
-    }
-
+    chunk = AIMessageChunk(content="分析结果：营收下降 20%")
+    fake_sub = _fake_sub_agent(
+        _event("on_chat_model_start"),
+        _event("on_chat_model_stream", chunk=chunk),
+        _event("on_chat_model_end", output=AIMessage(content="分析结果：营收下降 20%")),
+    )
     with patch(
         "src.agents.skills.executor.create_react_agent", return_value=fake_sub
     ) as mock_create:
         out = await exe.execute(rec, task="分析年报")
 
-    # 零工具硬保证：tools=[] 传入 create_react_agent
     args, kwargs = mock_create.call_args
     assert kwargs["tools"] == []
     assert kwargs["prompt"] == "你是财务建模专家"
-    # 复用主 agent llm，未调 get_llm
-    assert args[0] is main_llm
+    assert args[0] is main_llm  # 无 model/thinking → 复用主实例
     assert "分析结果" in out
 
 
@@ -95,8 +133,11 @@ async def test_fork_reuses_main_llm_when_model_empty():
 async def test_fork_model_override_builds_new_llm():
     """fork 且声明 model：get_llm(model=record.model) 新建实例。"""
     fake_llm = MagicMock()
-    fake_sub = AsyncMock()
-    fake_sub.ainvoke.return_value = {"messages": [MagicMock(content="专家分析")]}
+    fake_sub = _fake_sub_agent(
+        _event("on_chat_model_start"),
+        _event("on_chat_model_stream", chunk=AIMessageChunk(content="专家分析")),
+        _event("on_chat_model_end", output=AIMessage(content="专家分析")),
+    )
 
     with (
         patch(
@@ -121,61 +162,15 @@ async def test_fork_model_override_builds_new_llm():
 
 
 @pytest.mark.asyncio
-async def test_fork_result_truncated():
-    """fork 结果超 DELEGATE_RESULT_LIMIT → 截断并带总字数提示。"""
-    long_text = "字" * 3000
-    fake_sub = AsyncMock()
-    fake_sub.ainvoke.return_value = {"messages": [MagicMock(content=long_text)]}
-
-    with patch("src.agents.skills.executor.create_react_agent", return_value=fake_sub):
-        exe = SkillExecutor(main_llm=MagicMock())
-        rec = _record(
-            context=SkillContext.FORK,
-            agent_prompt="人格",
-            inline_prompt=None,
-            model=None,
-        )
-        out = await exe.execute(rec, task="分析")
-        assert "3000" in out
-        assert len(out) < 2000  # 截断后带前缀，远小于 3000
-        assert out.startswith(SSEInteractionTexts.DELEGATE_TRUNCATED_PREFIX[:10])
-
-
-@pytest.mark.asyncio
-async def test_fork_timeout_returns_timeout_text():
-    """fork 超时 → 返回 DELEGATE_TIMEOUT_TEXT（asyncio.wait_for 兜底）。"""
-    from src.agents.skills import executor as exec_mod
-    from src.config.const import DELEGATE_TIMEOUT
-
-    async def _never(*args, **kwargs):
-        await asyncio.sleep(DELEGATE_TIMEOUT + 1)
-        return {"messages": []}
-
-    fake_sub = AsyncMock()
-    fake_sub.ainvoke.side_effect = _never
-
-    with (
-        patch("src.agents.skills.executor.create_react_agent", return_value=fake_sub),
-        patch.object(exec_mod, "DELEGATE_TIMEOUT", 0.01),
-    ):
-        exe = SkillExecutor(main_llm=MagicMock())
-        rec = _record(
-            context=SkillContext.FORK,
-            agent_prompt="人格",
-            inline_prompt=None,
-            model=None,
-        )
-        out = await exe.execute(rec, task="分析")
-        assert out == SSEInteractionTexts.DELEGATE_TIMEOUT_TEXT
-
-
-@pytest.mark.asyncio
 async def test_fork_thinking_true_builds_llm_with_enable_thinking():
     """fork 且 thinking=True：新建 llm 时 extra_body.enable_thinking=True（D12 消费）。"""
     fake_llm = MagicMock()
     fake_llm.model_name = "main-model"
-    fake_sub = AsyncMock()
-    fake_sub.ainvoke.return_value = {"messages": [MagicMock(content="分析")]}
+    fake_sub = _fake_sub_agent(
+        _event("on_chat_model_start"),
+        _event("on_chat_model_stream", chunk=AIMessageChunk(content="分析")),
+        _event("on_chat_model_end", output=AIMessage(content="分析")),
+    )
 
     with (
         patch("src.agents.skills.executor.create_react_agent", return_value=fake_sub),
@@ -205,8 +200,11 @@ async def test_fork_thinking_false_builds_llm_with_thinking_off():
     """fork 且 thinking=False：新建 llm 且 enable_thinking=False（显式关思考）。"""
     fake_llm = MagicMock()
     fake_llm.model_name = "main-model"
-    fake_sub = AsyncMock()
-    fake_sub.ainvoke.return_value = {"messages": [MagicMock(content="分析")]}
+    fake_sub = _fake_sub_agent(
+        _event("on_chat_model_start"),
+        _event("on_chat_model_stream", chunk=AIMessageChunk(content="分析")),
+        _event("on_chat_model_end", output=AIMessage(content="分析")),
+    )
 
     with (
         patch("src.agents.skills.executor.create_react_agent", return_value=fake_sub),
@@ -232,8 +230,11 @@ async def test_fork_thinking_false_builds_llm_with_thinking_off():
 @pytest.mark.asyncio
 async def test_fork_thinking_none_reuses_main_llm():
     """thinking 未声明（None）：不新建 llm，复用主 agent 实例（D12 跟随主 agent）。"""
-    fake_sub = AsyncMock()
-    fake_sub.ainvoke.return_value = {"messages": [MagicMock(content="分析")]}
+    fake_sub = _fake_sub_agent(
+        _event("on_chat_model_start"),
+        _event("on_chat_model_stream", chunk=AIMessageChunk(content="分析")),
+        _event("on_chat_model_end", output=AIMessage(content="分析")),
+    )
 
     with (
         patch(
@@ -256,6 +257,287 @@ async def test_fork_thinking_none_reuses_main_llm():
         args, _kwargs = mock_create.call_args
         assert args[0] is main_llm
         assert "分析" in out
+
+
+@pytest.mark.asyncio
+async def test_fork_thinking_follows_ctx_deep_thinking_true():
+    """thinking 未声明且 ctx.deep_thinking=True：新建 llm 带 enable_thinking=True。"""
+    fake_llm = MagicMock()
+    fake_llm.model_name = "main-model"
+    fake_sub = _fake_sub_agent(
+        _event("on_chat_model_start"),
+        _event("on_chat_model_stream", chunk=AIMessageChunk(content="分析")),
+        _event("on_chat_model_end", output=AIMessage(content="分析")),
+    )
+    ctx = RequestContext(session_id="s1")
+    ctx.deep_thinking = True
+    token = current_request_ctx.set(ctx)
+    try:
+        with (
+            patch(
+                "src.agents.skills.executor.create_react_agent", return_value=fake_sub
+            ),
+            patch(
+                "src.agents.skills.executor.get_llm", return_value=fake_llm
+            ) as mock_get_llm,
+        ):
+            main_llm = MagicMock()
+            main_llm.model_name = "main-model"
+            exe = SkillExecutor(main_llm=main_llm)
+            rec = _record(
+                context=SkillContext.FORK,
+                agent_prompt="人格",
+                inline_prompt=None,
+                model=None,
+                thinking=None,
+            )
+            await exe.execute(rec, task="分析")
+    finally:
+        current_request_ctx.reset(token)
+    kwargs = mock_get_llm.call_args.kwargs
+    assert kwargs["model"] == "main-model"
+    assert kwargs["extra_body"] == {"enable_thinking": True}
+
+
+@pytest.mark.asyncio
+async def test_fork_thinking_follows_ctx_deep_thinking_false():
+    """thinking 未声明且 ctx.deep_thinking=False：新建 llm 带 enable_thinking=False（不落模型默认思考）。"""
+    fake_llm = MagicMock()
+    fake_sub = _fake_sub_agent(
+        _event("on_chat_model_start"),
+        _event("on_chat_model_stream", chunk=AIMessageChunk(content="分析")),
+        _event("on_chat_model_end", output=AIMessage(content="分析")),
+    )
+    ctx = RequestContext(session_id="s1")  # deep_thinking 默认 False
+    token = current_request_ctx.set(ctx)
+    try:
+        with (
+            patch(
+                "src.agents.skills.executor.create_react_agent", return_value=fake_sub
+            ),
+            patch(
+                "src.agents.skills.executor.get_llm", return_value=fake_llm
+            ) as mock_get_llm,
+        ):
+            main_llm = MagicMock()
+            main_llm.model_name = "main-model"
+            exe = SkillExecutor(main_llm=main_llm)
+            rec = _record(
+                context=SkillContext.FORK,
+                agent_prompt="人格",
+                inline_prompt=None,
+                model=None,
+                thinking=None,
+            )
+            await exe.execute(rec, task="分析")
+    finally:
+        current_request_ctx.reset(token)
+    assert mock_get_llm.call_args.kwargs["extra_body"] == {"enable_thinking": False}
+
+
+@pytest.mark.asyncio
+async def test_fork_thinking_none_without_ctx_reuses_main_llm():
+    """无请求上下文时 thinking=None：维持原行为——复用主 agent llm（不新建）。"""
+    fake_sub = _fake_sub_agent(
+        _event("on_chat_model_start"),
+        _event("on_chat_model_stream", chunk=AIMessageChunk(content="分析")),
+        _event("on_chat_model_end", output=AIMessage(content="分析")),
+    )
+    with (
+        patch(
+            "src.agents.skills.executor.create_react_agent", return_value=fake_sub
+        ) as mock_create,
+        patch("src.agents.skills.executor.get_llm") as mock_get_llm,
+    ):
+        main_llm = MagicMock()
+        main_llm.model_name = "main-model"
+        exe = SkillExecutor(main_llm=main_llm)
+        rec = _record(
+            context=SkillContext.FORK,
+            agent_prompt="人格",
+            inline_prompt=None,
+            model=None,
+            thinking=None,
+        )
+        await exe.execute(rec, task="分析")
+    mock_get_llm.assert_not_called()
+    args, _kwargs = mock_create.call_args
+    assert args[0] is main_llm
+
+
+@pytest.mark.asyncio
+async def test_fork_total_timeout_interrupts_with_reason():
+    """总时长超时（deep_thinking=False 档 240s，测试收紧）：中断并返回超时文案。"""
+    import src.agents.skills.executor as exec_mod
+
+    async def _never(*a, **k):
+        await asyncio.sleep(3600)
+        yield  # pragma: no cover
+
+    fake = MagicMock()
+    fake.astream_events = _never
+    ctx = RequestContext(session_id="s1")  # deep_thinking=False → 走默认档
+    token = current_request_ctx.set(ctx)
+    try:
+        with (
+            patch("src.agents.skills.executor.create_react_agent", return_value=fake),
+            patch.object(exec_mod.settings, "DELEGATE_TOTAL_TIMEOUT_S", 0.05),
+        ):
+            exe = SkillExecutor(main_llm=MagicMock())
+            rec = _record(
+                context=SkillContext.FORK, agent_prompt="人格", inline_prompt=None
+            )
+            out = await exe.execute(rec, task="分析")
+    finally:
+        current_request_ctx.reset(token)
+    assert out == SSEInteractionTexts.DELEGATE_TIMEOUT_TEXT
+    assert ctx.fork_stop_reason == "total"
+
+
+@pytest.mark.asyncio
+async def test_fork_idle_timeout_interrupts():
+    """事件级空闲超时：两事件间隔超 DELEGATE_MAX_IDLE_S → reason=idle。"""
+    import src.agents.skills.executor as exec_mod
+
+    async def _slow_events(*a, **k):
+        yield _event("on_chat_model_stream", chunk=AIMessageChunk(content="思考片段"))
+        await asyncio.sleep(5)  # 超过被收紧的空闲阈值
+        yield _event("on_chat_model_stream", chunk=AIMessageChunk(content="后续"))
+
+    fake = MagicMock()
+    fake.astream_events = _slow_events
+    ctx = RequestContext(session_id="s1")
+    token = current_request_ctx.set(ctx)
+    try:
+        with (
+            patch("src.agents.skills.executor.create_react_agent", return_value=fake),
+            patch.object(exec_mod.settings, "DELEGATE_MAX_IDLE_S", 0.1),
+        ):
+            exe = SkillExecutor(main_llm=MagicMock())
+            rec = _record(
+                context=SkillContext.FORK, agent_prompt="人格", inline_prompt=None
+            )
+            out = await exe.execute(rec, task="分析")
+    finally:
+        current_request_ctx.reset(token)
+    assert out == SSEInteractionTexts.DELEGATE_TIMEOUT_TEXT
+    assert ctx.fork_stop_reason == "idle"
+
+
+@pytest.mark.asyncio
+async def test_fork_turn_limit_interrupts():
+    """turn 上限：模型 start 事件超 max_iterations（测试设 1）→ reason=turn。"""
+    fake_sub = _fake_sub_agent(
+        _event("on_chat_model_start"),
+        _event("on_chat_model_start"),  # 第二轮
+        _event("on_chat_model_end", output=AIMessage(content="x")),
+    )
+    ctx = RequestContext(session_id="s1")
+    token = current_request_ctx.set(ctx)
+    try:
+        with patch(
+            "src.agents.skills.executor.create_react_agent", return_value=fake_sub
+        ):
+            exe = SkillExecutor(main_llm=MagicMock())
+            rec = _record(
+                context=SkillContext.FORK,
+                agent_prompt="人格",
+                inline_prompt=None,
+                max_iterations=1,
+            )
+            out = await exe.execute(rec, task="分析")
+    finally:
+        current_request_ctx.reset(token)
+    assert out == SSEInteractionTexts.DELEGATE_TIMEOUT_TEXT
+    assert ctx.fork_stop_reason == "turn"
+
+
+@pytest.mark.asyncio
+async def test_fork_cancel_aborts_with_cancelled():
+    """请求取消：ctx.abort_signal 置位 → fork 抛 CancelledError、reason=cancelled。"""
+    ctx = RequestContext(session_id="s1")
+    ctx.abort_signal.set()
+    token = current_request_ctx.set(ctx)
+    try:
+        fake_sub = _fake_sub_agent(
+            _event("on_chat_model_stream", chunk=AIMessageChunk(content="a")),
+            _event("on_chat_model_stream", chunk=AIMessageChunk(content="b")),
+        )
+        with patch(
+            "src.agents.skills.executor.create_react_agent", return_value=fake_sub
+        ):
+            exe = SkillExecutor(main_llm=MagicMock())
+            rec = _record(
+                context=SkillContext.FORK, agent_prompt="人格", inline_prompt=None
+            )
+            with pytest.raises(asyncio.CancelledError):
+                await exe.execute(rec, task="分析")
+    finally:
+        current_request_ctx.reset(token)
+    assert ctx.fork_stop_reason == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_fork_pushes_delegate_delta_events():
+    """fork 增量经 ctx.clarify_channel 投 delegate delta（thinking/content）；带 delegate_id。"""
+    chunk1 = AIMessageChunk(
+        content="", additional_kwargs={"reasoning_content": "思考A"}
+    )
+    chunk2 = AIMessageChunk(content="正文B")
+    fake_sub = _fake_sub_agent(
+        _event("on_chat_model_start"),
+        _event("on_chat_model_stream", chunk=chunk1),
+        _event("on_chat_model_stream", chunk=chunk2),
+        _event(
+            "on_chat_model_end",
+            output=AIMessage(
+                content="正文B",
+                usage_metadata={
+                    "input_tokens": 10,
+                    "output_tokens": 5,
+                    "total_tokens": 15,
+                },
+            ),
+        ),
+    )
+    ctx = RequestContext(session_id="s1")
+    ctx.delegate_id = "abc123"
+    token = current_request_ctx.set(ctx)
+    try:
+        with patch(
+            "src.agents.skills.executor.create_react_agent", return_value=fake_sub
+        ):
+            exe = SkillExecutor(main_llm=MagicMock())
+            rec = _record(
+                context=SkillContext.FORK, agent_prompt="人格", inline_prompt=None
+            )
+            out = await exe.execute(rec, task="分析")
+    finally:
+        current_request_ctx.reset(token)
+    deltas = [it for it in _drain_channel(ctx) if it.get("type") == "delegate"]
+    kinds = [it["kind"] for it in deltas if it["action"] == "delta"]
+    assert "thinking" in kinds and "content" in kinds
+    assert any(it.get("delegate_id") == "abc123" for it in deltas)
+    assert "正文B" in out
+
+
+@pytest.mark.asyncio
+async def test_fork_result_truncated():
+    """fork 结果超 DELEGATE_RESULT_LIMIT → 截断并带总字数提示。"""
+    long_text = "字" * 3000
+    fake_sub = _fake_sub_agent(
+        _event("on_chat_model_start"),
+        _event("on_chat_model_stream", chunk=AIMessageChunk(content=long_text)),
+        _event("on_chat_model_end", output=AIMessage(content=long_text)),
+    )
+    with patch("src.agents.skills.executor.create_react_agent", return_value=fake_sub):
+        exe = SkillExecutor(main_llm=MagicMock())
+        rec = _record(
+            context=SkillContext.FORK, agent_prompt="人格", inline_prompt=None
+        )
+        out = await exe.execute(rec, task="分析")
+    assert "3000" in out
+    assert out.startswith(SSEInteractionTexts.DELEGATE_TRUNCATED_PREFIX[:10])
 
 
 # ---- fork 回调隔离回归（final review Critical） ----
@@ -452,8 +734,11 @@ async def test_fork_with_llm_lacking_model_name_does_not_crash():
         """无 model_name 属性的极简 llm 替身。"""
 
     llm = _NoModelNameLLM()
-    fake_sub = AsyncMock()
-    fake_sub.ainvoke.return_value = {"messages": [MagicMock(content="分析")]}
+    fake_sub = _fake_sub_agent(
+        _event("on_chat_model_start"),
+        _event("on_chat_model_stream", chunk=AIMessageChunk(content="分析")),
+        _event("on_chat_model_end", output=AIMessage(content="分析")),
+    )
 
     with (
         patch(
