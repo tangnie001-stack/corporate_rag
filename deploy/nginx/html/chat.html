@@ -1343,7 +1343,7 @@ function renderTaskBoard() {
           <span class="delegate-dot ${meta.dot}"></span>
           <span class="task-title">${escapeHtml(t.title)}</span>
           ${typeBadge}
-          <span class="task-status">${meta.label}</span>
+          <span class="task-status">${escapeHtml(meta.label)}</span>
         </div>
         ${stage}${activity}${summary}${note}
         <div class="task-time">${escapeHtml(new Date(t.updated_at * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }))}</div>
@@ -2164,6 +2164,8 @@ function stopGeneration() {
     state.abortController.abort();
     state.abortController = null;
   }
+  // 本地 abort 使 done(cancelled) 事件不可达：须在 finalizeAnswer 复位 delegateSections 前兜底置取消态
+  finalizePendingDelegateSections('cancelled');
   finalizeAnswer();
   closeThinkRow();
   state.current = STATE.IDLE;
@@ -2196,6 +2198,7 @@ function resetStreamingState() {
   }
   streamBuffer = '';
   streamBubble = null;
+  resetDelegateSections();
   hideComposer();
   state.current = STATE.IDLE;
   setInputState(true);
