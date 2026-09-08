@@ -448,6 +448,36 @@
   .drawer-item .snippet { margin-top: 4px; font-size: 12.5px; color: var(--text-secondary); line-height: 1.6; }
   .drawer-empty { padding: 48px 18px; text-align: center; color: var(--text-muted); font-size: 13px; }
 
+  /* 任务/进度看板（task-board change；与引用抽屉互斥单开，共用 drawerBackdrop） */
+  .task-chip {
+    display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px;
+    background: transparent; border: 1px solid var(--border); border-radius: 20px;
+    cursor: pointer; font-size: 12.5px; color: var(--text-secondary); transition: all 150ms;
+    font-family: var(--font-body); flex-shrink: 0;
+  }
+  .task-chip:hover { border-color: var(--primary); color: var(--primary); }
+  .task-chip .task-count { display: none; }
+  .task-chip.has-running .task-count {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px;
+    background: var(--primary); color: #fff; font-size: 10.5px;
+  }
+  .task-badge { font-size: 10px; padding: 1px 6px; border-radius: 4px; }
+  .task-badge.exec { background: var(--primary-light); color: var(--primary); }
+  .task-badge.plan { border: 1px solid var(--border); color: var(--text-secondary); }
+  .task-item { padding: 12px 18px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 4px; }
+  .task-item:last-child { border-bottom: none; }
+  .task-headline { display: flex; align-items: center; gap: 8px; }
+  .task-title { flex: 1; font-weight: 500; font-size: 13px; min-width: 0; }
+  .task-status { font-size: 11px; color: var(--text-secondary); }
+  .task-note, .task-stage, .task-summary { font-size: 12px; color: var(--text-secondary); }
+  .task-activity {
+    font-size: 12px; color: var(--text-secondary); line-height: 1.5;
+    max-height: 44px; overflow: hidden; white-space: pre-wrap; word-break: break-word;
+  }
+  .task-time { font-size: 11px; color: var(--text-muted); }
+  /* 面板复用 .cite-drawer 布局：aside 元素挂 cite-drawer + task-panel 双类，样式不需重复 */
+
   /* 中断回答标记 */
   .interrupted-tag {
     display: inline-block; font-size: 12px; color: var(--text-secondary);
@@ -695,6 +725,12 @@
         <div id="newComposerContainer" class="composer-container"></div>
         <textarea id="newInput" class="composer-input" placeholder="描述你想查询的内容，例如「腾讯这几年的业绩怎么样」"></textarea>
         <div class="composer-bottom">
+          <!-- 任务/进度看板 chip（实例②：新对话页，question 常在此发起；与实例①共享面板与 state） -->
+          <button type="button" class="task-chip" onclick="toggleTaskBoard()" aria-expanded="false" title="任务/进度">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg>
+            <span>任务</span>
+            <span class="task-count">0</span>
+          </button>
           <button type="button" id="newThinking" class="thinking-chip" aria-pressed="false" title="开启后模型先思考再回答，更准确但响应更慢">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 1 1 7.072 0l-.548.547A3.374 3.374 0 0 0 14 18.469V19a2 2 0 1 1-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
             <span>深度思考</span>
@@ -720,6 +756,12 @@
           <span class="kb-info" id="headerKbInfo"></span>
         </div>
         <div class="header-right">
+          <!-- 任务/进度看板 chip（实例①：历史对话页；与实例②共享同一面板与 state） -->
+          <button type="button" class="task-chip" onclick="toggleTaskBoard()" aria-expanded="false" title="任务/进度">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg>
+            <span>任务</span>
+            <span class="task-count">0</span>
+          </button>
           <span class="preview-tag">预览版</span>
         </div>
       </header>
@@ -754,7 +796,7 @@
 </div>
 
 <!-- 右侧引用抽屉：点击来源横条 / 正文引用号滑出，展示本条回复全部引用，不遮挡对话区 -->
-<div class="drawer-backdrop" id="drawerBackdrop" onclick="closeCiteDrawer()"></div>
+<div class="drawer-backdrop" id="drawerBackdrop" onclick="closeAllDrawers()"></div>
 <aside class="cite-drawer" id="citeDrawer" aria-label="引用来源" role="dialog" aria-hidden="true">
   <div class="drawer-head">
     <span class="head-icon">
@@ -766,6 +808,20 @@
     </button>
   </div>
   <div class="drawer-list" id="drawerList"></div>
+</aside>
+
+<!-- 右侧任务/进度面板：复用 .cite-drawer 布局与 drawerBackdrop，与引用抽屉互斥单开（只读，数据源 = task 事件 + 快照） -->
+<aside class="cite-drawer task-panel" id="taskPanel" aria-label="任务/进度" role="dialog" aria-hidden="true">
+  <div class="drawer-head">
+    <span class="head-icon">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg>
+    </span>
+    <h3>任务/进度</h3>
+    <button class="drawer-close" type="button" onclick="closeTaskBoard()" title="关闭">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+  </div>
+  <div class="drawer-list" id="taskBoardList"></div>
 </aside>
 
 <script src="vendor/marked.min.js"></script>
@@ -1174,6 +1230,7 @@ function attachHistoryCitations(host, rawSources) {
 }
 
 function openCiteDrawer(citations, focusNum) {
+  closeTaskBoard(); // 与任务/进度面板互斥单开（task-board change）
   const list = document.getElementById('drawerList');
   if (!list) return;
   const items = citations || [];
@@ -1205,6 +1262,146 @@ function closeCiteDrawer() {
   if (backdrop) backdrop.classList.remove('show');
   if (drawer) drawer.setAttribute('aria-hidden', 'true');
 }
+
+// ── 任务/进度看板（task-board change；只读，数据源 = SSE task 事件 + 快照接口）──
+const taskBoard = { items: new Map(), open: false };
+
+// delegate_id → 由 delegate 增量事件（core）实时派生的活动摘要文本（只读展示层，
+// 不写回后端；design D5：注册表 stage 粒度 coarse，实时摘要由前端从 delegate 事件派生）
+const delegateActivity = new Map();
+
+function appendDelegateActivity(delegateId, text) {
+  if (!delegateId || !text) return;
+  const prev = delegateActivity.get(delegateId) || '';
+  const next = (prev + text).slice(-800);  // 单条活动摘要上限，防无限累积
+  delegateActivity.set(delegateId, next);
+  if (taskBoard.open) renderTaskBoard();
+}
+
+function upsertTask(data) {
+  const t = (data && data.task) || null;
+  if (!t || !t.task_id) return;
+  taskBoard.items.set(t.task_id, t);
+  updateTaskCount();
+  if (taskBoard.open) renderTaskBoard();
+}
+
+function removeTask(taskId) {
+  taskBoard.items.delete(taskId);
+  updateTaskCount();
+  if (taskBoard.open) renderTaskBoard();
+}
+
+function taskChipEls() {
+  return Array.from(document.querySelectorAll('.task-chip'));
+}
+
+function updateTaskCount() {
+  const running = Array.from(taskBoard.items.values()).filter(t => t.status === 'running' || t.status === 'pending');
+  taskChipEls().forEach(chip => chip.classList.toggle('has-running', running.length > 0));
+  taskChipEls().forEach(chip => {
+    const count = chip.querySelector('.task-count');
+    if (count) count.textContent = String(running.length);
+  });
+}
+
+function taskStatusMeta(t) {
+  // status → 圆点 class / 胶囊文案 / 中断原因（双通道，非仅颜色）
+  if (t.status === 'running' || t.status === 'pending') return { dot: 'running', label: '进行中' };
+  if (t.status === 'done') return { dot: 'done', label: '完成' };
+  if (t.status === 'cancelled') return { dot: 'error', label: '已取消' };
+  if (t.status === 'timeout') {
+    const reasonText = { idle: '空闲超时', total: '超时', turn: '轮次上限' }[t.reason] || t.reason || '超时';
+    return { dot: 'error', label: '超时', note: reasonText };
+  }
+  if (t.status === 'failed') return { dot: 'error', label: '失败', note: t.reason || '' };
+  return { dot: 'done', label: t.status };
+}
+
+function renderTaskBoard() {
+  const list = $('taskBoardList');
+  if (!list) return;
+  const items = Array.from(taskBoard.items.values()).sort((a, b) => b.updated_at - a.updated_at);
+  if (!items.length) {
+    list.innerHTML = '<div class="drawer-empty">暂无进行中的任务</div>';
+    return;
+  }
+  list.innerHTML = items.map(t => {
+    const meta = taskStatusMeta(t);
+    const typeBadge = t.type === 'execution'
+      ? '<span class="task-badge exec">执行</span>'
+      : '<span class="task-badge plan">计划</span>';
+    const note = meta.note ? `<div class="task-note">${escapeHtml(meta.note)}</div>` : '';
+    // execution 实时活动摘要：前端从 delegate 增量事件派生（delegateActivity），不依赖后端 stage
+    const activity = (t.type === 'execution' && delegateActivity.get(t.task_id))
+      ? `<div class="task-activity">${escapeHtml(delegateActivity.get(t.task_id))}</div>` : '';
+    const summary = t.summary ? `<div class="task-summary">${escapeHtml(t.summary)}</div>` : '';
+    const stage = t.stage && t.status !== 'done' ? `<div class="task-stage">${escapeHtml(t.stage)}</div>` : '';
+    return `
+      <div class="task-item" data-task-id="${escapeHtml(t.task_id)}">
+        <div class="task-headline">
+          <span class="delegate-dot ${meta.dot}"></span>
+          <span class="task-title">${escapeHtml(t.title)}</span>
+          ${typeBadge}
+          <span class="task-status">${meta.label}</span>
+        </div>
+        ${stage}${activity}${summary}${note}
+        <div class="task-time">${escapeHtml(new Date(t.updated_at * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }))}</div>
+      </div>`;
+  }).join('');
+}
+
+function openTaskBoard() {
+  taskBoard.open = true;
+  closeCiteDrawer();            // 与引用抽屉互斥单开
+  const p = $('taskPanel');
+  if (p) { p.classList.add('open'); p.setAttribute('aria-hidden', 'false'); }
+  taskChipEls().forEach(chip => chip.setAttribute('aria-expanded', 'true'));
+  const backdrop = $('drawerBackdrop');
+  if (backdrop) backdrop.classList.add('show');  // 与引用抽屉共用同一 backdrop
+  renderTaskBoard();
+}
+
+function closeTaskBoard() {
+  taskBoard.open = false;
+  const p = $('taskPanel');
+  if (p) { p.classList.remove('open'); p.setAttribute('aria-hidden', 'true'); }
+  taskChipEls().forEach(chip => chip.setAttribute('aria-expanded', 'false'));
+  const backdrop = $('drawerBackdrop');
+  if (backdrop && !$('citeDrawer').classList.contains('open')) {
+    backdrop.classList.remove('show');
+  }
+}
+
+// 统一关闭任务看板与引用抽屉（drawerBackdrop onclick 用；Esc 也走这里）
+function closeAllDrawers() {
+  closeTaskBoard();
+  closeCiteDrawer();
+}
+
+function toggleTaskBoard() {
+  if (taskBoard.open) closeTaskBoard();
+  else openTaskBoard();
+}
+
+async function loadTaskSnapshot(sessionId) {
+  try {
+    const res = await fetch('/api/sessions/tasks?session_id=' + encodeURIComponent(sessionId), {
+      method: 'GET',
+      headers: { 'X-Trace-ID': generateTraceId() },
+    });
+    const body = await res.json().catch(() => null);
+    if (body && body.code === 'SUCCESS' && Array.isArray(body.data)) {
+      taskBoard.items.clear();
+      delegateActivity.clear();  // 快照覆盖为权威态，活动摘要由 delegate 增量重建
+      body.data.forEach(t => taskBoard.items.set(t.task_id, t));
+      updateTaskCount();
+      if (taskBoard.open) renderTaskBoard();
+    }
+  } catch (e) { /* 快照拉取失败静默：运行期靠 task 事件增量 */ }
+}
+
+// Esc 关闭复用引用抽屉既有 keydown（下方 Escape 分支补 taskBoard.open），不重复注册监听
 
 // 正文内联引用号：把 AI 回复 markdown 正文里的「[n]」（n 属于本回复引用集）转为可点击引用号，
 // 点击打开抽屉并定位到对应条目。流式渲染期间不处理（整段重渲染会覆盖），仅在 finalize 后做一次。
@@ -1747,8 +1944,20 @@ function buildStreamHandlers() {
           ensureDelegateSection(data);
         } else if (data.action === 'delta') {
           appendDelegateDelta(data);
+          // 看板实时活动摘要：execution 条目的 task_id=delegate_id，delta 派生到 activity
+          appendDelegateActivity(data.delegate_id, data.delta || '');
         } else if (data.action === 'end') {
           finalizeDelegateSection(data);
+        }
+      } catch (err) { /* ignore */ }
+    },
+    task: (data) => {
+      try {
+        state.lastSeq = (data.seq !== undefined) ? data.seq : state.lastSeq;
+        if (data.action === 'terminal' && data.task) {
+          upsertTask(data);   // 终态保留在面板（状态胶囊置终态），不删条目
+        } else if (data.action === 'created' || data.action === 'updated') {
+          upsertTask(data);
         }
       } catch (err) { /* ignore */ }
     },
@@ -2253,6 +2462,7 @@ async function switchSession(sessionId) {
   showHistoryPage();
   loadSessions();
   await loadSessionMessages(sessionId);
+  loadTaskSnapshot(sessionId); // 任务/进度看板快照（task-board change）
   if (window.innerWidth < 768) toggleSidebar();
 }
 
@@ -2266,6 +2476,10 @@ function newSession() {
   updateHeader('', '');
   showNewPage();
   loadSessions();
+  taskBoard.items.clear();      // 新会话看板清空（task-board change）
+  delegateActivity.clear();
+  updateTaskCount();
+  if (taskBoard.open) renderTaskBoard(); // 面板开着时同步清空展示，避免残留旧会话条目
   if (window.innerWidth < 768) toggleSidebar();
 }
 
@@ -2338,12 +2552,14 @@ function toggleUserDropdown(e) {
   }
 }
 
-// Esc 关闭引用抽屉
+// Esc 关闭引用抽屉 / 任务/进度面板（task-board 复用既有 keydown，不重复注册监听）
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     const drawer = document.getElementById('citeDrawer');
     if (drawer && drawer.classList.contains('open')) {
       closeCiteDrawer();
+    } else if (taskBoard.open) {
+      closeTaskBoard();
     }
   }
 });
@@ -2410,6 +2626,7 @@ async function handleLogout() {
     const known = listOk ? !!sessionMap[state.sessionId] : hadSavedSession;
     if (!known) {
       showNewPage();
+      loadTaskSnapshot(state.sessionId); // 注册表可能残留异常条目，快照加载可无害覆盖（task-board change）
       return;
     }
     loadSessionMessages(state.sessionId).then((count) => {
@@ -2422,6 +2639,9 @@ async function handleLogout() {
       } else {
         showNewPage();
       }
+      // 刷新恢复：历史与空会话均以快照初始化看板；若在 generating，resume 流中的
+      // task 事件增量会继续 upsert（task-board change）
+      loadTaskSnapshot(state.sessionId);
     });
   });
 })();
