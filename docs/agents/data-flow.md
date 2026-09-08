@@ -93,6 +93,32 @@ fork 过程事件与主图事件分两条通道汇聚到同一 SSE 缓冲，共�
 resume 经 `from_payload` 原样回放，保证过程/终态不丢；过程原文不落库，刷新/历史重载
 不恢复过程区。
 
+### 看板数据流（task registry / SSE task 事件 / 快照接口）
+
+任务看板以进程内 `SessionTaskRegistry`（`src/chat/task_registry.py`，单例
+`task_registry`，key 含 session_id）为状态源，与 streaming_manager 同生命周期假设
+（不落库；delegate-hardening-observability core 之上，TTL 口径见
+api_contract.md「task 事件详情」）：
+
+```
+写路径：create_task / update_task / mark_terminal（Task 工具 plan 项、delegate fork execution 项）
+  → emit_task_event（action=created|updated|terminal）→ streaming buffer → SSE event: task 实时推前端
+读路径：GET /api/sessions/tasks?session_id=（页面刷新/切会话）
+  → task_registry.sweep_expired() → list_session() → data=任务快照列表（权威源，无任务=[]）
+```
+
+- **execution 条目自动登记**：delegate_task fork 分支执行时 `create_task(type=execution,
+  task_id=delegate_id)` 建 execution 项，终态/中断由 `mark_terminal` 置 status + reason
+  （与 delegate end 事件共用 DelegateStopReason 词表）；plan 条目由主 agent Task 工具
+  create/update/output/stop 驱动
+- **执行活动摘要由前端从 delegate 增量派生**：SSE `task` 事件只携带 coarse `stage`/
+  `summary`（start/end/中断边界更新，不做逐 delta 写入）；实时"分析过程"由前端按
+  delegate_id 从 delegate 事件（thinking/content 增量）渲染，两者按 delegate_id 关联
+- **事件=增量提示、快照=权威**：注册表 TTL 30min 大于事件缓冲 TTL 5min——5min 外 task
+  事件已不可达，刷新/切会话一律以快照接口为准，勿因缓冲被清误判任务消失
+- **前端只读**：看板无写入口；`task_stop` 仅收敛置 cancelled，运行中 delegate 取消走
+  cancel 端点（收敛语义与契约见 api_contract.md「task 事件详情」）
+
 ### 链路 2a：绑 KB 问答链（RAG）
 
 - 触发条件：`kb_id` 非空（前端已绑定知识库），`ctx.kb_bound=True`。

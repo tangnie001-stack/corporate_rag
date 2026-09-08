@@ -20,7 +20,8 @@
 
 路由统一挂载在 `/api` 前缀下。
 除以下 GET 端点外，其余端点使用 POST 方法：`/api/health`（健康检查）、
-`/api/sessions/events`（SSE 断点续接）、`/api/sessions/task-status`（任务状态查询）。
+`/api/sessions/events`（SSE 断点续接）、`/api/sessions/tasks`（任务快照）、
+`/api/sessions/task-status`（任务状态查询）。
 请求头 `X-Trace-ID` 可选传，响应头含 `X-Trace-ID`。
 
 ### 2.1 知识库
@@ -248,6 +249,51 @@ failed=失败 / cancelled=已取消）——不再无条件推"完成"。
 作为工具返回**纯文本**回主 agent 整合（不带 [n] 引用，引用只指向主 agent 自身检索来源），
 不出现在 delegate 事件载荷中。
 
+### `task` 事件详情
+
+任务/进度看板增量事件（task-board change）。由进程内 `SessionTaskRegistry`
+（`src/chat/task_registry.py`，模块级单例 `task_registry`）在 create/update/mark_terminal
+变更后经 `emit_task_event` 写该 session 事件缓冲，SSE 推前端；同入缓冲，resume 经
+`from_payload` 原样回放。两类条目来源：`type=plan`=主 agent 经 Task 工具建项；
+`type=execution`=delegate_task fork 自动登记（`task_id=delegate_id`，与 delegate 事件
+贯穿）。前端看板只读，无写入口。
+
+```json
+event: task
+data: {"action": "created", "task": {"task_id": "a1b2c3d4", "title": "财务建模专家", "type": "execution", "status": "running", "stage": "分析中", "summary": "正在分析 2024 营收结构…", "delegate_id": "a1b2c3d4", "dependencies": [], "reason": "", "created_at": 1780000000.0, "updated_at": 1780000000.0}}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `action` | str | `created`（建项）\| `updated`（非终态字段更新）\| `terminal`（进入终态集合 done/failed/timeout/cancelled；由 `update_task` 判定，cancelled 也属终态） |
+| `task` | dict | 任务快照（`TaskItem.to_dict()`），字段同下 |
+
+`task` 快照字段（与 `GET /api/sessions/tasks` 返回项一致，见 2.4.7）：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `task_id` | str | 任务 id：plan=工具生成短 uuid；execution=delegate_id |
+| `title` | str | 标题（LLM 提供或 skill 名） |
+| `type` | str | `plan`（主 agent Task 工具建项）/ `execution`（delegate 自动登记） |
+| `status` | str | `pending` / `running` / `done` / `failed` / `timeout` / `cancelled`（后四者为终态） |
+| `stage` | str | coarse 阶段（delegate start/end/中断边界更新，不做逐 delta 写入） |
+| `summary` | str | 摘要文本（plan 进展 / execution 活动说明） |
+| `delegate_id` | str | execution 专属（= task_id，关联"分析过程"折叠区）；plan 为空串 |
+| `dependencies` | list[str] | plan 依赖任务 id 列表 |
+| `reason` | str | 中断原因（`DelegateStopReason` 值；normal 为空串） |
+| `created_at` / `updated_at` | float | unix 时间戳（updated_at 供 TTL 清理排序） |
+
+> **TTL 口径（事件=增量提示、快照=权威）**：注册表条目 TTL 30min（`TASK_TTL_SECONDS`，
+> 惰性清理）大于事件缓冲 TTL 5min（streaming buffer 300s）——SSE `task` 事件只保证 5min
+> 内可达，更长窗口内权威数据源是 `GET /api/sessions/tasks` 快照接口（拉取前先 sweep）。
+> 前端 resume/刷新以快照校正，勿因缓冲被清（无 task 事件回放）而误判任务消失。
+>
+> **收敛语义（前端只读）**：`task_stop`（Task 工具）不置 `ctx.abort_signal`——阻塞式 fork
+> 下主 agent 无法在 delegate 运行期间并行停任务，跨请求/竞态 set abort 会误取消整个主
+> 请求；故 task_stop 仅对非终态条目（含残留 running/pending）置 cancelled。运行中
+> delegate 的真实取消收敛到 `POST /api/sessions/cancel`（core：fork 响应同一
+> abort_signal，中断原因=cancelled，delegate end 与注册表终态一致）。
+
 追问路径（~~当 classify 检测到缺失实体时~~ ⚠️ 已退役，agent 化后由 `ask_user` 事件 + `POST /chat/clarify-answer` 接管，见下文 2.3.2 与 ask_user 事件详情）：
 
 ```json
@@ -267,6 +313,7 @@ data: {}
 | `token` | LLM 生成中 | LLM 生成文本片段，前端逐段追加 |
 | **`reasoning`** | **agent 节点 LLM 流式输出思考增量（enable_thinking=true 且模型返回 reasoning_content，经 ChatQwenWithReasoning 提取）** | **思考过程增量（data: {"delta": "..."}），前端累积渲染 Think 折叠行；每轮 LLM 调用一个，默认收起；收到正文 token/状态/ask_user/abstention/done 时定型** |
 | **`delegate`** | **delegate_task 委派 fork skill 时产生（inline 命中不推）** | **fork 子代理过程事件：`action=start`（开始）\| `delta`（过程增量，`kind=thinking`\|`content`、`delta`=增量文本）\| `end`（结束，`ok` 区分完成/中断）。前端按 delegate_id 分节渲染"分析过程"折叠区，增量不进主 token 流/full_answer（详见「delegate 事件详情」）** |
+| **`task`** | **任务注册表 create/update/mark_terminal 变更（src/chat/task_registry.py 的 `emit_task_event`）** | **任务/进度看板增量事件：`action=created`（建项）\| `updated`（非终态更新）\| `terminal`（进入终态）；`task`=任务快照 dict（task_id/title/type/status/stage/summary/delegate_id/dependencies/reason/created_at/updated_at，`TaskItem.to_dict()`）。前端据此增量渲染看板（详见「task 事件详情」）** |
 | `citation` | format 节点完成 | 引用来源，按 source+page 去重；data 含 `kind`（`kb` 知识库 / `web` 网络搜索，默认 `kb`），前端按来源类型区分展示 |
 | **`clarification`** | ~~classify 检测到缺失实体~~ | **已退役**：classify 已删，无预判来源，不再生产，前端已由 `ask_user` 接管 |
 | **`ask_user`** | **ask_user 工具被调用（agent 需要用户补充信息）** | **问题卡片事件，前端 composer 接管输入区；提交答案后同流续答** |
@@ -524,6 +571,29 @@ Body: `{"session_id": "sid"}`
 > ⚠️ 本端点只置位 abort_signal，后台任务真正中断还需生成路径消费该信号
 > （M4 接线）。信号置位后由 `_run_with_finalize` 的取消分支写 interrupted
 > 部分回答与 `done(cancelled)` 终态。
+
+#### 2.4.7 `GET /api/sessions/tasks?session_id={sid}`
+
+任务看板快照读取：页面刷新/切换会话后初始化看板。权限与 sessions/events 一致
+（会话存在且属于当前用户，无权返回 404 `SESSION_NOT_FOUND`）。仅读运行期进程内
+注册表（`task_registry`），不落库；**无任务返回空列表 `[]`**。拉取前先 `sweep_expired`
+（惰性清理仅在 create_task 时触发，只读快照需主动清理超 TTL 条目）。
+
+| 参数 | 说明 |
+|------|------|
+| `session_id` | 会话 ID |
+
+Success:
+```json
+{"code": "SUCCESS", "message": "操作成功", "data": [
+  {"task_id": "a1b2c3d4", "title": "财务建模专家", "type": "execution", "status": "done", "stage": "", "summary": "分析完成", "delegate_id": "a1b2c3d4", "dependencies": [], "reason": "", "created_at": 1780000000.0, "updated_at": 1780000000.0}
+]}
+```
+
+`data` 为该会话全部任务条目的快照 dict 列表（`TaskItem.to_dict()`，按 `updated_at`
+降序），每项字段与 SSE `task` 事件 payload 的 `task` 一致（见「task 事件详情」）。
+作为**权威数据源**补齐 SSE `task` 事件 5min 缓冲窗口之外的看板状态（事件=增量提示、
+快照=权威，TTL 口径见「task 事件详情」）。
 
 ### 2.5 评估报告
 
