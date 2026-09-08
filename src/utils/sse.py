@@ -213,6 +213,27 @@ class SSEDelegateEvent:
         }
 
 
+@dataclass
+class SSETaskEvent:
+    """任务/进度看板变更事件（task-board change）。
+
+    action=created：条目创建；updated：非终态字段更新；
+    terminal：条目进入终态（done/failed/timeout/cancelled）。
+    task 为任务快照 dict（TaskItem.to_dict()，含 type/delegate_id/status/stage/reason）。
+    """
+
+    action: str  # created | updated | terminal
+    task: dict  # TaskItem.to_dict() 快照
+    type: str = "task"  # SSE 事件名（event: task）
+    seq: int | None = field(
+        default=None, compare=False, repr=False
+    )  # SSE 帧序列号（消费者注入；None 不序列化，不参与相等比较）
+
+    def payload_for_buffer(self) -> dict:
+        """返回与 to_sse 的 data: 同构的缓冲 payload。"""
+        return {"action": self.action, "task": self.task}
+
+
 SSEEvent = (
     SSEStatusEvent
     | SSETokenEvent
@@ -224,6 +245,7 @@ SSEEvent = (
     | SSEAbstentionEvent  # abstention 转人工提示
     | SSEReasoningDeltaEvent  # reasoning 思考增量
     | SSEDelegateEvent  # delegate fork 子代理过程事件
+    | SSETaskEvent  # task 任务/进度看板变更事件
 )
 
 
@@ -421,6 +443,14 @@ def sse_delegate(event: SSEDelegateEvent) -> str:
     return f"event: delegate\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def sse_task(event: SSETaskEvent) -> str:
+    """构建 task 事件（任务/进度看板）。"""
+    data: dict = {"action": event.action, "task": event.task}
+    if event.seq is not None:
+        data["seq"] = event.seq
+    return f"event: task\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
 def to_sse(event: SSEEvent) -> str:
     """将结构化事件转为 SSE 格式字符串。
 
@@ -482,6 +512,8 @@ def to_sse(event: SSEEvent) -> str:
             )
         case SSEReasoningDeltaEvent(reasoning_delta=delta, seq=seq):
             return sse_reasoning_delta(delta, seq)
+        case SSETaskEvent(action=action, task=task, seq=seq):
+            return sse_task(SSETaskEvent(action=action, task=task, seq=seq))
 
 
 def from_payload(etype: str, payload: dict) -> "SSEEvent":
@@ -542,4 +574,6 @@ def from_payload(etype: str, payload: dict) -> "SSEEvent":
             ok=payload.get("ok", True),
             reason=payload.get("reason", ""),
         )
+    if etype == "task":
+        return SSETaskEvent(action=payload["action"], task=payload["task"])
     raise ValueError(f"unknown sse event type: {etype}")

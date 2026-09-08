@@ -17,6 +17,7 @@ from src.utils.sse import (
     SSEModelInfoEvent,
     SSEReasoningDeltaEvent,
     SSEStatusEvent,
+    SSETaskEvent,
     SSETokenEvent,
     from_payload,
     to_sse,
@@ -65,6 +66,22 @@ CASES = [
         action="end",
         ok=False,
         reason="idle",
+    ),
+    SSETaskEvent(
+        action="terminal",
+        task={
+            "task_id": "d1",
+            "title": "finance-analyst",
+            "type": "execution",
+            "status": "timeout",
+            "stage": "",
+            "summary": "",
+            "delegate_id": "d1",
+            "dependencies": [],
+            "reason": "idle",
+            "created_at": 1.0,
+            "updated_at": 2.0,
+        },
     ),
 ]
 
