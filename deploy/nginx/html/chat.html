@@ -1395,6 +1395,15 @@ async function loadTaskSnapshot(sessionId) {
   } catch (e) { /* 快照拉取失败静默：运行期靠 task 事件增量 */ }
 }
 
+// 清空看板数据与展示：进入无任务会话（新会话 / 空壳 id / 已删会话）时本地清空，
+// 避免残留上一个会话条目。请求快照接口在此类会话下必然 404，故不依赖快照覆盖。
+function clearTaskBoard() {
+  taskBoard.items.clear();
+  delegateActivity.clear();
+  updateTaskCount();
+  if (taskBoard.open) renderTaskBoard();
+}
+
 // Esc 关闭复用引用抽屉既有 keydown（下方 Escape 分支补 taskBoard.open），不重复注册监听
 
 // 正文内联引用号：把 AI 回复 markdown 正文里的「[n]」（n 属于本回复引用集）转为可点击引用号，
@@ -2473,10 +2482,7 @@ function newSession() {
   updateHeader('', '');
   showNewPage();
   loadSessions();
-  taskBoard.items.clear();      // 新会话看板清空（task-board change）
-  delegateActivity.clear();
-  updateTaskCount();
-  if (taskBoard.open) renderTaskBoard(); // 面板开着时同步清空展示，避免残留旧会话条目
+  clearTaskBoard(); // 新会话无任务，本地清空看板，避免残留上一个会话条目（task-board change）
   if (window.innerWidth < 768) toggleSidebar();
 }
 
@@ -2623,7 +2629,8 @@ async function handleLogout() {
     const known = listOk ? !!sessionMap[state.sessionId] : hadSavedSession;
     if (!known) {
       showNewPage();
-      loadTaskSnapshot(state.sessionId); // 注册表可能残留异常条目，快照加载可无害覆盖（task-board change）
+      // 空壳/已删会话无任务可读（快照接口对此类 id 必然 404），本地清空看板即可
+      clearTaskBoard();
       return;
     }
     loadSessionMessages(state.sessionId).then((count) => {
