@@ -4,9 +4,14 @@
 1. 调用前 reload registry（懒重载，design D16）
 2. 按 skill 命中分发：unknown → 返回"skill 不存在"+ 可用列表；inline → 返回
    方法论（主 agent 自己答）；fork → SkillExecutor 跑零工具子代理
-3. fork 执行期间经 ctx.clarify_channel 推 STAGE_DELEGATE 状态（start/end），
-   inline 命中不推（design D14）；不走外层 astream_events 映射
+3. fork 执行期间经 ctx.clarify_channel 推 delegate start/end 事件（带 delegate_id
+   与 ok/reason 终态；增量由 executor 投 delegate delta），inline 命中不推
+   （design D14）；不走外层 astream_events 映射
 """
+
+import asyncio
+import time
+import uuid
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
@@ -14,7 +19,9 @@ from pydantic import BaseModel, Field
 from src.agents.skills.executor import SkillExecutor
 from src.agents.skills.models import SkillContext
 from src.agents.skills.registry import SkillRegistry
-from src.config.const import SSEInteractionTexts
+from src.config.const import DelegateStopReason, SSEInteractionTexts
+from src.core import logging as core_logging
+from src.core.log_events import Event
 from src.infra.llm.request_context import current_request_ctx
 
 
@@ -76,24 +83,81 @@ def make_delegate_task(skill_registry: SkillRegistry, executor: SkillExecutor):
             return await executor.execute(record, task)
 
         ctx = current_request_ctx.get()
-        if ctx is not None:
+        if ctx is None:
+            return await executor.execute(record, task)
+        # fork 可观测（design D6/D8）：分配 delegate_id 贯穿 start/增量/end；
+        # ctx.fork_stop_reason 由 executor 中断时写，finally 读取并复位
+        delegate_id = uuid.uuid4().hex[:8]
+        ctx.delegate_id = delegate_id
+        ctx.fork_stop_reason = None
+        await ctx.clarify_channel.put(
+            {
+                "type": "delegate",
+                "action": "start",
+                "delegate_id": delegate_id,
+                "skill": record.name,
+                "kind": "",
+                "delta": "",
+                "ok": True,
+                "reason": "",
+            }
+        )
+        core_logging.log_event(
+            Event.DELEGATE_START,
+            delegate_id=delegate_id,
+            skill=record.name,
+            thinking="true" if ctx.deep_thinking else "false",
+            task_len=len(task),
+        )
+        started_at = time.monotonic()
+        result_len = 0  # 正常路径更新为 len(out)；异常/取消早退保持 0（finally 记录用，勿用 dir() hack）
+        stop_reason: str | None = None
+        ok = True
+        try:
+            try:
+                out = await executor.execute(record, task)
+                result_len = len(out)
+            except asyncio.CancelledError:
+                stop_reason = DelegateStopReason.CANCELLED
+                ok = False
+                raise
+            except Exception:  # 异常同样收敛为 failed 终态后上抛（ToolNode 转错误回喂）
+                stop_reason = DelegateStopReason.FAILED
+                ok = False
+                raise
+            # 正常返回但 executor 曾中断（idle/total/turn）→ reason 已写入 ctx
+            stop_reason = ctx.fork_stop_reason
+            ok = stop_reason is None
+            return out
+        finally:
+            reason = (
+                DelegateStopReason.NORMAL
+                if ok
+                else (stop_reason or DelegateStopReason.FAILED)
+            )
             await ctx.clarify_channel.put(
                 {
-                    "type": "status",
-                    "stage": SSEInteractionTexts.STAGE_DELEGATE,
-                    "phase": "start",
+                    "type": "delegate",
+                    "action": "end",
+                    "delegate_id": delegate_id,
+                    "skill": record.name,
+                    "kind": "",
+                    "delta": "",
+                    "ok": ok,
+                    # SSE 事件 reason 契约：正常完成 ok=True → reason 为空串；
+                    # 中断/失败 ok=False → reason 取 DelegateStopReason 值（sse.py SSEDelegateEvent）
+                    "reason": "" if ok else reason.value,
                 }
             )
-        try:
-            return await executor.execute(record, task)
-        finally:
-            if ctx is not None:
-                await ctx.clarify_channel.put(
-                    {
-                        "type": "status",
-                        "stage": SSEInteractionTexts.STAGE_DELEGATE,
-                        "phase": "end",
-                    }
-                )
+            core_logging.log_event(
+                Event.DELEGATE_END,
+                delegate_id=delegate_id,
+                ok="true" if ok else "false",
+                reason=reason.value,
+                elapsed_ms=int((time.monotonic() - started_at) * 1000),
+                result_len=result_len,
+            )
+            ctx.delegate_id = ""
+            ctx.fork_stop_reason = None
 
     return delegate_task

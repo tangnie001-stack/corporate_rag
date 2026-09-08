@@ -1,5 +1,6 @@
-"""测试 delegate_task 工具 — inline 命中 / fork 命中 / 未知 skill / SSE 状态推送。"""
+"""测试 delegate_task 工具 — inline 命中 / fork 命中 / 未知 skill / SSE delegate 事件推送。"""
 
+import asyncio
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -62,9 +63,47 @@ class _FakeRegistry(SkillRegistry):
         return text
 
 
+def _event(kind, chunk=None, output=None):
+    """构造 langgraph v2 事件 dict（fake astream_events 事件源元素）。"""
+    data = {}
+    if chunk is not None:
+        data["chunk"] = chunk
+    if output is not None:
+        data["output"] = output
+    return {
+        "event": kind,
+        "name": "agent",
+        "metadata": {"langgraph_node": "agent"},
+        "data": data,
+    }
+
+
+def _agen(*items):
+    async def gen():
+        for it in items:
+            yield it
+
+    return gen()
+
+
+def _fake_sub_agent(*items):
+    """astream_events 版 fake sub-agent（替换旧 fake_sub.ainvoke mock）。"""
+    fake = MagicMock()
+    fake.astream_events = lambda *a, **k: _agen(*items)
+    return fake
+
+
+def _drain_channel(ctx):
+    """排空 ctx.clarify_channel，按序返回全部事件。"""
+    out = []
+    while not ctx.clarify_channel.empty():
+        out.append(ctx.clarify_channel.get_nowait())
+    return out
+
+
 @pytest.mark.asyncio
 async def test_inline_hit_returns_prompt_and_no_status():
-    """inline 命中：返回渲染后方法论，不推 STAGE_DELEGATE 状态。"""
+    """inline 命中：返回渲染后方法论，不推 delegate start/end 事件（design D14）。"""
     rec = _record("finance-qa", SkillContext.INLINE, "请按规则作答：{task}")
     reg = _FakeRegistry({"finance-qa": rec})
     executor = SkillExecutor(main_llm=MagicMock())
@@ -82,26 +121,18 @@ async def test_inline_hit_returns_prompt_and_no_status():
 
 
 @pytest.mark.asyncio
-async def test_fork_hit_pushes_start_and_end_status():
-    """fork 命中：推 start + end 两条 STAGE_DELEGATE 状态。"""
+async def test_fork_hit_pushes_delegate_start_end_with_id():
+    """fork 命中：推 delegate start + end 事件（带 delegate_id；end ok=True/reason=''）。"""
     rec = _record("finance-analyst", SkillContext.FORK, "你是财务建模专家")
     reg = _FakeRegistry({"finance-analyst": rec})
     executor = SkillExecutor(main_llm=MagicMock())
     tool = make_delegate_task(reg, executor)
 
-    async def _events(*args, **kwargs):
-        yield {"event": "on_chat_model_start", "data": {}}
-        yield {
-            "event": "on_chat_model_stream",
-            "data": {"chunk": AIMessageChunk(content="专家分析")},
-        }
-        yield {
-            "event": "on_chat_model_end",
-            "data": {"output": AIMessage(content="专家分析")},
-        }
-
-    fake_sub = MagicMock()
-    fake_sub.astream_events = _events
+    fake_sub = _fake_sub_agent(
+        _event("on_chat_model_start"),
+        _event("on_chat_model_stream", chunk=AIMessageChunk(content="专家分析")),
+        _event("on_chat_model_end", output=AIMessage(content="专家分析")),
+    )
 
     ctx = RequestContext(session_id="s1")
     token = current_request_ctx.set(ctx)
@@ -114,13 +145,54 @@ async def test_fork_hit_pushes_start_and_end_status():
         current_request_ctx.reset(token)
 
     assert "专家分析" in out
-    phases = []
-    while not ctx.clarify_channel.empty():
-        item = ctx.clarify_channel.get_nowait()
-        if item.get("type") == "status":
-            assert item.get("stage") == "delegate"
-            phases.append(item.get("phase"))
-    assert phases == ["start", "end"]
+    items = _drain_channel(ctx)
+    delegate_items = [it for it in items if it.get("type") == "delegate"]
+    actions = [it["action"] for it in delegate_items]
+    # 注意：executor 会在 content chunk 到达时 flush 出 kind=content 的 delta，
+    # 故中间可能存在 delta——只断言首 start、末 end
+    assert actions[0] == "start" and actions[-1] == "end"
+    start = delegate_items[0]
+    end = delegate_items[-1]
+    assert start["delegate_id"] and end["delegate_id"] == start["delegate_id"]
+    assert start["skill"] == "finance-analyst"
+    assert end["ok"] is True and end["reason"] == ""
+    # 旧 status 通道不再投递
+    assert not [it for it in items if it.get("type") == "status"]
+
+
+@pytest.mark.asyncio
+async def test_fork_interrupted_end_carries_reason():
+    """fork 中断（idle）：delegate end 携带 ok=False/reason=idle（区分"完成"）。"""
+    import src.agents.skills.executor as exec_mod
+    from src.config.const import SSEInteractionTexts
+
+    async def _slow(*a, **k):
+        yield _event("on_chat_model_stream", chunk=AIMessageChunk(content="a"))
+        await asyncio.sleep(5)
+
+    rec = _record("finance-analyst", SkillContext.FORK, "你是财务建模专家")
+    reg = _FakeRegistry({"finance-analyst": rec})
+    executor = SkillExecutor(main_llm=MagicMock())
+    tool = make_delegate_task(reg, executor)
+
+    ctx = RequestContext(session_id="s1")
+    token = current_request_ctx.set(ctx)
+    try:
+        with (
+            patch(
+                "src.agents.skills.executor.create_react_agent",
+                return_value=MagicMock(astream_events=_slow),
+            ),
+            patch.object(exec_mod.settings, "DELEGATE_MAX_IDLE_S", 0.1),
+        ):
+            out = await tool.ainvoke({"task": "分析年报", "skill": "finance-analyst"})
+    finally:
+        current_request_ctx.reset(token)
+
+    assert out == SSEInteractionTexts.DELEGATE_TIMEOUT_TEXT
+    items = _drain_channel(ctx)
+    end = [it for it in items if it.get("action") == "end"][-1]
+    assert end["ok"] is False and end["reason"] == "idle"
 
 
 @pytest.mark.asyncio

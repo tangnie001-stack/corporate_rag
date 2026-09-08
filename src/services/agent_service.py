@@ -45,6 +45,7 @@ from src.utils.sse import (
     SSEAbstentionEvent,
     SSEAskUserEvent,
     SSECitationEvent,
+    SSEDelegateEvent,
     SSEErrorEvent,
     SSEEvent,
     SSEModelInfoEvent,
@@ -84,7 +85,7 @@ class _StreamCapture:
 
 
 # 合并队列元素类型：LangGraph 事件（StreamEvent）或工具经 ctx.clarify_channel
-# 投递的事件 dict（ask_user/status），或哨兵
+# 投递的事件 dict（ask_user/delegate），或哨兵
 _QueueItem: TypeAlias = StreamEvent | dict | _EndMarker | _ErrorMarker
 
 
@@ -159,15 +160,24 @@ def _tool_detail_from_input(item: StreamEvent | dict, key: str) -> str | None:
 
 
 def _convert_event(
-    item: _QueueItem, capture: _StreamCapture | None = None
+    item: _QueueItem,
+    capture: _StreamCapture | None = None,
+    scope: str = "main",
 ) -> list[SSEEvent]:
     """把 queue 中的 item 转成 SSE 事件列表（空列表 = 无需产出）。
+
+    scope 标识事件归属：main = 主图事件（LangGraph astream_events / 澄清通道），
+    delegate = fork 子代理事件（executor/delegate_task 经 clarify_channel 投递，
+    自带 type=delegate 标记）。delegate 转换不依赖 metadata.langgraph_node=="agent"
+    判定，杜绝子代理事件被误当主 token。scope 供后续调用方显式区分，当前实现
+    下 graph 事件仅在 scope=="main" 时转换。
 
     queue 中混有三类 item：
     - ask_user 工具经 clarify_channel 推送的 {"type": "ask_user", "questions": [...]}
       → SSEAskUserEvent（问题卡片）
-    - delegate_task fork 分支经 clarify_channel 推送的 {"type": "status", ...}
-      → SSEStatusEvent（阶段状态，start/end）
+    - delegate_task fork 分支 / executor 经 clarify_channel 推送的
+      {"type": "delegate", action: start|delta|end, delegate_id, skill, kind, delta,
+      ok, reason} → SSEDelegateEvent（fork 过程增量，不进主 token 流/full_answer）
     - LangGraph astream_events 事件 dict（按事件类型接线，不依赖节点名映射）：
       on_chat_model_start（metadata.langgraph_node == "agent"）→ SSEStatusEvent 思考中
       on_chat_model_stream（metadata.langgraph_node == "agent" 且 chunk 内容非空）
@@ -184,6 +194,7 @@ def _convert_event(
     Args:
         item: queue 中取出的原始 item（clarify_channel 推送 dict 或 LangGraph 事件 dict）
         capture: 可选的流捕获容器（model_used / 最终 state），不传则跳过捕获
+        scope: 事件归属标识（main=主图；delegate=fork 子代理），graph 事件仅 main 转换
 
     Returns:
         list[SSEEvent]: 转换后的 SSE 事件列表；无法转换/无需产出的 item 返回空列表
@@ -191,17 +202,23 @@ def _convert_event(
     if isinstance(item, dict) and item.get("type") == "ask_user":
         return [SSEAskUserEvent(questions=item.get("questions", []))]
 
-    if isinstance(item, dict) and item.get("type") == "status":
-        stage = item.get("stage", "")
-        if stage == SSEInteractionTexts.STAGE_DELEGATE:
-            # delegate_task fork 分支经 ctx.clarify_channel 投递的 status dict →
-            # SSEStatusEvent（inline 命中不投递，见 design D14）
-            phase = item.get("phase")
-            if phase == "start":
-                message = SSEInteractionTexts.DELEGATE_STATUS_START
-            else:
-                message = SSEInteractionTexts.DELEGATE_STATUS_END
-            return [SSEStatusEvent(stage=stage, message=message)]
+    if isinstance(item, dict) and item.get("type") == "delegate":
+        # delegate_task / executor 经 ctx.clarify_channel 投递的委派事件 dict →
+        # SSEDelegateEvent（fork 过程增量 start/delta/end；不进主 token 流/full_answer，
+        # 防污染不变量由"delegate 仅经本分支转 delegate 事件"保证）
+        return [
+            SSEDelegateEvent(
+                delegate_id=item.get("delegate_id", ""),
+                action=item.get("action", "delta"),
+                skill=item.get("skill", ""),
+                kind=item.get("kind", ""),
+                delta=item.get("delta", ""),
+                ok=bool(item.get("ok", True)),
+                reason=item.get("reason", ""),
+            )
+        ]
+
+    if scope != "main":
         return []
 
     # 哨兵类已被 _dual_stream 提前消费，此处防御性排除以收窄类型
@@ -322,10 +339,10 @@ async def _dual_stream(
 ) -> AsyncGenerator[SSEEvent, None]:
     """双路合并：Task A 迭代事件源推 queue，Task B（本生成器）消费并转换产出 SSE 事件。
 
-    queue 同时承载 graph.astream_events 事件与 ask_user 工具经 clarify_channel
-    推送的澄清 item（应为无界 queue，避免哨兵 put 在取消路径阻塞）。事件源
-    异常/正常收尾统一用哨兵表达：异常 → _ErrorMarker 产出 SSEErrorEvent 后
-    break；正常结束 → _EndMarker 后 break。
+    queue 同时承载 graph.astream_events 事件与工具经 clarify_channel
+    推送的事件 item（ask_user 澄清 / delegate 委派，应为无界 queue，避免哨兵
+    put 在取消路径阻塞）。事件源异常/正常收尾统一用哨兵表达：异常 →
+    _ErrorMarker 产出 SSEErrorEvent 后 break；正常结束 → _EndMarker 后 break。
 
     本生成器（Task B）无论正常结束还是被取消（客户端断连触发 aclose），
     finally 都会取消 Task A 并 gather 等待其退出，保证事件源不再滞留。
@@ -379,14 +396,16 @@ async def _drain_clarify_channel(
     session_id: str,
     capture: _StreamCapture,
 ) -> None:
-    """消费 clarify_channel：ask_user 澄清 payload 转 SSE 事件写入缓冲。
+    """消费 clarify_channel：ask_user 澄清 / delegate 委派事件转 SSE 事件写入缓冲。
 
-    ask_user 工具与 verify 节点的 web_confirm 都把 {"type": "ask_user", ...}
-    投递到 ctx.clarify_channel（无界队列）。本任务与 _run_generation 的
-    graph 事件循环并行运行，取出后经 _convert_event 转 SSEAskUserEvent 写入
-    manager 缓冲，由 SSE 消费者推给前端渲染澄清卡；若缺此消费方，问题
-    payload 滞留队列，前端收不到 event: ask_user，等满 ASK_USER_TIMEOUT
-    超时。任务随生成循环结束/异常/取消被 _run_generation 的 finally 取消。
+    ask_user 工具与 verify 节点的 web_confirm 投递 {"type": "ask_user", ...}；
+    delegate_task fork 分支与 executor 投递 {"type": "delegate", ...}（start/delta/end）。
+    两者都进 ctx.clarify_channel（无界队列）。本任务与 _run_generation 的
+    graph 事件循环并行运行，取出后经 _convert_event 转 SSEAskUserEvent /
+    SSEDelegateEvent 写入 manager 缓冲，由 SSE 消费者推给前端渲染澄清卡与
+    委派过程区；若缺此消费方，payload 滞留队列，前端收不到对应事件（ask_user
+    等满 ASK_USER_TIMEOUT 超时）。任务随生成循环结束/异常/取消被 _run_generation
+    的 finally 取消。
 
     Args:
         ctx: 请求上下文（clarify_channel 的单一消费方）
@@ -429,7 +448,7 @@ async def _run_generation(
     on_chat_model_end）与 final_answer/tool_contexts（agent_finalize 节点
     on_chain_end）；循环结束后按捕获结果补发 abstention / model_info 事件
     到缓冲（复刻旧 stream_chat 语义，供前端拒答提示与模型名展示）。
-    ask_user 澄清通道由 _drain_clarify_channel 并行消费并写入同一缓冲，
+    ask_user / delegate 通道由 _drain_clarify_channel 并行消费并写入同一缓冲，
     与图事件同路推送给前端。
 
     Args:

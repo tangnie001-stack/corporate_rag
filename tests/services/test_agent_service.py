@@ -1025,35 +1025,55 @@ async def test_stream_chat_persists_citation_sources_on_complete():
     ]
 
 
-def test_convert_status_dict_to_sse_status_event():
-    """_convert_event 把 delegate fork 投递的 status dict 转 SSEStatusEvent。"""
-    from src.config.const import SSEInteractionTexts
+def test_convert_delegate_dict_to_sse_delegate_event():
+    """_convert_event 把 delegate dict 转 SSEDelegateEvent（delta/end 语义）。"""
     from src.services.agent_service import _convert_event
-    from src.utils.sse import SSEStatusEvent
+    from src.utils.sse import SSEDelegateEvent
 
-    events = _convert_event({"type": "status", "stage": "delegate", "phase": "start"})
+    events = _convert_event(
+        {
+            "type": "delegate",
+            "action": "delta",
+            "delegate_id": "d1",
+            "skill": "analyst",
+            "kind": "thinking",
+            "delta": "思考A",
+            "ok": True,
+            "reason": "",
+        }
+    )
     assert len(events) == 1
     ev = events[0]
-    assert isinstance(ev, SSEStatusEvent)
-    assert ev.stage == SSEInteractionTexts.STAGE_DELEGATE
-    assert ev.message == SSEInteractionTexts.DELEGATE_STATUS_START
+    assert isinstance(ev, SSEDelegateEvent)
+    assert ev.delegate_id == "d1" and ev.action == "delta"
+    assert ev.kind == "thinking" and ev.delta == "思考A"
 
-    events = _convert_event({"type": "status", "stage": "delegate", "phase": "end"})
-    ev = events[0]
-    assert isinstance(ev, SSEStatusEvent)
-    assert ev.message == SSEInteractionTexts.DELEGATE_STATUS_END
+    end = _convert_event(
+        {
+            "type": "delegate",
+            "action": "end",
+            "delegate_id": "d1",
+            "skill": "analyst",
+            "kind": "",
+            "delta": "",
+            "ok": False,
+            "reason": "idle",
+        }
+    )[0]
+    assert isinstance(end, SSEDelegateEvent)
+    assert end.ok is False and end.reason == "idle"
 
 
-def test_convert_status_unknown_phase_uses_end_text():
-    """未知 phase 回落 end 文案（防御，不抛）。"""
-    from src.config.const import SSEInteractionTexts
+def test_convert_event_scope_not_main_ignores_graph_events():
+    """scope != main 时 graph 事件不转换（显式 scope 隔离，防误归属）。"""
     from src.services.agent_service import _convert_event
-    from src.utils.sse import SSEStatusEvent
 
-    events = _convert_event({"type": "status", "stage": "delegate", "phase": "???"})
-    ev = events[0]
-    assert isinstance(ev, SSEStatusEvent)
-    assert ev.message == SSEInteractionTexts.DELEGATE_STATUS_END
+    item = {
+        "event": "on_chat_model_stream",
+        "metadata": {"langgraph_node": "agent"},
+        "data": {"chunk": type("C", (), {"content": "x", "additional_kwargs": {}})()},
+    }
+    assert _convert_event(item, scope="delegate") == []
 
 
 @pytest.mark.asyncio
