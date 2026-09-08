@@ -754,6 +754,7 @@ agent（LLM + bind_tools）← entry_point
 - 工具不能写 state：检索上下文累积到 `RequestContext.tool_contexts`（contextvar），由 `agent_finalize` 读入 `state.tool_contexts`
 - per-request 对象（澄清通道 queue / abort 信号 / ask_count）经 contextvar（`current_request_ctx`）传递，并发 session 天然隔离
 - 终止条件：`route_agent` 判断末条消息无 `tool_calls` 或达迭代上限 → `agent_finalize`
+- **主 agent 采样温度分档（chat-temperature-policy）**：绑定 KB（`kb_id` 非空）不传 `temperature`，沿用模型构造温度 `LLM_TEMPERATURE`（默认 0.1）；未绑定 KB 逐轮直传 settings 档 `NON_KB_MAIN_TEMPERATURE`（默认 0.6，settings 可调）。同请求内各 agent 轮次档位一致；分档仅作用主 agent，fork 子代理采样不受影响
 
 ### 5.3 AgentState 关键字段
 

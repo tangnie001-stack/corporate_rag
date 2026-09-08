@@ -102,3 +102,13 @@ def test_pdf_heading_subprocess_constants():
 
     assert PDF_HEADING_SUBPROCESS_TIMEOUT == 180
     assert MAX_CONCURRENT_HEADING_SUBPROCESS == 2
+
+
+def test_non_kb_temperature_default():
+    """NON_KB_MAIN_TEMPERATURE 默认 0.6（.env 污染环境也可稳定断言）。"""
+    import src.config.settings as _s
+
+    with patch("dotenv.load_dotenv"), patch.dict(os.environ):
+        os.environ.pop("NON_KB_MAIN_TEMPERATURE", None)
+        reloaded = reload(_s)
+        assert reloaded.NON_KB_MAIN_TEMPERATURE == 0.6
