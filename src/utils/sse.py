@@ -176,6 +176,43 @@ class SSEReasoningDeltaEvent:
         return {"delta": self.reasoning_delta}
 
 
+@dataclass
+class SSEDelegateEvent:
+    """fork 子代理过程事件（start/delta/end 一体）。
+
+    action=start：委派开始（含 delegate_id/skill）；
+    action=delta：过程增量（kind=thinking|content，delta=增量文本）；
+    action=end：委派结束（ok 区分正常/中断，reason 取 DelegateStopReason 值，
+    normal 时 ok=True、reason=""）。
+    """
+
+    delegate_id: (
+        str  # 本次委派唯一 id（短 uuid，贯穿 start/增量/end 与 task execution 条目）
+    )
+    action: str = "delta"  # start | delta | end
+    skill: str = ""  # 命中的 skill 名
+    kind: str = ""  # delta 用：thinking（思考增量） | content（正文增量）
+    delta: str = ""  # delta 用：增量文本
+    ok: bool = True  # end 用：正常完成
+    reason: str = ""  # end 用：中断原因（DelegateStopReason 值，非 normal 时非空）
+    type: str = "delegate"  # SSE 事件名（event: delegate）
+    seq: int | None = field(
+        default=None, compare=False, repr=False
+    )  # SSE 帧序列号（消费者注入；None 不序列化，不参与相等比较）
+
+    def payload_for_buffer(self) -> dict:
+        """返回与 to_sse 的 data: 同构的缓冲 payload。"""
+        return {
+            "delegate_id": self.delegate_id,
+            "action": self.action,
+            "skill": self.skill,
+            "kind": self.kind,
+            "delta": self.delta,
+            "ok": self.ok,
+            "reason": self.reason,
+        }
+
+
 SSEEvent = (
     SSEStatusEvent
     | SSETokenEvent
@@ -186,6 +223,7 @@ SSEEvent = (
     | SSEAskUserEvent  # ask_user 问题卡片
     | SSEAbstentionEvent  # abstention 转人工提示
     | SSEReasoningDeltaEvent  # reasoning 思考增量
+    | SSEDelegateEvent  # delegate fork 子代理过程事件
 )
 
 
@@ -367,6 +405,22 @@ def sse_reasoning_delta(reasoning_delta: str, seq: int | None = None) -> str:
     return f"event: reasoning\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def sse_delegate(event: SSEDelegateEvent) -> str:
+    """构建 delegate 事件（fork 子代理过程增量/start/end）。"""
+    data: dict = {
+        "delegate_id": event.delegate_id,
+        "action": event.action,
+        "skill": event.skill,
+        "kind": event.kind,
+        "delta": event.delta,
+        "ok": event.ok,
+        "reason": event.reason,
+    }
+    if event.seq is not None:
+        data["seq"] = event.seq
+    return f"event: delegate\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
 def to_sse(event: SSEEvent) -> str:
     """将结构化事件转为 SSE 格式字符串。
 
@@ -404,6 +458,28 @@ def to_sse(event: SSEEvent) -> str:
             return sse_ask_user(SSEAskUserEvent(t, questions, seq))
         case SSEAbstentionEvent(type=t, message=message, seq=seq):
             return sse_abstention(SSEAbstentionEvent(t, message, seq))
+        case SSEDelegateEvent(
+            delegate_id=did,
+            action=action,
+            skill=skill,
+            kind=kind,
+            delta=delta,
+            ok=ok,
+            reason=reason,
+            seq=seq,
+        ):
+            return sse_delegate(
+                SSEDelegateEvent(
+                    delegate_id=did,
+                    action=action,
+                    skill=skill,
+                    kind=kind,
+                    delta=delta,
+                    ok=ok,
+                    reason=reason,
+                    seq=seq,
+                )
+            )
         case SSEReasoningDeltaEvent(reasoning_delta=delta, seq=seq):
             return sse_reasoning_delta(delta, seq)
 
@@ -455,5 +531,15 @@ def from_payload(etype: str, payload: dict) -> "SSEEvent":
     if etype == "model_info":
         return SSEModelInfoEvent(
             model=payload["model"], is_fallback=payload["is_fallback"]
+        )
+    if etype == "delegate":
+        return SSEDelegateEvent(
+            delegate_id=payload["delegate_id"],
+            action=payload.get("action", "delta"),
+            skill=payload.get("skill", ""),
+            kind=payload.get("kind", ""),
+            delta=payload.get("delta", ""),
+            ok=payload.get("ok", True),
+            reason=payload.get("reason", ""),
         )
     raise ValueError(f"unknown sse event type: {etype}")

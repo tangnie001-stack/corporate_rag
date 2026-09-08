@@ -11,6 +11,7 @@ from src.utils.sse import (
     SSEAbstentionEvent,
     SSEAskUserEvent,
     SSECitationEvent,
+    SSEDelegateEvent,
     SSEDoneEvent,
     SSEErrorEvent,
     SSEModelInfoEvent,
@@ -46,6 +47,25 @@ CASES = [
     SSEAbstentionEvent(type="abstention", message="未在文档中找到相关数据"),
     SSEReasoningDeltaEvent(reasoning_delta="思考中..."),
     SSEModelInfoEvent(model="qwen-max", is_fallback=False),
+    SSEDelegateEvent(
+        delegate_id="d1a2b3c4",
+        skill="finance-analyst",
+        action="start",
+    ),
+    SSEDelegateEvent(
+        delegate_id="d1a2b3c4",
+        skill="finance-analyst",
+        action="delta",
+        kind="thinking",
+        delta="先梳理营收口径…",
+    ),
+    SSEDelegateEvent(
+        delegate_id="d1a2b3c4",
+        skill="finance-analyst",
+        action="end",
+        ok=False,
+        reason="idle",
+    ),
 ]
 
 

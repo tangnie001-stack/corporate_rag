@@ -83,3 +83,14 @@ def test_sse_reasoning_delta_event():
     """reasoning 增量事件序列化为标准 SSE 文本。"""
     text = to_sse(SSEReasoningDeltaEvent(reasoning_delta="思考片段"))
     assert text == 'event: reasoning\ndata: {"delta": "思考片段"}\n\n'
+
+
+def test_from_payload_unknown_delegate_ok():
+    from src.utils.sse import SSEDelegateEvent, from_payload
+
+    ev = from_payload(
+        "delegate",
+        {"delegate_id": "d", "action": "delta", "kind": "thinking", "delta": "x"},
+    )
+    assert isinstance(ev, SSEDelegateEvent)
+    assert ev.action == "delta"

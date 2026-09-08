@@ -283,4 +283,30 @@ EVENT_SPECS: dict[str, EventSpec] = {
     "delegate skip": EventSpec(
         "delegate skip", "app", "warning", ("reason", "skills_dir")
     ),
+    # [delegate] fork 子代理委派（delegate-hardening-observability）
+    "delegate start": EventSpec(
+        "delegate start",
+        "delegate",
+        "info",
+        ("delegate_id", "skill", "thinking", "task_len"),
+    ),
+    "delegate model turn": EventSpec(
+        "delegate model turn",
+        "delegate",
+        "info",
+        (
+            "delegate_id",
+            "model",
+            "usage_in",
+            "usage_out",
+            "usage_estimated",
+            "latency_ms",
+        ),
+    ),
+    "delegate end": EventSpec(
+        "delegate end",
+        "delegate",
+        "info",
+        ("delegate_id", "ok", "reason", "elapsed_ms", "result_len"),
+    ),
 }
