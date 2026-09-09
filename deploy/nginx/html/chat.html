@@ -2668,6 +2668,8 @@ function rebuildProcessFromEvents(events) {
           status.textContent = '分析中断 · ' + reasonText;
           status.classList.add('error');
         }
+        // end 已定格，复位指针：避免循环后兜底把已正常收尾的节误判为未闭合
+        delegateSec = null;
       }
     } else if (t === 'ask_user') {
       // 澄清帧渲染为静态注记（澄清问题与回答已在后续 user 消息中）
@@ -2677,6 +2679,21 @@ function rebuildProcessFromEvents(events) {
     }
     // token/citation/model_info/done/error 帧：跳过
     // （正文由 content 列、引用由 sources 列、模型与终态由既有列承载，见 process_log.py）
+  }
+  // 循环收尾：无悬挂开放元素（对齐循环内遇非同型事件的复位/定型规则）
+  statusGroup = null;
+  thinkRow = closeReplayThinkRow(thinkRow);
+  // 兜底：fork 取消时 delegate end 帧可能因 drain 竞态未持久化（H2），循环结束后
+  // 仍开放的委派区定格为中断态（reason 取 cancelled，与实时 finalizePendingDelegateSections
+  // 对 done(cancelled) 的兜底同规则），避免回放永久停留"正在分析…"呼吸点
+  if (delegateSec) {
+    const dot = delegateSec.querySelector('.delegate-dot');
+    const status = delegateSec.querySelector('.delegate-status');
+    const text = DELEGATE_REASON_TEXT['cancelled'] || '已取消';
+    dot.classList.remove('running');
+    dot.classList.add('error');
+    status.textContent = '分析中断 · ' + text;
+    status.classList.add('error');
   }
 }
 
