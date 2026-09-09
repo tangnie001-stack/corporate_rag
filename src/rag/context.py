@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from src.config.const import (
     ENTITY_LABELS,
     ENTITY_RENDER_ORDER,
+    SOURCE_TIER_LABELS,
     SSEInteractionTexts,
 )
 
@@ -24,6 +25,9 @@ class RAGContext:
     kind: str = (
         SSEInteractionTexts.CITATION_KIND_KB
     )  # 引用来源类型：kb（知识库） / web（网络搜索），默认 kb
+    tier: int | None = (
+        None  # 来源权威档位（resolve_source_tier 产出：0=内部文档/1=官方/2=媒体/3=一般/4=UGC）；None=未定档（存量数据/防御默认），前端不显示徽标
+    )
 
     def to_citation(self) -> str:
         """格式化为 Markdown 引用块。"""
@@ -37,8 +41,14 @@ class RAGContext:
         共用此格式，保证评估时 NLI 看到的上下文与线上生成时完全一致
         （含来源/页码锚点，如文件名里的期间），避免两处实现漂移。
         实体按 ENTITY_RENDER_ORDER 渲染存在的核心实体，无实体时保持原格式。
+        tier 非 None 时来源括注内追加档位标签（KB=内部文档；与生产/RAGAS 共用，标注后为评估基线分界点）。
         """
-        parts = [f"来源: {self.source} (第{self.page}页)"]
+        page_part = f"第{self.page}页"
+        if self.tier is not None:
+            label = SOURCE_TIER_LABELS.get(self.tier, "")
+            if label:
+                page_part = f"{page_part}, {label}"
+        parts = [f"来源: {self.source} ({page_part})"]
         entity_parts = []
         for key in ENTITY_RENDER_ORDER:
             value = self.entities.get(key)

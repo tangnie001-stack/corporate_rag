@@ -18,6 +18,7 @@ from src.config import TOP_K_RERANK
 from src.infra.db.vector_store.types import ChunkResult
 from src.infra.llm.chat_message import ChatMessage
 from src.rag import retrieval
+from src.rag.context import RAGContext
 from src.rag.retrieval import rerank_results
 
 
@@ -268,3 +269,38 @@ class TestQueryRewrite:
         result = retrieval.decompose_query("对比茅台和五粮液营收")
         assert isinstance(result, list)
         assert len(result) >= 2
+
+
+# ==================== tier 字段与档位标注测试（source-tier-labeling）====================
+
+
+class TestTierAnnotation:
+    """to_prompt_text 档位标注：tier 非 None 追加标签，None 保持存量格式。"""
+
+    def _make(self, tier=None):
+        return RAGContext(
+            content="内容",
+            source="a.pdf",
+            page=1,
+            doc_id="d1",
+            chunk_id="c1",
+            tier=tier,
+        )
+
+    def test_kb_tier_annotation(self):
+        """KB（tier=0）标注「内部文档」，并入页码括注。"""
+        assert "(第1页, 内部文档)" in self._make(tier=0).to_prompt_text()
+
+    def test_web_tier_annotation(self):
+        """web tier=2 标注「权威媒体」。"""
+        assert "(第1页, 权威媒体)" in self._make(tier=2).to_prompt_text()
+
+    def test_tier_none_keeps_legacy_format(self):
+        """tier=None（存量/未定档）保持原格式，无标签。"""
+        text = self._make(tier=None).to_prompt_text()
+        assert "来源: a.pdf (第1页)" in text
+        assert "内部文档" not in text
+
+    def test_default_tier_is_none(self):
+        """默认值为 None（design D6：不设 T0 兜底，防漏传错标最高信任档）。"""
+        assert self._make().tier is None
