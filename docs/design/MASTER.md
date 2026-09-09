@@ -47,6 +47,7 @@
 | 答案反馈 feedback | `agentic-clarification.md` | 28×28 SVG 按钮、选中 primary 高亮 |
 | 模型信息 model_info | `agentic-clarification.md` | 11px muted、fallback amber 徽标 |
 | 引用卡片 citation | `agentic-clarification.md`（组件）+ `chat-harness.md`（页面形态） | 末尾一体来源横条「来源 [n] ›」+ 右侧抽屉（fixed right，380px，滑出动画，不遮挡对话）；正文 `[n]` 点击打开抽屉并高亮定位 |
+| 引用等级徽标 citation-tier | `chat-citation-tier-2026-09-09.md` | 仅引用抽屉条目渲染（来源名称之前）10px 胶囊徽标（T0 紫/T1 绿/T2 蓝/T3 灰/T4 橙）；横条不加；tier 缺失不渲染；标签唯一权威 = const.py SOURCE_TIER_LABELS |
 | 深度思考开关 thinking-toggle | `agentic-clarification.md` | 输入区紧凑 chip、选中 primary、控制 `enable_thinking` |
 | Markdown 渲染 | `chat-markdown.md` | 助手消息 `.bubble-content.md` 富文本渲染（标题/加粗/列表/代码块/引用/表格）、marked+DOMPurify 安全、流式节流重渲染 |
 | 分析过程折叠区 delegate-progress | `chat-delegate-progress-2026-09-07.md` | AI 气泡内按 delegate_id 分节：思考二级折叠 + 正文流式；运行呼吸点/完成/中断(原因) 文案 |

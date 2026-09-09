@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>引用来源权威等级徽标 — 设计预览</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600&family=Source+Sans+3:wght@300;400;600&display=swap" rel="stylesheet">
+<style>
+/* ── 基线：docs/design/MASTER.md（Minimalism & Swiss）── */
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Source Sans 3',-apple-system,'PingFang SC','Microsoft YaHei',sans-serif; background:#F8FAFC; color:#1E293B; line-height:1.5; padding:32px 24px 80px; }
+.wrap { max-width:860px; margin:0 auto; }
+h1 { font-family:'Lexend',sans-serif; font-weight:600; font-size:22px; margin-bottom:6px; }
+.sub { color:#64748B; font-size:13px; margin-bottom:32px; }
+h2 { font-family:'Lexend',sans-serif; font-weight:500; font-size:15px; margin:36px 0 14px; color:#1E293B; }
+.note { color:#64748B; font-size:12px; margin-top:10px; }
+
+/* ── 色板 ── */
+.swatches { display:flex; gap:10px; flex-wrap:wrap; }
+.swatch { background:#FFFFFF; border:1px solid #E2E8F0; border-radius:10px; padding:12px 14px; min-width:128px; box-shadow:0 1px 3px rgba(0,0,0,0.08); }
+.swatch .dot { width:100%; height:34px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:600; margin-bottom:8px; }
+.swatch .t { font-size:12px; color:#1E293B; font-weight:600; }
+.swatch .d { font-size:11px; color:#64748B; }
+
+/* ── 徽标本体（与 chat.html 实现一致）── */
+.tier-badge { display:inline-block; margin-left:6px; padding:1px 6px; border-radius:8px; font-size:10px; line-height:14px; vertical-align:middle; white-space:nowrap; }
+.tier-0 { background:#ede9fe; color:#6d28d9; }
+.tier-1 { background:#dcfce7; color:#15803d; }
+.tier-2 { background:#dbeafe; color:#1d4ed8; }
+.tier-3 { background:#f1f5f9; color:#475569; }
+.tier-4 { background:#ffedd5; color:#c2410c; }
+
+/* ── 对话示例 ── */
+.demo { background:#FFFFFF; border:1px solid #E2E8F0; border-radius:12px; padding:20px; box-shadow:0 1px 3px rgba(0,0,0,0.08); }
+.bubble-row { display:flex; margin-bottom:16px; }
+.bubble-row.ai { justify-content:flex-start; }
+.bubble { max-width:78%; border-radius:12px; padding:12px 16px; font-size:14px; box-shadow:0 1px 3px rgba(0,0,0,0.08); }
+.bubble.ai { background:#FFFFFF; border:1px solid #E2E8F0; }
+.bubble .ref { color:#3B82F6; cursor:pointer; font-weight:600; }
+.cite-bar { display:inline-flex; align-items:center; gap:8px; background:#F8FAFC; border:1px solid #E2E8F0; border-radius:10px; padding:8px 14px; font-size:13px; cursor:pointer; transition:background .2s; }
+.cite-bar:hover { background:#EFF6FF; border-color:#BFDBFE; }
+.cite-bar svg { flex:none; }
+.cite-bar .bar-refs { display:inline-flex; gap:8px; align-items:center; }
+
+/* ── 抽屉 ── */
+.drawer { position:fixed; top:0; right:0; width:380px; max-width:92vw; height:100%; background:#FFFFFF; border-left:1px solid #E2E8F0; box-shadow:-4px 0 16px rgba(0,0,0,0.10); padding:20px 18px; overflow-y:auto; z-index:50; }
+.drawer h3 { font-family:'Lexend',sans-serif; font-size:14px; font-weight:500; margin-bottom:14px; }
+.drawer-item { border:1px solid #E2E8F0; border-radius:10px; padding:12px; margin-bottom:10px; }
+.drawer-item .num { color:#3B82F6; font-weight:600; font-size:13px; margin-right:6px; }
+.drawer-item .file { display:flex; align-items:center; gap:6px; font-size:13px; font-weight:600; flex-wrap:wrap; }
+.drawer-item .file svg { flex:none; color:#64748B; }
+.drawer-item .fname { color:#1E293B; }
+.drawer-item .page { color:#64748B; font-weight:400; font-size:12px; }
+.drawer-item .snippet { margin-top:8px; font-size:12px; color:#64748B; }
+.drawer-item .kind-web { font-size:11px; color:#64748B; }
+.legend-miss { border-style:dashed; opacity:.75; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>引用来源权威等级徽标</h1>
+  <p class="sub">source-tier-labeling · 组件增量预览 · 基线 MASTER.md（Minimalism &amp; Swiss）· 2026-09-09</p>
+
+  <h2>1. 档位色板（低饱和浅底深字，文字对比度 ≥4.5:1）</h2>
+  <div class="swatches">
+    <div class="swatch"><div class="dot tier-0">内部文档</div><div class="t">T0 内部文档</div><div class="d">KB 知识库 · 紫</div></div>
+    <div class="swatch"><div class="dot tier-1">官方一手</div><div class="t">T1 官方一手</div><div class="d">官网/.gov.cn · 绿</div></div>
+    <div class="swatch"><div class="dot tier-2">权威媒体</div><div class="t">T2 权威媒体</div><div class="d">财经媒体 · 蓝</div></div>
+    <div class="swatch"><div class="dot tier-3">一般</div><div class="t">T3 一般</div><div class="d">未命中默认 · 灰</div></div>
+    <div class="swatch"><div class="dot tier-4">UGC</div><div class="t">T4 UGC</div><div class="d">用户内容 · 橙</div></div>
+  </div>
+  <p class="note">标签文案唯一权威 = const.py SOURCE_TIER_LABELS；徽标带完整文字标签，颜色不是唯一指示。</p>
+
+  <h2>2. 引用横条（保持既有形态，不渲染徽标）</h2>
+  <div class="demo">
+    <div class="bubble-row ai">
+      <div class="bubble ai">
+        腾讯 2025 年全年营收 6,603 亿元，同比增长 8%<span class="ref">[1]</span>；市场观点认为增长动力主要来自金融科技与企业服务板块<span class="ref">[2]</span>；亦有分析指出国际业务利润率承压<span class="ref">[3]</span>。
+        <div style="margin-top:12px;">
+          <button class="cite-bar" type="button">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#64748B" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+            <span>来源</span>
+            <span class="bar-refs">
+              <span>[1]</span>
+              <span>[2]</span>
+              <span>[3]</span>
+            </span>
+            <svg class="bar-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="note">横条是聚合入口（一行多编号），逐条挂徽标会膨胀且不可读——等级详情属于「点开细看」的抽屉层；横条 DOM 与交互完全不变。</p>
+
+  <h2>3. 引用抽屉（含存量数据降级）</h2>
+  <div class="drawer" style="position:static;width:100%;max-width:none;height:auto;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+    <h3>引用来源</h3>
+    <div class="drawer-item">
+      <span class="num">[1]</span>
+      <div class="file">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+        <span class="tier-badge tier-1" title="权威等级：官方一手（T1）· 按来源域名规则自动定档，仅供参考">官方一手</span>
+        <span class="fname">static.www.tencent.com/annual2025.pdf</span>
+        <span class="page">第0页</span>
+      </div>
+      <div class="snippet">2025 年全年营收 6,603 亿元，同比增长 8%；金融科技及企业服务收入 2,120 亿元…</div>
+    </div>
+    <div class="drawer-item">
+      <span class="num">[2]</span>
+      <div class="file">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+        <span class="tier-badge tier-2" title="权威等级：权威媒体（T2）· 按来源域名规则自动定档，仅供参考">权威媒体</span>
+        <span class="fname">https://www.caixin.com/2026/analysis</span>
+        <span class="page">第0页</span>
+      </div>
+      <div class="snippet">市场分析：增长动力主要来自金融科技与企业服务板块的利润率改善…</div>
+    </div>
+    <div class="drawer-item">
+      <span class="num">[3]</span>
+      <div class="file">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+        <span class="tier-badge tier-4" title="权威等级：UGC（T4）· 按来源域名规则自动定档，仅供参考">UGC</span>
+        <span class="fname">https://zhuanlan.zhihu.com/p/882100</span>
+        <span class="page">第0页</span>
+      </div>
+      <div class="snippet">个人观点：国际业务利润率承压的原因与汇率及合规成本相关…</div>
+    </div>
+    <div class="drawer-item legend-miss">
+      <span class="num">[4]</span>
+      <div class="file">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+        <span class="fname">2024Q3 财报摘录.pdf（存量消息 · 无 tier）</span>
+        <span class="page">第5页</span>
+      </div>
+      <div class="snippet">↑ 存量数据降级示例：tier 缺失不渲染徽标，横条/抽屉/snippet 功能不受影响。</div>
+    </div>
+  </div>
+  <p class="note" style="margin-top:14px;">交互：徽标 title 悬浮展示「权威等级：{标签}（T{n}）· 按来源域名规则自动定档，仅供参考」；无新增动效，随横条/抽屉既有动画整体出现；实时与历史回放渲染一致。</p>
+</div>
+</body>
+</html>
