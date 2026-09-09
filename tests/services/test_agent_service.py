@@ -591,6 +591,27 @@ def test_citation_event_passes_kind():
     assert citations[0].kind == "web"
 
 
+def test_citation_event_passes_tier():
+    """format 输出 citations 的 tier 透传到 SSECitationEvent；缺省为 None。"""
+    events = _convert_event(
+        _format_end_item(
+            [
+                {
+                    "index": 1,
+                    "source": "https://www.caixin.com/a",
+                    "page": 0,
+                    "snippet": "财经",
+                    "score": 0.9,
+                    "kind": "web",
+                    "tier": 2,
+                }
+            ]
+        )
+    )
+    citations = [e for e in events if isinstance(e, SSECitationEvent)]
+    assert citations[0].tier == 2
+
+
 @pytest.mark.asyncio
 async def test_run_generation_writes_events_to_buffer(monkeypatch):
     """生产者 coroutine：图事件→带 seq 缓冲，token 累积为完整回答。"""
@@ -904,6 +925,7 @@ async def test_run_generation_accumulates_citation_sources():
             "snippet": "营收100亿",
             "kind": "kb",
             "index": 1,
+            "tier": None,
         }
     ]
 
@@ -1022,6 +1044,7 @@ async def test_stream_chat_persists_citation_sources_on_complete():
             "snippet": "营收100亿",
             "kind": "kb",
             "index": 1,
+            "tier": None,
         }
     ]
 

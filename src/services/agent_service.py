@@ -324,6 +324,7 @@ def _convert_event(
                     score=c.get("score", 0.0),
                     index=c.get("index", 0),
                     kind=c.get("kind", SSEInteractionTexts.CITATION_KIND_KB),
+                    tier=c.get("tier"),
                 )
                 for c in citations
             ]
@@ -527,7 +528,7 @@ async def _run_generation(
                     if partial_holder is not None:
                         partial_holder["text"] = full_answer
                 elif isinstance(event, SSECitationEvent) and partial_holder is not None:
-                    # 落库保留完整引用结构（source/page/snippet/kind/index），
+                    # 落库保留完整引用结构（source/page/snippet/kind/index/tier），
                     # 供历史回放重建引用横条与抽屉；旧数据为 "url (第x页)" 扁平串由前端降级
                     partial_holder.setdefault("sources", []).append(
                         {
@@ -536,6 +537,7 @@ async def _run_generation(
                             "snippet": event.snippet,
                             "kind": event.kind,
                             "index": event.index,
+                            "tier": event.tier,
                         }
                     )
             if abort_signal is not None and abort_signal.is_set():

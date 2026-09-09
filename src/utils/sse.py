@@ -60,6 +60,9 @@ class SSECitationEvent:
     kind: str = (
         SSEInteractionTexts.CITATION_KIND_KB
     )  # 引用来源类型：kb（知识库文档） / web（网络搜索）
+    tier: int | None = (
+        None  # 来源权威档位（0=内部文档/1=官方一手/2=权威媒体/3=一般/4=UGC）；None=存量消息或未定档，前端不显示徽标
+    )
     type: str = "citation"  # SSE 事件名（event: citation）
     seq: int | None = field(
         default=None, compare=False, repr=False
@@ -75,6 +78,7 @@ class SSECitationEvent:
             "highlighted_snippet": self.highlighted_snippet,
             "index": self.index,
             "kind": self.kind,
+            "tier": self.tier,
         }
 
 
@@ -298,6 +302,7 @@ def sse_citation(
     highlighted_snippet: str | None = None,
     index: int = 0,
     kind: str = SSEInteractionTexts.CITATION_KIND_KB,
+    tier: int | None = None,
     seq: int | None = None,
 ) -> str:
     """构建 SSE citation 事件。
@@ -310,6 +315,7 @@ def sse_citation(
         highlighted_snippet: 高亮 HTML 片段
         index: 原文档编号（对应 format_context 的 [n]），0 表示无编号
         kind: 引用来源类型：kb（知识库文档） / web（网络搜索）
+        tier: 来源权威档位（None=存量/未定档）
         seq: SSE 帧序列号（消费者注入，None 不序列化）
 
     Returns:
@@ -323,6 +329,7 @@ def sse_citation(
         "highlighted_snippet": highlighted_snippet,
         "index": index,
         "kind": kind,
+        "tier": tier,
     }
     if seq is not None:
         data["seq"] = seq
@@ -473,9 +480,10 @@ def to_sse(event: SSEEvent) -> str:
             highlighted_snippet=hs,
             index=idx,
             kind=k,
+            tier=tr,
             seq=seq,
         ):
-            return sse_citation(s, p, snippet, score, hs, idx, k, seq)
+            return sse_citation(s, p, snippet, score, hs, idx, k, tr, seq)
         case SSEStatusEvent(stage=stage, message=message, detail=detail, seq=seq):
             return sse_status(stage, message, detail, seq)
         case SSEErrorEvent(error=error, seq=seq):
@@ -546,6 +554,7 @@ def from_payload(etype: str, payload: dict) -> "SSEEvent":
             highlighted_snippet=payload["highlighted_snippet"],
             index=payload["index"],
             kind=payload["kind"],
+            tier=payload.get("tier"),
         )
     if etype == "done":
         return SSEDoneEvent(

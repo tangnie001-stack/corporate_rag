@@ -94,3 +94,44 @@ def test_from_payload_unknown_delegate_ok():
     )
     assert isinstance(ev, SSEDelegateEvent)
     assert ev.action == "delta"
+
+
+# ==================== citation tier 字段（source-tier-labeling）====================
+
+
+def test_citation_event_tier_in_payload():
+    """tier 显式传入时进 payload。"""
+    from src.utils.sse import SSECitationEvent
+
+    ev = SSECitationEvent(source="a.pdf", page=1, snippet="s", tier=2)
+    assert ev.payload_for_buffer()["tier"] == 2
+
+
+def test_citation_event_tier_default_none():
+    """tier 默认 None（存量/未定档语义），payload 键值为 null。"""
+    from src.utils.sse import SSECitationEvent
+
+    ev = SSECitationEvent(source="a.pdf", page=1, snippet="s")
+    assert ev.payload_for_buffer()["tier"] is None
+
+
+def test_citation_wire_json_contains_tier():
+    """wire 契约：to_sse 输出（前端实际收到的 data: 行）必须含 tier 键。
+
+    该测试守住「payload_for_buffer 有 tier 但 wire 序列化漏 tier」的断链——
+    此类断链单测上半段全绿、线上徽标全无。
+    """
+    from src.utils.sse import SSECitationEvent
+
+    ev = SSECitationEvent(source="a.pdf", page=1, snippet="s", tier=1)
+    wire = to_sse(ev)
+    assert "event: citation" in wire
+    assert '"tier": 1' in wire
+
+
+def test_citation_wire_json_tier_none_serialized():
+    """tier=None（存量语义）在 wire 中序列化为 null 键，前端据 null 降级。"""
+    from src.utils.sse import SSECitationEvent
+
+    ev = SSECitationEvent(source="a.pdf", page=1, snippet="s")
+    assert '"tier": null' in to_sse(ev)
