@@ -12,7 +12,7 @@ import re
 from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TypeAlias
+from typing import Any, TypeAlias
 
 from langchain_core.messages import BaseMessage
 from langchain_core.runnables.schema import StreamEvent
@@ -73,6 +73,8 @@ class _StreamCapture:
     捕获来源：
     - model_used：agent 节点 on_chat_model_end 的 response_metadata.model_name
     - final_answer / final_contexts：agent_finalize 节点 on_chain_end 的产物
+    - events_log：两条转换路径（主循环 + clarify drain）经 _record_event 采集的
+      全量 SSE 事件 [{"type", "payload"}]，供取消/收尾时落库（历史回放持久化源）
     """
 
     model_used: str = ""  # agent 节点 LLM 实际使用的模型名（空串 = 未捕获）
@@ -82,6 +84,9 @@ class _StreamCapture:
     final_contexts: list = field(
         default_factory=list
     )  # agent_finalize 产物中的检索上下文列表
+    events_log: list[dict[str, Any]] = field(
+        default_factory=list
+    )  # 过程事件采集（历史回放持久化源，design D1）
 
 
 # 合并队列元素类型：LangGraph 事件（StreamEvent）或工具经 ctx.clarify_channel
@@ -331,6 +336,20 @@ def _convert_event(
     return []
 
 
+def _record_event(capture: _StreamCapture | None, event: SSEEvent) -> None:
+    """事件采集：追加进本次生成的私有事件日志（design D1，独立于 manager 缓冲）。
+
+    Args:
+        capture: 流捕获容器（None 时静默跳过——无消费者的采集无意义）
+        event: 转换后的 SSE 事件
+    """
+    if capture is None:
+        return
+    capture.events_log.append(
+        {"type": event.type, "payload": event.payload_for_buffer()}
+    )
+
+
 async def _dual_stream(
     event_source: AsyncIterator[StreamEvent | dict],
     queue: asyncio.Queue[_QueueItem],
@@ -417,6 +436,7 @@ async def _drain_clarify_channel(
         item = await ctx.clarify_channel.get()
         try:
             for event in _convert_event(item, capture):
+                _record_event(capture, event)
                 manager.add_event(session_id, event.type, event.payload_for_buffer())
         except Exception as exc:  # noqa: BLE001  # 单条转换失败不终止消费
             core_logging.log_event(
@@ -464,7 +484,9 @@ async def _run_generation(
         partial_holder: 可选的 {"text": str, "sources": list[dict]} 共享 dict，
             随 token 产出更新 text，随 citation 事件累积 sources
             （[{source, page, snippet, kind, index}]，历史回放重建引用用），
-            供取消/出错时写 interrupted 部分回答、收尾落库引用来源
+            供取消/出错时写 interrupted 部分回答、收尾落库引用来源；
+            capture 创建后挂 events_log（events_log 的同一列表引用，取消路径
+            亦持续可见），finally 写 model_name（capture.model_used）
         abort_signal: 可选的请求级中止信号（cancel 端点置位）；置位后本任务
             在循环内尽快抛 CancelledError 中断生成，交由调用方收尾落库
 
@@ -482,6 +504,10 @@ async def _run_generation(
     )
     capture = _StreamCapture()
     full_answer = ""
+    if partial_holder is not None:
+        partial_holder["events_log"] = (
+            capture.events_log
+        )  # 共享列表引用，取消路径亦持续可见
     if abort_signal is not None and abort_signal.is_set():
         raise asyncio.CancelledError
     # 澄清通道与图事件循环并行：ask_user / web_confirm 经 clarify_channel
@@ -494,6 +520,7 @@ async def _run_generation(
             initial_state, version=LangGraph.VERSION
         ):
             for event in _convert_event(item, capture):
+                _record_event(capture, event)
                 manager.add_event(session_id, event.type, event.payload_for_buffer())
                 if isinstance(event, SSETokenEvent):
                     full_answer += event.token
@@ -518,6 +545,8 @@ async def _run_generation(
         # 澄清项已被并行任务即时消费，收尾时队列已空）
         drain_task.cancel()
         await asyncio.gather(drain_task, return_exceptions=True)
+        if partial_holder is not None:
+            partial_holder["model_name"] = capture.model_used
     # 收尾：复刻旧 stream_chat 语义，按捕获结果补发 abstention / model_info
     # 事件（capture 在循环内经 _convert_event 填充 model_used / final_answer）
     if capture.final_answer is not None:

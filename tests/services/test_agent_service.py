@@ -22,6 +22,7 @@ from src.services.agent_service import (
     AgentService,
     _convert_event,
     _is_abstention,
+    _record_event,
     _StreamCapture,
 )
 from src.utils.sse import (
@@ -1087,3 +1088,32 @@ async def test_stream_chat_sets_ctx_deep_thinking():
     # 默认 False 档
     _, launch_ctx2 = await service.stream_chat("", "s1", "q")
     assert launch_ctx2["ctx"].deep_thinking is False
+
+
+class TestEventsLogCollection:
+    def test_main_loop_events_collected(self):
+        """主循环路径：转换出的 SSE 事件被采集进 events_log。"""
+        capture = _StreamCapture()
+        event = SSEStatusEvent(
+            SSEInteractionTexts.STAGE_AGENT, SSEInteractionTexts.AGENT_STATUS_THINKING
+        )
+        _record_event(capture, event)
+        assert capture.events_log == [
+            {"type": "status", "payload": event.payload_for_buffer()}
+        ]
+
+    def test_drain_path_events_collected(self):
+        """clarify drain 路径：delegate/ask_user 帧同样被采集（评审 F2）。"""
+        capture = _StreamCapture()
+        delegate_item = {
+            "type": "delegate",
+            "action": "start",
+            "delegate_id": "d1",
+            "skill": "finance-analyst",
+        }
+        for ev in _convert_event(delegate_item, capture):
+            _record_event(capture, ev)
+        assert capture.events_log[0]["type"] == "delegate"
+
+    def test_capture_none_noop(self):
+        _record_event(None, SSEStatusEvent("s", "m"))  # 不抛异常即可

@@ -185,7 +185,8 @@ async def _run_with_finalize(
         session_id: 会话 ID
         kb_id: 知识库 ID
         partial_holder: 生产者写入的 {"text": 已产出 token, "sources": 引用来源列表}
-            共享 dict，取消/出错时据此写 interrupted 部分回答，收尾落库引用来源
+            共享 dict，取消/出错时据此写 interrupted 部分回答，收尾落库引用来源；
+            _run_generation 另挂 events_log（过程事件列表引用）并于收尾写 model_name
         answer_builder: 可调用对象，执行生成并更新 partial_holder["text"]，
             返回完整回答
         manager: StreamingRunManager（终态事件写入缓冲）
