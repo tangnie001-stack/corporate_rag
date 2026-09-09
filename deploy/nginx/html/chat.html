@@ -394,6 +394,14 @@
   }
   .cite-bar .bar-arrow { width: 12px; height: 12px; color: var(--text-muted); margin-left: 2px; transition: transform 150ms; flex-shrink: 0; }
 
+  /* 来源权威徽标（source-tier-labeling）：仅抽屉条目渲染，tier 缺失不渲染；色值照抄规格档 chat-citation-tier-2026-09-09.md */
+  .tier-badge { display:inline-block; margin-left:6px; padding:1px 6px; border-radius:8px; font-size:10px; line-height:14px; vertical-align:middle; white-space:nowrap; flex-shrink:0; }
+  .tier-0 { background:#ede9fe; color:#6d28d9; }
+  .tier-1 { background:#dcfce7; color:#15803d; }
+  .tier-2 { background:#dbeafe; color:#1d4ed8; }
+  .tier-3 { background:#f1f5f9; color:#475569; }
+  .tier-4 { background:#ffedd5; color:#c2410c; }
+
   /* 右侧引用抽屉（滑出面板，不遮挡对话区） */
   .drawer-backdrop {
     position: fixed; inset: 0; background: rgba(15, 23, 42, 0.24);
@@ -1285,6 +1293,20 @@ function finalizeAnswer() {
   resetDelegateSections();
 }
 
+// tier → 中文等级映射（权威来源：src/config/const.py SOURCE_TIER_LABELS / api_contract.md；
+// 改文案动线：const.py → api_contract.md → 本文件 三步同步）
+const TIER_LABELS = { 0: '内部文档', 1: '官方一手', 2: '权威媒体', 3: '一般', 4: 'UGC' };
+
+// tier 徽标 HTML：tier 为 null/undefined/未知值时返回空串（存量数据降级不显示）；
+// title 悬浮说明为规格档（chat-citation-tier-2026-09-09.md 第 6 节）要求
+function tierBadgeHtml(tier) {
+  if (tier === null || tier === undefined) return '';
+  const label = TIER_LABELS[tier];
+  if (label === undefined) return '';
+  const tip = '权威等级：' + label + '（T' + tier + '）· 按来源域名规则自动定档，仅供参考';
+  return '<span class="tier-badge tier-' + tier + '" title="' + tip + '">' + label + '</span>';
+}
+
 // ── 引用交互：AI 回复聚合为一条「来源 [n]」横条 + 右侧抽屉 ──
 // 引用归属到最近的 AI 气泡行（.bubble-row.ai）：SSE citation 事件在 format 结束后到达，
 // 此时该轮 AI 气泡已存在；跨轮时新的 AI 气泡行触发新横条，旧横条留在原回复下。
@@ -1296,7 +1318,7 @@ function lastAiRow() {
   return rows.length ? rows[rows.length - 1] : null;
 }
 
-function renderCitation(source, page, snippet, index) {
+function renderCitation(source, page, snippet, index, tier) {
   const host = lastAiRow();
   if (!host) return;
   if (_citeBarHost !== host) {
@@ -1305,7 +1327,10 @@ function renderCitation(source, page, snippet, index) {
     host._citeBarEl = null;
   }
   const num = index > 0 ? index : host._citeData.length + 1;
-  host._citeData.push({ source, page, snippet, num });
+  // tier 仅整数合法，其余（缺失/null/脏值）归一为 null，供抽屉降级判断
+  let tierVal = null;
+  if (Number.isInteger(tier)) tierVal = tier;
+  host._citeData.push({ source, page, snippet, num, tier: tierVal });
   renderCiteBar(host);
   scrollToBottom();
 }
@@ -1342,6 +1367,7 @@ function attachHistoryCitations(host, rawSources) {
     let page = 0;
     let snippet = '';
     let num = 0;
+    let tier = null; // 旧扁平串与缺失 tier 的结构化条目均视为无等级
     if (typeof item === 'string') {
       // 旧扁平格式 "url (第N页)"：提取来源与页码
       const m = item.match(/^(.*?)\s*\(第(\d+)页\)\s*$/);
@@ -1356,9 +1382,14 @@ function attachHistoryCitations(host, rawSources) {
       page = item.page || 0;
       snippet = item.snippet || '';
       num = item.index || 0;
+      if (Number.isInteger(item.tier)) {
+        tier = item.tier;
+      } else {
+        tier = null;
+      }
     }
     if (!source) return;
-    cites.push({ source, page, snippet, num: num > 0 ? num : i + 1 });
+    cites.push({ source, page, snippet, num: num > 0 ? num : i + 1, tier });
   });
   if (!cites.length) return;
   host._citeData = cites;
@@ -1382,6 +1413,7 @@ function openCiteDrawer(citations, focusNum) {
         <div class="body">
           <div class="file">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+            ${tierBadgeHtml(c.tier)}
             <span class="fname">${escapeHtml(c.source || '')}</span>
             <span class="page">第${c.page || 0}页</span>
           </div>
@@ -2076,7 +2108,7 @@ function buildStreamHandlers() {
     citation: (data) => {
       try {
         state.lastSeq = (data.seq !== undefined) ? data.seq : state.lastSeq;
-        renderCitation(data.source, data.page, data.snippet || '', data.index || 0);
+        renderCitation(data.source, data.page, data.snippet || '', data.index || 0, data.tier);
       } catch (err) { /* ignore */ }
     },
     ask_user: (data) => {
