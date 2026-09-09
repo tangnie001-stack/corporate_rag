@@ -245,3 +245,95 @@ class SSEInteractionTexts:
     DELEGATE_TRUNCATED_PREFIX: str = (
         "子代理已产出完整分析 {total} 字，摘要如下：\n{truncated}"
     )
+
+
+# ── 来源权威分级（source-tier-labeling change）──
+# KB 内部文档固定档：resolve_source_tier 对 kind=kb 返回，不走域名解析
+SOURCE_TIER_KB: int = 0
+# web 未命中清单与模式时的默认中性档（非差评）
+SOURCE_TIER_DEFAULT: int = 3
+# 规则域 → 档位（人工维护先验；增补走候选规则审核流程，见 cookbook）。
+# 匹配语义：域边界后缀（== 或 endswith("." + rule)），最长后缀优先
+SOURCE_TIER_RULES: dict[str, int] = {
+    # T1 官方一手
+    "tencent.com": 1,
+    "cninfo.com.cn": 1,
+    "sse.com.cn": 1,
+    "szse.cn": 1,
+    # T2 权威财经媒体
+    "caixin.com": 2,
+    "yicai.com": 2,
+    "wallstreetcn.com": 2,
+    "sina.com.cn": 2,
+    "finance.sina.com.cn": 2,
+    "eastmoney.com": 2,
+    # T4 UGC
+    "zhihu.com": 4,
+    "xueqiu.com": 4,
+    "weibo.com": 4,
+    "guba.eastmoney.com": 4,
+}
+# 官方/教育机构域名模式：清单未命中时命中模式升 T1
+SOURCE_TIER_PATTERN_SUFFIXES: tuple[str, ...] = (".gov.cn", ".edu.cn")
+# 档位 → 中文标签（权威映射唯一来源；api_contract.md 同步登记，前端照抄勿另造文案，
+# 改动动线：const.py → api_contract.md → chat.html 三步走完才算改完）
+SOURCE_TIER_LABELS: dict[int, str] = {
+    0: "内部文档",
+    1: "官方一手",
+    2: "权威媒体",
+    3: "一般",
+    4: "UGC",
+}
+
+
+def _extract_domain(url: str) -> str:
+    """从 url 提取归一化域名。
+
+    去 scheme/路径/query/userinfo/端口与 www. 前缀，转小写。
+
+    Args:
+        url: 来源 url
+
+    Returns:
+        归一化后的域名字符串
+    """
+    host = url.strip().lower()
+    if "://" in host:
+        host = host.split("://", 1)[1]
+    host = host.split("/", 1)[0]  # 剥路径与 query
+    host = host.split("@")[-1]  # 剥 userinfo
+    host = host.rsplit(":", 1)[0]  # 剥端口
+    host = host.removeprefix("www.")  # 剥 www. 前缀
+    return host
+
+
+def resolve_source_tier(url: str, kind: str) -> int:
+    """来源权威确定性定档。
+
+    KB kind 固定 T0；web 按规则域匹配（域边界后缀、最长后缀优先），
+    官方/教育域名模式升 T1，未命中默认中性档 T3。同一 url 恒定输出，
+    不随模型采样变化（模型判断不改写档位，design D1）。
+
+    Args:
+        url: 来源 url（KB 来源可为文件名，不参与解析）
+        kind: 来源类型（SSEInteractionTexts.CITATION_KIND_KB / CITATION_KIND_WEB）
+
+    Returns:
+        档位整数（0=内部文档 1=官方一手 2=权威媒体 3=一般 4=UGC）
+    """
+    if kind == SSEInteractionTexts.CITATION_KIND_KB:
+        return SOURCE_TIER_KB
+    domain = _extract_domain(url)
+    matches = [
+        rule
+        for rule, tier in SOURCE_TIER_RULES.items()
+        if domain == rule or domain.endswith("." + rule)
+    ]
+    if matches:
+        # 最长后缀优先：guba.eastmoney.com(T4) 覆盖 eastmoney.com(T2)
+        best = max(matches, key=len)
+        return SOURCE_TIER_RULES[best]
+    for suffix in SOURCE_TIER_PATTERN_SUFFIXES:
+        if domain.endswith(suffix):
+            return 1
+    return SOURCE_TIER_DEFAULT
