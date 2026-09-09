@@ -1115,5 +1115,52 @@ class TestEventsLogCollection:
             _record_event(capture, ev)
         assert capture.events_log[0]["type"] == "delegate"
 
+    @pytest.mark.asyncio
+    async def test_drain_clarify_channel_records_delegate_event(self):
+        """集成：真正执行 _drain_clarify_channel，delegate item 采集进 events_log 并写缓冲。
+
+        回归防线（评审 Important）：原 test_drain_path_events_collected 直接调
+        _convert_event + _record_event，drain 循环内的 _record_event 行被误删时
+        该测试仍通过。本测试走真实 drain 函数，删行即失败。
+
+        退出方式说明：drain 函数是 while True 无哨兵消费循环，生产中由
+        _run_generation 的 finally cancel 收敛（agent_service.py drain_task），
+        因此测试同样用 cancel + gather(return_exceptions=True) 收尾——与生产
+        语义一致且确定性强；asyncio.wait_for 超时方式依赖任意时限且会残留
+        pending 任务，故不采用。消费确认用带时限的轮询（add_event 被调用即止）。
+        """
+        from src.infra.llm.request_context import RequestContext
+        from src.services.agent_service import _drain_clarify_channel
+
+        ctx = RequestContext(session_id="s1")
+        ctx.clarify_channel = asyncio.Queue()
+        await ctx.clarify_channel.put(
+            {
+                "type": "delegate",
+                "action": "start",
+                "delegate_id": "d1",
+                "skill": "finance-analyst",
+            }
+        )
+        manager = Mock()
+        manager.add_event = Mock()
+        capture = _StreamCapture()
+
+        drain_task = asyncio.create_task(
+            _drain_clarify_channel(ctx, manager, "s1", capture)
+        )
+        # 轮询等待队列条目被消费（2s 时限兜底，避免异常时无限挂起）
+        async with asyncio.timeout(2):
+            while not manager.add_event.called:
+                await asyncio.sleep(0.01)
+        drain_task.cancel()
+        await asyncio.gather(drain_task, return_exceptions=True)
+
+        assert len(capture.events_log) == 1
+        assert capture.events_log[0]["type"] == "delegate"
+        manager.add_event.assert_called_once_with(
+            "s1", "delegate", capture.events_log[0]["payload"]
+        )
+
     def test_capture_none_noop(self):
         _record_event(None, SSEStatusEvent("s", "m"))  # 不抛异常即可
