@@ -1062,7 +1062,7 @@ function renderUserBubble(text) {
 
 // ── 本轮过程容器：Think 块 / 状态行 / 委派过程区按事件到达顺序挂同一容器，
 // 保留完整时序叙事；AI 气泡在首个 token 到达时创建于容器之后（不提前创建）。
-// 每轮问答各一个容器，跨轮互不混叠；历史重载不重建（D7），容器仅运行期存在 ──
+// 每轮问答各一个容器，跨轮互不混叠；历史重载经静态路径 rebuildProcessFromEvents 重建，实时容器不复用于回放 ──
 let processContainer = null;
 
 function ensureProcessContainer() {
@@ -2542,6 +2542,152 @@ async function loadSessions() {
   }
 }
 
+// ── 历史回放过程重建（design D6/D7：静态渲染变体，不复用实时 handler——副作用边界，
+// 零运行期全局状态；类名与 DOM 结构同实时路径 renderStatusTag / renderReasoningDelta /
+// ensureDelegateSection 逐一对齐，保证历史回放与实时观看视觉一致）──
+
+// 定型回放中的 Think 块（与实时 closeThinkRow 同规则：折叠摘要定格为首行），返回 null 复位指针
+function closeReplayThinkRow(thinkRow) {
+  if (!thinkRow) return null;
+  const body = thinkRow.querySelector('.think-body');
+  const summary = thinkRow.querySelector('.think-summary');
+  if (body && summary) {
+    const full = body.textContent;
+    const newline = full.indexOf('\n');
+    if (newline === -1) {
+      summary.textContent = full;
+    } else {
+      summary.textContent = full.slice(0, newline);
+    }
+  }
+  return null;
+}
+
+// 历史过程重建：按序渲染持久化事件到独立过程容器（append 于 chatContainer 末尾，
+// 须在 renderAiAnswer 之前调用，保持与实时路径一致的 [过程容器, 气泡] DOM 顺序）
+function rebuildProcessFromEvents(events) {
+  const container = document.createElement('div');
+  container.className = 'process-group';
+  chatContainer.appendChild(container);
+  let statusGroup = null;  // 相邻 status 合并组（rebuild 局部指针，遇非 status 事件置 null）
+  let thinkRow = null;     // 开放的 Think 块（rebuild 局部指针，遇非 reasoning 事件定型）
+  let delegateSec = null;  // 开放的委派区（start 建、end 定格；delta 已聚合为最终文本）
+  for (const ev of events) {
+    const t = ev.type;
+    const p = ev.payload || {};
+    if (t === 'status') {
+      // 防数据异常：status 前未定型的 Think 块按实时规则收口
+      thinkRow = closeReplayThinkRow(thinkRow);
+      if (!statusGroup) {
+        statusGroup = document.createElement('div');
+        statusGroup.className = 'pg-group';
+        container.appendChild(statusGroup);
+      }
+      const div = document.createElement('div');
+      div.className = 'status-tag';
+      let text = escapeHtml(p.message || '');
+      if (p.detail) {
+        text += ' <span class="status-detail">' + escapeHtml(p.detail) + '</span>';
+      }
+      div.innerHTML = `<span class="status-dot"></span> ${text}`;
+      statusGroup.appendChild(div);
+    } else if (t === 'preamble') {
+      statusGroup = null;
+      thinkRow = closeReplayThinkRow(thinkRow);
+      const div = document.createElement('div');
+      div.className = 'preamble';
+      div.textContent = p.text || '';
+      container.appendChild(div);
+    } else if (t === 'reasoning') {
+      // 深度思考场景：reasoning 帧按 Think 块累积渲染（无活跃块则创建，结构与实时一致）
+      statusGroup = null;
+      if (!thinkRow) {
+        thinkRow = document.createElement('details');
+        thinkRow.className = 'think-row';
+        thinkRow.innerHTML = `
+          <summary>
+            <span class="think-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 1 1 7.072 0l-.548.547A3.374 3.374 0 0 0 14 18.469V19a2 2 0 1 1-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg></span>
+            <span class="think-title">Think</span>
+            <span class="think-summary"></span>
+            <span class="think-chevron"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></span>
+          </summary>
+          <div class="think-body"></div>`;
+        container.appendChild(thinkRow);
+      }
+      const body = thinkRow.querySelector('.think-body');
+      const summary = thinkRow.querySelector('.think-summary');
+      body.textContent += p.delta || '';
+      summary.textContent = latestReasoningLine(body.textContent);
+    } else if (t === 'delegate') {
+      statusGroup = null;
+      thinkRow = closeReplayThinkRow(thinkRow);
+      if (p.action === 'start') {
+        // 委派区重建：结构与实时 ensureDelegateSection 同构（head 可点击折叠）
+        delegateSec = document.createElement('section');
+        delegateSec.className = 'delegate-progress';
+        const title = escapeHtml(p.skill || '专家') + ' · 领域专家分析';
+        delegateSec.innerHTML = `
+          <button type="button" class="delegate-head" aria-expanded="true">
+            <span class="delegate-dot running"></span>
+            <span class="delegate-title">${title}</span>
+            <span class="delegate-status">正在分析…</span>
+            <svg class="delegate-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div class="delegate-body">
+            <details class="delegate-think" open>
+              <summary>思考过程</summary>
+              <div class="delegate-think-body"></div>
+            </details>
+            <div class="delegate-content"></div>
+          </div>`;
+        container.appendChild(delegateSec);
+        const head = delegateSec.querySelector('.delegate-head');
+        head.addEventListener('click', () => {
+          const closed = delegateSec.classList.toggle('closed');
+          head.setAttribute('aria-expanded', String(!closed));
+        });
+      } else if (p.action === 'delta' && delegateSec) {
+        if (p.kind === 'thinking') {
+          delegateSec.querySelector('.delegate-think-body').textContent += p.delta || '';
+        } else {
+          delegateSec.querySelector('.delegate-content').textContent += p.delta || '';
+        }
+      } else if (p.action === 'end' && delegateSec) {
+        // ok/reason 定格：与实时 finalizeDelegateSection 同规则（含既有中文映射）
+        const dot = delegateSec.querySelector('.delegate-dot');
+        const status = delegateSec.querySelector('.delegate-status');
+        const ok = p.ok !== false;
+        if (ok) {
+          dot.classList.remove('running');
+          dot.classList.add('done');
+          status.textContent = '领域专家分析完成';
+        } else {
+          const reasonText = DELEGATE_REASON_TEXT[p.reason] || p.reason || '';
+          dot.classList.remove('running');
+          dot.classList.add('error');
+          status.textContent = '分析中断 · ' + reasonText;
+          status.classList.add('error');
+        }
+      }
+    } else if (t === 'ask_user') {
+      // 澄清帧渲染为静态注记（澄清问题与回答已在后续 user 消息中）
+      statusGroup = null;
+      thinkRow = closeReplayThinkRow(thinkRow);
+      renderAskUserNote(container);
+    }
+    // token/citation/model_info/done/error 帧：跳过
+    // （正文由 content 列、引用由 sources 列、模型与终态由既有列承载，见 process_log.py）
+  }
+}
+
+// ask_user 帧的静态注记（历史回放专用）
+function renderAskUserNote(container) {
+  const div = document.createElement('div');
+  div.className = 'status-tag';
+  div.innerHTML = `<span class="status-dot"></span> 已向用户澄清`;
+  container.appendChild(div);
+}
+
 // 加载指定会话的历史消息并渲染（POST /api/sessions/messages），返回消息数
 async function loadSessionMessages(sessionId) {
   chatContainer.innerHTML = '';
@@ -2559,6 +2705,10 @@ async function loadSessionMessages(sessionId) {
       if (m.role === 'user') {
         renderUserBubble(m.content || '');
       } else if (m.role === 'assistant') {
+        // D7 反转：先重建过程容器（与实时路径 [过程容器, 气泡] 顺序一致），后渲染气泡
+        if (m.process && m.process.format_version === 1 && Array.isArray(m.process.events)) {
+          rebuildProcessFromEvents(m.process.events);
+        }
         renderAiAnswer(m.content || '', m.status === 'interrupted');
         // 历史回放重建引用：sources 由后端反序列化为数组（结构化 dict / 旧扁平串），
         // 渲染横条并可展开抽屉（含 snippet）；刷新/切换会话后引用不丢失
