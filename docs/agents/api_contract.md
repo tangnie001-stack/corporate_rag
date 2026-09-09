@@ -465,7 +465,15 @@ Success:
       }
     ],
     "status": "interrupted",
-    "created_at": "2026-07-03T12:00:05"
+    "created_at": "2026-07-03T12:00:05",
+    "model_name": "qwen3-32b",
+    "process": {
+      "format_version": 1,
+      "events": [
+        {"seq": 1, "type": "status", "payload": {"stage": "retrieve", "message": "正在检索相关文档..."}},
+        {"seq": 2, "type": "preamble", "payload": {"text": "先看一下营收口径…"}}
+      ]
+    }
   }
 ]}
 ```
@@ -473,6 +481,10 @@ Success:
 `status` 取值 `complete` / `interrupted`，标识消息是否完整生成（前端据此标记被中断的回答）。
 
 `sources` 字段：assistant 消息携带的引用来源列表，新数据为结构化对象数组（每项含 `source` 文件名/URL、`page` 页码、`snippet` 原文片段、`kind` 来源类型 `kb`/`web`、`index` 引用编号）；前端历史回放路径根据此字段重建「来源」横条与右侧抽屉。`kind` 与 SSE `citation` 事件 `data.kind` 同源。**存量旧数据**为扁平字符串数组（每项形如 `"文件名.pdf (第3页)"`），由 `get_messages` 反序列化时循环解包兼容（最多解 4 层剥离历史双重 JSON 转义）；前端对字符串项降级——横条照显、抽屉 `snippet` 留空。
+
+`process` 字段（assistant 消息）：持久化的过程轨迹对象，`{"format_version": 1, "events": [{"seq", "type", "payload"}, ...]}`，seq 从 1 递增；前端历史回放据此重建过程容器，回答正文由 `content` 列承载、不重复入列。事件 `type` 实际枚举：`status` / `reasoning` / `preamble` / `delegate` / `ask_user`——`token` 帧不直接入列，正文前的旁白段固化为 `preamble`（见 glossary.md「旁白」），末轮 answer 正文 token 与 `model_info` / `abstention` / `done` / `error` / `citation` 五类排除（分别由 content / 既有列承载）。存量消息为 `null`；脏数据（非法 JSON / 非 dict）降级为 `null` 不阻断消息返回。
+
+`model_name` 字段（assistant 消息）：实际回答模型名，与 SSE `model_info` 事件同源；存量消息为 `null`。
 
 404:
 ```json

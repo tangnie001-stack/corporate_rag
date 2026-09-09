@@ -71,6 +71,13 @@
 
 - **reasoning_content**：模型的流式思考文本（chain-of-thought）。DashScope 等第三方把思考增量放在 `delta.reasoning_content`，OpenRouter 等用 `delta.reasoning`；`ChatQwenWithReasoning` 统一累积到 `AIMessageChunk.additional_kwargs["reasoning_content"]`，供上层读取与展示
 
+## 过程回放
+
+| 术语 | 定义 | 常见错误 |
+|------|------|---------|
+| `旁白（preamble）` | 最后一次工具调用之前模型输出的 content 流（分拣时由 token 帧固化，payload 为 `{"text": ...}`），渲染为过程容器内的弱化块；深度思考开启时消失（规划内容走 reasoning_content） | ❌ 与 answer 正文混排（正文由 content 列承载，token 帧不入 process） |
+| `过程轨迹（process）` | assistant 消息持久化的有序事件数组（`conversation_history.process` 列，`{"format_version": 1, "events": [...]}`），历史回放据此重建过程容器；D7「历史重载不重建」已反转 | ❌ 把 model_info/abstention/done/error/citation 五类也计入事件 |
+
 ## 评估指标（RAGAS）
 
 | 指标 | 含义 |

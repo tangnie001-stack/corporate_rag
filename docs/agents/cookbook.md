@@ -72,6 +72,17 @@
 - app 的 uvicorn 无 `--reload`（见 CLAUDE.md 常用命令），必须 restart 进程才能加载新代码
 - 判断"代码改动是否已生效"先看 override：挂了 `src/` 则文件已同步只需 restart；未挂载才需要 `--build`
 
+### ALTER TABLE 操作
+
+**场景**：`conversation_history` 表结构变更（如 session-process-replay 新增 process 列）
+**步骤**：
+1. 进 MySQL 容器执行表结构变更，本例（session-process-replay）：
+   ```sql
+   ALTER TABLE conversation_history ADD COLUMN process MEDIUMTEXT NULL COMMENT '过程事件JSON（历史回放）';
+   ```
+**验证**：`SHOW COLUMNS FROM conversation_history LIKE 'process';` 确认列存在且类型/可空性正确
+**注意事项**：可空列无需回填，代码对 NULL 容忍；先改代码后 DDL（或反过来）均可，无强顺序依赖
+
 ## 调试
 
 ### SSE 帧级核对（trace_id 回放事件流）
