@@ -113,6 +113,55 @@
 - 接口有属主校验：session 不属于该账号返回 404
 - **密码/token 不写入任何会提交的文档**；`.env` 不在 git 跟踪范围
 
+## 来源等级（source-tier-labeling）
+
+### 候选规则审核
+
+**场景**：种子域名清单（`src/config/const.py SOURCE_TIER_RULES`）成长——定期从历史引用中筛出高频未命中域名，人工审核后决定加入规则表或记入拒绝清单。本 change 无 DDL，不建任何表。
+**步骤**：
+1. 跑聚合 SQL（MySQL 8.0；`sources` 列为 TEXT 存双重转义 JSON 字符串，需先 `JSON_UNQUOTE(CAST(... AS JSON))` 解包一层再 JSON_TABLE，直接对列做 `'$[*]'` 会解析为标量得 0 行）：
+   ```sql
+   SELECT
+     CASE
+       WHEN jt.val LIKE "http%://%" THEN SUBSTRING_INDEX(SUBSTRING_INDEX(jt.val, "/", 3), "/", -1)
+       ELSE SUBSTRING_INDEX(jt.val, "/", 1)
+     END AS domain_raw,
+     COUNT(*)            AS cite_count,
+     COUNT(DISTINCT m.id) AS msg_count
+   FROM conversation_history m
+   JOIN JSON_TABLE(
+     JSON_UNQUOTE(CAST(m.sources AS JSON)),
+     '$[*]' COLUMNS (val VARCHAR(1024) PATH '$.source')
+   ) jt
+   WHERE m.sources IS NOT NULL
+   GROUP BY domain_raw
+   HAVING cite_count >= 5
+   ORDER BY cite_count DESC;
+   ```
+   说明：KB 来源（如 `tencent_2024_annual.pdf`）与带 scheme 的 web URL 都能提取；存量字符串数组脏数据显示为 NULL，人工审核时排除；未命中过滤不在 SQL 侧做（不复刻 Python 解析逻辑），人工对照规则表排除。
+2. 人工对照 `SOURCE_TIER_RULES` 与下方拒绝清单，排除已命中/已拒绝域名，筛出候选（阈值建议：≥5 次且跨 ≥3 会话，即 `cite_count >= 5 AND msg_count >= 3`）。
+3. 打开样本消息核对引用上下文，确认该域名内容性质（官方/媒体/UGC）。
+4. 批准 → `SOURCE_TIER_RULES` 加行 → `docker compose restart app` 生效 → 涉及标签文案时同步 api_contract.md（动线：const.py → api_contract.md → chat.html）。
+5. 拒绝 → 在下方拒绝清单追加一行 `域名 | 拒绝日期 | 理由`（negative cache，不建数据库表）。
+
+拒绝清单（negative cache）：
+
+| 域名 | 拒绝日期 | 理由 |
+|------|---------|------|
+| （暂无） | | |
+
+**验证**：加入规则表并重启后，用该域名来源重新提问，引用抽屉徽标显示预期档位；或 `pytest tests/ -k tier -v` 通过。
+**注意事项**：SHALL NOT 使用 LLM 判定 tier 或自动升级档位（spec 硬约束）；SQL 阈值只是初筛，定档唯一权威是 `SOURCE_TIER_RULES`。
+
+### RAGAS 检索质量评估基线分界（2026-09-10）
+
+**场景**：source-tier-labeling 上线当天起，to_prompt_text 会在喂给模型的 context 块文本中追加档位标注（如「[官方一手]」），NLI 评估读到的上下文因此与历史不同。
+**步骤**：
+1. 以本条目登记日期为分界：**此后**的 faithfulness 等依赖上下文的评估结果与**此前**的历史分数不可直接对比。
+2. 需要跨基线对比时，重新生成测试集或用同一批问题在两侧各跑一次评估。
+**验证**：—（记录性条目）
+**注意事项**：对应 design 文档 Risks 项；label 只增上下文长度不改变事实内容，预期影响幅度小但不可忽略。
+
 ## 分区命名
 
 按操作主题分区，例如：`## 评估`、`## 分块`、`## 部署`。新主题首次出现时新建分区。

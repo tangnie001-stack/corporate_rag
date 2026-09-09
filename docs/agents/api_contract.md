@@ -322,6 +322,21 @@ data: {}
 | `done` | 流结束 | 流结束标记；携带 `trace_id`（当前请求全链路追踪 ID），前端记录后随答案反馈回传 |
 | `error` | 异常 | 异常时推送，无 retry 机制 |
 
+##### citation.tier（source-tier-labeling）
+
+SSECitationEvent payload 与落库 sources 的新增字段 `tier: int | null`：
+
+| tier | 标签 | 语义 |
+|------|------|------|
+| 0 | 内部文档 | KB 知识库文档（不走域名分级） |
+| 1 | 官方一手 | T1 官方域名 / .gov.cn / .edu.cn |
+| 2 | 权威媒体 | T2 财经媒体清单 |
+| 3 | 一般 | T3 未命中默认中性档 |
+| 4 | UGC | T4 用户生成内容清单 |
+| null | （无徽标） | 存量消息或未定档 |
+
+**标签文案以 `src/config/const.py SOURCE_TIER_LABELS` 为唯一权威，本表与前端 `chat.html TIER_LABELS` 为照抄副本；改动动线：const.py → api_contract.md → chat.html 三步走完才算改完。**徽标仅渲染在引用抽屉条目，引用横条保持既有形态（见 chat-harness-ui spec）。
+
 #### 2.3.2 `POST /api/chat/clarify-answer → 200 | 404`
 
 提交 ask_user 问题答案，解析挂起的澄清 Future，使 agent 继续执行。
@@ -480,7 +495,7 @@ Success:
 
 `status` 取值 `complete` / `interrupted`，标识消息是否完整生成（前端据此标记被中断的回答）。
 
-`sources` 字段：assistant 消息携带的引用来源列表，新数据为结构化对象数组（每项含 `source` 文件名/URL、`page` 页码、`snippet` 原文片段、`kind` 来源类型 `kb`/`web`、`index` 引用编号）；前端历史回放路径根据此字段重建「来源」横条与右侧抽屉。`kind` 与 SSE `citation` 事件 `data.kind` 同源。**存量旧数据**为扁平字符串数组（每项形如 `"文件名.pdf (第3页)"`），由 `get_messages` 反序列化时循环解包兼容（最多解 4 层剥离历史双重 JSON 转义）；前端对字符串项降级——横条照显、抽屉 `snippet` 留空。
+`sources` 字段：assistant 消息携带的引用来源列表，新数据为结构化对象数组（每项含 `source` 文件名/URL、`page` 页码、`snippet` 原文片段、`kind` 来源类型 `kb`/`web`、`index` 引用编号、`tier` 来源等级 `int 0-4` 或 `null`，语义见上文「citation.tier」）；前端历史回放路径根据此字段重建「来源」横条与右侧抽屉（`tier` 仅用于抽屉条目徽标，横条不渲染）。`kind` 与 SSE `citation` 事件 `data.kind` 同源。**存量旧数据**为扁平字符串数组（每项形如 `"文件名.pdf (第3页)"`），由 `get_messages` 反序列化时循环解包兼容（最多解 4 层剥离历史双重 JSON 转义）；前端对字符串项降级——横条照显、抽屉 `snippet` 留空。
 
 `process` 字段（assistant 消息）：持久化的过程轨迹对象，`{"format_version": 1, "events": [{"seq", "type", "payload"}, ...]}`，seq 从 1 递增；前端历史回放据此重建过程容器，回答正文由 `content` 列承载、不重复入列。事件 `type` 实际枚举：`status` / `reasoning` / `preamble` / `delegate` / `ask_user`——`token` 帧不直接入列，正文前的旁白段固化为 `preamble`（见 glossary.md「旁白」），末轮 answer 正文 token 与 `model_info` / `abstention` / `done` / `error` / `citation` 五类排除（分别由 content / 既有列承载）。存量消息为 `null`；脏数据（非法 JSON / 非 dict）降级为 `null` 不阻断消息返回。
 

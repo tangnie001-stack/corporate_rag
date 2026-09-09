@@ -52,6 +52,8 @@
 - **kind**：引用来源类型，取值 `kb`（知识库）/ `web`（网络搜索），默认 `kb`；承载于 `SSEInteractionTexts.CITATION_KIND_KB` / `CITATION_KIND_WEB`，贯穿 `RAGContext.kind` 与 citation 事件
 - **search_web**：联网搜索工具，KB 检索不达标时经 Tavily 兜底检索网页，结果与 retrieve_kb 共用 `tool_contexts` 编号（kind=web 区分来源）；受 `WEB_SEARCH_ENABLED` 开关与 `WEB_SEARCH_PER_TURN_LIMIT` 限次控制
 - **web_search**：SSE 状态阶段（`SSEStatusEvent.stage` 取值），联网搜索开始/完成状态提示（"正在联网搜索..." / "联网搜索完成，正在分析..."）
+- **来源等级（source tier）**：引用来源的权威等级，取值 T0（内部文档，KB 固定）/ T1（官方一手）/ T2（权威媒体）/ T3（一般，未命中默认中性档）/ T4（UGC），由 `SOURCE_TIER_RULES` 域名规则表确定性定档（`.gov.cn`/`.edu.cn` 模式升 T1），模型判断不改写已定档位；以徽标形式透明呈现在引用抽屉条目，系统不裁决可信度；字段语义与标签权威见 api_contract.md「citation.tier」
+- **候选规则信号**：种子清单（`SOURCE_TIER_RULES`）的成长机制——离线 SQL 从 `conversation_history.sources` 聚合全部域名引用次数，达阈值者经人工审核（对照规则表与拒绝清单、核对样本引用上下文）后加入规则表，被拒域名记入文档化拒绝清单（negative cache）；不使用 LLM 定档或自动升级；操作步骤见 cookbook.md「候选规则审核」
 
 ## 技能委派（主从委派）
 
