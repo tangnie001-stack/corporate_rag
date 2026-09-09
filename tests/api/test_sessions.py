@@ -69,6 +69,52 @@ def test_session_messages_include_status(auth_client, mock_app_service):
     assert data[1]["status"] == "interrupted"
 
 
+class TestMessagesProcessField:
+    """messages 接口 process / model_name 字段返回。"""
+
+    def test_process_deserialized_to_dict(self, auth_client, mock_app_service):
+        """mock svc.get_messages 返回含 process JSON 串与 model_name 的行。"""
+        mock_app_service.get_session_by_id = AsyncMock(return_value=make_session("s1"))
+        mock_app_service.get_messages = AsyncMock(
+            return_value=[
+                make_message(
+                    "assistant",
+                    "2024年营收为100亿",
+                    process='{"format_version": 1, "events": []}',
+                    model_name="qwen3.7-flash",
+                )
+            ]
+        )
+
+        resp = auth_client.post("/api/sessions/messages", json={"session_id": "s1"})
+
+        assert resp.status_code == 200
+        item = resp.json()["data"][0]
+        assert item["process"] == {"format_version": 1, "events": []}
+        assert item["model_name"] == "qwen3.7-flash"
+
+    def test_legacy_null_process(self, auth_client, mock_app_service):
+        """process/model_name 为 None 的存量行。"""
+        mock_app_service.get_session_by_id = AsyncMock(return_value=make_session("s1"))
+        mock_app_service.get_messages = AsyncMock(
+            return_value=[
+                make_message(
+                    "assistant",
+                    "存量回答",
+                    process=None,
+                    model_name=None,
+                )
+            ]
+        )
+
+        resp = auth_client.post("/api/sessions/messages", json={"session_id": "s1"})
+
+        assert resp.status_code == 200
+        item = resp.json()["data"][0]
+        assert item["process"] is None
+        assert item["model_name"] is None
+
+
 def test_session_messages_not_found(auth_client, mock_app_service):
     """POST /api/sessions/messages session 不存在返回 404。"""
     mock_app_service.get_session_by_id = AsyncMock(return_value=None)

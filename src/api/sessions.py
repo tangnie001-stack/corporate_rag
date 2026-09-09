@@ -4,6 +4,8 @@
 会话持久化在 MySQL 中，并缓存于 Redis。
 """
 
+import json
+
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
@@ -98,6 +100,19 @@ async def get_session_messages(
     messages = await svc.get_messages(session_id)
     result = []
     for row in messages:
+        # process 列存 JSON 串（{"format_version", "events"}），读回反序列化；
+        # 存量行为 NULL；脏数据降级为 None 不阻断消息返回
+        process_raw = row.get("process")
+        if process_raw:
+            try:
+                process = json.loads(process_raw)
+            except json.JSONDecodeError as e:
+                logger.warning(
+                    "Process JSON decode failed (session={}): {}", session_id, e
+                )
+                process = None
+        else:
+            process = None
         result.append(
             MessageItem(
                 role=row["role"],
@@ -107,6 +122,8 @@ async def get_session_messages(
                 created_at=row["created_at"].isoformat()
                 if row.get("created_at")
                 else None,
+                process=process,
+                model_name=row.get("model_name"),
             )
         )
     return ResponseModel(data=result)

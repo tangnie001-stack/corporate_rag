@@ -180,6 +180,8 @@ class MessageItem(BaseModel):
     # 旧数据为 "url (第N页)" 扁平字符串（降级展示）
     status: str = "complete"  # complete / interrupted — 消息状态
     created_at: str | None = None  # 发送时间
+    process: dict | None = None  # 过程事件对象（历史回放，存量消息 null）
+    model_name: str | None = None  # 实际回答模型名（存量消息 null）
 
 
 class SessionDeleteResponse(BaseModel):
