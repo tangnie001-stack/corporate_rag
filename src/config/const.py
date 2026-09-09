@@ -300,7 +300,9 @@ def _extract_domain(url: str) -> str:
     host = url.strip().lower()
     if "://" in host:
         host = host.split("://", 1)[1]
-    host = host.split("/", 1)[0]  # 剥路径与 query
+    # 先剥 query/fragment，无路径 url（如 https://zhihu.com?a=1）也生效
+    host = host.split("?", 1)[0].split("#", 1)[0]
+    host = host.split("/", 1)[0]  # 剥路径
     host = host.split("@")[-1]  # 剥 userinfo
     host = host.rsplit(":", 1)[0]  # 剥端口
     host = host.removeprefix("www.")  # 剥 www. 前缀

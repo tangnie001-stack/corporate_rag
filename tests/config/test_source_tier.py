@@ -48,6 +48,10 @@ class TestResolveSourceTier:
         """未命中清单与模式 → 中性默认档 T3，不报错不丢弃。"""
         assert resolve_source_tier("https://example.org/page?q=1", WEB) == 3
 
+    def test_query_only_url_no_path(self):
+        """无路径仅 query 的 url：query 残留不得污染域名匹配，zhihu.com?a=1 → T4。"""
+        assert resolve_source_tier("https://zhihu.com?a=1", WEB) == 4
+
     def test_normalization_case_www_port_path(self):
         """大写/www 前缀/端口/路径不影响定档。"""
         assert resolve_source_tier("HTTPS://WWW.Tencent.COM:8443/a/b?q=1", WEB) == 1

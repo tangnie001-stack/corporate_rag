@@ -33,8 +33,8 @@
 
 #### Scenario: 最长后缀优先
 
-- **WHEN** 规则表同时含 `finance.sina.com.cn`（T2）与 `sina.com.cn`（T4），url 域名为 `finance.sina.com.cn`
-- **THEN** 解析结果 SHALL 命中最长后缀规则定档为 T2，SHALL NOT 被更泛规则覆盖
+- **WHEN** 规则表同时含 `guba.eastmoney.com`（T4）与 `eastmoney.com`（T2），url 域名为 `guba.eastmoney.com`
+- **THEN** 解析结果 SHALL 命中最长后缀规则定档为 T4，SHALL NOT 被更泛规则覆盖
 
 ### Requirement: tier 全链路透传
 

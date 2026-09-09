@@ -48,7 +48,7 @@
 
 ### D5: 非法编号观测信号
 
-format_node 现有逻辑对超范围编号静默忽略（nodes.py:82）。补记 `retrieval_signal: signal=invalid_citation`（含编号值）——同一编号重复出现时聚合为一条（`ids` 为去重升序 pipe-join，`count` 为出现总次数，如 `[99]×2+[102]×1` → `ids=99|102 count=3`），不做逐次日志防噪音；幻觉编号频率是模型退化的免费哨兵，零成本。
+format_node 现有逻辑对超范围编号静默忽略（nodes.py:82）。补记 `retrieval_signal: signal=invalid_citation`（含编号值）——同一编号重复出现时聚合为一条（`ids` 为去重升序 pipe-join，`count` 为出现总次数，如 `[99]×2+[102]×1` → `ids="99|102" count=3`（`|` 非日志安全字符，值被引号包裹）），不做逐次日志防噪音；幻觉编号频率是模型退化的免费哨兵，零成本。
 
 ## Risks / Trade-offs
 
