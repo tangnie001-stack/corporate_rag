@@ -1111,6 +1111,7 @@ function updatePendingPreview() {
     pendingPreviewEl = document.createElement('div');
     pendingPreviewEl.className = 'preamble';
     ensureProcessContainer().appendChild(pendingPreviewEl);
+    closeStatusGroup(); // 预览为非 status 元素，入容器后闭合当前 status 组，后续 status 开新组（保证旁白位于两个 status 组之间，时序不倒置）
   }
   pendingPreviewEl.textContent = pendingTokens.join('');
 }
@@ -1629,6 +1630,7 @@ function renderComposer(questions) {
       <button class="clarification-submit" type="button">提交</button>
     </div>`;
   composer.classList.add('active');
+  closeStatusGroup(); // 澄清卡片为非 status 元素，接管输入区后闭合当前 status 组，澄清后续答 status 开新组
 
   // 提交：收集每问的 {id, selected, custom}，至少一项有内容才提交
   composer.querySelector('.clarification-submit').addEventListener('click', () => {
@@ -1713,6 +1715,7 @@ function renderAbstention(message) {
     showHint('已记录转人工需求，客服将尽快与您联系');
   });
   chatContainer.appendChild(div);
+  closeStatusGroup(); // 卡片为非 status 元素，入容器后闭合当前 status 组，后续 status 开新组
   scrollToBottom();
 }
 
@@ -2021,10 +2024,9 @@ function buildStreamHandlers() {
     ask_user: (data) => {
       try {
         state.lastSeq = (data.seq !== undefined) ? data.seq : state.lastSeq;
-        closeThinkRow();
+        closeThinkRow(); // D6：澄清暂停不复位过程容器，澄清后帧继续进原容器
         // 不关流：SSE 保持连接，composer 接管输入区，提交后同流续答
         state.current = STATE.CLARIFYING;
-        closeThinkRow(); // D6：澄清暂停不复位过程容器，澄清后帧继续进原容器
         hideInputArea();
         hideStopBtn();
         renderComposer(data.questions || []);
@@ -2084,6 +2086,11 @@ function buildStreamHandlers() {
         }
         finalizeAnswer();
         closeThinkRow();
+        // 纯闲聊收尾：待定区并入气泡后容器无任何过程元素则移除空容器，避免残留空白组
+        if (processContainer && processContainer.isConnected && !processContainer.firstChild) {
+          processContainer.remove();
+          processContainer = null;
+        }
         if (data.trace_id) state.traceId = data.trace_id;
       } catch (err) { /* ignore */ }
       streamRetryCount = 0; // 流正常结束，重置断线重连计数
@@ -2112,6 +2119,7 @@ function buildStreamHandlers() {
       state.lastSeq = (data.seq !== undefined) ? data.seq : state.lastSeq;
       // fork 取消/异常时 delegate end 可能丢失：须在 finalizeAnswer 复位 delegateSections 前兜底置中断态
       finalizePendingDelegateSections('failed');
+      dropPendingPreview(); // error 终态不走 done 的待定区合并，清理预览避免旁白样式残留
       finalizeAnswer();
       streamRetryCount = 0; // 服务端终态 error，不再重连
       if (state.current === STATE.STREAMING) {
@@ -2194,6 +2202,7 @@ function onStreamError(e) {
     return;
   }
   // 重试耗尽：定型已渲染的部分答案，提示刷新恢复
+  dropPendingPreview(); // 终态不走 done 的待定区合并，清理预览避免旁白样式残留
   finalizeAnswer();
   state.current = STATE.IDLE;
   setInputState(true);
