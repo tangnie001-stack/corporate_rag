@@ -179,6 +179,22 @@ class TestRerank:
         assert len(contexts) == 2
         assert [c.score for c in contexts] == pytest.approx([0.1, 0.5])
 
+    def test_kb_construction_assigns_tier_zero(self):
+        """KB 构造点（rerank_results）显式产出 T0（内部文档）。"""
+        reranker = MagicMock()
+        reranker.rerank.return_value = [
+            {"index": 0, "relevance_score": 0.9},
+        ]
+        results = [
+            ChunkResult(
+                id="d1:0",
+                content="test content",
+                metadata={"source": "a.pdf", "page": 1, "doc_id": "d1"},
+            )
+        ]
+        contexts = retrieval.rerank_results("query", results, reranker)
+        assert contexts[0].tier == 0
+
 
 # ==================== to_prompt_text 实体渲染测试 ====================
 def test_to_prompt_text_with_entities():

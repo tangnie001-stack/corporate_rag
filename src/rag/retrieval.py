@@ -11,7 +11,12 @@ from src.config import (
     TOP_K_RETRIEVAL,
     settings,
 )
-from src.config.const import ENTITY_OPTIONAL_TYPES, ENTITY_TYPES
+from src.config.const import (
+    ENTITY_OPTIONAL_TYPES,
+    ENTITY_TYPES,
+    SSEInteractionTexts,
+    resolve_source_tier,
+)
 from src.core.log_events import Event
 from src.core.logging import log_event
 from src.infra.db.vector_store import VectorStore
@@ -174,6 +179,10 @@ def rerank_results(
                 chunk_id=r.id,
                 parent_content=pc,
                 score=score,
+                tier=resolve_source_tier(
+                    r.metadata.get("source", ""),
+                    SSEInteractionTexts.CITATION_KIND_KB,
+                ),
                 entities={
                     k: r.metadata.get(k) for k in _ALL_ENTITY_KEYS if r.metadata.get(k)
                 },

@@ -166,10 +166,52 @@ async def test_retrieve_kb_rerank_timeout_falls_back_raw_order(monkeypatch):
     finally:
         current_request_ctx.reset(token)
 
-    # 降级为 raw order：两条上下文都保留，按检索原始顺序 + 引用编号
+    # 降级为 raw order：两条上下文都保留，按检索原始顺序 + 引用编号（KB tier=0 → 内部文档标注）
     assert "[1]" in out and "[2]" in out
     assert "毛利率 40%" in out
-    assert "来源: 财报.pdf (第1页)" in out
+    assert "来源: 财报.pdf (第1页, 内部文档)" in out
+
+
+@pytest.mark.asyncio
+async def test_retrieve_kb_timeout_fallback_assigns_tier_zero(monkeypatch):
+    """rerank 超时降级分支构造的 RAGContext 显式赋 tier=0（KB 内部文档档）。"""
+    from src.agents.tools import rag_tools as rag_tools_mod
+    from src.infra.db.vector_store.types import ChunkResult
+
+    async def fake_search(query, kb_id, vector_store, bm25):
+        """mock search：返回一条带 metadata 的 ChunkResult。"""
+        return [
+            ChunkResult(
+                id="doc1:0",
+                content="毛利率 40%",
+                distance=0.1,
+                metadata={"source": "财报.pdf", "page": 1, "doc_id": "doc1"},
+            )
+        ]
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        """mock asyncio.to_thread：模拟 rerank 线程内抛 TimeoutError。"""
+        raise TimeoutError
+
+    monkeypatch.setattr(retrieval, "search", fake_search)
+    monkeypatch.setattr(rag_tools_mod.asyncio, "to_thread", fake_to_thread)
+
+    tool = make_rag_tools(
+        vector_store=cast(VectorStore, None),
+        bm25=None,
+        reranker=None,
+        prompt_manager=None,
+    )[0]
+
+    ctx = RequestContext(session_id="s1")
+    token = current_request_ctx.set(ctx)
+    try:
+        await tool.ainvoke({"query": "毛利率", "state": _new_state()})
+    finally:
+        current_request_ctx.reset(token)
+
+    assert len(ctx.tool_contexts) == 1
+    assert ctx.tool_contexts[0].tier == 0
 
 
 @pytest.mark.asyncio

@@ -18,7 +18,12 @@ from pydantic import BaseModel, Field
 from src.agents.graph.state import AgentState
 from src.agents.tools.ask_tools import AskQuestion, AskUserArgs, ask_user
 from src.config import TOP_K_RERANK, settings
-from src.config.const import ASK_USER_TIMEOUT, RERANK_TIMEOUT
+from src.config.const import (
+    ASK_USER_TIMEOUT,
+    RERANK_TIMEOUT,
+    SSEInteractionTexts,
+    resolve_source_tier,
+)
 from src.core import logging as core_logging
 from src.core.log_events import Event, Signal
 from src.infra.db.vector_store import VectorStore
@@ -161,6 +166,10 @@ def make_rag_tools(
                         chunk_id=r.id,
                         parent_content=pc,
                         score=1 - r.distance if r.distance is not None else 0.0,
+                        tier=resolve_source_tier(
+                            r.metadata.get("source", ""),
+                            SSEInteractionTexts.CITATION_KIND_KB,
+                        ),
                         entities={
                             k: r.metadata.get(k)
                             for k in _ALL_ENTITY_KEYS

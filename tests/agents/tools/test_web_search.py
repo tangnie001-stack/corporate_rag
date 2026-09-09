@@ -109,8 +109,10 @@ async def test_search_web_multiquery_uses_one_quota(monkeypatch, ctx):
 
     # 一次多查询调用只占 1 次额度
     assert ctx.web_count == 1
-    # 各 query 结果按查询顺序合并，编号连续 [1]~[6]
-    assert out.startswith("[1] 来源: https://q1.com/1\n内容: https://q1.com/1 正文")
+    # 各 query 结果按查询顺序合并，编号连续 [1]~[6]（q1.com 未命中规则表 → T3/一般 标注）
+    assert out.startswith(
+        "[1] 来源: https://q1.com/1 (一般)\n内容: https://q1.com/1 正文"
+    )
     assert "[4] 来源: https://q2.com/1" in out
     assert "[6] 来源: https://q2.com/3" in out
     assert len(ctx.tool_contexts) == 6
@@ -242,3 +244,46 @@ async def test_search_web_autonomous_emits_to_web_signal(monkeypatch, ctx):
     assert captured["fields"]["kb_id"] == "kb1"
     assert captured["fields"]["result_count"] > 0
     assert "latency_ms" in captured["fields"]
+
+
+# ==================== tier 赋值与块文本标注（source-tier-labeling）====================
+
+
+@pytest.mark.asyncio
+async def test_search_web_assigns_tier_t4_and_annotates(monkeypatch, ctx):
+    """命中规则域的 web 结果定档并写入块文本（zhihu.com → T4/UGC）。"""
+
+    async def _t4_search(query, top_k=5, timeout=5.0, transport=None):
+        return [
+            {
+                "url": "https://zhuanlan.zhihu.com/p/1",
+                "title": "Z",
+                "content": "帖子内容",
+                "score": 0.9,
+            }
+        ]
+
+    async def _t4_extract(urls, timeout=5.0, transport=None):
+        return [{"url": u, "content": f"{u} 正文"} for u in urls]
+
+    monkeypatch.setattr(web_tools, "tavily_search", _t4_search)
+    monkeypatch.setattr(web_tools, "tavily_extract", _t4_extract)
+
+    out = await search_web.ainvoke({"queries": ["知乎 帖子"]})
+
+    web_ctx = ctx.tool_contexts[-1]
+    assert web_ctx.tier == 4  # zhuanlan.zhihu.com 命中 zhihu.com T4
+    assert "(UGC)" in out  # 块文本带档位标注
+
+
+@pytest.mark.asyncio
+async def test_search_web_assigns_tier_default_t3(monkeypatch, ctx):
+    """未命中域名的 web 结果默认中性档 T3/一般（复用文件顶部 _fake_tavily_search 的 a.com/b.com）。"""
+    monkeypatch.setattr(web_tools, "tavily_search", _fake_tavily_search)
+    monkeypatch.setattr(web_tools, "tavily_extract", _fake_tavily_extract)
+
+    out = await search_web.ainvoke({"queries": ["测试问题"]})
+
+    web_ctx = ctx.tool_contexts[-1]
+    assert web_ctx.tier == 3  # a.com 不在规则表 → T3
+    assert "(一般)" in out

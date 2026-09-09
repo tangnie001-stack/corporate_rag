@@ -15,8 +15,10 @@ from pydantic import BaseModel, Field
 
 from src.config import settings
 from src.config.const import (
+    SOURCE_TIER_LABELS,
     WEB_BODY_LIMIT,
     SSEInteractionTexts,
+    resolve_source_tier,
 )
 from src.core import logging as core_logging
 from src.core.log_events import Event, Signal
@@ -127,7 +129,9 @@ async def search_web(queries: list[str], top_k: int = 5) -> str:
         content = snippet[:WEB_BODY_LIMIT]
         if not content:
             continue
-        # 带 kind=web 标记来源类型，format_node 据此保留 web 兜底引用
+        # 带 kind=web 标记来源类型，format_node 据此保留 web 兜底引用；
+        # tier 与块文本标注共用同一解析结果，避免同一 url 两次定档
+        tier = resolve_source_tier(r["url"], SSEInteractionTexts.CITATION_KIND_WEB)
         collector.append(
             RAGContext(
                 content=content,
@@ -136,9 +140,13 @@ async def search_web(queries: list[str], top_k: int = 5) -> str:
                 doc_id=r["url"],
                 chunk_id=r["url"],
                 kind=SSEInteractionTexts.CITATION_KIND_WEB,
+                tier=tier,
             )
         )
-        blocks.append(f"[{offset + len(blocks) + 1}] 来源: {r['url']}\n内容: {content}")
+        blocks.append(
+            f"[{offset + len(blocks) + 1}] 来源: {r['url']}"
+            f" ({SOURCE_TIER_LABELS[tier]})\n内容: {content}"
+        )
     # to_web 检索降级缺陷信号：仅态 B（kb_bound=True）且非 verify 指派
     # （web_guided=False）的自主降级才产；verify 指派联网补数据是正常完成步骤，
     # 由 web_guided=True 排除在缺陷信号外（态 A 纯对话未绑 KB 也不产）
