@@ -24,7 +24,6 @@
     --bubble-user: #F1F5F9;
     --bubble-user-text: #1E293B;
     --kb-accent: #3B82F6;
-    --accent: #F97316; /* 旁白 .preamble 虚线边框强调色（对齐设计稿 v2 accent 橙色） */
     --shadow: 0 1px 3px rgba(0,0,0,0.08);
     --shadow-lg: 0 4px 12px rgba(0,0,0,0.04);
     --font-display: 'Lexend', 'Source Sans 3', sans-serif;
@@ -552,11 +551,13 @@
   .think-row summary .think-summary { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-muted); }
   .think-row .think-body { padding: 4px 12px 10px; font-size: 13px; line-height: 1.6; color: var(--text-secondary); white-space: pre-wrap; }
 
-  /* 过程元素：相邻同型 status 组 + 旁白（首个工具调用前的待定正文） */
+  /* 过程元素（v3 单气泡：全部挂当前轮 assistant 气泡 bubble-content 内，按事件到达顺序
+     时序排列；设计稿 chat-eventstream-mockup-2026-09-08.html v3）：相邻同型 status 组 +
+     旁白（待定/回溯重分类的 narration，正文段落样式） + answer-md 正文子容器 */
   .pg-group{display:flex;flex-direction:column;gap:5px}
-  .preamble{border-left:3px dashed var(--accent);background:var(--surface);border-radius:0 8px 8px 0;
-    padding:7px 12px;font-size:13px;line-height:1.6;color:var(--text-secondary);font-style:italic;
-    position:relative;width:fit-content;max-width:100%}
+  .bubble-content.md .pg-group{margin:8px 0}
+  .answer-md{min-width:0}
+  .bubble-content.md p.narration{margin:6px 0;line-height:1.65}
 
   /* ── Clarification（ask_user 澄清卡片） ── */
   .clarification-inner {
@@ -1060,18 +1061,19 @@ function renderUserBubble(text) {
   scrollToBottom();
 }
 
-// ── 本轮过程容器：Think 块 / 状态行 / 委派过程区按事件到达顺序挂同一容器，
-// 保留完整时序叙事；AI 气泡在首个 token 到达时创建于容器之后（不提前创建）。
-// 每轮问答各一个容器，跨轮互不混叠；历史重载经静态路径 rebuildProcessFromEvents 重建，实时容器不复用于回放 ──
-let processContainer = null;
+// ── v3 单气泡叙事：过程元素与正文全部挂当前轮 assistant 气泡的 .bubble-content 内，
+// 按事件到达顺序排列（status 组 → 旁白 narration → answer-md 正文，同泡混排）。
+// 每轮问答各一个气泡，跨轮互不混叠；历史重放经静态路径 rebuildProcessFromEvents
+// 渲染进同一容器，与实时路径同构 ──
+let answerMd = null; // bubble-content 内正文子容器 <div class="answer-md">（首个 answer token 时创建，位于过程元素之后）
 
+// 确保当前轮 assistant 气泡已创建并返回其 .bubble-content 作为过程元素挂载点
+// （首个过程元素/待定 token 到达时即建泡，复用 createAssistantBubble 的行结构与头像）
 function ensureProcessContainer() {
-  if (!processContainer || !processContainer.isConnected) {
-    processContainer = document.createElement('div');
-    processContainer.className = 'process-group';
-    chatContainer.appendChild(processContainer);
+  if (!streamBubble || !streamBubble.isConnected) {
+    streamBubble = createAssistantBubble();
   }
-  return processContainer;
+  return streamBubble;
 }
 
 // ── 过程元素公共状态（design D3/D6）──
@@ -1096,6 +1098,28 @@ function closeStatusGroup() {
   currentStatusGroup = null;
 }
 
+// 过程元素挂载：answer-md 已存在时插入其前（正文之后到达的 status/旁白仍按事件
+// 时序位于正文上方），否则追加到容器末尾
+function mountProcessElement(el) {
+  const host = ensureProcessContainer();
+  if (answerMd && answerMd.isConnected) {
+    host.insertBefore(el, answerMd);
+  } else {
+    host.appendChild(el);
+  }
+}
+
+// 正文子容器：首个 answer token 时创建于过程元素之后，流式/终稿 Markdown 均渲染于此
+function ensureAnswerMd() {
+  if (answerMd && answerMd.isConnected) {
+    return answerMd;
+  }
+  answerMd = document.createElement('div');
+  answerMd.className = 'answer-md';
+  ensureProcessContainer().appendChild(answerMd);
+  return answerMd;
+}
+
 function buildStatusTag(stage, message, detail) {
   const div = document.createElement('div');
   div.className = 'status-tag';
@@ -1107,18 +1131,18 @@ function buildStatusTag(stage, message, detail) {
   return div;
 }
 
-// 待定区预览：单一 div 原位更新（不重复建节点）
+// 待定区预览：单一 <p class="narration"> 原位更新（不重复建节点，正文段落样式）
 function updatePendingPreview() {
   if (!pendingPreviewEl || !pendingPreviewEl.isConnected) {
-    pendingPreviewEl = document.createElement('div');
-    pendingPreviewEl.className = 'preamble';
-    ensureProcessContainer().appendChild(pendingPreviewEl);
+    pendingPreviewEl = document.createElement('p');
+    pendingPreviewEl.className = 'narration';
+    mountProcessElement(pendingPreviewEl);
     closeStatusGroup(); // 预览为非 status 元素，入容器后闭合当前 status 组，后续 status 开新组（保证旁白位于两个 status 组之间，时序不倒置）
   }
   pendingPreviewEl.textContent = pendingTokens.join('');
 }
 
-// 固化：待定区转正式旁白块（预览 div 原位保留即成正式块）
+// 固化：待定区转正式旁白段（预览节点原位保留即成正式段）
 function flushPendingAsPreamble() {
   pendingPreviewEl = null;   // 节点已在容器内，保留
   pendingTokens = [];
@@ -1134,20 +1158,21 @@ function dropPendingPreview() {
 }
 
 // 回溯重分类（工具边界调用）：上一轮以 tool_calls 收尾，其 content 流为旁白
-// （design D2 等价判定的实时版）——把上次工具边界之后乐观进气泡的 token 提取
-// 为旁白块插到边界元素之前，并重渲气泡。负责「工具调用之间」的旁白；「第一个
-// 工具调用前」的旁白由待定区负责（flushPendingAsPreamble），两者不重叠。
+// （design D2 等价判定的实时版）——把上次工具边界之后乐观进 answer-md 的 token 提取
+// 为旁白段 <p class="narration"> 插到 answer-md 之前，并截断重渲 answer-md（同气泡内
+// 位置正确）。负责「工具调用之间」的旁白；「第一个工具调用前」的旁白由待定区负责
+// （flushPendingAsPreamble），两者不重叠。
 function reclassifyNarrationAsPreamble() {
   if (answerStartIdx < streamBuffer.length) {
     const narration = streamBuffer.slice(answerStartIdx);
     streamBuffer = streamBuffer.slice(0, answerStartIdx);
-    const div = document.createElement('div');
-    div.className = 'preamble';
-    div.textContent = narration;
-    ensureProcessContainer().appendChild(div);
+    const p = document.createElement('p');
+    p.className = 'narration';
+    p.textContent = narration;
+    mountProcessElement(p); // answer-md 已存在时插到其前，同气泡内时序正确
     closeStatusGroup(); // 旁白为非 status 元素，入容器后闭合当前 status 组，保证时序不倒置
-    if (streamBubble && streamBubble.isConnected) {
-      streamBubble.innerHTML = renderMarkdown(normalizePartialMarkdown(streamBuffer));
+    if (answerMd && answerMd.isConnected) {
+      answerMd.innerHTML = renderMarkdown(normalizePartialMarkdown(streamBuffer));
     }
   }
   answerStartIdx = streamBuffer.length; // 边界处理后重置为截断后的长度
@@ -1165,41 +1190,16 @@ function renderStatusTag(stage, message, detail) {
   if (!currentStatusGroup || !currentStatusGroup.isConnected) {
     currentStatusGroup = document.createElement('div');
     currentStatusGroup.className = 'pg-group';
-    ensureProcessContainer().appendChild(currentStatusGroup);
+    mountProcessElement(currentStatusGroup);
   }
   const div = buildStatusTag(stage, message, detail);
   currentStatusGroup.appendChild(div);
   scrollToBottom();
 }
 
-function renderAiAnswer(text, interrupted) {
-  const div = document.createElement('div');
-  div.className = 'bubble-row ai';
-  let interruptedTag = '';
-  if (interrupted) {
-    interruptedTag = '<div class="interrupted-tag">（回答被中断）</div>';
-  }
-  div.innerHTML = `
-    <div class="bubble-avatar">🤖</div>
-    <div class="bubble-main">
-      <div class="bubble-content md">${renderMarkdown(text)}${interruptedTag}</div>
-    </div>
-  `;
-  chatContainer.appendChild(div);
-  scrollToBottom();
-}
-
-const STREAM_RENDER_INTERVAL = 60;
-let streamBuffer = '';
-let streamBubble = null;
-let streamTimer = null;
-
-// 获取或创建当前 AI 气泡（带 .md 作用域类）。基于 streamBubble 缓存复用，
-// 不依赖 querySelector 时序（避免跨轮污染上一轮气泡）；finalizeAnswer 复位后自动新建。
-function ensureAiBubble() {
-  if (streamBubble && streamBubble.isConnected) {
-    return streamBubble;
-  }
+// 创建 assistant 气泡行并返回其 .bubble-content（实时 ensureProcessContainer 与
+// 历史回放共用的建泡入口，复用同一行结构：头像 + bubble-main + bubble-content.md）
+function createAssistantBubble() {
   const row = document.createElement('div');
   row.className = 'bubble-row ai';
   row.innerHTML = `
@@ -1208,12 +1208,39 @@ function ensureAiBubble() {
       <div class="bubble-content md"></div>
     </div>`;
   chatContainer.appendChild(row);
-  streamBubble = row.querySelector('.bubble-content');
-  return streamBubble;
+  return row.querySelector('.bubble-content');
 }
 
+// 在指定 bubble-content 内渲染正文（answer-md 子容器承载 Markdown，中断标记跟随其后；
+// 空文本不建 answer-md，配合 .bubble-content:empty 隐藏空泡）
+function renderAiAnswerInto(content, text, interrupted) {
+  if (text) {
+    const md = document.createElement('div');
+    md.className = 'answer-md';
+    md.innerHTML = renderMarkdown(text);
+    content.appendChild(md);
+  }
+  if (interrupted) {
+    const tag = document.createElement('div');
+    tag.className = 'interrupted-tag';
+    tag.textContent = '（回答被中断）';
+    content.appendChild(tag);
+  }
+  scrollToBottom();
+}
+
+function renderAiAnswer(text, interrupted) {
+  renderAiAnswerInto(createAssistantBubble(), text, interrupted);
+}
+
+const STREAM_RENDER_INTERVAL = 60;
+let streamBuffer = '';
+let streamBubble = null; // 当前轮 assistant 气泡的 .bubble-content（过程元素与正文共同挂载点，经 ensureProcessContainer 惰性创建）
+let streamTimer = null;
+
 // 流式：累积 buffer，60ms 节流整段重渲染（预览走闭合补全）。
-// 首个工具调用前的 token 进旁白待定区（斜体虚线块预览），之后到达的 token 才是正文进气泡
+// 首个工具调用前的 token 进旁白待定区（bubble-content 内正文段落预览），
+// 之后到达的 token 才是正文，渲染进 bubble-content 内的 answer-md 子容器
 function renderAiAnswerStream(text) {
   if (!toolCallSeen) {
     pendingTokens.push(text);
@@ -1221,32 +1248,36 @@ function renderAiAnswerStream(text) {
     return;
   }
   streamBuffer += text;
-  streamBubble = ensureAiBubble();
+  ensureAnswerMd();
   if (streamTimer === null) {
     streamTimer = setTimeout(() => {
       streamTimer = null;
-      if (streamBubble) {
-        streamBubble.innerHTML = renderMarkdown(normalizePartialMarkdown(streamBuffer));
+      if (answerMd && answerMd.isConnected) {
+        answerMd.innerHTML = renderMarkdown(normalizePartialMarkdown(streamBuffer));
         scrollToBottom();
       }
     }, STREAM_RENDER_INTERVAL);
   }
 }
 
-// 最终全量渲染：done/error/onerror 共用，原始全文（不补全），复位流式状态
+// 最终全量渲染：done/error/onerror 共用，原始全文（不补全），复位流式状态。
+// streamBubble 指针保留（已停止注记等收尾元素仍挂本轮气泡），跨轮复位由
+// removeStreamingState / resetStreamingState 负责
 function finalizeAnswer() {
   if (streamTimer !== null) {
     clearTimeout(streamTimer);
     streamTimer = null;
   }
+  if (streamBuffer || (answerMd && answerMd.isConnected)) {
+    ensureAnswerMd().innerHTML = streamBuffer ? renderMarkdown(streamBuffer) : '';
+  }
   if (streamBubble) {
-    streamBubble.innerHTML = renderMarkdown(streamBuffer);
     const host = streamBubble.closest('.bubble-row.ai');
     attachInlineCiteRefs(host); // 正文引用号转可点击（仅当本回复有 citation 数据）
     scrollToBottom();
   }
   streamBuffer = '';
-  streamBubble = null;
+  answerMd = null; // 指针复位（DOM 随本轮气泡保留）
   answerStartIdx = 0; // 正文指针随缓冲清零（下一回答从空缓冲计起）
   // delegate 过程区收尾：正文定型后仍未收 end 的节置中断态（异常残留兜底），
   // 并清空 map 供下一轮复用（正文定型后不再接收本 delegate 增量）
@@ -1781,11 +1812,12 @@ function sendFeedback(sessionId, messageIndex, rating) {
   }).catch(() => { /* 反馈失败静默 */ });
 }
 
-// 发送新消息/接管输入区时的流式复位：不复位 DOM——过程行（status/think/委派区）
-// 随本轮过程容器持久保留（每轮叙事完整、跨轮不混叠）；仅复位指针，
-// 下轮事件到达时经 ensureProcessContainer 开启新容器
+// 发送新消息/接管输入区时的流式复位：不复位 DOM——过程叙事与正文随本轮气泡持久保留
+// （每轮叙事完整、跨轮不混叠）；仅复位指针，下轮事件到达时经 ensureProcessContainer
+// 开启新气泡
 function removeStreamingState() {
-  processContainer = null;
+  streamBubble = null;
+  answerMd = null;
   currentThinkRow = null;
   resetProcessRenderState(); // 旁白待定区/status 组等过程渲染状态一并复位
 }
@@ -1828,7 +1860,7 @@ function renderReasoningDelta(delta) {
         <span class="think-chevron"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></span>
       </summary>
       <div class="think-body"></div>`;
-    ensureProcessContainer().appendChild(details);
+    mountProcessElement(details);
     closeStatusGroup(); // think-row 为非 status 元素，入容器后闭合当前 status 组
     currentThinkRow = details;
     scrollToBottom();
@@ -1862,9 +1894,6 @@ function ensureDelegateSection(data) {
   toolCallSeen = true;
   flushPendingAsPreamble();
   reclassifyNarrationAsPreamble();
-  // 挂本轮过程容器（委派 start 的时序位置），不提前创建 AI 气泡：
-  // 提前建气泡会让其后到达的末轮思考/状态行错位到回答下方（2026-09-08 修复）
-  const host = ensureProcessContainer();
   const section = document.createElement('section');
   section.className = 'delegate-progress';
   section.dataset.did = did;
@@ -1883,7 +1912,7 @@ function ensureDelegateSection(data) {
       </details>
       <div class="delegate-content"></div>
     </div>`;
-  host.appendChild(section);
+  mountProcessElement(section);
   closeStatusGroup(); // 委派节为非 status 元素，入容器后闭合当前 status 组
   const head = section.querySelector('.delegate-head');
   head.addEventListener('click', () => {
@@ -2111,19 +2140,14 @@ function buildStreamHandlers() {
           finalizePendingDelegateSections('cancelled');
         }
         if (pendingTokens.length && !toolCallSeen) {
-          // 全程无工具调用：待定区即正文，倒入气泡
+          // 全程无工具调用（纯闲聊回退）：待定区即正文，去掉预览节点后并入
+          // streamBuffer，经 finalizeAnswer 渲染进 answer-md
           const text = pendingTokens.join('');
           dropPendingPreview();
           streamBuffer = text + streamBuffer;  // 待定内容位于正文开头（preview 已展示过，此处合并定型）
-          streamBubble = ensureAiBubble();
         }
         finalizeAnswer();
         closeThinkRow();
-        // 纯闲聊收尾：待定区并入气泡后容器无任何过程元素则移除空容器，避免残留空白组
-        if (processContainer && processContainer.isConnected && !processContainer.firstChild) {
-          processContainer.remove();
-          processContainer = null;
-        }
         if (data.trace_id) state.traceId = data.trace_id;
       } catch (err) { /* ignore */ }
       streamRetryCount = 0; // 流正常结束，重置断线重连计数
@@ -2322,7 +2346,8 @@ function stopGeneration() {
   renderStoppedNotice();
 }
 
-// 已停止提示：挂本轮过程容器末尾，随该轮叙事持久保留（不复位、不跨轮清理）
+// 已停止提示：挂本轮气泡末尾（finalizeAnswer 保留 streamBubble 指针，此处落位同一气泡），
+// 随该轮叙事持久保留（不复位、不跨轮清理）
 function renderStoppedNotice() {
   const div = document.createElement('div');
   div.className = 'status-tag';
@@ -2347,6 +2372,7 @@ function resetStreamingState() {
   }
   streamBuffer = '';
   streamBubble = null;
+  answerMd = null;
   resetDelegateSections();
   hideComposer();
   state.current = STATE.IDLE;
@@ -2596,12 +2622,9 @@ function closeReplayThinkRow(thinkRow) {
   return null;
 }
 
-// 历史过程重建：按序渲染持久化事件到独立过程容器（append 于 chatContainer 末尾，
-// 须在 renderAiAnswer 之前调用，保持与实时路径一致的 [过程容器, 气泡] DOM 顺序）
-function rebuildProcessFromEvents(events) {
-  const container = document.createElement('div');
-  container.className = 'process-group';
-  chatContainer.appendChild(container);
+// 历史过程重建：按序渲染持久化事件到指定 bubble-content（v3 单气泡：调用方先经
+// createAssistantBubble 建泡再传入，过程元素与正文渲染进同一容器，与实时路径同构）
+function rebuildProcessFromEvents(container, events) {
   let statusGroup = null;  // 相邻 status 合并组（rebuild 局部指针，遇非 status 事件置 null）
   let thinkRow = null;     // 开放的 Think 块（rebuild 局部指针，遇非 reasoning 事件定型）
   let delegateSec = null;  // 开放的委派区（start 建、end 定格；delta 已聚合为最终文本）
@@ -2627,10 +2650,10 @@ function rebuildProcessFromEvents(events) {
     } else if (t === 'preamble') {
       statusGroup = null;
       thinkRow = closeReplayThinkRow(thinkRow);
-      const div = document.createElement('div');
-      div.className = 'preamble';
-      div.textContent = p.text || '';
-      container.appendChild(div);
+      const el = document.createElement('p');
+      el.className = 'narration';
+      el.textContent = p.text || '';
+      container.appendChild(el);
     } else if (t === 'reasoning') {
       // 深度思考场景：reasoning 帧按 Think 块累积渲染（无活跃块则创建，结构与实时一致）
       statusGroup = null;
@@ -2755,11 +2778,13 @@ async function loadSessionMessages(sessionId) {
       if (m.role === 'user') {
         renderUserBubble(m.content || '');
       } else if (m.role === 'assistant') {
-        // D7 反转：先重建过程容器（与实时路径 [过程容器, 气泡] 顺序一致），后渲染气泡
+        // v3 单气泡：先创建 assistant 气泡行，过程事件重建与正文渲染进同一 bubble-content
+        //（数据形状校验：format_version===1 + events 数组；存量 process=null 跳过重建仅渲终稿）
+        const content = createAssistantBubble();
         if (m.process && m.process.format_version === 1 && Array.isArray(m.process.events)) {
-          rebuildProcessFromEvents(m.process.events);
+          rebuildProcessFromEvents(content, m.process.events);
         }
-        renderAiAnswer(m.content || '', m.status === 'interrupted');
+        renderAiAnswerInto(content, m.content || '', m.status === 'interrupted');
         // 历史回放重建引用：sources 由后端反序列化为数组（结构化 dict / 旧扁平串），
         // 渲染横条并可展开抽屉（含 snippet）；刷新/切换会话后引用不丢失
         attachHistoryCitations(lastAiRow(), m.sources);
