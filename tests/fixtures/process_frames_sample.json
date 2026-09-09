@@ -1,0 +1,18 @@
+[
+  {"type": "status", "payload": {"stage": "agent", "message": "正在思考..."}},
+  {"type": "token", "payload": {"token": "参考文档为空，我将"}},
+  {"type": "token", "payload": {"token": "通过检索知识库和联网搜索来获取腾讯2025年的财务数据。"}},
+  {"type": "status", "payload": {"stage": "retrieve", "message": "正在检索相关文档...", "detail": "query=腾讯2025年毛利率 净利率 ROE 财务数据"}},
+  {"type": "status", "payload": {"stage": "retrieve", "message": "检索完成，正在分析..."}},
+  {"type": "status", "payload": {"stage": "agent", "message": "正在思考..."}},
+  {"type": "token", "payload": {"token": "知识库中只有2024年的数据，没有2025年的数据。"}},
+  {"type": "token", "payload": {"token": "我需要联网搜索腾讯2025年的财务数据。"}},
+  {"type": "status", "payload": {"stage": "web_search", "message": "正在联网搜索...", "detail": "queries=['腾讯2025年年报 毛利率 净利率 ROE']"}},
+  {"type": "status", "payload": {"stage": "web_search", "message": "联网搜索完成，正在分析..."}},
+  {"type": "status", "payload": {"stage": "agent", "message": "正在思考..."}},
+  {"type": "token", "payload": {"token": "根据联网搜索到的腾讯2025年年报数据，我现在可以为您详细计算和分析。"}},
+  {"type": "token", "payload": {"token": "## 腾讯2025年毛利率、净利率、ROE计算与趋势解读"}},
+  {"type": "citation", "payload": {"source": "https://example.com/a", "page": 0, "snippet": "...", "index": 1}},
+  {"type": "model_info", "payload": {"model": "qwen3.7-flash", "is_fallback": false}},
+  {"type": "done", "payload": {"trace_id": "trace_test", "cancelled": false}}
+]
