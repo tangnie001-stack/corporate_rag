@@ -320,3 +320,25 @@ class TestTierAnnotation:
     def test_default_tier_is_none(self):
         """默认值为 None（design D6：不设 T0 兜底，防漏传错标最高信任档）。"""
         assert self._make().tier is None
+
+
+def test_to_prompt_text_web_ctx_with_tier_label():
+    """web 上下文（tier 非 None）走 to_prompt_text 渲染时，来源括注内追加档位标签。
+
+    前序遗留覆盖：Task 3 仅测了块文本，web ctx 经 to_prompt_text 的渲染未覆盖；
+    生产 prompt 与 RAGAS NLI 共用此格式，需保证档位标签在两处一致出现。
+    """
+    from src.config.const import SSEInteractionTexts
+    from src.rag.context import RAGContext
+
+    ctx = RAGContext(
+        content="网页内容",
+        source="https://www.tencent.com/a",
+        page=0,
+        doc_id="u",
+        chunk_id="u",
+        kind=SSEInteractionTexts.CITATION_KIND_WEB,
+        tier=1,
+    )
+    text = ctx.to_prompt_text()
+    assert text == ("来源: https://www.tencent.com/a (第0页, 官方一手)\n内容: 网页内容")

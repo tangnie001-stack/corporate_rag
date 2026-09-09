@@ -33,6 +33,7 @@ class Signal(str, Enum):
     ABSTAIN_AFTER_RETRIEVE = "abstain_after_retrieve"
     CITED = "cited"
     EMPTY_RESULT = "empty_result"
+    INVALID_CITATION = "invalid_citation"
 
 
 class Event(str, Enum):

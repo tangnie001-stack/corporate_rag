@@ -73,9 +73,26 @@ def format_node(state: AgentState) -> dict:
         core_logging.log_event(Event.FORMAT_DONE, citations=0, reason="abstention")
         return {"citations": []}
 
-    # 提取回答中引用的编号 [n]，非法编号（超出 context 范围）忽略
-    cited_numbers = {int(m) for m in re.findall(r"\[(\d+)\]", answer)}
+    # 提取回答中引用的编号 [n]，非法编号（超出 context 范围）不进 citations
+    raw_numbers = [int(m) for m in re.findall(r"\[(\d+)\]", answer)]
+    cited_numbers = set(raw_numbers)
     valid_numbers = {n for n in cited_numbers if 1 <= n <= len(contexts)}
+    # 幻觉编号观测信号（design D5）：聚合一条（ids=去重升序，count=出现总次数），防日志噪音
+    invalid_numbers = sorted(cited_numbers - valid_numbers)
+    if invalid_numbers:
+        invalid_count = sum(1 for n in raw_numbers if n in set(invalid_numbers))
+        if hasattr(state, "query"):
+            invalid_query = state.query
+        else:
+            invalid_query = ""
+        core_logging.retrieval_signal(
+            Signal.INVALID_CITATION,
+            invalid_query,
+            0,
+            kb_id="",
+            count=invalid_count,
+            ids="|".join(str(n) for n in invalid_numbers),
+        )
     if not valid_numbers:
         core_logging.log_event(Event.FORMAT_DONE, citations=0, reason="no_markers")
         return {"citations": []}
@@ -97,6 +114,7 @@ def format_node(state: AgentState) -> dict:
                 "snippet": _relevant_snippet(ctx.content, answer),
                 "score": ctx.score,
                 "kind": ctx.kind,
+                "tier": ctx.tier,
             }
         )
     core_logging.log_event(Event.FORMAT_DONE, citations=len(citations))

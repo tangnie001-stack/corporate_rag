@@ -11,6 +11,8 @@ from src.agents.graph.state import AgentState
 from src.agents.graph.workflow import build_graph
 from src.config import settings
 from src.config.const import SSEInteractionTexts
+from src.core import logging as core_logging
+from src.core.log_events import Signal
 from src.infra.llm.request_context import RequestContext, current_request_ctx
 from src.rag.context import RAGContext
 
@@ -745,3 +747,61 @@ def test_build_graph_passes_delegate_task_to_rag_tools(monkeypatch):
         delegate_task=sentinel.delegate_tool,
     )
     assert captured["delegate_task"] is sentinel.delegate_tool
+
+
+# ==================== tier 透传与非法编号信号（source-tier-labeling）====================
+
+
+def _one_ctx(source="a.pdf"):
+    return RAGContext(
+        content="内容", source=source, page=1, doc_id="d1", chunk_id="c1", score=0.9
+    )
+
+
+def test_format_node_citation_carries_tier():
+    """citations dict 携带来源 tier（None 透传为 None，非 None 原样透传）。"""
+    state = AgentState(
+        answer="内容[1][2]",
+        tool_contexts=[
+            _one_ctx(source="x.pdf"),
+            RAGContext(
+                content="网页",
+                source="https://www.tencent.com/a",
+                page=0,
+                doc_id="u",
+                chunk_id="u",
+                score=0.8,
+                tier=1,
+            ),
+        ],
+    )
+    result = format_node(state)
+    assert result["citations"][0]["tier"] is None
+    assert result["citations"][1]["tier"] == 1
+
+
+def test_format_node_invalid_citation_signal(monkeypatch):
+    """超范围编号产出 invalid_citation 信号（含去重 ids 与出现次数 count），不进 citations。"""
+    recorded = []
+    monkeypatch.setattr(
+        core_logging, "retrieval_signal", lambda *a, **k: recorded.append((a, k))
+    )
+    state = AgentState(answer="内容[9][9][99]", tool_contexts=[_one_ctx()])
+    result = format_node(state)
+    assert result["citations"] == []  # 既有行为不变
+    assert len(recorded) == 1  # 聚合为一条信号，不逐次记录
+    args, kwargs = recorded[0]
+    assert args[0] == Signal.INVALID_CITATION
+    assert kwargs["count"] == 3  # [9]×2 + [99]×1
+    assert kwargs["ids"] == "9|99"  # 去重升序 pipe join
+
+
+def test_format_node_valid_citations_no_invalid_signal(monkeypatch):
+    """全部编号合法时不产出 invalid_citation 信号。"""
+    recorded = []
+    monkeypatch.setattr(
+        core_logging, "retrieval_signal", lambda *a, **k: recorded.append((a, k))
+    )
+    state = AgentState(answer="内容[1]", tool_contexts=[_one_ctx()])
+    format_node(state)
+    assert all(args[0] != Signal.INVALID_CITATION for args, _ in recorded)
