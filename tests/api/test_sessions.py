@@ -114,6 +114,48 @@ class TestMessagesProcessField:
         assert item["process"] is None
         assert item["model_name"] is None
 
+    def test_process_invalid_json_degrades(self, auth_client, mock_app_service):
+        """process 列为非法 JSON 串时降级为 null，不阻断消息返回。"""
+        mock_app_service.get_session_by_id = AsyncMock(return_value=make_session("s1"))
+        mock_app_service.get_messages = AsyncMock(
+            return_value=[
+                make_message(
+                    "assistant",
+                    "脏数据回答",
+                    process="not-json{",
+                    model_name="qwen3.7-flash",
+                )
+            ]
+        )
+
+        resp = auth_client.post("/api/sessions/messages", json={"session_id": "s1"})
+
+        assert resp.status_code == 200
+        item = resp.json()["data"][0]
+        assert item["process"] is None
+        assert item["model_name"] == "qwen3.7-flash"
+
+    def test_process_non_dict_json_degrades(self, auth_client, mock_app_service):
+        """process 列为合法 JSON 但非 dict（如 '123'）时同样降级为 null。"""
+        mock_app_service.get_session_by_id = AsyncMock(return_value=make_session("s1"))
+        mock_app_service.get_messages = AsyncMock(
+            return_value=[
+                make_message(
+                    "assistant",
+                    "非 dict 回答",
+                    process="123",
+                    model_name="qwen3.7-flash",
+                )
+            ]
+        )
+
+        resp = auth_client.post("/api/sessions/messages", json={"session_id": "s1"})
+
+        assert resp.status_code == 200
+        item = resp.json()["data"][0]
+        assert item["process"] is None
+        assert item["model_name"] == "qwen3.7-flash"
+
 
 def test_session_messages_not_found(auth_client, mock_app_service):
     """POST /api/sessions/messages session 不存在返回 404。"""

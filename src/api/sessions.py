@@ -106,6 +106,14 @@ async def get_session_messages(
         if process_raw:
             try:
                 process = json.loads(process_raw)
+                # 合法 JSON 但非 dict（如 '123'）同样降级，避免穿透到
+                # Pydantic 校验引发 500
+                if not isinstance(process, dict):
+                    logger.warning(
+                        "Process JSON decode failed (session={}): not a dict",
+                        session_id,
+                    )
+                    process = None
             except json.JSONDecodeError as e:
                 logger.warning(
                     "Process JSON decode failed (session={}): {}", session_id, e
