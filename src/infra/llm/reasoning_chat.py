@@ -8,6 +8,9 @@ AIMessageChunk.additional_kwargs["reasoning_content"]，供上层读取。
 参考：langchain-ai/langchain issue #38764 的 ReasoningChatOpenAI 实现。
 """
 
+from typing import Any
+
+from langchain_core.language_models.base import LanguageModelInput
 from langchain_core.messages import AIMessageChunk
 from langchain_core.outputs import ChatGenerationChunk
 from langchain_openai import ChatOpenAI
@@ -57,3 +60,53 @@ class ChatQwenWithReasoning(ChatOpenAI):
                 prev + reasoning
             )
         return generation_chunk
+
+
+class ReasoningPreservingChatQwen(ChatQwenWithReasoning):
+    """在 chunk 侧 reasoning 提取之上，增加请求侧 reasoning_content 回传。
+
+    DashScope 要求：深度思考模式多轮工具调用时，assistant 消息须携带
+    reasoning_content（省略降低工具调用准确性），请求须启用 preserve_thinking。
+    覆写点为 _get_request_payload（实例方法，langchain-openai 1.3.3 的
+    _convert_message_to_dict 是模块级函数不可覆写）。
+    """
+
+    def __init__(self, **kwargs) -> None:
+        """构造时向 extra_body 注入 preserve_thinking=True（不覆盖用户显式配置）。
+
+        Args:
+            **kwargs: 透传给 ChatQwenWithReasoning 的构造参数
+        """
+        extra = dict(kwargs.pop("extra_body", None) or {})
+        extra.setdefault("preserve_thinking", True)
+        kwargs["extra_body"] = extra
+        super().__init__(**kwargs)
+
+    def _get_request_payload(
+        self,
+        input_: LanguageModelInput,
+        *,
+        stop: list[str] | None = None,
+        **kwargs: Any,
+    ) -> dict:
+        """构建请求 payload，并把 assistant 消息的 reasoning_content 注入其中。
+
+        Args:
+            input_: 模型输入（消息列表或 LangChain 支持的其他输入形式）
+            stop: 停止词序列
+            **kwargs: 透传给父类的额外请求参数
+
+        Returns:
+            dict：openai 兼容请求 payload，assistant 消息按需携带 reasoning_content
+        """
+        messages = self._convert_input(input_).to_messages()
+        payload = super()._get_request_payload(input_, stop=stop, **kwargs)
+        for msg, msg_dict in zip(messages, payload.get("messages", [])):
+            if msg_dict.get("role") != "assistant":
+                continue
+            reasoning = (getattr(msg, "additional_kwargs", None) or {}).get(
+                "reasoning_content", ""
+            )
+            if reasoning and not msg_dict.get("reasoning_content"):
+                msg_dict["reasoning_content"] = reasoning
+        return payload

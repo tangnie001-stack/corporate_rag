@@ -39,7 +39,7 @@ from src.config import (
     RETRY_MAX_ATTEMPTS,
     TOP_K_RERANK,
 )
-from src.infra.llm.reasoning_chat import ChatQwenWithReasoning
+from src.infra.llm.reasoning_chat import ReasoningPreservingChatQwen
 
 
 def with_retry(
@@ -150,7 +150,7 @@ def get_llm(
     # 合并 LLM_KWARGS 和显式传入的 kwargs
     extra_kwargs: dict = json.loads(LLM_KWARGS)
     extra_kwargs.update(kwargs)
-    return ChatQwenWithReasoning(
+    return ReasoningPreservingChatQwen(
         model=model,
         temperature=temperature,
         api_key=SecretStr(LLM_API_KEY),
