@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Chat · SSE 事件流混排时序 mockup（v2 · 真实帧序 + 旁白 + 相邻合并）</title>
+<style>
+  :root{
+    --primary:#3B82F6; --primary-light:#EFF6FF; --primary-hover:#2563EB;
+    --accent:#F97316; --bg:#F8FAFC; --surface:#FFFFFF; --surface-muted:#F1F5F9;
+    --text:#1E293B; --text-secondary:#64748B; --text-muted:#94A3B8;
+    --border:#E2E8F0; --error:#EF4444; --amber:#F59E0B; --success:#10B981;
+    --radius:12px; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  body{background:var(--bg); color:var(--text); font:16px/1.5 "Source Sans 3","Segoe UI",system-ui,sans-serif}
+  .page{max-width:1120px;margin:0 auto;display:grid;grid-template-columns:240px 1fr;min-height:100vh}
+  aside{border-right:1px solid var(--border);padding:20px 12px;background:var(--surface)}
+  .brand{font-family:Lexend,sans-serif;font-weight:600;font-size:18px;margin-bottom:18px}
+  .side-label{font-size:12px;color:var(--text-muted);margin:14px 6px 6px;text-transform:uppercase;letter-spacing:.05em}
+  .side-item{padding:8px 10px;border-radius:8px;font-size:14px;color:var(--text-secondary);cursor:pointer}
+  .side-item.active{background:var(--primary-light);color:var(--primary);font-weight:600}
+  main{padding:24px 32px 96px;max-width:860px;margin:0 auto;width:100%}
+  .chat-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:12px;flex-wrap:wrap}
+  .titles strong{font-family:Lexend,sans-serif;font-size:17px;display:block}
+  .titles span{font-size:12px;color:var(--text-muted)}
+  .evt-toggle{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--border);background:var(--surface);
+    border-radius:8px;padding:7px 12px;font-size:13px;cursor:pointer;color:var(--text-secondary);user-select:none}
+  .evt-toggle:hover{border-color:var(--primary);color:var(--primary)}
+  .evt-toggle input{accent-color:var(--primary);cursor:pointer}
+  .tasks-chip{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--border);background:var(--surface);
+    border-radius:24px;padding:7px 14px;font-size:14px;cursor:pointer;transition:border-color .15s, background .15s}
+  .tasks-chip:hover{border-color:var(--primary);background:var(--primary-light)}
+  .tasks-chip .count{background:var(--primary);color:#fff;border-radius:10px;padding:0 7px;font-size:12px;line-height:18px}
+  /* 消息流 */
+  .stream{max-width:720px}
+  .bubble{margin:14px 0;padding:12px 16px;border-radius:16px;box-shadow:var(--shadow);max-width:92%;position:relative}
+  .user{background:var(--primary-light);margin-left:auto;border-top-right-radius:6px}
+  .assistant{background:var(--surface);border-top-left-radius:6px}
+  .who{font-size:12px;color:var(--text-muted);margin-bottom:4px}
+  /* 过程容器：元素按到达顺序混排；相邻同型合并为组 div */
+  .process-group{max-width:92%;margin:10px 0;display:flex;flex-direction:column;gap:8px}
+  .pg-group{display:flex;flex-direction:column;gap:5px}
+  .pg-label{font-size:10px;color:var(--text-muted);font-family:Lexend,sans-serif;letter-spacing:.03em}
+  .status-tag{display:inline-flex;align-items:center;gap:8px;background:var(--surface-muted);border-radius:8px;
+    padding:6px 12px;font-size:13px;color:var(--text-secondary);align-self:flex-start;position:relative;width:fit-content}
+  .status-dot{width:7px;height:7px;border-radius:50%;background:var(--primary)}
+  .status-dot.idle{background:var(--text-muted)}
+  .status-dot.spin{background:var(--primary);animation:pulse 1.2s infinite}
+  .status-detail{color:var(--text-muted);font-size:12px}
+  /* 旁白块（token_preamble）：区别于正文的弱化样式 */
+  .preamble{border-left:3px dashed var(--accent);background:var(--surface);border-radius:0 8px 8px 0;
+    padding:7px 12px;font-size:13px;line-height:1.6;color:var(--text-secondary);font-style:italic;position:relative;width:fit-content;max-width:100%}
+  /* Think 块（深度思考开时取代旁白位） */
+  .think-row{border:1px solid var(--border);border-radius:10px;background:var(--surface);position:relative}
+  .think-row summary{display:flex;align-items:center;gap:8px;padding:7px 12px;font-size:13px;cursor:pointer;
+    color:var(--text-secondary);list-style:none;user-select:none}
+  .think-row summary::-webkit-details-marker{display:none}
+  .think-icon{color:var(--text-muted);display:flex}
+  .think-title{font-weight:600;color:var(--text)}
+  .think-summary{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text-muted)}
+  .think-chevron{margin-left:auto;transition:transform .15s;color:var(--text-muted)}
+  .think-row[open] .think-chevron{transform:rotate(90deg)}
+  .think-body{padding:4px 12px 10px;font-size:13px;line-height:1.6;color:var(--text-secondary);white-space:pre-wrap;
+    border-top:1px dashed var(--border)}
+  /* delegate 过程区 */
+  .delegate{border:1px solid var(--border);border-radius:10px;background:var(--surface-muted);overflow:hidden;position:relative}
+  .d-head{display:flex;align-items:center;gap:8px;padding:9px 12px;cursor:pointer;font-size:14px;user-select:none}
+  .d-head:hover{background:rgba(59,130,246,.06)}
+  .d-title{font-weight:600;flex:1}
+  .d-state{font-size:12px;display:inline-flex;align-items:center;gap:6px;color:var(--text-secondary)}
+  .dot{width:7px;height:7px;border-radius:50%}
+  .dot.ok{background:var(--text-secondary)}
+  .chev{transition:transform .15s;color:var(--text-muted)}
+  .delegate.open .chev{transform:rotate(180deg)}
+  .d-body{padding:2px 12px 12px}
+  .d-think{border-left:3px solid var(--primary-light);background:var(--surface);border-radius:6px;padding:8px 10px;
+    font-size:13px;color:var(--text-secondary);line-height:1.6;margin:8px 0 10px}
+  .d-think summary{font-size:12px;cursor:pointer;user-select:none}
+  .d-content{padding:0 2px 6px;font-size:15px;line-height:1.65}
+  /* 引用横条 + 模型注 */
+  .cite-bar{display:flex;align-items:center;gap:8px;border:1px solid var(--border);background:var(--surface-muted);
+    border-radius:8px;padding:6px 12px;font-size:13px;color:var(--text-secondary);cursor:pointer;width:fit-content;
+    margin:10px 0 6px;position:relative;transition:border-color .15s, background .15s}
+  .cite-bar:hover{border-color:var(--primary);background:var(--primary-light)}
+  .cite-bar .refs{color:var(--primary);font-weight:600}
+  .model-note{font-size:12px;color:var(--text-muted);position:relative}
+  .done-note{border:1px dashed var(--border);border-radius:8px;padding:8px 12px;font-size:12px;color:var(--text-muted);
+    position:relative;margin-top:10px}
+  /* 正文气泡内 markdown 简样 */
+  .md table{border-collapse:collapse;font-size:13px;margin:8px 0}
+  .md th,.md td{border:1px solid var(--border);padding:4px 10px}
+  .md th{background:var(--surface-muted)}
+  .md h3{font-family:Lexend,sans-serif;font-size:15px;margin:10px 0 4px}
+  .md p{margin:6px 0;line-height:1.65}
+  /* 分支场景卡 */
+  .branch{margin-top:36px}
+  .branch h2{font-family:Lexend,sans-serif;font-size:15px;margin-bottom:4px}
+  .branch .hint{font-size:12px;color:var(--text-muted);margin-bottom:12px}
+  .branch-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:var(--shadow);position:relative}
+  .composer{border:1px solid var(--primary);border-radius:10px;padding:10px 12px;background:var(--surface)}
+  .composer .q{font-size:14px;margin-bottom:8px}
+  .composer .q b{color:var(--primary)}
+  .composer .opts{display:flex;gap:8px;flex-wrap:wrap}
+  .composer .opts button{border:1px solid var(--border);background:var(--surface);border-radius:16px;padding:5px 14px;
+    font-size:13px;cursor:pointer;color:var(--text-secondary)}
+  .abstain{display:inline-flex;align-items:center;gap:8px;background:#FFFBEB;border:1px solid #FDE68A;color:#92400E;
+    border-radius:8px;padding:8px 12px;font-size:13px}
+  .abstain button{border:1px solid #F59E0B;background:var(--surface);color:#B45309;border-radius:6px;padding:3px 10px;
+    font-size:12px;cursor:pointer}
+  .err-banner{display:flex;align-items:center;gap:8px;background:#FEF2F2;border:1px solid #FECACA;color:#991B1B;
+    border-radius:8px;padding:8px 12px;font-size:13px}
+  /* SSE 类型标注徽标 */
+  .evt-badge{position:absolute;top:-9px;left:10px;font:10px/15px Lexend,sans-serif;color:var(--text-muted);
+    background:var(--bg);padding:0 6px;border:1px solid var(--border);border-radius:6px;white-space:nowrap;
+    opacity:0;pointer-events:none;transition:opacity .15s;z-index:2}
+  body.badges-on .evt-badge{opacity:1}
+  body.badges-on .bubble, body.badges-on .pg-group, body.badges-on .preamble, body.badges-on .delegate,
+  body.badges-on .cite-bar, body.badges-on .model-note, body.badges-on .done-note, body.badges-on .branch-card,
+  body.badges-on .think-row{
+    margin-top:18px}
+  .legend{margin:18px 0 0;font-size:12px;color:var(--text-muted);line-height:1.8}
+  .legend code{background:var(--surface-muted);border:1px solid var(--border);border-radius:4px;padding:0 4px}
+  .legend b{color:var(--text-secondary)}
+</style>
+</head>
+<body>
+<div class="page">
+  <aside>
+    <div class="brand">FQ · Harness</div>
+    <div class="side-label">会话</div>
+    <div class="side-item active">腾讯 2025 业绩优劣势分析</div>
+    <div class="side-item">腾讯 2024 年报杜邦分析</div>
+    <div class="side-item">通用闲聊 · 市场观点</div>
+    <div class="side-label">版本</div>
+    <div style="font-size:12px;color:var(--text-muted);padding:0 6px;line-height:1.7">
+      v2（2026-09-08）：数据基线换成 <code style="font-size:11px">trace_3157b559</code> 真实 447 帧；<br>
+      新增<b>旁白块</b>元素；<b>相邻同型合并</b>为组 div。
+    </div>
+  </aside>
+
+  <main>
+    <div class="chat-head">
+      <div class="titles"><strong>腾讯 2025 业绩优劣势分析</strong><span>知识库 · test123 · 深度思考关（帧样本真实场景）</span></div>
+      <label class="evt-toggle"><input type="checkbox" id="badgeToggle">显示 SSE 类型标注</label>
+      <button class="tasks-chip" type="button" aria-expanded="false">
+        <span class="dot-live" aria-hidden="true"></span> 任务 <span class="count" aria-label="进行中任务数">0</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+    </div>
+
+    <div class="stream">
+      <div class="bubble user">
+        <span class="evt-badge">#0 user 消息（非 SSE，本地渲染）</span>
+        <div class="who">你</div>
+        计算腾讯2025年毛利率、净利率、ROE，推算变化趋势并解读驱动因素
+      </div>
+
+      <!-- 过程容器：元素按到达顺序；相邻同型合并为组 -->
+      <div class="process-group">
+
+        <!-- 组1：单条 status -->
+        <div class="pg-group">
+          <span class="pg-label">status 组（相邻同型合并 · 1 帧）</span>
+          <span class="status-tag"><i class="status-dot spin"></i> 正在思考...
+            <span class="evt-badge">#1 status（on_chat_model_start）</span></span>
+        </div>
+
+        <!-- 旁白块：轮1工具调用前的 content 流 -->
+        <div class="preamble">
+          参考文档为空，我将通过检索知识库和联网搜索来获取腾讯2025年的财务数据。
+          <span class="evt-badge">#2-8 token_preamble（最后一次工具调用之前的 content 流）</span>
+        </div>
+
+        <!-- 组2：相邻两条 status 合并 -->
+        <div class="pg-group">
+          <span class="pg-label">status 组（相邻同型合并 · 2 帧）</span>
+          <span class="status-tag"><i class="status-dot spin"></i> 正在检索相关文档... <span class="status-detail">query=腾讯2025年毛利率 净利率 ROE 财务数据</span>
+            <span class="evt-badge">#9 status（on_tool_start retrieve_kb）</span></span>
+          <span class="status-tag"><i class="status-dot idle"></i> 检索完成，正在分析...
+            <span class="evt-badge">#10 status（on_tool_end）</span></span>
+        </div>
+
+        <div class="pg-group">
+          <span class="pg-label">status 组（1 帧）</span>
+          <span class="status-tag"><i class="status-dot spin"></i> 正在思考...
+            <span class="evt-badge">#11 status</span></span>
+        </div>
+
+        <!-- 旁白块：轮2 -->
+        <div class="preamble">
+          知识库中只有2024年的数据，没有2025年的数据。我需要联网搜索腾讯2025年的财务数据。
+          <span class="evt-badge">#12-20 token_preamble</span>
+        </div>
+
+        <!-- 组3：联网两条 status 合并 -->
+        <div class="pg-group">
+          <span class="pg-label">status 组（相邻同型合并 · 2 帧）</span>
+          <span class="status-tag"><i class="status-dot spin"></i> 正在联网搜索... <span class="status-detail">queries=['腾讯2025年年报 毛利率 净利率 ROE', 'Tencent 2025 annual report…']</span>
+            <span class="evt-badge">#21 status（on_tool_start search_web）</span></span>
+          <span class="status-tag"><i class="status-dot idle"></i> 联网搜索完成，正在分析...
+            <span class="evt-badge">#22 status（on_tool_end）</span></span>
+        </div>
+
+        <div class="pg-group">
+          <span class="pg-label">status 组（1 帧）</span>
+          <span class="status-tag"><i class="status-dot spin"></i> 正在思考...
+            <span class="evt-badge">#23 status（末轮开始，此后无工具调用）</span></span>
+        </div>
+
+        <!-- 对比注记：深度思考开时此处为 Think 块 -->
+        <div class="preamble" style="border-left-style:solid;border-left-color:var(--primary-light)">
+          深度思考开启时：本位置及上方各「正在思考」后出现 <b>Think 块（reasoning 帧）</b>，旁白不再出现在 content 通道（规划进入 reasoning_content）；多轮工具调用需回传 reasoning_content（preserve_thinking=true）。
+          <span class="evt-badge">对比注记（非渲染元素）</span>
+        </div>
+      </div>
+
+      <!-- 正文气泡：只含最后一次工具调用之后的 content 流 -->
+      <div class="bubble assistant">
+        <span class="evt-badge">#24-443 token（最后一次工具调用之后的连续 content 流 = 正式回答）</span>
+        <div class="who">FQ 智能助手</div>
+        <div class="md">
+          <p>根据联网搜索到的腾讯2025年年报数据，我现在可以为您详细计算和分析。</p>
+          <h3>一、核心指标计算</h3>
+          <table>
+            <tr><th>指标</th><th>2024年</th><th>2025年</th><th>变化</th></tr>
+            <tr><td>毛利率</td><td>53%</td><td>56%</td><td>+3pp</td></tr>
+            <tr><td>IFRS净利率</td><td>29.4%</td><td>29.9%</td><td>+0.5pp</td></tr>
+            <tr><td>ROE</td><td>~17.2%</td><td>17.5%</td><td>+0.3pp</td></tr>
+          </table>
+          <p><b>驱动因素</b>：高毛利业务占比提升（增值服务 57%→60%、金融科技 47%→51%，腾讯云首次规模化盈利）；AI 大规模投入（研发 857 亿、+21%）压制净利率释放幅度……</p>
+        </div>
+      </div>
+
+      <button class="cite-bar" type="button">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#64748B" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+        来源 <span class="refs">[1] [2] [3] [4] [5]</span>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg>
+        <span class="evt-badge">#444-450 citation（7 条 web 来源）</span>
+      </button>
+
+      <div class="model-note">由 <b>qwen3.7-flash</b> 回答
+        <span class="evt-badge">#451 model_info（收尾补发）</span></div>
+
+      <div class="done-note">done（终态，不渲染可见元素；trace_3157b559 全程 447 帧：status×7 + token×431 + citation×7 + model_info×1 + done×1，本稿按聚合后展示）
+        <span class="evt-badge">#452 done</span></div>
+    </div>
+
+    <!-- 分支场景 -->
+    <div class="branch">
+      <h2>分支场景（同一混排规则的特例落位）</h2>
+      <div class="hint">以下三类事件出现时，同样按到达顺序插入消息流对应位置。</div>
+
+      <div class="branch-card" style="margin-bottom:16px">
+        <span class="evt-badge">ask_user：插入当前过程位置，composer 接管输入区</span>
+        <div class="composer">
+          <div class="q"><b>追问</b>：您想查询哪些报告期的数据？</div>
+          <div class="opts"><button>2024 年报</button><button>2025 中报</button><button>近三年对比</button></div>
+        </div>
+      </div>
+
+      <div class="branch-card" style="margin-bottom:16px">
+        <span class="evt-badge">abstention：拒答提示 + 转人工，跟随该轮回答</span>
+        <div class="abstain">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+          未在文档中找到相关数据
+          <button type="button">转人工咨询</button>
+        </div>
+      </div>
+
+      <div class="branch-card">
+        <span class="evt-badge">error：终态，横幅提示 + 状态复位，不再重连</span>
+        <div class="err-banner">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/></svg>
+          连接异常，请重试
+        </div>
+      </div>
+    </div>
+
+    <div class="legend">
+      <b>相邻合并规则</b>：只合并「相邻且同类型」的元素为一个组 div，类型不同即分拆，整体严格按到达顺序——只看相邻，不看全局。<br>
+      <b>旁白判定规则</b>：以最后一次工具调用为分界——其之前的 content 流为 <code>token_preamble</code>（过程容器内，弱化样式），之后的 content 流为正式回答（answer，正文气泡）。深度思考开启时旁白消失（规划进入 reasoning_content 通道）。<br>
+      <b>事件类型全集（11 种）</b>：<code>status</code> <code>token</code> <code>reasoning</code> <code>citation</code> <code>model_info</code> <code>done</code> <code>error</code> <code>ask_user</code> <code>abstention</code> <code>delegate</code> <code>task</code>——<code>task</code> 不产生消息流元素（只更新任务 chip/看板）。
+    </div>
+  </main>
+</div>
+<script>
+  const toggle = document.getElementById('badgeToggle');
+  toggle.addEventListener('change', () => {
+    document.body.classList.toggle('badges-on', toggle.checked);
+  });
+</script>
+</body>
+</html>

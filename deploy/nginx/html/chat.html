@@ -1053,6 +1053,20 @@ function renderUserBubble(text) {
   scrollToBottom();
 }
 
+// ── 本轮过程容器：Think 块 / 状态行 / 委派过程区按事件到达顺序挂同一容器，
+// 保留完整时序叙事；AI 气泡在首个 token 到达时创建于容器之后（不提前创建）。
+// 每轮问答各一个容器，跨轮互不混叠；历史重载不重建（D7），容器仅运行期存在 ──
+let processContainer = null;
+
+function ensureProcessContainer() {
+  if (!processContainer || !processContainer.isConnected) {
+    processContainer = document.createElement('div');
+    processContainer.className = 'process-group';
+    chatContainer.appendChild(processContainer);
+  }
+  return processContainer;
+}
+
 function renderStatusTag(stage, message, detail) {
   const div = document.createElement('div');
   div.className = 'status-tag';
@@ -1061,7 +1075,7 @@ function renderStatusTag(stage, message, detail) {
     text += ' <span class="status-detail">' + escapeHtml(detail) + '</span>';
   }
   div.innerHTML = `<span class="status-dot"></span> ${text}`;
-  chatContainer.appendChild(div);
+  ensureProcessContainer().appendChild(div);
   scrollToBottom();
 }
 
@@ -1665,8 +1679,12 @@ function sendFeedback(sessionId, messageIndex, rating) {
   }).catch(() => { /* 反馈失败静默 */ });
 }
 
+// 发送新消息/接管输入区时的流式复位：不复位 DOM——过程行（status/think/委派区）
+// 随本轮过程容器持久保留（每轮叙事完整、跨轮不混叠）；仅复位指针，
+// 下轮事件到达时经 ensureProcessContainer 开启新容器
 function removeStreamingState() {
-  chatContainer.querySelectorAll('.status-tag').forEach(el => el.remove());
+  processContainer = null;
+  currentThinkRow = null;
 }
 
 // ── Think 折叠行（reasoning 事件累积渲染，前端推断边界）──
@@ -1707,7 +1725,7 @@ function renderReasoningDelta(delta) {
         <span class="think-chevron"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></span>
       </summary>
       <div class="think-body"></div>`;
-    chatContainer.appendChild(details);
+    ensureProcessContainer().appendChild(details);
     currentThinkRow = details;
     scrollToBottom();
   }
@@ -1735,8 +1753,9 @@ function ensureDelegateSection(data) {
   if (!did) return null;
   let sec = delegateSections.get(did);
   if (sec) return sec;
-  const bubble = ensureAiBubble();           // 无正文时也先建 AI 行（正文到达后填充）
-  const main = bubble.closest('.bubble-main');
+  // 挂本轮过程容器（委派 start 的时序位置），不提前创建 AI 气泡：
+  // 提前建气泡会让其后到达的末轮思考/状态行错位到回答下方（2026-09-08 修复）
+  const host = ensureProcessContainer();
   const section = document.createElement('section');
   section.className = 'delegate-progress';
   section.dataset.did = did;
@@ -1755,7 +1774,7 @@ function ensureDelegateSection(data) {
       </details>
       <div class="delegate-content"></div>
     </div>`;
-  main.appendChild(section);
+  host.appendChild(section);
   const head = section.querySelector('.delegate-head');
   head.addEventListener('click', () => {
     const closed = section.classList.toggle('closed');
@@ -2176,12 +2195,12 @@ function stopGeneration() {
   renderStoppedNotice();
 }
 
-// 已停止提示：标记本段回答为中断（下次发送时随 removeStreamingState 清理）
+// 已停止提示：挂本轮过程容器末尾，随该轮叙事持久保留（不复位、不跨轮清理）
 function renderStoppedNotice() {
   const div = document.createElement('div');
   div.className = 'status-tag';
   div.innerHTML = escapeHtml('已停止');
-  chatContainer.appendChild(div);
+  ensureProcessContainer().appendChild(div);
   scrollToBottom();
 }
 

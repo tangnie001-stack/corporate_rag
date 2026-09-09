@@ -72,6 +72,36 @@
 - app 的 uvicorn 无 `--reload`（见 CLAUDE.md 常用命令），必须 restart 进程才能加载新代码
 - 判断"代码改动是否已生效"先看 override：挂了 `src/` 则文件已同步只需 restart；未挂载才需要 `--build`
 
+## 调试
+
+### SSE 帧级核对（trace_id 回放事件流）
+
+**场景**：核对某次问答前端实际收到的 SSE 帧序（status/token/reasoning 逐帧），验证过程渲染或排查流式问题。**唯一输入是 trace_id**
+**步骤**：
+1. 凭据自取：测试账号在 `.env` 的 `TEST_ACCOUNT` / `TEST_PASSWORD`（勿写进任何会提交的文档）；token 过期或首次使用，自己登录换新：
+   ```bash
+   TOKEN=$(curl -s -X POST http://localhost/api/auth/login \
+     -H "Content-Type: application/json" \
+     -d "{\"account\":\"$TEST_ACCOUNT\",\"password\":\"$TEST_PASSWORD\"}" \
+     | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['token'])")
+   ```
+2. trace_id → session_id：日志按 trace_id grep，任取一行，第四段 `|` 分隔的 `sess_*` 即 session_id：
+   ```bash
+   docker exec corporate-rag-app grep "<trace_id>" /data/logs/app_YYYY-MM-DD.log | head -1
+   ```
+3. 回放帧缓冲：
+   ```bash
+   curl -s "http://localhost/api/sessions/events?session_id=<SID>&after_seq=0" \
+        -H "Cookie: token=$TOKEN" -N
+   ```
+   返回带 `seq` 的 SSE 帧流（event: status/token/reasoning/…，按到达顺序）
+**验证**：正常生成后回放应看到 status/think 交错、末轮 token 连续、citation×N、model_info、done 的完整序列
+**注意事项**：
+- 帧缓冲是进程内存（`StreamingRunManager`），**终态后 TTL 300s、同会话新提问即清、容器重启全丢**——回放要在生成结束后 5 分钟内做
+- 缓冲只保留该会话**最近一次**生成的帧
+- 接口有属主校验：session 不属于该账号返回 404
+- **密码/token 不写入任何会提交的文档**；`.env` 不在 git 跟踪范围
+
 ## 分区命名
 
 按操作主题分区，例如：`## 评估`、`## 分块`、`## 部署`。新主题首次出现时新建分区。

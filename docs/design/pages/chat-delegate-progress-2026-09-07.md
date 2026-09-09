@@ -11,7 +11,7 @@
 
 | 组件 | 归属 change | 触发 | 说明 |
 |------|------------|------|------|
-| 分析过程折叠区 delegate-progress | core | `delegate` SSE 事件（kind=thinking/content） | 嵌入**该条 AI 回答气泡**内；按 delegate_id 分节 |
+| 分析过程折叠区 delegate-progress | core | `delegate` SSE 事件（kind=thinking/content） | 挂本轮过程容器（时序位置=委派 start）；按 delegate_id 分节 |
 | 委派状态文案 | core | `delegate` end（ok/reason） | "领域专家分析完成" / "分析中断（原因）" |
 | 任务/进度看板 task-board | task-board | `task` SSE 事件 + 快照接口 | 头部 chip → 右侧只读面板，plan/execution 分组 |
 
@@ -19,7 +19,7 @@
 
 ### 1. 分析过程折叠区 delegate-progress（core）
 
-**位置**：AI 回答气泡内 `bubble-content` 之后、引用来源横条/反馈之前；整区仍属该条消息的 DOM 子块，`overflow` 不影响回答正文。
+**位置**：本轮**过程容器**（`.process-group`，按事件到达顺序容纳 Think 块 / 状态行 / 委派区的时序流）内、委派 start 事件到达的时序位置；AI 回答气泡在首个 token 到达时创建于过程容器之后（2026-09-08 修订：原「嵌入回答气泡内」会因气泡提前创建导致其后到达的思考/状态行错位到回答下方，改为随过程容器时序排列）。
 
 - **结构**（每个 delegate_id 一节）：
   - 节头（可点击整行，`cursor-pointer`，`aria-expanded`）：`[技能名] 领域专家分析` 标题 + 左侧 6px 状态圆点（运行中 primary 呼吸 / 完成 text-secondary / 中断 error）+ 右侧 chevron SVG + 行尾状态文案
@@ -27,7 +27,7 @@
     - **思考过程** 二级折叠：`reasoning` 增量，样式 muted、字号 13px、行高 1.6、左边 3px primary-light 条；二级头 "思考过程" + 字数（`reasoning` 增量过长时以省略风险提示）
     - **分析正文**：`content` 增量流式，正常正文排版（16px/1.5），白底正文区与思考区分隔
 - **样式**：节体容器 `--surface-muted` 底、1px `--border`、圆角 10px、内边距 12px；节头与节体间隙 8px；节间分隔 16px
-- **多 delegate**：同一气泡内按 delegate_id 分节、可分别折叠；顺序与事件到达一致
+- **多 delegate**：同一过程容器内按 delegate_id 分节、可分别折叠；顺序与事件到达一致
 - **状态与文案**：运行中节头圆点 primary + 文案"正在分析…"；正常结束圆点 text-secondary + "领域专家分析完成"；中断（idle/total/turn/failed）圆点 error + **"分析中断（原因）"**（原因中文短词：空闲超时 / 超时 / 轮次上限 / 失败），行尾可用 11px muted 注明
 - **渲染**：`delegate` 事件（kind=thinking|content、delegate_id、delta）按 id 找到节；无 id 对应节则丢弃并 warn；thinking 与 content 各自累积后流式追加；运行中节自动滚动到底（`scrollIntoView` 若该气泡可见）
 - **动画**：展开/收起 150-200ms；呼吸点 opacity 1↔0.35（1.2s）；`prefers-reduced-motion` 时停用呼吸/滚动动画
