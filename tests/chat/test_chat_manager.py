@@ -195,7 +195,15 @@ async def test_save_user_and_assistant_async(monkeypatch):
     async def fake_save_user(session_id, kb_id, user_msg):
         calls.append(("user", session_id, kb_id, user_msg))
 
-    async def fake_save_assistant(session_id, kb_id, assistant_msg, sources, status):
+    async def fake_save_assistant(
+        session_id,
+        kb_id,
+        assistant_msg,
+        sources,
+        status,
+        process_json=None,
+        model_name=None,
+    ):
         calls.append(("assistant", session_id, kb_id, assistant_msg, status))
 
     cm = ChatManager.__new__(ChatManager)

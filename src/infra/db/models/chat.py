@@ -3,6 +3,7 @@
 from datetime import datetime
 
 from sqlalchemy import Integer, String, Text, func
+from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.infra.db.base import Base, IDMixin, TimestampMixin, UTCDateTime
@@ -34,6 +35,9 @@ class MessageModel(Base):
     completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
     total_tokens: Mapped[int] = mapped_column(Integer, default=0)
     model_name: Mapped[str | None] = mapped_column(String(64), comment="模型名称")
+    process: Mapped[str | None] = mapped_column(
+        MEDIUMTEXT, nullable=True, comment="过程事件JSON（历史回放）"
+    )
     status: Mapped[str] = mapped_column(
         String(16), default="complete", nullable=False, comment="complete/interrupted"
     )

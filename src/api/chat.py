@@ -10,6 +10,7 @@ from loguru import logger
 
 from src.api.dependencies import get_app_service
 from src.api.model.request import ChatStreamRequest
+from src.chat.process_log import serialize_process
 from src.chat.streaming import StreamingRunManager, streaming_manager
 from src.config.const import SESSION_LOCK_TTL
 from src.infra.llm.request_context import RequestContext, current_request_ctx
@@ -215,6 +216,8 @@ async def _run_with_finalize(
                 partial,
                 partial_holder.get("sources", []),
                 "interrupted",
+                process_json=serialize_process(partial_holder.get("events_log") or []),
+                model_name=partial_holder.get("model_name", ""),
             )
         manager.add_event(session_id, "done", {"cancelled": True})
         raise
@@ -228,6 +231,8 @@ async def _run_with_finalize(
                 partial,
                 partial_holder.get("sources", []),
                 "interrupted",
+                process_json=serialize_process(partial_holder.get("events_log") or []),
+                model_name=partial_holder.get("model_name", ""),
             )
         manager.add_event(session_id, "error", {"error": str(e)})
     else:
@@ -237,6 +242,8 @@ async def _run_with_finalize(
             full_answer,
             partial_holder.get("sources", []),
             "complete",
+            process_json=serialize_process(partial_holder.get("events_log") or []),
+            model_name=partial_holder.get("model_name", ""),
         )
         # 完整回答写 Redis 对话历史（get_history_async 供下一轮 prompt 上下文）；
         # 取消/异常的部分回答保持仅 MySQL，不写 Redis

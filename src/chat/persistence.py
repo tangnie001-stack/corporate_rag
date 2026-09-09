@@ -90,8 +90,20 @@ class PersistenceService:
         assistant_msg: str,
         sources: list[dict] | None = None,
         status: str = "complete",
+        process_json: str | None = None,
+        model_name: str | None = None,
     ) -> None:
-        """写入一条 assistant 消息（完成/中止时调用，status 区分完整与中断）。"""
+        """写入一条 assistant 消息（完成/中止时调用，status 区分完整与中断）。
+
+        Args:
+            session_id: 会话 ID
+            kb_id: 关联的知识库 ID
+            assistant_msg: 助理回答内容
+            sources: 来源引用列表
+            status: 消息状态（complete/interrupted）
+            process_json: 过程事件JSON（历史回放，None=存量语义）
+            model_name: 实际回答模型名（复用既有列，None 落空串）
+        """
         try:
             from src.infra.db.models.chat import MessageModel
 
@@ -104,6 +116,8 @@ class PersistenceService:
                     content=assistant_msg,
                     sources=sources_json,
                     status=status,
+                    process=process_json,
+                    model_name=model_name or "",
                 )
             )
         except Exception as e:  # noqa: BLE001

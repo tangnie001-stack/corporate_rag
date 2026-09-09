@@ -250,10 +250,28 @@ class AppService:
         assistant_msg: str,
         sources: list[dict] | None = None,
         status: str = "complete",
+        process_json: str | None = None,
+        model_name: str | None = None,
     ) -> None:
-        """流结束后异步写入单条 assistant 消息到 MySQL。"""
+        """流结束后异步写入单条 assistant 消息到 MySQL。
+
+        Args:
+            session_id: 会话 ID
+            kb_id: 关联的知识库 ID
+            assistant_msg: 助理回答内容
+            sources: 来源引用列表
+            status: 消息状态（complete/interrupted）
+            process_json: 过程事件JSON（历史回放，None=存量语义）
+            model_name: 实际回答模型名（复用既有列，None 落空串）
+        """
         await self.chat_manager.save_assistant_async(
-            session_id, kb_id, assistant_msg, sources, status
+            session_id,
+            kb_id,
+            assistant_msg,
+            sources,
+            status,
+            process_json,
+            model_name,
         )
 
     async def save_messages_async(

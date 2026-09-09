@@ -105,6 +105,9 @@ class ChatRepo:
                 completion_tokens=getattr(msg, "completion_tokens", 0),
                 total_tokens=getattr(msg, "total_tokens", 0),
                 model_name=getattr(msg, "model_name", ""),
+                process=getattr(
+                    msg, "process", None
+                ),  # 白名单透传（既有 getattr 模式）
             )
             session.add(m)
             await session.commit()
