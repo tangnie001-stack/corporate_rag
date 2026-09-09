@@ -56,21 +56,21 @@
 #### Scenario: 中间轮旁白隔离
 
 - **WHEN** 第一轮模型输出 content「参考文档为空，我将通过检索…」后发起 retrieve_kb 工具调用
-- **THEN** 该段 content SHALL 渲染为过程容器内的旁白块，而非回答气泡的一部分
+- **THEN** 该段 content SHALL 渲染为 assistant 气泡 bubble-content 内的旁白正文段（与正式回答同正文样式，v3 单气泡叙事），而非独立样式块
 
 #### Scenario: 纯问答无工具调用
 
 - **WHEN** 一次生成全程无任何工具调用，模型的 content 直接收尾
 - **THEN** 全部 content SHALL 作为正式回答渲染进气泡，不产生旁白块
 
-### Requirement: 历史回放重建过程容器
+### Requirement: 历史回放重建过程区（气泡内）
 
-`loadSessionMessages` 对含非空 process 的 assistant 消息 SHALL 按数组顺序将事件喂给与实时路径相同的**过程元素渲染函数**，重建过程容器（状态行/旁白块/委派区等），渲染产物 SHALL 与实时观看一致。复用边界：SHALL 仅复用过程元素渲染函数，SHALL NOT 触发实时 handler 的运行期副作用（done 收尾、loadSessions、composer 接管）。交互类事件 SHALL 静态化：`ask_user` 帧渲染为静态注记（非交互卡片）；`error`/`done` 帧跳过（中断语义由消息 status 标签承载）。process 为 NULL 的存量消息 SHALL 跳过重建（仅终稿）。本要求取代既有 D7「历史重载不重建」决策。
+`loadSessionMessages` 对含非空 process 的 assistant 消息 SHALL 按数组顺序将事件喂给与实时路径相同的**过程元素渲染函数**，在该回答的 assistant 气泡 `bubble-content` 内重建过程区（状态行/旁白正文段/委派区等，全部位于气泡内、正式正文之前），渲染产物 SHALL 与实时观看一致。复用边界：SHALL 仅复用过程元素渲染函数，SHALL NOT 触发实时 handler 的运行期副作用（done 收尾、loadSessions、composer 接管）。交互类事件 SHALL 静态化：`ask_user` 帧渲染为静态注记（非交互卡片）；`error`/`done` 帧跳过（中断语义由消息 status 标签承载）。process 为 NULL 的存量消息 SHALL 跳过重建（仅终稿）。本要求取代既有 D7「历史重载不重建」决策。
 
 #### Scenario: 刷新后过程原样重现
 
 - **WHEN** 用户刷新页面加载含 process 的会话
-- **THEN** 该回答的过程容器 SHALL 按事件顺序重建（状态行、旁白块、委派区与实时观看一致），正文气泡渲染 answer 且 SHALL NOT 出现正文重复
+- **THEN** 该回答的气泡内过程区 SHALL 按事件顺序重建（状态行、旁白正文段、委派区与实时观看一致），正文渲染 answer 且 SHALL NOT 出现正文重复
 
 #### Scenario: 历史中的澄清事件静态化
 
@@ -80,11 +80,11 @@
 #### Scenario: 存量消息降级
 
 - **WHEN** 前端加载 process 为 null 的历史消息
-- **THEN** 仅渲染终稿与引用，无过程容器，无 JS 错误
+- **THEN** 仅渲染终稿与引用，无气泡内过程区，无 JS 错误
 
 ### Requirement: 相邻同型合并渲染
 
-过程容器渲染 SHALL 将「相邻且同类型」的元素合并为一个组 div（如连续 status 归入同一组），类型不同即分拆；只看相邻，不看全局；整体严格按到达顺序。实时路径与历史回放 SHALL 共用同一合并实现。
+过程区渲染（bubble-content 内）SHALL 将「相邻且同类型」的元素合并为一个组 div（如连续 status 归入同一组），类型不同即分拆；只看相邻，不看全局；整体严格按到达顺序。实时路径与历史回放 SHALL 共用同一合并实现。
 
 #### Scenario: 连续状态合并
 

@@ -177,7 +177,7 @@
   - 交互：点击外部遮罩 / Esc / ✕ 关闭抽屉
   - **历史回放（刷新 / 切换会话）**：assistant 消息携带结构化 `sources` 数组（见 `api_contract.md §2.4.2`），前端 `loadSessionMessages` 读取后调用 `attachHistoryCitations` 重建该气泡的横条 + 抽屉（复用实时路径同一套 `renderCiteBar` / `openCiteDrawer` / `attachInlineCiteRefs`）。**兼容策略**：存量旧数据 `sources` 为扁平字符串数组（"文件名 (第x页)"），由后端 `get_messages` 迭代解包返回（剥离历史双重 JSON 转义），前端对字符串项降级展示——横条照显、抽屉 `snippet` 留空；新数据为结构化 dict（`source/page/snippet/kind/index`），完整还原引用细节。
 - **反馈按钮**：AI 回复右下角 👍/👎
-- **深度思考块**：可折叠的 reasoning 段（`bg #F1F5F9`，左蓝色边）；与工具调用/检索状态行同挂**本轮过程容器**（`.process-group`），按事件到达顺序时序排列，容器位于该轮 AI 回答气泡之前（2026-09-08 修订，见 chat-delegate-progress-2026-09-07.md）
+- **深度思考块**：可折叠的 reasoning 段（`bg #F1F5F9`，左蓝色边）；与工具调用/检索状态行、旁白正文段同挂**该轮 AI 气泡的 `bubble-content` 内**（v3 单气泡叙事，2026-09-09 修订：过程区不再使用气泡外独立容器，旁白为正文样式段落，按事件到达顺序时序排列；历史回放同构，见 chat-eventstream-mockup-2026-09-08.html v3）
 
 ## 数据源（与本项目 API 对接）
 

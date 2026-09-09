@@ -55,7 +55,7 @@
 
 ### D6: 历史回放的复用边界与交互事件静态化
 
-「历史回放复用实时渲染管线」的边界必须收窄为：**复用过程元素渲染函数**（status 组/Think 块/旁白块/委派区的 DOM 构建与相邻合并），**不复用整个 handler 集合**——实时 handler 含运行期副作用（done 会 finalizeAnswer + loadSessions() 刷侧栏 + 状态机切换；ask_user 会 renderComposer 接管输入区），历史回放触发这些会产生死卡片和错误收尾。对应规则：
+「历史回放复用实时渲染管线」的边界必须收窄为：**复用过程元素渲染函数**（status 组/Think 块/旁白正文段/委派区的 DOM 构建与相邻合并），**不复用整个 handler 集合**；渲染挂载点为 assistant 气泡的 `bubble-content` 内（v3 单气泡叙事，2026-09-09 设计稿定稿——过程区不再使用气泡外独立容器，旁白为正文样式段落）——实时 handler 含运行期副作用（done 会 finalizeAnswer + loadSessions() 刷侧栏 + 状态机切换；ask_user 会 renderComposer 接管输入区），历史回放触发这些会产生死卡片和错误收尾。对应规则：
 
 - `ask_user` 帧在历史回放中渲染为**静态注记**（如"已向用户澄清"），不是交互卡片——澄清的回答本身是消息流中的独立 user 消息，天然在旁
 - `error`/`done` 帧在历史回放中跳过（中断语义由消息 status=interrupted 标签承载，引用由既有 attachHistoryCitations 承载）
