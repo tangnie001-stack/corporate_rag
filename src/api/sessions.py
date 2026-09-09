@@ -114,6 +114,14 @@ async def get_session_messages(
                         session_id,
                     )
                     process = None
+                elif process.get("format_version") != 1:
+                    # 未知版本不拒绝，透传 + 警告（读取端按 format_version 分派，
+                    # 前端不认识时自行跳过重建）
+                    logger.warning(
+                        "Unknown process format_version (session={}): {}",
+                        session_id,
+                        process.get("format_version"),
+                    )
             except json.JSONDecodeError as e:
                 logger.warning(
                     "Process JSON decode failed (session={}): {}", session_id, e

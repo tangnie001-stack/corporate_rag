@@ -24,7 +24,7 @@
     --bubble-user: #F1F5F9;
     --bubble-user-text: #1E293B;
     --kb-accent: #3B82F6;
-    --accent: #3B82F6; /* 旁白 .preamble 虚线边框强调色（与主色一致） */
+    --accent: #F97316; /* 旁白 .preamble 虚线边框强调色（对齐设计稿 v2 accent 橙色） */
     --shadow: 0 1px 3px rgba(0,0,0,0.08);
     --shadow-lg: 0 4px 12px rgba(0,0,0,0.04);
     --font-display: 'Lexend', 'Source Sans 3', sans-serif;
@@ -1079,6 +1079,7 @@ let pendingTokens = [];        // 旁白待定区：首个工具调用前的 tok
 let toolCallSeen = false;      // 是否已出现工具调用（之后 token = 正文）
 let pendingPreviewEl = null;   // 待定区预览 div（单一节点引用，固化时原位保留）
 let currentStatusGroup = null; // 相邻同型合并：当前 status 组 div
+let answerStartIdx = 0;        // 气泡正文起点指针：上次工具边界在 streamBuffer 中的位置（其后内容尚未被边界重分类，可能是旁白）
 
 // 新提问全量复位过程渲染状态（随 removeStreamingState 调用）
 function resetProcessRenderState() {
@@ -1087,6 +1088,7 @@ function resetProcessRenderState() {
   pendingPreviewEl = null;
   currentStatusGroup = null;
   currentThinkRow = null;
+  answerStartIdx = 0;
 }
 
 // 相邻合并关键：任何非 status 元素入容器后，闭合当前 status 组
@@ -1131,13 +1133,34 @@ function dropPendingPreview() {
   pendingTokens = [];
 }
 
-// status 渲染：闭合 Think 行；工具类 status 触发旁白待定区固化；
+// 回溯重分类（工具边界调用）：上一轮以 tool_calls 收尾，其 content 流为旁白
+// （design D2 等价判定的实时版）——把上次工具边界之后乐观进气泡的 token 提取
+// 为旁白块插到边界元素之前，并重渲气泡。负责「工具调用之间」的旁白；「第一个
+// 工具调用前」的旁白由待定区负责（flushPendingAsPreamble），两者不重叠。
+function reclassifyNarrationAsPreamble() {
+  if (answerStartIdx < streamBuffer.length) {
+    const narration = streamBuffer.slice(answerStartIdx);
+    streamBuffer = streamBuffer.slice(0, answerStartIdx);
+    const div = document.createElement('div');
+    div.className = 'preamble';
+    div.textContent = narration;
+    ensureProcessContainer().appendChild(div);
+    closeStatusGroup(); // 旁白为非 status 元素，入容器后闭合当前 status 组，保证时序不倒置
+    if (streamBubble && streamBubble.isConnected) {
+      streamBubble.innerHTML = renderMarkdown(normalizePartialMarkdown(streamBuffer));
+    }
+  }
+  answerStartIdx = streamBuffer.length; // 边界处理后重置为截断后的长度
+}
+
+// status 渲染：闭合 Think 行；工具类 status 触发旁白待定区固化 + 气泡回溯重分类；
 // 相邻同型 status 合并进同一 .pg-group（被非 status 元素打断后开新组）
 function renderStatusTag(stage, message, detail) {
   closeThinkRow();
   if (stage === 'retrieve' || stage === 'web_search') {
     toolCallSeen = true;
     flushPendingAsPreamble();
+    reclassifyNarrationAsPreamble();
   }
   if (!currentStatusGroup || !currentStatusGroup.isConnected) {
     currentStatusGroup = document.createElement('div');
@@ -1224,6 +1247,7 @@ function finalizeAnswer() {
   }
   streamBuffer = '';
   streamBubble = null;
+  answerStartIdx = 0; // 正文指针随缓冲清零（下一回答从空缓冲计起）
   // delegate 过程区收尾：正文定型后仍未收 end 的节置中断态（异常残留兜底），
   // 并清空 map 供下一轮复用（正文定型后不再接收本 delegate 增量）
   finalizePendingDelegateSections('');
@@ -1833,6 +1857,11 @@ function ensureDelegateSection(data) {
   if (!did) return null;
   let sec = delegateSections.get(did);
   if (sec) return sec;
+  // 委派 start 为工具边界：固化待定区（首个工具前的旁白）+ 回溯重分类
+  // （工具调用之间的旁白），其后 token 才是正文候选
+  toolCallSeen = true;
+  flushPendingAsPreamble();
+  reclassifyNarrationAsPreamble();
   // 挂本轮过程容器（委派 start 的时序位置），不提前创建 AI 气泡：
   // 提前建气泡会让其后到达的末轮思考/状态行错位到回答下方（2026-09-08 修复）
   const host = ensureProcessContainer();
@@ -2025,6 +2054,10 @@ function buildStreamHandlers() {
       try {
         state.lastSeq = (data.seq !== undefined) ? data.seq : state.lastSeq;
         closeThinkRow(); // D6：澄清暂停不复位过程容器，澄清后帧继续进原容器
+        // ask_user 为工具边界：澄清前的话是旁白——固化待定区 + 回溯重分类
+        toolCallSeen = true;
+        flushPendingAsPreamble();
+        reclassifyNarrationAsPreamble();
         // 不关流：SSE 保持连接，composer 接管输入区，提交后同流续答
         state.current = STATE.CLARIFYING;
         hideInputArea();

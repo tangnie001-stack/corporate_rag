@@ -44,7 +44,10 @@ async def test_background_task_finalizes_assistant_on_cancel():
     fake_svc.save_assistant_async = AsyncMock(
         side_effect=lambda *a, **k: calls.append(("assistant", a[4]))
     )
-    partial_holder = {"text": "部分回答"}
+    partial_holder = {
+        "text": "部分回答",
+        "events_log": [{"type": "token", "payload": {"token": "部分回答"}}],
+    }
     mgr = StreamingRunManager()
     entered = asyncio.Event()
 
@@ -127,7 +130,10 @@ async def test_complete_path_writes_assistant_to_redis():
     fake_svc.chat_manager.add_message_async = AsyncMock(
         side_effect=lambda *a, **k: redis_calls.append(a)
     )
-    partial_holder = {"text": ""}
+    partial_holder = {
+        "text": "",
+        "events_log": [{"type": "token", "payload": {"token": "完整回答"}}],
+    }
     mgr = StreamingRunManager()
 
     async def answer_builder():
@@ -166,7 +172,10 @@ async def test_cancelled_path_skips_redis_assistant():
     fake_svc.chat_manager.add_message_async = AsyncMock(
         side_effect=lambda *a, **k: redis_calls.append(a)
     )
-    partial_holder = {"text": "部分回答"}
+    partial_holder = {
+        "text": "部分回答",
+        "events_log": [{"type": "token", "payload": {"token": "部分回答"}}],
+    }
     mgr = StreamingRunManager()
 
     async def answer_builder():
@@ -254,7 +263,10 @@ async def test_background_task_error_event_round_trips_from_payload():
 
     fake_svc = MagicMock()
     fake_svc.save_assistant_async = AsyncMock()
-    partial_holder = {"text": "部分回答"}
+    partial_holder = {
+        "text": "部分回答",
+        "events_log": [{"type": "token", "payload": {"token": "部分回答"}}],
+    }
     mgr = StreamingRunManager()
 
     async def answer_builder():
@@ -304,7 +316,10 @@ async def test_background_task_done_cancelled_round_trips():
     fake_svc.save_assistant_async = AsyncMock(
         side_effect=lambda *a, **k: calls.append(("assistant", a[4]))
     )
-    partial_holder = {"text": "部分回答"}
+    partial_holder = {
+        "text": "部分回答",
+        "events_log": [{"type": "token", "payload": {"token": "部分回答"}}],
+    }
     mgr = StreamingRunManager()
 
     async def answer_builder():

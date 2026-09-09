@@ -14,6 +14,7 @@ from langchain_core.language_models.base import LanguageModelInput
 from langchain_core.messages import AIMessageChunk
 from langchain_core.outputs import ChatGenerationChunk
 from langchain_openai import ChatOpenAI
+from loguru import logger
 
 
 class ChatQwenWithReasoning(ChatOpenAI):
@@ -72,13 +73,18 @@ class ReasoningPreservingChatQwen(ChatQwenWithReasoning):
     """
 
     def __init__(self, **kwargs) -> None:
-        """构造时向 extra_body 注入 preserve_thinking=True（不覆盖用户显式配置）。
+        """构造时按需向 extra_body 注入 preserve_thinking=True（不覆盖用户显式配置）。
+
+        仅当请求未显式关闭思考（extra_body.enable_thinking 不为 False）时注入：
+        enable_thinking=False 的调用方（fork 子代理、RAGAS 选手/裁判等）请求体
+        保持原样，避免 400 或评估基线漂移。
 
         Args:
             **kwargs: 透传给 ChatQwenWithReasoning 的构造参数
         """
         extra = dict(kwargs.pop("extra_body", None) or {})
-        extra.setdefault("preserve_thinking", True)
+        if extra.get("enable_thinking") is not False:
+            extra.setdefault("preserve_thinking", True)
         kwargs["extra_body"] = extra
         super().__init__(**kwargs)
 
@@ -101,12 +107,20 @@ class ReasoningPreservingChatQwen(ChatQwenWithReasoning):
         """
         messages = self._convert_input(input_).to_messages()
         payload = super()._get_request_payload(input_, stop=stop, **kwargs)
-        for msg, msg_dict in zip(messages, payload.get("messages", [])):
+        payload_messages = payload.get("messages", [])
+        if len(messages) != len(payload_messages):
+            # 数量不一致说明两侧消息形态分歧，无法一一对应，跳过注入保证请求安全
+            logger.warning(
+                "reasoning_content injection skipped: message count mismatch "
+                "({} vs {})",
+                len(messages),
+                len(payload_messages),
+            )
+            return payload
+        for msg, msg_dict in zip(messages, payload_messages):
             if msg_dict.get("role") != "assistant":
                 continue
-            reasoning = (getattr(msg, "additional_kwargs", None) or {}).get(
-                "reasoning_content", ""
-            )
+            reasoning = msg.additional_kwargs.get("reasoning_content", "")
             if reasoning and not msg_dict.get("reasoning_content"):
                 msg_dict["reasoning_content"] = reasoning
         return payload

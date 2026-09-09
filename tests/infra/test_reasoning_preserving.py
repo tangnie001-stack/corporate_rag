@@ -35,3 +35,25 @@ class TestReasoningPreserving:
         extra_body = _llm().extra_body
         assert extra_body is not None
         assert extra_body.get("preserve_thinking") is True
+
+    def test_enable_thinking_false_skips_preserve_thinking(self):
+        # 显式关闭思考的调用方（fork 子代理、RAGAS 选手/裁判）请求体不被改变
+        llm = ReasoningPreservingChatQwen(
+            model="qwen3.7-flash",
+            api_key="test",
+            extra_body={"enable_thinking": False},
+        )
+        extra_body = llm.extra_body
+        assert extra_body is not None
+        assert extra_body.get("preserve_thinking") is None
+        assert extra_body.get("enable_thinking") is False
+
+    def test_enable_thinking_true_keeps_preserve_thinking(self):
+        llm = ReasoningPreservingChatQwen(
+            model="qwen3.7-flash",
+            api_key="test",
+            extra_body={"enable_thinking": True},
+        )
+        extra_body = llm.extra_body
+        assert extra_body is not None
+        assert extra_body.get("preserve_thinking") is True

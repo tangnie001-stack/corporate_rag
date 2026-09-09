@@ -188,8 +188,8 @@ async def _run_with_finalize(
         partial_holder: 生产者写入的 {"text": 已产出 token, "sources": 引用来源列表}
             共享 dict，取消/出错时据此写 interrupted 部分回答，收尾落库引用来源；
             _run_generation 另挂 events_log（过程事件列表引用）并于收尾写 model_name
-        answer_builder: 可调用对象，执行生成并更新 partial_holder["text"]，
-            返回完整回答
+        answer_builder: 可调用对象，执行生成并更新 partial_holder["text"]；
+            终态落库内容为 process 分拣返回的净化正文（旁白已剔除）
         manager: StreamingRunManager（终态事件写入缓冲）
         abort_signal: 请求级中止信号（由 cancel 端点置位，任务内当前不消费）
         release_lock: per-session 并发锁释放回调（幂等，任务完成时调用）
@@ -206,48 +206,60 @@ async def _run_with_finalize(
     trace_token = current_trace_id.set(trace_id or None)
     session_token = current_session_id.set(ctx.session_id)
     try:
-        full_answer = await answer_builder()
+        await answer_builder()
     except asyncio.CancelledError:
-        partial = partial_holder["text"]
-        if partial:
+        # 净化正文：分拣剔除旁白后的末轮正文流，替代全量累积 token 落库，
+        # 避免历史回放时旁白双重渲染；partial_holder["text"] 同步更新保持一致
+        process_json, purified = serialize_process(
+            partial_holder.get("events_log") or []
+        )
+        partial_holder["text"] = purified
+        if purified:
             await svc.save_assistant_async(
                 session_id,
                 kb_id,
-                partial,
+                purified,
                 partial_holder.get("sources", []),
                 "interrupted",
-                process_json=serialize_process(partial_holder.get("events_log") or []),
+                process_json=process_json,
                 model_name=partial_holder.get("model_name", ""),
             )
         manager.add_event(session_id, "done", {"cancelled": True})
         raise
     except Exception as e:  # noqa: BLE001
         logger.exception("generation failed: {}", e)
-        partial = partial_holder["text"]
-        if partial:
+        process_json, purified = serialize_process(
+            partial_holder.get("events_log") or []
+        )
+        partial_holder["text"] = purified
+        if purified:
             await svc.save_assistant_async(
                 session_id,
                 kb_id,
-                partial,
+                purified,
                 partial_holder.get("sources", []),
                 "interrupted",
-                process_json=serialize_process(partial_holder.get("events_log") or []),
+                process_json=process_json,
                 model_name=partial_holder.get("model_name", ""),
             )
         manager.add_event(session_id, "error", {"error": str(e)})
     else:
+        process_json, purified = serialize_process(
+            partial_holder.get("events_log") or []
+        )
+        partial_holder["text"] = purified
         await svc.save_assistant_async(
             session_id,
             kb_id,
-            full_answer,
+            purified,
             partial_holder.get("sources", []),
             "complete",
-            process_json=serialize_process(partial_holder.get("events_log") or []),
+            process_json=process_json,
             model_name=partial_holder.get("model_name", ""),
         )
-        # 完整回答写 Redis 对话历史（get_history_async 供下一轮 prompt 上下文）；
-        # 取消/异常的部分回答保持仅 MySQL，不写 Redis
-        await svc.chat_manager.add_message_async(session_id, "assistant", full_answer)
+        # 净化正文写 Redis 对话历史（get_history_async 供下一轮 prompt 上下文，
+        # 与 MySQL 落库内容一致）；取消/异常的部分回答保持仅 MySQL，不写 Redis
+        await svc.chat_manager.add_message_async(session_id, "assistant", purified)
         manager.add_event(session_id, "done", {"trace_id": trace_id or ""})
     finally:
         current_request_ctx.reset(ctx_token)

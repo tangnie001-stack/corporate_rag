@@ -64,8 +64,9 @@ async def clarify_answer(
 
     从进程级 pending_asks 中 pop 该 session 的 Future（pop 保证单次消费：
     无论成功解析还是已超时，注册表只允许被消费一次，避免重复回答）。
-    resolve 成功后把答案作为 user 消息写入 Redis 历史（chat_manager），
-    与 stream_chat 入口写入原始 query 的轨道并存，保证跨 turn 上下文不丢。
+    resolve 成功后把答案作为 user 消息写入 Redis 历史（chat_manager）
+    与 MySQL（save_user_async，对齐 chat_stream 入口的用户消息落库模式，
+    kb_id 从会话记录取）——仅写 Redis 时刷新后澄清回答即丢，回放叙事断裂。
 
     Args:
         body: 澄清答案请求体，含 session_id 与 answers
@@ -93,4 +94,9 @@ async def clarify_answer(
     text = _format_answers_text(body.answers)
     if text:
         await svc.chat_manager.add_message_async(body.session_id, "user", text)
+        # 澄清回答落 MySQL（与 Redis 历史双写）：refresh 后 Redis 历史不可用于
+        # 回放，消息流以 MySQL 为准；kb_id 从会话记录取（本端点无 KB 上下文）
+        session = await svc.get_session_by_id(body.session_id)
+        if session:
+            await svc.save_user_async(body.session_id, session.get("kb_id") or "", text)
     return ResponseModel(data=True)
