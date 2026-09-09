@@ -24,6 +24,7 @@
     --bubble-user: #F1F5F9;
     --bubble-user-text: #1E293B;
     --kb-accent: #3B82F6;
+    --accent: #3B82F6; /* 旁白 .preamble 虚线边框强调色（与主色一致） */
     --shadow: 0 1px 3px rgba(0,0,0,0.08);
     --shadow-lg: 0 4px 12px rgba(0,0,0,0.04);
     --font-display: 'Lexend', 'Source Sans 3', sans-serif;
@@ -551,6 +552,12 @@
   .think-row summary .think-summary { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-muted); }
   .think-row .think-body { padding: 4px 12px 10px; font-size: 13px; line-height: 1.6; color: var(--text-secondary); white-space: pre-wrap; }
 
+  /* 过程元素：相邻同型 status 组 + 旁白（首个工具调用前的待定正文） */
+  .pg-group{display:flex;flex-direction:column;gap:5px}
+  .preamble{border-left:3px dashed var(--accent);background:var(--surface);border-radius:0 8px 8px 0;
+    padding:7px 12px;font-size:13px;line-height:1.6;color:var(--text-secondary);font-style:italic;
+    position:relative;width:fit-content;max-width:100%}
+
   /* ── Clarification（ask_user 澄清卡片） ── */
   .clarification-inner {
     background: var(--bubble-ai); border: 1px solid var(--border);
@@ -1067,7 +1074,27 @@ function ensureProcessContainer() {
   return processContainer;
 }
 
-function renderStatusTag(stage, message, detail) {
+// ── 过程元素公共状态（design D3/D6）──
+let pendingTokens = [];        // 旁白待定区：首个工具调用前的 token
+let toolCallSeen = false;      // 是否已出现工具调用（之后 token = 正文）
+let pendingPreviewEl = null;   // 待定区预览 div（单一节点引用，固化时原位保留）
+let currentStatusGroup = null; // 相邻同型合并：当前 status 组 div
+
+// 新提问全量复位过程渲染状态（随 removeStreamingState 调用）
+function resetProcessRenderState() {
+  pendingTokens = [];
+  toolCallSeen = false;
+  pendingPreviewEl = null;
+  currentStatusGroup = null;
+  currentThinkRow = null;
+}
+
+// 相邻合并关键：任何非 status 元素入容器后，闭合当前 status 组
+function closeStatusGroup() {
+  currentStatusGroup = null;
+}
+
+function buildStatusTag(stage, message, detail) {
   const div = document.createElement('div');
   div.className = 'status-tag';
   let text = escapeHtml(message);
@@ -1075,7 +1102,49 @@ function renderStatusTag(stage, message, detail) {
     text += ' <span class="status-detail">' + escapeHtml(detail) + '</span>';
   }
   div.innerHTML = `<span class="status-dot"></span> ${text}`;
-  ensureProcessContainer().appendChild(div);
+  return div;
+}
+
+// 待定区预览：单一 div 原位更新（不重复建节点）
+function updatePendingPreview() {
+  if (!pendingPreviewEl || !pendingPreviewEl.isConnected) {
+    pendingPreviewEl = document.createElement('div');
+    pendingPreviewEl.className = 'preamble';
+    ensureProcessContainer().appendChild(pendingPreviewEl);
+  }
+  pendingPreviewEl.textContent = pendingTokens.join('');
+}
+
+// 固化：待定区转正式旁白块（预览 div 原位保留即成正式块）
+function flushPendingAsPreamble() {
+  pendingPreviewEl = null;   // 节点已在容器内，保留
+  pendingTokens = [];
+}
+
+// 待定区丢弃（answer 段并入气泡前清理预览节点）
+function dropPendingPreview() {
+  if (pendingPreviewEl && pendingPreviewEl.isConnected) {
+    pendingPreviewEl.remove();
+  }
+  pendingPreviewEl = null;
+  pendingTokens = [];
+}
+
+// status 渲染：闭合 Think 行；工具类 status 触发旁白待定区固化；
+// 相邻同型 status 合并进同一 .pg-group（被非 status 元素打断后开新组）
+function renderStatusTag(stage, message, detail) {
+  closeThinkRow();
+  if (stage === 'retrieve' || stage === 'web_search') {
+    toolCallSeen = true;
+    flushPendingAsPreamble();
+  }
+  if (!currentStatusGroup || !currentStatusGroup.isConnected) {
+    currentStatusGroup = document.createElement('div');
+    currentStatusGroup.className = 'pg-group';
+    ensureProcessContainer().appendChild(currentStatusGroup);
+  }
+  const div = buildStatusTag(stage, message, detail);
+  currentStatusGroup.appendChild(div);
   scrollToBottom();
 }
 
@@ -1119,8 +1188,14 @@ function ensureAiBubble() {
   return streamBubble;
 }
 
-// 流式：累积 buffer，60ms 节流整段重渲染（预览走闭合补全）
+// 流式：累积 buffer，60ms 节流整段重渲染（预览走闭合补全）。
+// 首个工具调用前的 token 进旁白待定区（斜体虚线块预览），之后到达的 token 才是正文进气泡
 function renderAiAnswerStream(text) {
+  if (!toolCallSeen) {
+    pendingTokens.push(text);
+    updatePendingPreview();
+    return;
+  }
   streamBuffer += text;
   streamBubble = ensureAiBubble();
   if (streamTimer === null) {
@@ -1685,6 +1760,7 @@ function sendFeedback(sessionId, messageIndex, rating) {
 function removeStreamingState() {
   processContainer = null;
   currentThinkRow = null;
+  resetProcessRenderState(); // 旁白待定区/status 组等过程渲染状态一并复位
 }
 
 // ── Think 折叠行（reasoning 事件累积渲染，前端推断边界）──
@@ -1726,6 +1802,7 @@ function renderReasoningDelta(delta) {
       </summary>
       <div class="think-body"></div>`;
     ensureProcessContainer().appendChild(details);
+    closeStatusGroup(); // think-row 为非 status 元素，入容器后闭合当前 status 组
     currentThinkRow = details;
     scrollToBottom();
   }
@@ -1775,6 +1852,7 @@ function ensureDelegateSection(data) {
       <div class="delegate-content"></div>
     </div>`;
   host.appendChild(section);
+  closeStatusGroup(); // 委派节为非 status 元素，入容器后闭合当前 status 组
   const head = section.querySelector('.delegate-head');
   head.addEventListener('click', () => {
     const closed = section.classList.toggle('closed');
@@ -1946,7 +2024,7 @@ function buildStreamHandlers() {
         closeThinkRow();
         // 不关流：SSE 保持连接，composer 接管输入区，提交后同流续答
         state.current = STATE.CLARIFYING;
-        removeStreamingState();
+        closeThinkRow(); // D6：澄清暂停不复位过程容器，澄清后帧继续进原容器
         hideInputArea();
         hideStopBtn();
         renderComposer(data.questions || []);
@@ -1996,6 +2074,13 @@ function buildStreamHandlers() {
           // fork 取消时 delegate end 可能丢失：须在 finalizeAnswer 复位 delegateSections 前兜底置中断态，
           // 否则 map 已空此调用为空操作，文案退化为泛化的"分析中断 · 中断"
           finalizePendingDelegateSections('cancelled');
+        }
+        if (pendingTokens.length && !toolCallSeen) {
+          // 全程无工具调用：待定区即正文，倒入气泡
+          const text = pendingTokens.join('');
+          dropPendingPreview();
+          streamBuffer = text + streamBuffer;  // 待定内容位于正文开头（preview 已展示过，此处合并定型）
+          streamBubble = ensureAiBubble();
         }
         finalizeAnswer();
         closeThinkRow();
