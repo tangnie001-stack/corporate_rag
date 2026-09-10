@@ -3,6 +3,7 @@
 > 本地 `../github/` 下镜像的开源参考项目，用于在对应场景下优先参考其实现模式。
 > 按**功能域**分组（要做什么 → 直接进对应域找参考），组内按价值排序（技术栈契合 × 当前痛点匹配 × 可迁移深度，基于 2026-09 对 corporate_rag 的分析）。
 > 本清单只承载"项目是什么 + 何时查阅 + 参考价值"；具体架构细节以对应仓库源码为准。
+> **例外**：附录另收本地已安装的技能（`~/.agents/skills/`，非 `../github` 镜像），作为"标准 skill 长什么样"的范例。
 
 ## 目录
 
@@ -12,6 +13,7 @@
 - [域 4：生产化模板 / 平台（参考思路）](#域-4生产化模板--平台参考思路)
 - [域 5：RAG 引擎（文档处理互补）](#域-5rag-引擎文档处理互补)
 - [域 6：清理候选](#域-6清理候选)
+- [附：参考技能（本地已安装）](#附参考技能本地已安装非-github-镜像)
 
 ---
 
@@ -40,7 +42,7 @@
 ## 域 3：Agent 编排 / harness（找模式）
 
 > 本站"主从委派 + skill 化业务解耦"升级路线的主参考域。
-> 组内分工：claude-code 提供**委派范式**（AgentTool/skill fork）；deepseek-harness 提供**skill/配置机制层**（注册表/scope）；agency-agents 提供**子代理预设内容库**（现成的领域专家人格，可直接转成 registry 条目）。
+> 组内分工：claude-code 提供**委派范式**（AgentTool/skill fork）；deepseek-harness 提供**skill/配置机制层**（注册表/scope）；agency-agents 提供**智能体预设内容库**（现成的领域专家人格，可直接转成 `AgentPresetRegistry` 条目，见 change `session-agent-and-skill-invocation`）。
 
 **claude-code**
 - Anthropic 终端编码 agent（闭源，~51 万行 TS；2026-03 因 npm source map 误发布泄露，本地为社区还原版 `claude-code-best/claude-code`）。
@@ -63,8 +65,10 @@
 - **何时查阅**：做简单多智能体路由/群聊、工具调用模板时（Python 同语言，参考下限）。
 
 **agency-agents**
-- AI 专家人格合集（The Agency，msitarzewski/agency-agents，MIT）。纯内容仓库：19 个 division（engineering/finance/security...）各含多个"专家 agent"Markdown，每个 = frontmatter（`name`/`description`）+ 正文（身份/使命/规则/交付物模板）；`scripts/convert.sh` 把专家转成各工具格式（claude-code `.claude/agents/*.md`、gemini/opencode/qwen 等）。**非运行时框架，是"子代理预设内容库"**。
-- **与本项目关系**：主从委派方案里 AgentRegistry 的预设内容可直接取自这些 markdown（description 作委派匹配、正文作 system_prompt），finance division 的 5 个财务专家（Financial Analyst / Bookkeeper / FPA / Investment Researcher / Tax Strategist）与本站财务 RAG 场景天然契合。
+- **智能体（子代理）预设内容库**（The Agency，msitarzewski/agency-agents，MIT）。纯内容仓库：19 个 division 目录（engineering/finance/security...），共 ~274 个"专家 agent" Markdown。**是智能体人设定义，不是 skill**（概念区分见 docs/agents/glossary.md「Agent / Skill / Tool」）。
+- 每个文件 = frontmatter（`name`/`description` + 展示元数据 `color`/`emoji`/`vibe`，可选 `tools`/`services`/`author`）+ 正文（身份/使命/规则/交付物模板/工作流）。
+- `scripts/convert.sh` 把同一份专家转成 16 种工具格式（claude-code `.claude/agents/*.md`、qwen `~/.qwen/agents/*.md`、codex TOML 等）；转 `skill-md`（antigravity/osaurus）时**只保留 `name` + `description`**——佐证 SKILL.md 的标准最小集。
+- **与本项目关系**：`AgentPresetRegistry` 的预设内容可直接取自这些 markdown（description 作匹配、正文作 system_prompt）；**change `session-agent-and-skill-invocation` 的首批智能体预设计划取自 finance 域**（需中文化裁剪，仅取 identity / mission / critical rules 三段，避免 prompt 过长）。
 - **何时查阅**：做子代理预设/专家人格库、或给委派方案找现成"首批子代理内容"时（内容搬运为主，不涉及机制）。
 
 ---
@@ -96,3 +100,19 @@
 - **awesome-llm-apps-main**：AI Agent/RAG 模板集（理念参考为主，直接可迁移的少）。头脑风暴 agent 功能形态时查阅。
 - **full-stack-fastapi-template-0.10.0**：FastAPI 官方全栈模板（含前端）。本站纯后端 API，前端非重点；分层/认证已有成熟结构。
 - **fastapi-best-architecture-1.15.0**：FastAPI 社区最佳实践。与 fastapi-0.141.1 官方文档重叠；统一响应/异常处理本站 `docs/agents/rules.md` 已覆盖。
+
+---
+
+## 附：参考技能（本地已安装，非 `../github` 镜像）
+
+> 经 `npx skills add -g` 装进 `~/.agents/skills/`（多工具共享技能源库，symlink 进 CodeBuddy/Claude Code 等）的技能。
+> 用途：作为"标准 skill 长什么样"的**契约范例**与**内容搬运来源**——与上文"智能体预设"（agency-agents）正好凑成 agent / skill 两类范例。
+
+**financial-statement-analyzer**
+- 中文「财务报表深度分析」skill（geeksfino/finskills，Apache-2.0）。法证财务分析师视角，9 步法：5 因子杜邦分解 → 盈利质量（应计比率 / 现金转化率红灯阈值）→ 财务健康评分（Altman Z / Piotroski F / Beneish M）→ 营运资本 CCC → 资产负债表隐性风险（商誉减值、关联交易、在建工程不转固、股权质押）→ 业务分部 → 同行基准 → 报告模板。
+- **A 股特化**：CAS vs US GAAP 差异、扣非净利润、政府补助依赖、"读附注"提醒、商业承兑汇票坏账风险。
+- **契约范例**：frontmatter 仅 `name` + `description` + `license`——与 claude-code / agency-agents 的 `skill-md` 转换一致，是"SKILL.md 标准最小集"的活样本。
+- **与本项目关系**：中文财务域，其方法论 / 公式 / 报告模板可直接参考，用于增强或对标 `skills/finance-analyst`；但它是**纯知识 skill**（无 `context`、无工具），搬运时需按本站契约（inline/fork、双轴）适配，且其"确认对象 → 取数"流程与本站"主 agent 先检索再委派"模式不同。
+- **配套技能**：文末推荐 `findata-toolkit-cn`（A 股实时行情 / 财务指标 / 北向资金，免费无 API key）。
+- **位置**：`~/.agents/skills/financial-statement-analyzer/`（`SKILL.md` + `references/analysis-methodology.md` + `references/output-template.md`）
+- **何时查阅**：写财务分析类 skill、或给 `finance-analyst` 补方法论 / 公式 / 报告模板时。

@@ -187,6 +187,38 @@ src/agents/graph/agent_node.py:68-74 与 src/config/prompts.py:50（KB_UNBOUND_S
 空 kb_id 不检索 src/agents/tools/rag_tools.py:127-130；web 结果写入
 src/agents/tools/web_tools.py:131-141。
 
+### 答案校验与引用格式化链路（2a/2b 通用）
+
+`verify → format` 是两条问答链的公共尾段：2a/2b 已按 KB 绑定状态分别描述两套校验分支，
+本节给**环节级总览**（谁在什么条件下做什么、代码在哪）并补 format 段细节。
+
+| # | 环节 | 职责 | 触发/条件 | 代码 |
+|---|------|------|------|------|
+| 1 | 态分派 | 按 `state.kb_id` 分派态 A（纯对话）/ 态 B（绑 KB）两套校验链 | 每次进 verify | `verify/node.py:35-62` |
+| 2 | 完整性校验 | 正则 `\d{4}` 提取答案年份，与 `ctx.temporal_years` 比对 | 态 B 且 required 非空 | `verify/checks.py:22` |
+| 3 | 缺失年份联网询问 | 经 clarify_channel 问用户"是否联网补充"；会话内记住（`ctx.web_confirmed`） | 态 B 且有缺失 | `verify/ask_confirm.py` |
+| 4 | 缺失年份决策化 | ①用户意愿优先 → ②看上一轮 `search_web` queries 是否带全缺失年份（带全=网络已穷尽→注记直通）→ ③保险丝 → ④注入指引/hint + regen | 态 B 且有缺失 | `verify/regen_decision.py` |
+| 5 | KB 溯源护栏 | 有 KB context 但答案无 `[n]` 且非拒答 → 注入溯源指引 → regen 一次 | 态 B 完整性通过后 | `verify/guardrails.py` |
+| 6 | 联网引用引导 | 态 A：调过 `search_web` 但答案无 `[n]` → 注入标注指引 → regen 一次 | 态 A | `verify/guardrails.py` |
+| 7 | 拒答检测 | 命中 `ABSTENTION_MARKERS` 且无 `[n]` → citations 置空 | format | `nodes.py:66-74` |
+| 8 | 引用编号提取/过滤 | 正则提取 `[n]`；非法编号（超出 context 范围）不进 citations，记 `INVALID_CITATION` 信号 | format | `nodes.py:76-98` |
+| 9 | 引用去重 | 按 `(source, page)` 去重，保留原始编号 | format | `nodes.py:100-120` |
+| 10 | 引用预览片段定位 | `_relevant_snippet`：以"回答与 chunk 的最长公共子串"为中心截 200 字，前缀 `…` | format 每条引用 | `nodes.py:21-58` |
+| 11 | 事件输出与落库 | citations → SSE `citation` 事件；同时落 `conversation_history.sources` 供历史回放 | 生成后 | `agent_service.py` |
+
+**几个易忽略的机制**：
+
+- **regen = 一段全新主循环**：verify 指派 regen 时除注入 SystemMessage 外，还**复位**
+  `_agent_iterations=0` 与 `ctx.web_count=0`——否则 regen 轮的 `search_web` 会因配额耗尽
+  而返回限流文案、不真正执行，verify 据此误判"网络也没覆盖"。
+- **`ctx.web_guided`**：verify 指派联网时置 `True`，用于区分"正常补数据"与"agent 自主降级
+  联网"（只有后者才发 TO_WEB 缺陷信号）。
+- **两个护栏的保险丝不同**：`kb_citation_guardrail` 只复位主循环预算、**不占** verify 保险丝；
+  `_verify_regenerations` 仅由决策化路径自增。
+- **引用预览不是截开头**：`_relevant_snippet` 用最长公共子串定位"回答真正依据的那一段"，
+  避免 parent-child 长 chunk（相关句在深处）的预览与回答无关、误导用户以为引用不支撑回答；
+  无有效重叠（`< 15` 字符）时回退取开头 200 字。
+
 ### 字段级生产-消费矩阵（StateGraph）
 
 两条链路共享同一拓扑与节点实现，矩阵不区分链路。节点通过共享 `AgentState` 间接通信：

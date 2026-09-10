@@ -49,6 +49,8 @@
 | 引用卡片 citation | `agentic-clarification.md`（组件）+ `chat-harness.md`（页面形态） | 末尾一体来源横条「来源 [n] ›」+ 右侧抽屉（fixed right，380px，滑出动画，不遮挡对话）；正文 `[n]` 点击打开抽屉并高亮定位 |
 | 引用等级徽标 citation-tier | `chat-citation-tier-2026-09-09.md` | 仅引用抽屉条目渲染（来源名称之前）10px 胶囊徽标（T0 紫/T1 绿/T2 蓝/T3 灰/T4 橙）；横条不加；tier 缺失不渲染；标签唯一权威 = const.py SOURCE_TIER_LABELS |
 | 深度思考开关 thinking-toggle | `agentic-clarification.md` | 输入区紧凑 chip、选中 primary、控制 `enable_thinking` |
+| 智能体选择器 agent-selector | `chat-agent-skill-selector-2026-09-11.md` | 知识库胶囊右侧胶囊（user-round 图标）、默认文案「默认」、下拉单选（名称+描述+单选点）、会话级不可变（菜单底锁提示）；历史页不渲染，顶栏只读徽标回显 |
+| 技能选择器 skill-selector | `chat-agent-skill-selector-2026-09-11.md` | 深度思考 chip 右侧同构 chip（book-open 图标）、菜单**向上**弹出、选中变蓝显示技能名、选中即向输入框行首插入 `/name `；只列可用户调用技能 |
 | Markdown 渲染 | `chat-markdown.md` | 助手消息 `.bubble-content.md` 富文本渲染（标题/加粗/列表/代码块/引用/表格）、marked+DOMPurify 安全、流式节流重渲染 |
 | 分析过程折叠区 delegate-progress | `chat-delegate-progress-2026-09-07.md` | AI 气泡内按 delegate_id 分节：思考二级折叠 + 正文流式；运行呼吸点/完成/中断(原因) 文案 |
 | 委派状态文案 | `chat-delegate-progress-2026-09-07.md` | "领域专家分析完成" / "分析中断·原因"（取代无条件"完成"） |
@@ -61,5 +63,6 @@
 | Chat 页面（聊天主界面 `/`） | `pages/chat-harness.md` | 左侧栏 + 新对话/历史对话双页面、KB 会话级绑定、引用悬浮卡交互 |
 | Chat 子代理过程 + 任务看板 | `pages/chat-delegate-progress-2026-09-07.md` | 委派过程折叠区（分节/流式/完成·中断文案）+ 任务/进度看板（chip + 右侧只读面板） |
 | KB 管理页面（`/Knowledgebase`） | `pages/kb-harness-page.md` | 与 chat 同款浅色布局与侧栏（含左下角用户模块），功能不变 |
+| Chat 页：智能体选择器 + 技能选择器 | `pages/chat-agent-skill-selector-2026-09-11.md` | 新对话页「知识库 + 智能体」同行（智能体在右，默认「默认」）；输入区「深度思考 + 技能」同排（技能在右）；智能体会话级不可变、技能消息级持续生效 |
 
 新组件/页面设计时：全局基线更新到本文件，页面级规格写入 `pages/<name>.md`，效果预览输出 `docs/design/<name>-mockup.html`。

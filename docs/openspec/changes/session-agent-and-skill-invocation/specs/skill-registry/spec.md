@@ -1,0 +1,41 @@
+## MODIFIED Requirements
+
+### Requirement: Skill 文件结构
+
+系统 SHALL 从项目根 `skills/<name>/SKILL.md` 加载 skill。
+
+#### Scenario: 目录结构识别
+
+- **WHEN** 扫描 `skills/` 目录
+- **THEN** 每个含 `SKILL.md` 的子目录识别为一个 skill
+- **AND** 目录名作为 skill 名
+
+#### Scenario: frontmatter 解析
+
+- **WHEN** 解析 SKILL.md
+- **THEN** 提取 frontmatter 字段：name、description、context、model、allowed-tools、user-invocable、disable-model-invocation
+- **AND** name 缺省时用目录名；description 缺省时用正文首段
+- **AND** `allowed-tools` 以**逗号分隔字符串**书写，内部转为列表
+- **AND** 已废弃的 `thinking` 与 `max-iterations` 字段不再被识别（历史写法忽略并记 warning；迭代上限改由执行者 agent 定义的 `maxTurns` 控制）
+
+### Requirement: SkillRecord 运行时对象
+
+系统 SHALL 为每个加载的 skill 生成 SkillRecord，含 {name, description, context, inline_prompt, agent_prompt, model, allowed_tools, user_invocable, disable_model_invocation, source_path}。
+
+#### Scenario: context 值约束
+
+- **WHEN** context 字段为 "fork" 或 "inline" 之外的值
+- **THEN** 加载期按 "inline" 处理并记 warning
+
+#### Scenario: 正文按 context 解析
+
+- **WHEN** context=inline
+- **THEN** 正文存为 inline_prompt（供主 agent 注入执行）
+- **AND** inline_prompt 控制在短方法论规模（建议 ≤500 字）——内容注入后留在 messages 历史，长文会造成上下文累积膨胀；长文领域内容应建模为 fork skill（独立子代理上下文，不占主对话）
+- **WHEN** context=fork
+- **THEN** 正文存为 agent_prompt（供子代理 system_prompt）
+
+#### Scenario: 双轴控制字段默认推导
+
+- **WHEN** skill 未显式声明 user-invocable / disable-model-invocation
+- **THEN** 加载期依据 allowed-tools 与工具 readonly 属性推导默认值（见 skill-invocation capability），并写入 SkillRecord 的 user_invocable / disable_model_invocation

@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>智能体选择器 + 技能选择器 · 视觉稿 2026-09-11</title>
+<link href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600;700&family=Source+Sans+3:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* ═══ 基线：与 deploy/nginx/html/chat.html、docs/design/MASTER.md 一致 ═══ */
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --primary: #3B82F6;
+    --primary-hover: #2563EB;
+    --primary-light: #DBEAFE;
+    --bg: #F8FAFC;
+    --surface: #FFFFFF;
+    --surface-muted: #F1F5F9;
+    --text: #1E293B;
+    --text-secondary: #64748B;
+    --text-muted: #94A3B8;
+    --border: #E2E8F0;
+    --bubble-ai: #F8FAFC;
+    --bubble-user: #F1F5F9;
+    --shadow: 0 1px 3px rgba(0,0,0,0.08);
+    --shadow-lg: 0 4px 12px rgba(0,0,0,0.04);
+    --font-display: 'Lexend', 'Source Sans 3', sans-serif;
+    --font-body: 'Source Sans 3', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+    --transition: 150ms ease;
+  }
+
+  html { font-size: 16px; }
+  body {
+    font-family: var(--font-body);
+    font-size: 14px; line-height: 1.5; color: var(--text);
+    background: #EEF2F7; min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+    padding: 24px 16px 48px;
+  }
+  svg { display: block; }
+  button { font-family: var(--font-body); }
+
+  /* ═══ 展示外壳 ═══ */
+  .mock-shell { max-width: 1120px; margin: 0 auto; }
+  .mock-bar {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+  .mock-title { font-family: var(--font-display); font-weight: 600; font-size: 16px; }
+  .mock-title small { font-family: var(--font-body); font-weight: 400; color: var(--text-secondary); font-size: 12px; margin-left: 8px; }
+  .seg { margin-left: auto; display: inline-flex; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 3px; gap: 2px; }
+  .seg button {
+    border: none; background: transparent; color: var(--text-secondary);
+    font-size: 13px; font-weight: 500; padding: 6px 14px; border-radius: 8px; cursor: pointer;
+    transition: background var(--transition), color var(--transition);
+  }
+  .seg button:hover { background: var(--surface-muted); color: var(--text); }
+  .seg button.on { background: var(--primary-light); color: var(--primary); }
+
+  .device {
+    height: 760px; border-radius: 16px; overflow: hidden;
+    border: 1px solid var(--border); box-shadow: 0 12px 32px rgba(15,23,42,0.10);
+    background: var(--bg); position: relative;
+  }
+
+  /* ═══ App 骨架（复制 chat.html 布局） ═══ */
+  .app { display: flex; height: 100%; overflow: hidden; }
+
+  .sidebar { width: 280px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
+  .sidebar-header { padding: 16px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); }
+  .logo { width: 32px; height: 32px; border-radius: 8px; background: linear-gradient(135deg, #3B82F6, #7C3AED); display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-family: var(--font-display); font-size: 14px; flex-shrink: 0; }
+  .brand { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .brand-name { font-family: var(--font-display); font-weight: 600; font-size: 14px; }
+  .brand-version { font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); }
+  .feature-block { padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; border-bottom: 1px solid var(--border); }
+  .feature-btn { width: 100%; padding: 9px 12px; background: var(--surface-muted); border: none; border-radius: 8px; display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--text); text-align: left; cursor: pointer; transition: background var(--transition); }
+  .feature-btn:hover { background: var(--primary-light); color: var(--primary); }
+  .feature-btn svg { width: 15px; height: 15px; color: var(--text-secondary); }
+  .feature-btn:hover svg { color: var(--primary); }
+  .side-label { padding: 14px 16px 6px; font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .side-list { flex: 1; overflow-y: auto; padding: 0 10px 10px; display: flex; flex-direction: column; gap: 2px; }
+  .side-item { padding: 9px 12px; border-radius: 8px; font-size: 13px; color: var(--text); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: background var(--transition); }
+  .side-item:hover { background: var(--surface-muted); }
+  .side-item.active { background: var(--primary-light); color: var(--primary); font-weight: 500; }
+  .side-foot { border-top: 1px solid var(--border); padding: 12px 16px; display: flex; align-items: center; gap: 10px; }
+  .avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--surface-muted); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+  .side-foot .u-name { font-size: 13px; }
+  .side-foot .u-sub { font-size: 11px; color: var(--text-muted); }
+
+  .main { flex: 1; display: flex; flex-direction: column; background: var(--bg); overflow: hidden; min-width: 0; }
+  .page { display: none; width: 100%; height: 100%; }
+  .page.active { display: flex; flex-direction: column; }
+
+  /* ── 页面①：新对话页 ── */
+  .new-chat { align-items: center; justify-content: center; padding: 40px 24px; overflow-y: auto; position: relative; }
+  .welcome-logo { width: 56px; height: 56px; border-radius: 14px; margin: 0 auto 20px; background: linear-gradient(135deg, #3B82F6, #7C3AED); display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-family: var(--font-display); font-size: 22px; }
+  .welcome-brand { display: flex; align-items: center; justify-content: center; gap: 8px; font-family: var(--font-display); font-weight: 600; font-size: 20px; margin-bottom: 8px; }
+  .preview-tag { background: var(--surface-muted); border: 1px solid var(--border); color: var(--text-secondary); padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 500; white-space: nowrap; }
+  .welcome-title { font-family: var(--font-display); font-weight: 600; font-size: 26px; margin: 8px 0; text-align: center; }
+  .welcome-sub { color: var(--text-secondary); font-size: 14px; margin-bottom: 28px; text-align: center; }
+
+  /* ── 选择器行（kb-bar） ── */
+  .kb-bar { width: 100%; max-width: 720px; margin: 0 auto 10px; display: flex; align-items: center; gap: 8px; position: relative; }
+
+  .pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 7px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    font-size: 13px; color: var(--text); cursor: pointer; box-shadow: var(--shadow);
+    transition: border-color var(--transition), background var(--transition);
+    font-family: var(--font-body);
+  }
+  .pill:hover { border-color: var(--primary); }
+  .pill:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(59,130,246,0.3); }
+  .pill > svg.lead { width: 14px; height: 14px; color: var(--text-secondary); flex-shrink: 0; }
+  .pill .chevron { width: 12px; height: 12px; opacity: 0.6; margin-left: 2px; flex-shrink: 0; }
+  .pill .sel { color: var(--primary); font-weight: 500; }
+  .pill .none { color: var(--text-secondary); font-weight: 400; }
+  .pill .pill-label { color: var(--text-secondary); font-weight: 400; }
+  .pill[aria-expanded="true"] { border-color: var(--primary); }
+  .pill.locked { cursor: not-allowed; opacity: 0.9; }
+  .pill.locked:hover { border-color: var(--border); }
+
+  /* ── 下拉菜单（kb-menu 同构） ── */
+  .menu {
+    position: absolute; min-width: 300px; max-height: 320px; overflow-y: auto;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 6px; box-shadow: 0 8px 24px rgba(15,23,42,0.12); display: none; z-index: 40;
+  }
+  .menu.open { display: block; }
+  .menu.down { top: calc(100% + 6px); left: 0; }
+  .menu.up { bottom: calc(100% + 8px); left: 0; }
+  .menu-title { padding: 6px 10px 4px; font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .menu-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 10px; border-radius: 8px; font-size: 13px; color: var(--text);
+    cursor: pointer; transition: background var(--transition); width: 100%;
+    border: none; background: none; text-align: left;
+  }
+  .menu-item:hover { background: var(--surface-muted); }
+  .menu-item > svg.lead { width: 15px; height: 15px; color: var(--text-secondary); flex-shrink: 0; margin-top: 1px; }
+  .menu-item .meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .menu-item .m-name { font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .menu-item .m-desc { font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .menu-item .m-name code { font-family: var(--font-mono); font-size: 12px; color: var(--primary); background: var(--primary-light); padding: 1px 5px; border-radius: 4px; }
+  .menu-item .check {
+    margin-left: auto; width: 16px; height: 16px; border: 1px solid var(--border); border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .menu-item .check svg { width: 10px; height: 10px; color: #fff; display: none; }
+  .menu-item.selected .check { border-color: var(--primary); background: var(--primary); }
+  .menu-item.selected .check svg { display: block; }
+  .menu-foot { margin: 6px 4px 2px; padding: 7px 8px 3px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
+  .menu-foot svg { width: 12px; height: 12px; flex-shrink: 0; }
+
+  /* ── 输入框 ── */
+  .composer { width: 100%; max-width: 720px; margin: 0 auto; background: var(--surface); border: 1px solid var(--border); border-radius: 24px; padding: 14px 14px 10px; box-shadow: var(--shadow-lg); transition: border-color var(--transition), box-shadow var(--transition); position: relative; }
+  .composer:focus-within { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(59,130,246,0.15); }
+  .composer-input { width: 100%; min-height: 28px; max-height: 220px; background: transparent; border: none; outline: none; color: var(--text); font-size: 15px; line-height: 1.5; resize: none; font-family: inherit; }
+  .composer-input::placeholder { color: var(--text-muted); }
+  .composer-bottom { margin-top: 10px; display: flex; align-items: center; gap: 6px; }
+  .composer-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+
+  /* 深度思考 chip + 技能 chip（同构） */
+  .chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    height: 28px; padding: 0 12px; border: 1px solid transparent; border-radius: 14px;
+    background: transparent; color: var(--text-secondary);
+    font-size: 12px; font-weight: 500; cursor: pointer; flex-shrink: 0;
+    transition: background var(--transition), color var(--transition), border-color var(--transition);
+  }
+  .chip:hover { background: var(--bg); color: var(--text); }
+  .chip:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(59,130,246,0.3); }
+  .chip.active { background: var(--primary-light); border-color: var(--primary); color: var(--primary); }
+  .chip svg.lead { width: 13px; height: 13px; }
+  .chip .chevron { width: 10px; height: 10px; opacity: 0.6; }
+  .chip[aria-expanded="true"] { background: var(--bg); color: var(--text); }
+  .chip.active[aria-expanded="true"] { background: var(--primary-light); color: var(--primary); }
+  .chip-group { position: relative; display: inline-flex; }
+
+  /* 发送按钮 */
+  .send-btn { width: 38px; height: 38px; border-radius: 50%; border: 1px solid var(--primary); background: var(--primary); color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
+  .send-btn svg { width: 18px; height: 18px; }
+
+  /* ── 页面②：历史对话页 ── */
+  .main-header { height: 56px; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); background: var(--surface); flex-shrink: 0; }
+  .header-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--primary); flex-shrink: 0; }
+  .header-name { font-weight: 500; font-size: 14px; }
+  .kb-info { font-size: 12px; color: var(--text-secondary); }
+  .kb-info .v { color: var(--primary); font-weight: 500; }
+  .header-right { display: flex; align-items: center; gap: 10px; }
+  .tag-locked { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-secondary); background: var(--surface-muted); border: 1px solid var(--border); border-radius: 8px; padding: 4px 10px; }
+  .tag-locked svg { width: 12px; height: 12px; }
+  .tag-locked .v { color: var(--primary); font-weight: 500; }
+
+  .chat-thread { flex: 1; overflow-y: auto; padding: 24px; }
+  .inner { max-width: 880px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+  .msg { display: flex; flex-direction: column; }
+  .msg.user { align-items: flex-end; }
+  .bubble { max-width: 76%; padding: 10px 14px; font-size: 14px; line-height: 1.6; }
+  .msg.user .bubble { background: var(--bubble-user); color: var(--text); border-radius: 16px 4px 16px 16px; }
+  .msg.ai .bubble { background: var(--bubble-ai); border: 1px solid var(--border); border-radius: 4px 12px 12px 12px; }
+  .msg.ai .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-secondary); margin-top: 6px; }
+  .msg.ai .badge code { font-family: var(--font-mono); color: var(--primary); }
+  .composer-wrap { padding: 0 24px 20px; }
+
+  /* ── 底部规格卡 ── */
+  .specs { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-top: 20px; }
+  .spec-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; box-shadow: var(--shadow); }
+  .spec-card h3 { font-family: var(--font-display); font-size: 13px; font-weight: 600; margin-bottom: 10px; display: flex; align-items: center; gap: 7px; }
+  .spec-card h3 svg { width: 15px; height: 15px; color: var(--primary); }
+  .spec-card ul { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+  .spec-card li { font-size: 12px; color: var(--text-secondary); line-height: 1.55; padding-left: 12px; position: relative; }
+  .spec-card li::before { content: ''; position: absolute; left: 0; top: 7px; width: 4px; height: 4px; border-radius: 50%; background: var(--primary); }
+  .spec-card li b { color: var(--text); font-weight: 600; }
+
+  .hint { max-width: 1120px; margin: 0 auto 14px; font-size: 12px; color: var(--text-secondary); display: flex; align-items: center; gap: 8px; }
+  .hint svg { width: 14px; height: 14px; color: var(--primary); flex-shrink: 0; }
+
+  /* 窄屏：隐藏侧栏（真实 chat.html 走汉堡抽屉，此处仅保证选择器不被挤压） */
+  @media (max-width: 900px) {
+    body { padding: 12px 8px 32px; }
+    .device { height: 640px; }
+    .sidebar { display: none; }
+    .new-chat { padding: 28px 16px; }
+    .welcome-title { font-size: 22px; }
+    .chat-thread { padding: 16px 12px; }
+    .composer-wrap { padding: 0 12px 14px; }
+    .menu { min-width: 260px; max-width: calc(100vw - 48px); }
+    /* 窄屏：智能体菜单右对齐锚定；技能菜单改为锚定整个输入框（避免 chip 居中时左右溢出） */
+    .menu.down { left: auto; right: 0; }
+    .chip-group { position: static; }
+    .menu.up { left: 0; right: 0; min-width: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<div class="mock-shell">
+  <div class="mock-bar">
+    <div class="mock-title">智能体选择器 + 技能选择器<small>视觉稿 · 2026-09-11 · 基线 MASTER.md</small></div>
+    <div class="seg" role="tablist">
+      <button type="button" class="on" data-view="new">新对话页</button>
+      <button type="button" data-view="history">历史对话页</button>
+    </div>
+  </div>
+
+  <div class="hint">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+    点击「智能体」胶囊或「技能」chip 可展开下拉菜单；选择技能会向输入框行首插入 <code>/name</code>。
+  </div>
+
+  <div class="device">
+    <div class="app">
+      <!-- 侧栏 -->
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <div class="logo">FQ</div>
+          <div class="brand">
+            <span class="brand-name">Corporate Agent Harness</span>
+            <span class="brand-version">v0.1.0</span>
+          </div>
+        </div>
+        <div class="feature-block">
+          <button class="feature-btn" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            新建会话
+          </button>
+          <button class="feature-btn" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+            知识库管理
+          </button>
+        </div>
+        <div class="side-label">会话历史</div>
+        <div class="side-list">
+          <div class="side-item active">腾讯 2024 年报财务分析</div>
+          <div class="side-item">合同违约责任条款解读</div>
+          <div class="side-item">Q3 经营数据口径核对</div>
+        </div>
+        <div class="side-foot">
+          <div class="avatar">张</div>
+          <div>
+            <div class="u-name">张工</div>
+            <div class="u-sub">已登录</div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- 主区 -->
+      <main class="main">
+        <!-- 页面①：新对话页 -->
+        <div class="page new-chat active" id="pageNew">
+          <div class="welcome-logo">FQ</div>
+          <div class="welcome-brand">Corporate Agent Harness <span class="preview-tag">预览版</span></div>
+          <div class="welcome-title">探索企业知识，赋能业务问答</div>
+          <div class="welcome-sub">基于工具与知识库的智能助手，支持多知识库切换与联网补充</div>
+
+          <!-- ★ 选择器行：知识库 + 智能体 -->
+          <div class="kb-bar">
+            <!-- 知识库 -->
+            <div class="pill" id="kbPill" role="button" tabindex="0" aria-haspopup="listbox" aria-expanded="false">
+              <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+              <span id="kbLabel" class="sel">腾讯控股知识库</span>
+              <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+            </div>
+
+            <!-- ★ 智能体（新增，紧邻知识库右侧） -->
+            <div style="position: relative;">
+              <div class="pill" id="agentPill" role="button" tabindex="0" aria-haspopup="listbox" aria-expanded="false">
+                <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 12 0v1"/></svg>
+                <span id="agentLabel" class="none">默认</span>
+                <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+              </div>
+              <div class="menu down" id="agentMenu" role="listbox" aria-label="选择智能体">
+                <div class="menu-title">选择智能体</div>
+                <button class="menu-item selected" type="button" data-name="默认" data-default="1">
+                  <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 12 0v1"/></svg>
+                  <span class="meta"><span class="m-name">默认</span><span class="m-desc">通用助手</span></span>
+                  <span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg></span>
+                </button>
+                <button class="menu-item" type="button" data-name="财务专家">
+                  <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 12 0v1"/></svg>
+                  <span class="meta"><span class="m-name">财务专家</span><span class="m-desc">财报分析、估值与财务风险研判</span></span>
+                  <span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg></span>
+                </button>
+                <button class="menu-item" type="button" data-name="法务顾问">
+                  <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 12 0v1"/></svg>
+                  <span class="meta"><span class="m-name">法务顾问</span><span class="m-desc">合同条款审阅与合规风险解读</span></span>
+                  <span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg></span>
+                </button>
+                <button class="menu-item" type="button" data-name="数据分析师">
+                  <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 12 0v1"/></svg>
+                  <span class="meta"><span class="m-name">数据分析师</span><span class="m-desc">指标拆解、口径对齐与数据洞察</span></span>
+                  <span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg></span>
+                </button>
+                <div class="menu-foot">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                  选定后本会话内不可更改
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 输入框 -->
+          <div class="composer">
+            <textarea class="composer-input" id="newInput" rows="1" placeholder="描述你想查询的内容，例如「腾讯这几年的业绩怎么样」"></textarea>
+            <div class="composer-bottom">
+              <button class="chip" type="button" aria-pressed="false">
+                <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 1 1 7.072 0l-.548.547A3.374 3.374 0 0 0 14 18.469V19a2 2 0 1 1-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+                深度思考
+              </button>
+
+              <!-- ★ 技能选择器（新增，紧邻深度思考右侧） -->
+              <span class="chip-group">
+                <button class="chip" id="skillChip" type="button" aria-haspopup="listbox" aria-expanded="false">
+                  <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>
+                  <span id="skillLabel">技能</span>
+                  <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+                </button>
+                <div class="menu up" id="skillMenu" role="listbox" aria-label="选择技能">
+                  <div class="menu-title">选择技能</div>
+                  <button class="menu-item selected" type="button" data-skill="">
+                    <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                    <span class="meta"><span class="m-name">不使用技能</span></span>
+                    <span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg></span>
+                  </button>
+                  <button class="menu-item" type="button" data-skill="finance-qa">
+                    <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>
+                    <span class="meta"><span class="m-name"><code>/finance-qa</code></span><span class="m-desc">财务问答：营收/利润/现金流口径</span></span>
+                    <span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg></span>
+                  </button>
+                  <button class="menu-item" type="button" data-skill="financial-statement-analyzer">
+                    <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>
+                    <span class="meta"><span class="m-name"><code>/financial-statement-analyzer</code></span><span class="m-desc">财务报表深度分析：盈利质量与造假风险</span></span>
+                    <span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg></span>
+                  </button>
+                  <button class="menu-item" type="button" data-skill="kb-summarize">
+                    <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>
+                    <span class="meta"><span class="m-name"><code>/kb-summarize</code></span><span class="m-desc">知识库长文摘要与要点提炼</span></span>
+                    <span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg></span>
+                  </button>
+                  <div class="menu-foot">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                    插入 /名称 后发送，本会话持续生效
+                  </div>
+                </div>
+              </span>
+
+              <div class="composer-actions">
+                <button class="send-btn" type="button" title="发送">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 页面②：历史对话页 -->
+        <div class="page" id="pageHistory">
+          <header class="main-header">
+            <div class="header-title">
+              <span class="dot"></span>
+              <span class="header-name">腾讯 2024 年报财务分析</span>
+              <span class="kb-info">知识库：<span class="v">腾讯控股知识库</span></span>
+            </div>
+            <div class="header-right">
+              <span class="tag-locked">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                智能体：<span class="v">财务专家</span>
+              </span>
+              <span class="preview-tag">预览版</span>
+            </div>
+          </header>
+
+          <div class="chat-thread">
+            <div class="inner">
+              <div class="msg user"><div class="bubble">腾讯 2024 年营业收入和净利润分别是多少？</div></div>
+              <div class="msg ai">
+                <div class="bubble">根据知识库内容，腾讯 2024 年实现营业收入 6603 亿元，同比增长 8%；归母净利润 1941 亿元，同比增长 68%。<br>（引用来源：腾讯控股 2024 年度报告）</div>
+                <div class="badge">由 <code>DeepSeek-V4-Flash</code> 回答 · 财务专家</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="composer-wrap">
+            <div class="composer">
+              <textarea class="composer-input" rows="1" placeholder="描述你想查询的内容…"></textarea>
+              <div class="composer-bottom">
+                <button class="chip" type="button" aria-pressed="false">
+                  <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 1 1 7.072 0l-.548.547A3.374 3.374 0 0 0 14 18.469V19a2 2 0 1 1-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+                  深度思考
+                </button>
+                <span class="chip-group">
+                  <button class="chip" type="button" aria-haspopup="listbox" aria-expanded="false">
+                    <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>
+                    技能
+                    <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+                  </button>
+                </span>
+                <div class="composer-actions">
+                  <button class="send-btn" type="button" title="发送">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- 规格速览 -->
+  <section class="specs">
+    <div class="spec-card">
+      <h3>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 12 0v1"/></svg>
+        智能体选择器（会话级）
+      </h3>
+      <ul>
+        <li>位置：<b>知识库胶囊右侧</b>，同一行 gap 8px</li>
+        <li>默认项文案：<b>「默认」</b>（通用助手），灰字</li>
+        <li>选中后蓝字；<b>会话内不可更改</b>，菜单底部有锁提示</li>
+        <li>历史对话页不渲染，顶栏以只读徽标回显</li>
+        <li>数据源：<code>GET /api/agents</code></li>
+      </ul>
+    </div>
+    <div class="spec-card">
+      <h3>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>
+        技能选择器（消息级）
+      </h3>
+      <ul>
+        <li>位置：<b>深度思考 chip 右侧</b>，同构 chip</li>
+        <li>选中后 chip 变蓝并显示技能名</li>
+        <li>选中 → 输入框行首插入 <code>/name </code>（与手输 / 等价）</li>
+        <li>只列 <code>user-invocable ≠ false</code> 的技能</li>
+        <li>数据源：<code>GET /api/skills</code>；菜单向上弹出</li>
+      </ul>
+    </div>
+    <div class="spec-card">
+      <h3>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+        交互与无障碍
+      </h3>
+      <ul>
+        <li>触发元素 <code>aria-haspopup="listbox"</code> + <code>aria-expanded</code></li>
+        <li>键盘：↑/↓ 移动、Enter 选中、Esc 关闭并归还焦点</li>
+        <li>焦点环 3px <code>rgba(59,130,246,0.3)</code></li>
+        <li>两菜单与引用抽屉 / 任务面板互斥单开</li>
+        <li>过渡 150ms；尊重 <code>prefers-reduced-motion</code></li>
+      </ul>
+    </div>
+  </section>
+</div>
+
+<script>
+  (function () {
+    var $ = function (id) { return document.getElementById(id); };
+
+    // 场景切换
+    var segBtns = document.querySelectorAll('.seg button');
+    segBtns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        segBtns.forEach(function (b) { b.classList.remove('on'); });
+        btn.classList.add('on');
+        var view = btn.getAttribute('data-view');
+        $('pageNew').classList.toggle('active', view === 'new');
+        $('pageHistory').classList.toggle('active', view === 'history');
+        closeAll();
+      });
+    });
+
+    function closeAll() {
+      $('agentMenu').classList.remove('open');
+      $('agentPill').setAttribute('aria-expanded', 'false');
+      $('skillMenu').classList.remove('open');
+      $('skillChip').setAttribute('aria-expanded', 'false');
+    }
+
+    function bindToggle(pill, menu) {
+      pill.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var willOpen = !menu.classList.contains('open');
+        closeAll();
+        if (willOpen) {
+          menu.classList.add('open');
+          pill.setAttribute('aria-expanded', 'true');
+        }
+      });
+      pill.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pill.click(); }
+        if (e.key === 'Escape') { closeAll(); }
+      });
+    }
+
+    bindToggle($('agentPill'), $('agentMenu'));
+    bindToggle($('skillChip'), $('skillMenu'));
+
+    // 智能体单选
+    var agentItems = $('agentMenu').querySelectorAll('.menu-item');
+    agentItems.forEach(function (item) {
+      item.addEventListener('click', function (e) {
+        e.stopPropagation();
+        agentItems.forEach(function (i) { i.classList.remove('selected'); });
+        item.classList.add('selected');
+        var name = item.getAttribute('data-name');
+        var label = $('agentLabel');
+        var isDefault = item.getAttribute('data-default') === '1';
+        label.textContent = name;
+        label.className = isDefault ? 'none' : 'sel';
+        closeAll();
+      });
+    });
+
+    // 技能单选 + 插入 /name
+    var skillItems = $('skillMenu').querySelectorAll('.menu-item');
+    skillItems.forEach(function (item) {
+      item.addEventListener('click', function (e) {
+        e.stopPropagation();
+        skillItems.forEach(function (i) { i.classList.remove('selected'); });
+        item.classList.add('selected');
+        var name = item.getAttribute('data-skill');
+        var input = $('newInput');
+        var label = $('skillLabel');
+        if (name) {
+          var text = input.value.replace(/^\/\S+\s*/, '');
+          input.value = '/' + name + ' ' + text;
+          label.textContent = '技能 · ' + name;
+        } else {
+          input.value = input.value.replace(/^\/\S+\s*/, '');
+          label.textContent = '技能';
+        }
+        $('skillChip').classList.toggle('active', !!name);
+        closeAll();
+        input.focus();
+      });
+    });
+
+    document.addEventListener('click', closeAll);
+  })();
+</script>
+</body>
+</html>

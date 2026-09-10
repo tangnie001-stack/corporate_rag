@@ -1,0 +1,169 @@
+# 代码地图（前后端结构）
+
+代码结构唯一归属文档：仓库顶层目录、后端 `src/` 分层、前端 `deploy/nginx/html`、
+运行时内容库与测试的组织方式。**改动代码前先读这里定位文件**；层间调用规则与文件大小
+红线是规约，见 `CLAUDE.md`「代码目录结构」与 `docs/agents/rules.md`。
+
+> 本仓库**前后端同仓**：后端 Python（`src/`），前端静态 HTML/CSS/JS（`deploy/nginx/html/`，
+> 由 Nginx 容器直接托管，无构建步骤）。
+
+## 一、顶层目录
+
+| 目录 / 文件 | 职责 |
+|------|------|
+| `src/` | 后端 Python 源码（分层见下） |
+| `tests/` | 单元测试，与 `src/` 模块一一对应 |
+| `deploy/` | 部署件：`nginx/`（反向代理 + 前端静态文件）、各中间件 Dockerfile（mysql/chroma/clickhouse） |
+| `deploy/nginx/html/` | **前端页面静态文件**（chat.html / index.html / login.html 等） |
+| `skills/` | 运行时 skill 内容库（`<name>/SKILL.md`，业务侧管理，compose volume 挂载进容器 `/app/skills`） |
+| `docs/` | 文档：`agents/`（本目录，规则/契约/排查）、`design/`（UI 设计规格与 HTML 预览）、`openspec/`（OpenSpec 主目录）、`superpowers/`、`pitfalls/` |
+| `openspec/` | **符号链接 → `docs/openspec`**；OpenSpec changes / specs |
+| `alembic/` + `alembic.ini` | 数据库迁移 |
+| `scripts/` | 运维脚本（清库、重建 KB 数据、migrations） |
+| `litellm/` | LiteLLM 代理配置（模型网关） |
+| `data/`、`logs/` | 运行期数据与日志挂载点 |
+| `docker-compose.yml` / `.override.yml` / `.prod.yml` | 编排（mysql / redis / postgres / clickhouse / minio / langfuse / nginx / litellm-proxy / app 共 9 个服务） |
+| `Dockerfile`、`pyproject.toml` | 应用镜像与依赖 |
+
+## 二、后端 `src/` 分层
+
+```
+main.py            FastAPI 入口：app 工厂 + 异常处理器 + 中间件挂载 + 路由注册
+api/               纯路由层：请求校验 → 调 service → 返回（不写业务逻辑）
+  ├─ model/        Pydantic 请求体(request.py) / 响应体(response.py)
+  └─ sse_utils.py  SSE 格式化（chat.py 不得内联）
+services/          业务编排：app_service → kb / document / chat(agent)
+  agent_service.py 图生命周期 + 一次生成的主循环（_run_generation）
+agents/            LangGraph agent 循环
+  ├─ graph/        workflow(建图) / state / agent_node / nodes / verify
+  ├─ tools/        retrieve_kb、ask_user、search_web、task、registry
+  └─ skills/       主从委派运行时：loader/registry/executor/delegate_task/models
+rag/               检索与知识库路由：retrieval / context / prompt / stream / temporal
+chat/              对话管理：manager(Redis) / persistence(MySQL) / streaming / task_registry / process_log
+chunking/          分块：router(策略路由) / strategies(4 种) / validator / scorer
+parsers/           文档解析：pdf / docx / txt + base / router
+core/              日志：logging / log_events / log_event_specs
+config/            settings(环境变量) / prompts(提示词) / const(常量/文案/枚举) / response_codes
+infra/             基础设施：db(engine/vector_store/models) / llm / search / auth / redis_client
+middleware/        auth / trace_id / response_processor（统一响应包装）
+cli/               RAGAS 评估、检索对比、trace 回放等命令行工具
+models.py          LLM / Embedding / Rerank 工厂（get_llm / get_embedding / get_rerank）
+utils/             sse 事件类型 / errors / desensitize / auth_crypto
+tools/             工具基类（base.py）
+```
+
+**分层调用规则**（改代码前必守，详见 `CLAUDE.md`）：`api/` 不得直接调 `infra/`、`config/`，
+必须经 `services/`；`api/chat.py` 不含 SSE 格式化函数。前端只经 Nginx `/api/*` 打到后端，
+不直连 `app` 容器。
+
+### 后端一次问答的主链路
+
+```
+浏览器 chat.html
+  → POST /api/chat/stream            src/api/chat.py
+  → ChatStreamRequest 校验            src/api/model/request.py
+  → AppService → AgentService         src/services/app_service.py、agent_service.py
+  → make_initial_state                src/agents/graph/state.py
+  → LangGraph.astream_events          src/agents/graph/workflow.py（agent ↔ tools → finalize → verify → format）
+       ├─ agent_node / agent_finalize  src/agents/graph/agent_node.py、nodes.py
+       ├─ tools: retrieve_kb 等        src/agents/tools/rag_tools.py、web_tools.py
+       └─ delegate_task → fork 子代理  src/agents/skills/delegate_task.py、executor.py
+  → SSE 事件转换 + 落缓冲             agent_service.py _convert_event / chat/streaming.py
+  → StreamingResponse（SSE）          src/api/chat.py
+```
+
+关键入口：`src/main.py`（异常处理器 + 中间件顺序 `CORS → ResponseProcessor → auth → TraceID → router`）、
+`src/api/dependencies.py`（`get_app_service` 依赖注入）、`src/services/agent_service.py:450`
+（`_run_generation` 主循环）。数据流链路细节见 `docs/agents/data-flow.md`。
+
+## 三、前端 `deploy/nginx/html/`
+
+Nginx 容器把本目录挂到 `/usr/share/nginx/html` 直接托管，**无 npm / 构建步骤**，
+改完刷新即可（详细部署见 `docs/agents/cookbook.md`「部署」）。
+
+| 文件 | 行数 | 用途 | 依赖 |
+|------|------|------|------|
+| `chat.html` | ~3030 | **对话问答页**（主页面，Nginx 默认 index）| 自包含内联 CSS/JS；仅外链 `vendor/marked.min.js`、`vendor/purify.min.js`、Google Fonts |
+| `index.html` | ~1261 | **知识库管理页**（KB/文档增删、上传、分块预览、RAGAS 徽标）| 自包含；外链 `js/api.js` |
+| `login.html` | ~44 | 登录页 | — |
+| `js/api.js` | 209 | REST API 请求封装（统一错误处理 / trace_id） | 被 `index.html` 引用 |
+| `js/chat.js` | 809 | 早期 SSE 聊天控制器（外部 JS 版） | **当前页面未引用**（chat.html 已自包含），历史遗留 |
+| `css/style.css` | 447 | 早期样式表 | **当前页面未引用**，历史遗留 |
+| `vendor/` | — | `marked.min.js`（Markdown 渲染）、`purify.min.js`（XSS 消毒） | chat.html 引用 |
+| `*-mockup.html` | — | UI 设计预览稿（chat-harness / eval / kb-harness-page），**非生产页面** | 独立打开 |
+
+> ⚠️ 改前端前先确认改的是 `chat.html` 还是 `js/chat.js`：`js/chat.js` 与 `css/style.css`
+> 当前无页面引用，但 e2e 测试与部分归档文档仍会提到它们。新逻辑写进自包含页面，
+> 不要误改遗留文件。
+
+### `chat.html` 内部结构（改前必读）
+
+单文件内联 JS，按注释分块（`// ── 段名 ──`）：
+
+| 段（起始行区域） | 内容 |
+|------|------|
+| State / Session / DOM refs（:840-） | STATE 状态机常量、state 全局（sessionId/kbId/deepThinking/abortController/lastSeq）、双输入框 composer（新对话页 / 历史对话页） |
+| 页面切换（:956-） | `showNewPage` / `showHistoryPage` / 头部标题同步 |
+| Markdown 渲染（:991-） | `renderMarkdown`（marked + purify）、流式半成品 markdown 归一化 |
+| 渲染（:1059-） | 用户气泡、单气泡叙事（过程元素挂当前轮 assistant 气泡内）、状态标签、AI 回答流式/终态、引用横条 + 抽屉 |
+| 任务看板（:1437-） | `upsertTask` / `appendDelegateActivity`（数据源 = SSE `task`/`delegate` 事件 + 快照接口） |
+| 澄清 composer（:1662-） | `renderComposer` / `submitComposer` → `POST /api/chat/clarify-answer` |
+| 反馈（:1810-） | `appendFeedback` / `sendFeedback` → `POST /api/feedback` |
+| 思考过程（:1861-） | `renderReasoningDelta`（deep_thinking 的 reasoning 增量） |
+| delegate 过程（:1919-） | `ensureDelegateSection` / `appendDelegateDelta` / `finalizeDelegateSection`（fork 子代理 start/delta/end） |
+| **SSE 消费（:2036-2240）** | `fetchStream` / `parseSSE` / **`buildStreamHandlers`**（事件分发核心）/ `resumeStream`（断线续传） |
+| 发送与停止（:2301-） | `startStream(query)`（POST `/api/chat/stream`，body: session_id/kb_id/query/deep_thinking）、`sendMessage`、`stopGeneration` |
+| KB 选择（:2470-） | `loadKBs` / `renderKbMenu` → `GET /api/kbs/list` |
+| 会话列表（:2588-） | `loadSessions` / `switchSession` / `newSession` → `/api/sessions/*` |
+| 历史回放（:2641-2832） | `rebuildProcessFromEvents`（用事件流重建过程视图）、`loadSessionMessages` |
+| 登录 / 用户区（:2862-） | `verifyLogin` / `handleLogout` → `/api/auth/*` |
+
+**前端消费的后端接口（均在 `/api`）**：`chat/stream`、`chat/clarify-answer`、`sessions/{list,events,messages,cancel,task-status}`、
+`kbs/list`、`feedback`、`auth/{verify,logout}`、`config`。接口字段语义与 SSE 事件结构见
+`docs/agents/api_contract.md`。
+
+## 四、Nginx 路由（`deploy/nginx/nginx.conf`）
+
+| location | 去向 |
+|------|------|
+| `/` | `root /usr/share/nginx/html; index chat.html`（前端页面） |
+| `= /Knowledgebase` | `try_files /index.html`（知识库管理页入口） |
+| `/api/` | `proxy_pass http://app:8000`（后端） |
+| `/docs`、`/openapi.json` | `proxy_pass http://app:8000`（Swagger） |
+
+## 五、运行时内容库与部署
+
+- `skills/<name>/SKILL.md`：声明式能力文件（frontmatter：name / description / context /
+  model / thinking / allowed-tools / max-iterations）。**业务侧管理，改内容免改代码**；
+  经 compose volume 挂载进容器 `/app/skills`。术语与委派机制见 `docs/agents/glossary.md`「技能委派」。
+- 顶层 `skills/`（运行时内容）与 `.claude/skills/`（开发期工具链，如 openspec）语义不同，勿混淆。
+- 容器日志在 `/data/logs/`，按天轮转；`trace_id` 见 `docs/agents/logging-rules.md`。
+
+## 六、测试 `tests/`
+
+与 `src/` 模块一一对应：`tests/agents`、`api`、`chat`、`chunking`、`cli`、`config`、`core`、
+`infra`、`middleware`、`parsers`、`rag`、`services`、`utils`，公共 fixture 在 `tests/fixtures`、
+`tests/conftest.py`。外部依赖 mock，不发真实网络请求。
+
+## 七、文档与 OpenSpec
+
+- `docs/agents/`：规则 / 契约 / 排查（本目录，归属见 `CLAUDE.md`「文档组织」表）。
+- `docs/design/`：UI 设计系统与页面规格 + HTML 预览（流程见 `docs/agents/ui-design-flow.md`）。
+- `openspec/`（→ `docs/openspec/`）：capability specs 与 changes；用 `openspec list` / `openspec status --change <name>` 查询。
+
+## 八、常见改动落点速查
+
+| 我要改… | 落点 |
+|------|------|
+| 加/改一个 HTTP 接口 | `src/api/<模块>.py`（路由）+ `src/api/model/request.py`/`response.py`（契约）+ 对应 `services/` 编排；同步 `docs/agents/api_contract.md` 与测试断言 |
+| 改一次生成的编排 / 事件转换 | `src/services/agent_service.py`（`_run_generation` / `_convert_event`） |
+| 改 agent 循环 / 提示词 | `src/agents/graph/agent_node.py`、`nodes.py`、`src/rag/prompt.py`、`src/config/prompts.py` |
+| 加/改工具 | `src/agents/tools/`（实现 + 在 `rag_tools.py` 注册）；工具描述文案入 `src/config/` |
+| 加/改 skill 机制 | `src/agents/skills/`（loader/registry/executor/delegate_task）；内容放 `skills/<name>/SKILL.md` |
+| 改前端对话页 | `deploy/nginx/html/chat.html`（自包含）；**勿改 `js/chat.js`** |
+| 改知识库管理页 | `deploy/nginx/html/index.html`（+ `js/api.js`） |
+| 改 Nginx 路由 / 静态托管 | `deploy/nginx/nginx.conf`、`deploy/nginx/Dockerfile` |
+| 改分块 | `src/chunking/`（`strategies/` 加策略 + `router.py` 挂路由）；排查见 `docs/agents/chunking-issues.md` |
+| 改常量 / 文案 / 阈值 | `src/config/`（`settings.py` 环境变量、`prompts.py` 提示词、`const.py` 常量与 SSE 文案） |
+| 加日志事件 / 前缀 | `src/core/log_events.py`、`log_event_specs.py`；规范见 `docs/agents/logging-rules.md` |
+| 改部署 / 容器 | `docker-compose*.yml`、`Dockerfile`；操作见 `docs/agents/cookbook.md` |

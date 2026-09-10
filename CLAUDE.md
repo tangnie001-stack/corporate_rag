@@ -25,6 +25,7 @@ Python 3.11+ / FastAPI / ChromaDB / LangChain / DashScope / MySQL 8.0 / Redis 7 
 | docs/agents/rules.md | 架构规约：异常处理 / 响应包装 / 日志约定 / 排查规范 / 代码注释标准 | 写代码前 |
 | docs/agents/logging-rules.md | 日志格式唯一归属：行模板 / 前缀主表(开放登记制) / 事件命名 / 值类型编码(token 字符集) / 级别语义 / 已知例外(retrieval_signal) | 写任何日志、登记事件/前缀前 |
 | docs/agents/api_contract.md | 接口契约：参数语义、返回值格式、历史踩坑 | 改 API / 公共方法签名前；前端页面对接接口时 |
+| docs/agents/code-map.md | 代码结构唯一归属：顶层目录 / 后端 `src/` 分层与模块职责 / 前端 `deploy/nginx/html` 页面与 SSE 消费 / 常见改动落点速查 | **改动代码前定位文件时必读** |
 | docs/agents/data-flow.md | 数据流链路 | 排查问题、理解系统流程 |
 | docs/agents/codegraph-guide.md | 依赖图查询（比逐文件 grep 高效） | 查询代码关系 |
 | docs/agents/glossary.md | 领域词汇表：核心标识符 / 响应信封 / RAG 流水线 / RAGAS 指标等规范术语 | 术语含义不确定、写文档或命名时查阅 |
@@ -33,32 +34,18 @@ Python 3.11+ / FastAPI / ChromaDB / LangChain / DashScope / MySQL 8.0 / Redis 7 
 | docs/agents/ui-design-flow.md | UI 设计流程与产物路径：全局基线 `docs/design/MASTER.md` / 页面规格 `docs/design/pages/<name>.md` / 效果预览 `docs/design/<name>-mockup.html` | **改 UI / 新增组件前必读**；产出按此流程落 `docs/design/`，改完用 playwright-cli 验证 |
 | docs/agents/cookbook.md | 操作记录协议：什么该记、怎么记；条目按协议追加 | 遇到可复用操作流程时按协议记录；需要操作步骤时查阅 |
 | docs/agents/requirements_pool.md | 需求池（意向清单，非已确认需求） | 规划/排期时参考；不作为功能实现依据 |
-| docs/agents/reference-projects.md | 参考项目清单：本地 github 镜像仓库、评分排序、各自适用场景与何时查阅 | 写对应领域代码前、选型/排期时参考 |
+| docs/agents/reference-projects.md | 参考资源：本地 github 镜像仓库（按域分组、评分排序、何时查阅）+ 附录「本地已安装技能」（`~/.agents/skills/`） | 写对应领域代码前、选型/排期时参考；找 agent/skill 范例时 |
 
 ## 代码目录结构（修改代码前必读）
 
-```
-src/
-├── api/          # 纯路由层：请求校验→调 service→返回（不写业务逻辑）
-├── services/     # 业务编排 app_service → kb / document / chat
-├── agents/       # LangGraph agent 循环：graph（workflow/state/nodes/agent_node）+ tools（retrieve_kb / ask_user / delegate_task）
-├── agents/skills/  # 主从委派运行时：skill 加载/注册/执行（SkillRecord / SkillLoader / SkillRegistry / SkillExecutor / make_delegate_task）
-├── rag/          # 检索与知识库路由：retrieval / kb_router / context / prompt
-├── chat/         # 对话管理 manager(Redis) + persistence(MySQL)
-├── core/         # Loguru 日志
-├── config/       # settings / response_codes / prompts / queries
-├── parsers/      # pdf / docx / txt 解析
-├── middleware/    # auth / trace_id / 统一响应包装
-├── infra/        # db / llm / search / auth / errors / redis
-├── cli/          # RAGAS 评估 / 检索调试
-├── chunking/     # 分块策略 / 校验 validate_chunks / 质量评分 ChunkQualityScorer
-├── models.py     # LLM/Embedding/Rerank 工厂
-└── main.py       # FastAPI 入口 + 异常处理器
+**完整代码结构、模块职责与「常见改动落点速查」见 `docs/agents/code-map.md`（唯一归属文档）。**
 
-tests/            # 与 src/ 模块一一对应
-```
+速览（改代码前仍须查 code-map.md 定位文件）：
 
-顶层 `skills/` 为运行时 skill 内容库（业务侧管理，`<name>/SKILL.md`，compose volume 挂载进容器 `/app/skills`）；`.claude/skills/` 为开发期工具链 skill（如 openspec/openspec-apply-change），两者语义不同。实现与术语见 glossary.md「技能委派」。
+- **后端** `src/`：分层 `api/ → services/ → agents/ + rag/ + chat/ + chunking/ + infra/`；入口 `src/main.py`，模型工厂 `src/models.py`，agent 循环 `src/agents/graph/`，主从委派 `src/agents/skills/`
+- **前端** `deploy/nginx/html/`：`chat.html`（对话页，自包含）/ `index.html`（知识库管理页）/ `login.html`；Nginx 静态托管、无构建步骤，路由见 `deploy/nginx/nginx.conf`
+- **运行时内容库** 顶层 `skills/<name>/SKILL.md`（业务侧管理，compose volume 挂载进容器 `/app/skills`）；`.claude/skills/` 为开发期工具链 skill（如 openspec），两者语义不同。实现与术语见 glossary.md「技能委派」
+- **测试** `tests/`：与 `src/` 模块一一对应
 
 ### 层间调用规则
 - ❌ `api/` 不得直接调用 `infra/` 或 `config/`（必须通过 `services/`）
