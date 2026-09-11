@@ -21,6 +21,7 @@ from src.api.model.response import MessageItem, SessionDeleteResponse, SessionIt
 from src.api.schema import ResponseModel
 from src.chat.streaming import _subscribe_buffer, streaming_manager
 from src.chat.task_registry import task_registry
+from src.config.const import SKILL_INJECTION_PREFIX
 from src.config.response_codes import Code
 from src.services.app_service import AppService
 from src.utils.errors import BusinessError
@@ -143,7 +144,15 @@ async def get_session_messages(
                 model_name=row.get("model_name"),
             )
         )
-    return ResponseModel(data=result)
+    # 注入型隐藏消息（role=user 且带标记前缀）前端不展示；data 仍是数组，契约不变
+    visible = [
+        m
+        for m in result
+        if not (
+            m.role == "user" and (m.content or "").startswith(SKILL_INJECTION_PREFIX)
+        )
+    ]
+    return ResponseModel(data=visible)
 
 
 @router.post("/sessions/delete", response_model=ResponseModel)

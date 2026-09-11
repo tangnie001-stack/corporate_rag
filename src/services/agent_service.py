@@ -33,10 +33,11 @@ from src.chat.streaming import (
     streaming_manager,
 )
 from src.config import TOP_K_RERANK, settings
-from src.config.const import SSEInteractionTexts
+from src.config.const import SKILL_INJECTION_PREFIX, SSEInteractionTexts
 from src.core import logging as core_logging
 from src.core.log_events import Event, Signal
 from src.infra.db.vector_store import VectorStore
+from src.infra.llm.chat_message import ChatMessage
 from src.infra.llm.langfuse_tracing import LangfuseTracer
 from src.infra.llm.prompt_manager import PromptManager
 from src.infra.llm.request_context import RequestContext
@@ -786,3 +787,26 @@ class AgentService:
             return ""
         await self._chat_manager.bind_session_agent_async(session_id, requested)
         return requested
+
+    async def _inject_skill_message(
+        self, session_id: str, kb_id: str, text: str
+    ) -> ChatMessage:
+        """把 skill 正文作为一条隐藏消息写入会话上下文（Redis + DB）。
+
+        写入的是带 SKILL_INJECTION_PREFIX 标记的 user 消息原文：前端经
+        `sessions/messages` 过滤不展示，模型经 `_initial_messages` 抽成独立
+        HumanMessage 可见且随历史持久化跨轮生效。
+
+        Args:
+            session_id: 会话 ID
+            kb_id: 当前知识库 ID（落库用，可为空）
+            text: 已渲染的 skill 正文
+
+        Returns:
+            新构造的 ChatMessage；调用方应把它**追加到本轮 history**
+            （否则本轮 prompt 看不到，需等下一轮才从 Redis 读回）
+        """
+        content = f"{SKILL_INJECTION_PREFIX}\n{text}"
+        await self._chat_manager.add_message_async(session_id, "user", content)
+        await self._chat_manager.save_user_async(session_id, kb_id, content)
+        return ChatMessage(role="user", content=content)

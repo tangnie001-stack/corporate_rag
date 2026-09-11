@@ -7,12 +7,18 @@
 import time
 from collections.abc import Callable
 
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langgraph.prebuilt import ToolNode
 
 from src.agents.graph.state import AgentState
+from src.agents.skills.prefix import clean_prefix
 from src.config import settings
-from src.config.const import HISTORY_MAX_TURNS, HISTORY_TOKEN_RATIO, MAX_DELEGATE_BONUS
+from src.config.const import (
+    HISTORY_MAX_TURNS,
+    HISTORY_TOKEN_RATIO,
+    MAX_DELEGATE_BONUS,
+    SKILL_INJECTION_PREFIX,
+)
 from src.core import logging as core_logging
 from src.core.log_events import Event
 from src.infra.llm.chat_message import ChatMessage
@@ -53,6 +59,59 @@ def _truncate_history(
     return recent
 
 
+def _initial_messages(state: AgentState, prompt_manager) -> list[BaseMessage]:
+    """组装首轮 LLM 消息列表：system 段 + 注入隐藏消息 + 普通历史 + 当前 query。
+
+    注入型隐藏消息（内容带 SKILL_INJECTION_PREFIX 标记的 user 行）从历史中
+    抽出为独立 HumanMessage，放在主 system 段之后、普通对话历史之前——既不进
+    人设层/环境约束层，也避免"对话中途插 system 消息"的模型兼容风险。当前 query
+    经 clean_prefix 剥掉已注册技能名前缀后再组装（读时清洗，落库保留原文）。
+
+    Args:
+        state: 图状态（读 query / kb_id / _history）
+        prompt_manager: PromptManager，提供系统指令与用户模板
+
+    Returns:
+        LLM 消息列表：system（+未绑定时追加会话指令）+ 注入消息 + 历史 + 当前 user
+    """
+    # 历史窗口截断（最近 N 轮 + token 双上限）后再组装初始消息；
+    # kb_bound 由 kb_id 是否非空决定（未绑定 KB → 追加禁止检索指令）
+    history = _truncate_history(state._history or [])
+    ctx = current_request_ctx.get()
+    if ctx is not None:
+        persona = ctx.persona
+        has_skills = ctx.has_skills
+        known = ctx.known_skill_names
+    else:
+        persona = ""
+        has_skills = False
+        known = set()
+    injected: list[BaseMessage] = []
+    normal: list[ChatMessage] = []
+    for msg in history:
+        if msg.role == "user" and msg.content.startswith(SKILL_INJECTION_PREFIX):
+            injected.append(HumanMessage(content=msg.content))
+        else:
+            normal.append(msg)
+    messages = build_prompt(
+        clean_prefix(state.query, known),
+        "",
+        normal,
+        prompt_manager,
+        kb_bound=bool(state.kb_id),
+        persona=persona,
+        has_skills=has_skills,
+    )
+    # 注入消息放在主 system 段之后、普通对话历史之前（不进人设层/环境约束层）
+    if injected:
+        insert_at = 0
+        for i, m in enumerate(messages):
+            if isinstance(m, SystemMessage):
+                insert_at = i + 1
+        messages[insert_at:insert_at] = injected
+    return messages
+
+
 def make_agent_model_node(llm, tools, prompt_manager) -> Callable:
     """创建 agent 模型节点工厂：bind_tools + 初始消息注入 + 迭代计数。
 
@@ -66,19 +125,11 @@ def make_agent_model_node(llm, tools, prompt_manager) -> Callable:
     """
     model = llm.bind_tools(tools)
 
-    def _initial_messages(state: AgentState) -> list[BaseMessage]:
-        # 历史窗口截断（最近 N 轮 + token 双上限）后再组装初始消息；
-        # kb_bound 由 kb_id 是否非空决定（未绑定 KB → 追加禁止检索指令）
-        history = _truncate_history(state._history or [])
-        return build_prompt(
-            state.query, "", history, prompt_manager, kb_bound=bool(state.kb_id)
-        )
-
     async def agent_model(state: AgentState) -> dict:
         if state.messages:
             messages = state.messages
         else:
-            messages = _initial_messages(state)
+            messages = _initial_messages(state, prompt_manager)
         iteration = state._agent_iterations + 1
         core_logging.log_event(
             Event.ITERATION_DONE, iteration=iteration, msgs=len(messages)

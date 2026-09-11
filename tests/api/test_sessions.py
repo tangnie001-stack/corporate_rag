@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 from src.chat.streaming import streaming_manager
 from src.chat.task_registry import SessionTaskRegistry
-from src.config.const import TaskStatus, TaskType
+from src.config.const import SKILL_INJECTION_PREFIX, TaskStatus, TaskType
 from tests.api.mock_data import make_message, make_session
 
 
@@ -169,6 +169,28 @@ class TestMessagesProcessField:
         item = resp.json()["data"][0]
         assert item["process"] is None
         assert item["model_name"] == "qwen3.7-flash"
+
+
+def test_session_messages_filters_injected_marker(auth_client, mock_app_service):
+    """POST /api/sessions/messages 过滤注入型隐藏消息，data 仍为数组且只含普通行。"""
+    mock_app_service.get_session_by_id = AsyncMock(return_value=make_session("s1"))
+    mock_app_service.get_messages = AsyncMock(
+        return_value=[
+            make_message("user", SKILL_INJECTION_PREFIX + "\n方法论正文"),
+            make_message("user", "2024年营收多少"),
+            make_message("assistant", "2024年营收为100亿"),
+        ]
+    )
+
+    response = auth_client.post("/api/sessions/messages", json={"session_id": "s1"})
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert isinstance(data, list)
+    assert len(data) == 2
+    assert all(SKILL_INJECTION_PREFIX not in item["content"] for item in data)
+    assert data[0]["content"] == "2024年营收多少"
+    assert data[1]["role"] == "assistant"
 
 
 def test_session_messages_not_found(auth_client, mock_app_service):

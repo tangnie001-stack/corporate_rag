@@ -106,6 +106,12 @@ SKILL_TASK_PLACEHOLDERS = ("$ARGUMENTS", "{task}")
 # ask_user —— D18：子代理不直接交互，需要确认时由编排层确认门代为询问；
 # delegate_task —— D7：子代理不再委派，防递归与上下文爆炸。
 FORK_FORBIDDEN_TOOLS = ("ask_user", "delegate_task")
+SKILL_INJECTION_PREFIX: str = "[[skill-injection]]"
+"""注入型隐藏消息的内容前缀标记。
+
+用途：① `sessions/messages` 据此过滤（前端不展示）；② `agent_node._initial_messages`
+据此把该行抽成独立 HumanMessage（模型可见）。标记必须是 ASCII 且用户不可能自然打出。
+"""
 # 专家分析标记短语：fork 子代理"无源分析观点"由 4.1 引导主 agent 措辞（design D9），
 # kb_citation_guardrail 据此豁免（防纯分析型 fork 答案被误触发补标 regen，M7）
 EXPERT_ANALYSIS_MARKER = "基于领域经验的分析"
