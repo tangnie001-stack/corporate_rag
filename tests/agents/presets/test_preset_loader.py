@@ -71,3 +71,28 @@ def test_non_ascii_name_is_skipped(tmp_path):
 def test_missing_dir_returns_empty(tmp_path):
     """目录不存在时返回空列表，不抛异常。"""
     assert AgentPresetLoader(tmp_path / "nope").load_all() == []
+
+
+def test_max_turns_bool_is_treated_as_none(tmp_path):
+    """maxTurns 为布尔值时视为非法（避免 True 被当成 1），回落 None。"""
+    (tmp_path / "analyst.md").write_text(
+        "---\nname: analyst\ndescription: 数据分析\nmaxTurns: true\n---\n你是分析师。\n",
+        encoding="utf-8",
+    )
+
+    presets = AgentPresetLoader(tmp_path).load_all()
+
+    assert presets[0].max_turns is None
+
+
+def test_illegal_file_stem_is_skipped_with_warning(tmp_path):
+    """frontmatter name 合法但文件名非 ASCII slug → 记 warning 并跳过。"""
+    (tmp_path / "财报.md").write_text(
+        "---\nname: finance-report\ndescription: 财报\n---\n正文\n",
+        encoding="utf-8",
+    )
+
+    with pytest.warns(UserWarning, match="文件名非法"):
+        presets = AgentPresetLoader(tmp_path).load_all()
+
+    assert presets == []

@@ -99,7 +99,7 @@ async def test_inline_without_placeholder_returns_as_is():
 
 @pytest.mark.asyncio
 async def test_fork_reuses_main_llm_when_model_empty():
-    """fork 且未声明 model/thinking：复用主 agent llm 实例；经 astream_events 聚合结果。"""
+    """fork 且未声明 model：复用主 agent llm 实例；经 astream_events 聚合结果。"""
     main_llm = MagicMock()
     exe = SkillExecutor(main_llm=main_llm)
     rec = _record(

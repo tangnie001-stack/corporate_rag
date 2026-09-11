@@ -16,6 +16,7 @@
 | `deploy/` | 部署件：`nginx/`（反向代理 + 前端静态文件）、各中间件 Dockerfile（mysql/chroma/clickhouse） |
 | `deploy/nginx/html/` | **前端页面静态文件**（chat.html / index.html / login.html 等） |
 | `skills/` | 运行时 skill 内容库（`<name>/SKILL.md`，业务侧管理，compose volume 挂载进容器 `/app/skills`） |
+| `agents/` | **智能体预设内容库**（`<name>.md` 平坦文件，业务侧管理；见下方「三个 `agents` 的区别」） |
 | `docs/` | 文档：`agents/`（本目录，规则/契约/排查）、`design/`（UI 设计规格与 HTML 预览）、`openspec/`（OpenSpec 主目录）、`superpowers/`、`pitfalls/` |
 | `openspec/` | **符号链接 → `docs/openspec`**；OpenSpec changes / specs |
 | `alembic/` + `alembic.ini` | 数据库迁移 |
@@ -24,6 +25,9 @@
 | `data/`、`logs/` | 运行期数据与日志挂载点 |
 | `docker-compose.yml` / `.override.yml` / `.prod.yml` | 编排（mysql / redis / postgres / clickhouse / minio / langfuse / nginx / litellm-proxy / app 共 9 个服务） |
 | `Dockerfile`、`pyproject.toml` | 应用镜像与依赖 |
+
+> **三个 `agents` 的区别（勿混淆）**：根 `agents/` = 智能体预设**内容**（`<name>.md` 平坦文件）；
+> `src/agents/` = agent 运行时**代码**（graph / tools / skills / presets）；`docs/agents/` = **文档**（规则 / 契约 / 排查）。
 
 ## 二、后端 `src/` 分层
 
@@ -36,8 +40,9 @@ services/          业务编排：app_service → kb / document / chat(agent)
   agent_service.py 图生命周期 + 一次生成的主循环（_run_generation）
 agents/            LangGraph agent 循环
   ├─ graph/        workflow(建图) / state / agent_node / nodes / verify
-  ├─ tools/        retrieve_kb、ask_user、search_web、task、registry
-  └─ skills/       主从委派运行时：loader/registry/executor/delegate_task/models
+  ├─ tools/        retrieve_kb、ask_user、search_web、task、registry( + readonly 声明表)
+  ├─ skills/       主从委派运行时：loader/registry/executor/delegate_task/models/invocation
+  └─ presets/      智能体预设：models / loader / registry
 rag/               检索与知识库路由：retrieval / context / prompt / stream / temporal
 chat/              对话管理：manager(Redis) / persistence(MySQL) / streaming / task_registry / process_log
 chunking/          分块：router(策略路由) / strategies(4 种) / validator / scorer
@@ -134,8 +139,10 @@ Nginx 容器把本目录挂到 `/usr/share/nginx/html` 直接托管，**无 npm 
 ## 五、运行时内容库与部署
 
 - `skills/<name>/SKILL.md`：声明式能力文件（frontmatter：name / description / context /
-  model / thinking / allowed-tools / max-iterations）。**业务侧管理，改内容免改代码**；
+  model / allowed-tools / agent / user-invocable / disable-model-invocation）。**业务侧管理，改内容免改代码**；
   经 compose volume 挂载进容器 `/app/skills`。术语与委派机制见 `docs/agents/glossary.md`「技能委派」。
+- `agents/<name>.md`：智能体预设（frontmatter 驼峰键 display_name / description / tools /
+  skills / maxTurns；正文为 system prompt 人设）。术语见 `docs/agents/glossary.md`「智能体预设」。
 - 顶层 `skills/`（运行时内容）与 `.claude/skills/`（开发期工具链，如 openspec）语义不同，勿混淆。
 - 容器日志在 `/data/logs/`，按天轮转；`trace_id` 见 `docs/agents/logging-rules.md`。
 
@@ -160,6 +167,7 @@ Nginx 容器把本目录挂到 `/usr/share/nginx/html` 直接托管，**无 npm 
 | 改 agent 循环 / 提示词 | `src/agents/graph/agent_node.py`、`nodes.py`、`src/rag/prompt.py`、`src/config/prompts.py` |
 | 加/改工具 | `src/agents/tools/`（实现 + 在 `rag_tools.py` 注册）；工具描述文案入 `src/config/` |
 | 加/改 skill 机制 | `src/agents/skills/`（loader/registry/executor/delegate_task）；内容放 `skills/<name>/SKILL.md` |
+| 加/改智能体预设 | 内容放 `agents/<name>.md`；机制在 `src/agents/presets/`（loader/registry） |
 | 改前端对话页 | `deploy/nginx/html/chat.html`（自包含）；**勿改 `js/chat.js`** |
 | 改知识库管理页 | `deploy/nginx/html/index.html`（+ `js/api.js`） |
 | 改 Nginx 路由 / 静态托管 | `deploy/nginx/nginx.conf`、`deploy/nginx/Dockerfile` |

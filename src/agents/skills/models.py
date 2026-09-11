@@ -13,7 +13,7 @@ class SkillContext:
     """skill 执行上下文常量（frontmatter context 字段取值）。
 
     分工：inline = 指令注入主 agent 上下文、主 agent 自己执行；
-    fork = 生成独立子代理（create_agent）隔离执行。
+    fork = 生成独立子代理隔离执行。
     """
 
     INLINE: str = "inline"  # inline 执行形态

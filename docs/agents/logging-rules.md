@@ -43,3 +43,5 @@
 ## 已知例外
 - `retrieval_signal:` 为 P1 Change 2 既有契约保留前缀，检索域聚合需
   `[retrieval]` + `retrieval_signal:` 两条 grep 模式；待前缀体系重构时统一
+- skill / 智能体预设的**加载期**问题（名称非法、废弃字段、双轴推导、死 skill）走 `warnings.warn`，
+  不登记为 `Event`（一次性内容问题，非请求路径）

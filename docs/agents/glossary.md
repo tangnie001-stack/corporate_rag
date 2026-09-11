@@ -71,12 +71,20 @@
 
 **参考项目辨析**：`github/agency-agents` 的 319 个 `.md` 是 **agent 人设定义**（frontmatter：name/description/color/emoji/vibe/tools），**不是 skill**；其 `scripts/convert.sh` 生成 SKILL.md 时只保留 `name` + `description`（标准最小集）。
 
+## 智能体预设与调用控制
+
+| 术语 | 定义 | 常见错误 |
+|------|------|---------|
+| `智能体预设（agent preset）` | 磁盘声明式智能体定义（`agents/<name>.md`，frontmatter 驼峰键 + 正文 system prompt 人设）；运行时对象 `AgentPreset` 由 `AgentPresetLoader` 产出、`AgentPresetRegistry` 按名索引（`src/agents/presets/`） | ❌ 与 skill 混为一谈（身份 vs 手册） |
+| 会话级 vs 消息级 | 预设是**会话级身份**：选定后整通会话稳定（回答"谁在干活"）；skill 是**消息级内容**：按命中注入或 fork 执行（回答"按哪本手册干"） | ❌ 把 skill 当身份、把预设当一次性指令 |
+| 双轴调用控制 | skill 的两条正交开关：`user-invocable`（允许用户 `/xxx` 调用）与 `disable-model-invocation`（禁止模型自动 `delegate_task` 调用）；未显式声明时按 `allowed-tools` 的工具只读性推导（含写类工具默认锁模型端，fail-safe；只读表为空 fail-open 不锁）；两侧皆关 = 死 skill 记 warning | ❌ 以为一个开关管两边 |
+
 ## 技能委派（主从委派）
 
 | 术语 | 定义 | 常见错误 |
 |------|------|---------|
 | `skill` | 磁盘声明式能力文件（`skills/<name>/SKILL.md`，frontmatter 声明元数据 + 正文按 context 存方法论/子代理 prompt）；skill 是内容/配置而非代码 | ❌ 与开发期 `.claude/skills/` 工具链 skill 混为一谈 |
-| `SkillRecord` | skill 文件解析后的运行时对象（name/description/context/inline_prompt/agent_prompt 等），由 `SkillLoader` 产出（`src/agents/skills/models.py`） | ❌ 直接用 SKILL.md 原文当结构体 |
+| `SkillRecord` | skill 文件解析后的运行时对象（name/description/context/inline_prompt/fork_body/双轴等），由 `SkillLoader` 产出（`src/agents/skills/models.py`） | ❌ 直接用 SKILL.md 原文当结构体 |
 | inline 执行 | skill `context=inline`：方法论注入主 agent 上下文，主 agent 自己执行 | — |
 | fork 执行 | skill `context=fork`：`SkillExecutor` 生成零工具子代理独立深度分析，结果纯文本回主 agent | — |
 | `delegate_task` | 主 agent 委派工具 `delegate_task(task, skill)`，按命中 skill 的 context 分发 inline/fork；unknown 返回"skill 不存在 + 可用列表" | 引用会指向子代理产出（实际引用仍只指向主 agent 自身检索来源） |

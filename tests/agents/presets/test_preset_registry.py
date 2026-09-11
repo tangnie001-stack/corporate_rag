@@ -63,3 +63,23 @@ def test_all_is_sorted_by_name(tmp_path):
     registry.reload_if_changed()
 
     assert [p.name for p in registry.all()] == ["alpha", "zeta"]
+
+
+def test_reload_detects_in_place_edit(tmp_path):
+    """同一路径原地改写内容后 reload 可见（文件级 signature，而非仅目录 mtime）。
+
+    原地写不改变父目录 mtime，只有文件级 signature 才能察觉内容变化。
+    """
+    _write(tmp_path, "finance-expert.md", "finance-expert", desc="第一版")
+    registry = AgentPresetRegistry(AgentPresetLoader(tmp_path))
+    registry.reload_if_changed()
+    first = registry.get("finance-expert")
+    assert first is not None
+    assert first.description == "第一版"
+
+    _write(tmp_path, "finance-expert.md", "finance-expert", desc="更新后的第二版")
+    registry.reload_if_changed()
+
+    updated = registry.get("finance-expert")
+    assert updated is not None
+    assert updated.description == "更新后的第二版"

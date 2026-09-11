@@ -79,7 +79,9 @@ def test_invalid_context_falls_back_inline(tmp_path):
         "description: x\ncontext: hybrid\n",
         "方法论正文",
     )
-    rec = SkillLoader(tmp_path).load_all()[0]
+    with pytest.warns(UserWarning, match="非法值"):
+        records = SkillLoader(tmp_path).load_all()
+    rec = records[0]
     assert rec.context == SkillContext.INLINE
     assert rec.inline_prompt is not None
     assert "方法论正文" in rec.inline_prompt
@@ -189,7 +191,7 @@ def test_agent_field_is_parsed(tmp_path):
 
 
 def test_explicit_dual_axis_fields_are_parsed(tmp_path):
-    """显式声明 user-invocable false 时原样写入记录。"""
+    """两侧显式声明原样写入记录；两侧皆关（死 skill）随之记 warning。"""
     from src.agents.skills.loader import SkillLoader
 
     skill_dir = tmp_path / "report-publish"
@@ -205,7 +207,8 @@ def test_explicit_dual_axis_fields_are_parsed(tmp_path):
         encoding="utf-8",
     )
 
-    records = SkillLoader(tmp_path).load_all()
+    with pytest.warns(UserWarning, match="死 skill"):
+        records = SkillLoader(tmp_path).load_all()
 
     assert records[0].user_invocable is False
     assert records[0].disable_model_invocation is True

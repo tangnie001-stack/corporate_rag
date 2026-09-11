@@ -111,9 +111,6 @@ def test_lazy_reload_no_change_keeps_records(tmp_path):
 
 
 def _make_registry(tmp_path, frontmatter: str, name: str = "finance-qa"):
-    from src.agents.skills.loader import SkillLoader
-    from src.agents.skills.registry import SkillRegistry
-
     skill_dir = tmp_path / name
     skill_dir.mkdir()
     (skill_dir / "SKILL.md").write_text(frontmatter, encoding="utf-8")
@@ -157,3 +154,44 @@ def test_to_tool_description_only_lists_model_visible(tmp_path):
     )
 
     assert registry.to_tool_description() == "当前无可用 skill"
+
+
+def test_visible_lists_are_sorted_by_name(tmp_path):
+    """user_visible / model_visible 按名排序（与记录插入顺序无关）。
+
+    目录名按 a-dir/b-dir 升序装载，frontmatter name 故意反序（zeta/alpha），
+    使插入顺序 ≠ 名称顺序——只有显式排序才能通过。
+    """
+    _write_skill(tmp_path, "a-dir", frontmatter_name="zeta")
+    _write_skill(tmp_path, "b-dir", frontmatter_name="alpha")
+
+    registry = SkillRegistry(SkillLoader(tmp_path))
+    registry.reload_if_changed()
+
+    assert [r.name for r in registry.user_visible()] == ["alpha", "zeta"]
+    assert [r.name for r in registry.model_visible()] == ["alpha", "zeta"]
+
+
+def test_tool_description_exact_budget_has_no_ellipsis(tmp_path):
+    """文本长度恰等于 max_chars 时不截断、不追加省略号（边界含等号）。"""
+    _write_skill(tmp_path, "finance-qa")
+
+    registry = SkillRegistry(SkillLoader(tmp_path))
+    registry.reload_if_changed()
+
+    expected = "finance-qa: finance-qa 规则"
+    assert registry.to_tool_description(max_chars=len(expected)) == expected
+
+
+def test_visible_lists_are_snapshots(tmp_path):
+    """候选列表为快照：改动返回的 list 不影响注册表后续查询。"""
+    _write_skill(tmp_path, "alpha")
+
+    registry = SkillRegistry(SkillLoader(tmp_path))
+    registry.reload_if_changed()
+
+    first = registry.user_visible()
+    first.clear()
+
+    assert [r.name for r in registry.user_visible()] == ["alpha"]
+    assert [r.name for r in registry.model_visible()] == ["alpha"]
