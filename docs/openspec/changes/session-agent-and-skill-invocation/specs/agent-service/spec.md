@@ -11,7 +11,7 @@ AgentService SHALL 接收流式请求的 `agent` 字段（智能体预设 `name`
 
 #### Scenario: 预绑定 skill 预加载
 
-- **WHEN** 生效预设声明 `skills: [财报分析手册]` 且当前为该会话首轮
+- **WHEN** 生效预设声明 `skills: [finance-qa]` 且当前为该会话首轮
 - **THEN** 该 skill 正文以隐藏消息注入会话上下文（不进 system prompt）
 - **AND** 后续轮次持续可见，且**不重复注入**
 

@@ -79,9 +79,15 @@ frontmatter 字段：`name`（缺省用文件名；**仅允许 ASCII slug** `^[A
 
 #### Scenario: 预加载 skill
 
-- **WHEN** 预设声明 `skills: [财报分析手册]` 且为该会话首轮
+- **WHEN** 预设声明 `skills: [finance-qa]` 且为该会话首轮
 - **THEN** 该 skill 正文在首轮生成前以隐藏消息注入会话上下文（不进 system prompt）
 - **AND** 后续轮次持续可见且不重复注入
+
+#### Scenario: 预加载声明的 skill 不存在
+
+- **WHEN** 预设声明了 `skills: [ghost-skill]` 但注册表中无该 skill
+- **THEN** 记 warning 并跳过该项（不中断会话、不影响其余预加载项）
+- **AND** 预设本身仍正常加载（`skills` 是内容引用，不是加载期硬依赖）
 
 #### Scenario: 预设 tools 不改主 agent 工具集
 

@@ -1176,7 +1176,7 @@ def test_parse_preset_with_all_fields(tmp_path):
         "display_name: 财务专家\n"
         "description: 财报分析、估值与财务风险研判\n"
         "tools: retrieve_kb\n"
-        "skills: 财报分析手册\n"
+        "skills: finance-qa\n"
         "maxTurns: 8\n"
         "---\n"
         "你是一名资深财务分析师。\n",
@@ -1190,7 +1190,7 @@ def test_parse_preset_with_all_fields(tmp_path):
     assert preset.name == "finance-expert"
     assert preset.display_name == "财务专家"
     assert preset.tools == ["retrieve_kb"]
-    assert preset.skills == ["财报分析手册"]
+    assert preset.skills == ["finance-qa"]
     assert preset.max_turns == 8
     assert preset.system_prompt == "你是一名资深财务分析师。"
 
