@@ -164,16 +164,29 @@ class PromptManager:
         self._cache[name] = (fallback, now + self._cache_ttl)
         return fallback
 
+    def get_base_system_prompt(self) -> str:
+        """取"基础段"system prompt（不含环境约束追加段与日期）。
+
+        与 get_system_prompt() 的分工：本方法只负责"人设层的默认来源"，
+        不做引用指令 / 委派引导 / 日期追加——那些属环境约束层，由
+        `src/rag/prompt.build_system_prompt` 统一追加（保证追加顺序唯一）。
+
+        Returns:
+            Langfuse 拉取或本地兜底的 system prompt 原文
+        """
+        return self._get(self.PROMPT_NAMES["system"], _FALLBACK_SYSTEM_PROMPT)
+
     def get_system_prompt(self) -> str:
-        """获取系统指令 prompt，追加内联引用编号指令和今日日期。
+        """获取系统指令 prompt，追加内联引用编号指令、委派引导和今日日期。
 
         从 Langfuse 拉取或使用本地兜底的 financial-system-prompt，
-        确保末尾始终包含内联引用编号指令，并追加今日日期锚定相对时间表达。
+        确保末尾始终包含内联引用编号指令与 delegate 引导段，并追加今日日期
+        锚定相对时间表达。语义与既有调用方保持不变。
 
         Returns:
             完整的系统 prompt 文本
         """
-        prompt = self._get(self.PROMPT_NAMES["system"], _FALLBACK_SYSTEM_PROMPT)
+        prompt = self.get_base_system_prompt()
         # 确保内联引用指令始终存在（无论 prompt 来自 Langfuse 还是本地兜底）
         if INLINE_CITATION_INSTRUCTION not in prompt:
             prompt += INLINE_CITATION_INSTRUCTION
