@@ -34,20 +34,18 @@ def _answer_has_citation(answer: str) -> bool:
     return re.search(r"\[\d+\]", answer) is not None
 
 
-def _has_web_context(ctx) -> bool:
-    """判断本轮是否调用了 search_web 并拿到了联网上下文（tool_contexts 含 kind=web）。
+def _has_web_context(state: AgentState) -> bool:
+    """判断本轮是否调用了 search_web 并拿到了联网上下文（state 材料含 kind=web）。
 
     Args:
-        ctx: 当前请求上下文（可能为 None）
+        state: 当前图状态（材料来自 AgentState 承载的本轮材料池）
 
     Returns:
         True 存在 kind=web 的检索上下文
     """
-    if ctx is None:
-        return False
     return any(
         getattr(c, "kind", None) == SSEInteractionTexts.CITATION_KIND_WEB
-        for c in ctx.tool_contexts
+        for c in state.tool_contexts
     )
 
 
@@ -71,9 +69,12 @@ async def web_citation_guard(
 ) -> dict | None:
     """态 A 联网引用引导：调过 search_web 但答案无 [n] → 注入指引重生成一次。
 
+    判据材料（是否联网）读 AgentState 承载的本轮材料池；ctx 仅用于 regen 轮复位
+    search_web 请求级配额（web_count）。
+
     Args:
-        state: 当前图状态
-        ctx: 请求上下文
+        state: 当前图状态（材料来自 AgentState 承载的本轮材料池）
+        ctx: 请求上下文（仅用于复位 web_count 配额）
 
     Returns:
         None 通过（未联网/已带引用/已达保险丝上限/已引导过）；
@@ -81,7 +82,7 @@ async def web_citation_guard(
     """
     answer = state.answer or ""
     if (
-        not _has_web_context(ctx)
+        not _has_web_context(state)
         or _answer_has_citation(answer)
         or state._verify_regenerations >= MAX_VERIFY_REGENERATIONS
         or _citation_guidance_already_injected(state)
@@ -106,20 +107,18 @@ async def web_citation_guard(
     }
 
 
-def _has_kb_context(ctx) -> bool:
-    """判断本轮是否检索了知识库（tool_contexts 含 kind=kb）。
+def _has_kb_context(state: AgentState) -> bool:
+    """判断本轮是否检索了知识库（state 材料含 kind=kb）。
 
     Args:
-        ctx: 当前请求上下文（可能为 None）
+        state: 当前图状态（材料来自 AgentState 承载的本轮材料池）
 
     Returns:
         True 存在 kind=kb 的检索上下文
     """
-    if ctx is None:
-        return False
     return any(
         getattr(c, "kind", None) == SSEInteractionTexts.CITATION_KIND_KB
-        for c in ctx.tool_contexts
+        for c in state.tool_contexts
     )
 
 
@@ -136,20 +135,17 @@ def _is_abstention_or_kb_uncovered(answer: str) -> bool:
     return any(m in answer for m in markers)
 
 
-async def kb_citation_guardrail(
-    state: AgentState, ctx: RequestContext | None
-) -> dict | None:
+async def kb_citation_guardrail(state: AgentState) -> dict | None:
     """态 B KB 答案强制溯源：有 kb context 但答案无 [n] → 注入指引重生成一次。
 
-    排除拒答/知识库未覆盖（答案无 KB 事实可标引用）、专家分析观点（含
-    EXPERT_ANALYSIS_MARKER 的分析 fork 答案视为不需溯源的观点表述，M7）与已引导过
-    （防与模型"判断无关"冲突，不重复灌第二次）。不占 verify 修订保险丝：本护栏靠
-    already_guided 至多触发一次，共享保险丝会饿死完整性决策轮的重生成额度，两条
-    regen 路径计数保持独立。
+    判据材料（是否检索 KB）读 AgentState 承载的本轮材料池。排除拒答/知识库未覆盖
+    （答案无 KB 事实可标引用）、专家分析观点（含 EXPERT_ANALYSIS_MARKER 的分析 fork
+    答案视为不需溯源的观点表述，M7）与已引导过（防与模型"判断无关"冲突，不重复灌
+    第二次）。不占 verify 修订保险丝：本护栏靠 already_guided 至多触发一次，共享保险丝
+    会饿死完整性决策轮的重生成额度，两条 regen 路径计数保持独立。
 
     Args:
-        state: 当前图状态
-        ctx: 请求上下文
+        state: 当前图状态（材料来自 AgentState 承载的本轮材料池）
 
     Returns:
         None 通过（无 kb context / 已带引用 / 拒答或未覆盖 / 专家分析观点 / 已引导过）；
@@ -158,7 +154,7 @@ async def kb_citation_guardrail(
     """
     answer = state.answer or ""
     if (
-        not _has_kb_context(ctx)
+        not _has_kb_context(state)
         or _answer_has_citation(answer)
         or _is_abstention_or_kb_uncovered(answer)
         or EXPERT_ANALYSIS_MARKER in answer  # 专家分析观点豁免（design D9 / M7）

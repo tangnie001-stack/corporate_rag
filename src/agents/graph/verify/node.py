@@ -41,7 +41,7 @@ async def verify_node(state: AgentState) -> dict:
 
     # ── 态 B：绑定 KB（年份完整性 → 缺失走决策化；通过后 KB 溯源护栏）──
     answer = state.answer or ""
-    required = ctx.temporal_years if ctx is not None else []
+    required = state.verify_temporal_years
     missing = completeness_check(required, answer) if required else []
     core_logging.log_event(
         Event.COMPLETENESS_CHECK,
@@ -55,7 +55,7 @@ async def verify_node(state: AgentState) -> dict:
         # 重生成），返回其决策 dict
         return await decide_missing_web(state, ctx, required, missing, answer)
     # KB 溯源护栏：检索到 KB context 但答案无 [n] 且非拒答 → 引导补标 regen
-    guardrail = await kb_citation_guardrail(state, ctx)
+    guardrail = await kb_citation_guardrail(state)
     if guardrail is not None:
         return guardrail
     # 完整性 + 引用护栏通过 → 直通 format

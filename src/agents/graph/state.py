@@ -28,7 +28,10 @@ class AgentState:
     )  # 模型可见消息（来源：agent 循环节点追加；范围：整轮执行；用途：LLM 上下文，add_messages 提供追加语义）
     tool_contexts: list[RAGContext] = field(
         default_factory=list
-    )  # retrieve_kb 累积的检索上下文（来源：检索节点写入；范围：整轮执行；用途：引用溯源）
+    )  # 本轮材料池（来源：常规轮 agent_finalize 从主 ctx 写入 / 直出轮直出节点从子代理 ctx 写入；范围：整轮执行；用途：引用溯源，verify 引用护栏与 format 判据读此）
+    verify_temporal_years: list[int] = field(
+        default_factory=list
+    )  # verify 判据材料：本轮要求覆盖年份（来源：常规轮 agent_finalize 从主 ctx 写入 / 直出轮直出节点从子 ctx 写入；范围：整轮执行；用途：年份完整性比对；空=不校验）
     _agent_iterations: int = (
         0  # 循环迭代计数（来源：agent 节点自增；范围：单轮执行；用途：调试与护栏判断）
     )

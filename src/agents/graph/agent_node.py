@@ -1,7 +1,7 @@
 """Agent 循环节点 — model↔tools 条件循环 + 收尾。
 
 循环：agent_model（bind_tools 调用 LLM）→ route_agent → tools（ToolNode）→ 回 agent_model。
-末轮无 tool_calls → agent_finalize（提取 answer + 读入 tool_contexts）→ format。
+末轮无 tool_calls → agent_finalize（提取 answer + 读入本轮材料）→ format。
 """
 
 import time
@@ -188,10 +188,11 @@ def make_agent_tools_node(tools) -> Callable:
 
 
 def make_agent_finalize_node() -> Callable:
-    """创建收尾节点：提取末次 AIMessage 为 answer + 读入 tool_contexts。
+    """创建收尾节点：提取末次 AIMessage 为 answer + 读入本轮材料（tool_contexts / 年份）。
 
     Returns:
-        异步节点函数，接收 AgentState，返回 dict 更新 answer/tool_contexts
+        异步节点函数，接收 AgentState，返回 dict 更新
+        answer/tool_contexts/verify_temporal_years
     """
 
     async def agent_finalize(state: AgentState) -> dict:
@@ -203,9 +204,15 @@ def make_agent_finalize_node() -> Callable:
         ctx = current_request_ctx.get()
         if ctx is not None:
             contexts = ctx.tool_contexts
+            years = ctx.temporal_years
         else:
             contexts = []
-        return {"answer": answer, "tool_contexts": contexts}
+            years = []
+        return {
+            "answer": answer,
+            "tool_contexts": contexts,
+            "verify_temporal_years": years,
+        }
 
     return agent_finalize
 

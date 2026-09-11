@@ -152,12 +152,28 @@ def _make_state(
     answer: str = "",
     kb_id: str = "",
     regenerations: int = 0,
+    temporal_years: list[int] | None = None,
+    tool_contexts: list[RAGContext] | None = None,
 ) -> AgentState:
-    """构造 verify_node 测试用 AgentState（kb_id="" = 未绑定 KB，态 A）。"""
+    """构造 verify_node 测试用 AgentState（kb_id="" = 未绑定 KB，态 A）。
+
+    temporal_years / tool_contexts 是本轮判据材料在 AgentState 上的载体：verify 的
+    年份完整性与两条引用护栏均读 state，不再读主 ctx（T7/D26）。未显式传入时为空表。
+    """
+    if temporal_years is None:
+        years: list[int] = []
+    else:
+        years = temporal_years
+    if tool_contexts is None:
+        contexts: list[RAGContext] = []
+    else:
+        contexts = tool_contexts
     return AgentState(
         answer=answer,
         kb_id=kb_id,
         _verify_regenerations=regenerations,
+        verify_temporal_years=years,
+        tool_contexts=contexts,
     )
 
 
@@ -174,9 +190,13 @@ async def test_verify_node_unbound_kb_passthrough(monkeypatch):
 async def test_verify_node_disabled_passthrough(monkeypatch):
     """VERIFY_ENABLED=False → 直通返回 answer，即使存在缺失年份。"""
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", False)
-    _ctx, token = _make_ctx(temporal_years=[2023, 2024, 2025])
+    _ctx, token = _make_ctx()
     try:
-        state = _make_state(answer="2024年营收3943亿", kb_id="kb1")
+        state = _make_state(
+            answer="2024年营收3943亿",
+            kb_id="kb1",
+            temporal_years=[2023, 2024, 2025],
+        )
         result = await verify_node(state)
         assert result == {
             "answer": "2024年营收3943亿",
@@ -194,9 +214,13 @@ async def test_verify_node_missing_user_rejects_annotate(monkeypatch):
         "src.agents.graph.verify.ask_confirm._ask_web_confirm",
         AsyncMock(return_value=False),
     )
-    _ctx, token = _make_ctx(temporal_years=[2023, 2024, 2025])
+    _ctx, token = _make_ctx()
     try:
-        state = _make_state(answer="2024年营收3943亿", kb_id="kb1")
+        state = _make_state(
+            answer="2024年营收3943亿",
+            kb_id="kb1",
+            temporal_years=[2023, 2024, 2025],
+        )
         result = await verify_node(state)
         assert result == {
             "answer": (
@@ -217,9 +241,13 @@ async def test_verify_node_missing_confirmed_regenerates(monkeypatch):
         "src.agents.graph.verify.ask_confirm._ask_web_confirm",
         AsyncMock(return_value=True),
     )
-    ctx, token = _make_ctx(temporal_years=[2023, 2024, 2025])
+    ctx, token = _make_ctx()
     try:
-        state = _make_state(answer="2024年营收3943亿", kb_id="kb1")
+        state = _make_state(
+            answer="2024年营收3943亿",
+            kb_id="kb1",
+            temporal_years=[2023, 2024, 2025],
+        )
         result = await verify_node(state)
         assert result["answer"] == "2024年营收3943亿"
         assert result["_needs_regenerate"] is True
@@ -246,12 +274,15 @@ async def test_verify_node_missing_regen_resets_web_quota(monkeypatch):
         AsyncMock(side_effect=AssertionError("已确认过联网，不应再次询问")),
     )
     ctx, token = _make_ctx(
-        temporal_years=[2023, 2024, 2025],
         web_confirmed=True,
         web_count=settings.WEB_SEARCH_PER_TURN_LIMIT,  # 第 1 段配额已耗尽
     )
     try:
-        state = _make_state(answer="2024年营收3943亿", kb_id="kb1")
+        state = _make_state(
+            answer="2024年营收3943亿",
+            kb_id="kb1",
+            temporal_years=[2023, 2024, 2025],
+        )
         result = await verify_node(state)
         assert result["_needs_regenerate"] is True
         assert result["_agent_iterations"] == 0
@@ -273,12 +304,15 @@ async def test_verify_node_web_exhausted_passthrough_keeps_web_quota(monkeypatch
         AsyncMock(side_effect=AssertionError("已确认过联网，不应再次询问")),
     )
     ctx, token = _make_ctx(
-        temporal_years=[2023, 2024, 2025],
         web_confirmed=True,
         web_count=settings.WEB_SEARCH_PER_TURN_LIMIT,
     )
     try:
-        state = _make_state(answer="2024年营收3943亿", kb_id="kb1")
+        state = _make_state(
+            answer="2024年营收3943亿",
+            kb_id="kb1",
+            temporal_years=[2023, 2024, 2025],
+        )
         state.messages = [
             AIMessage(
                 content="",
@@ -304,12 +338,13 @@ async def test_verify_node_missing_fuse_exhausted_annotate(monkeypatch):
         "src.agents.graph.verify.ask_confirm._ask_web_confirm",
         AsyncMock(side_effect=AssertionError("已确认过联网，不应再次询问")),
     )
-    _ctx, token = _make_ctx(temporal_years=[2023, 2024, 2025], web_confirmed=True)
+    _ctx, token = _make_ctx(web_confirmed=True)
     try:
         state = _make_state(
             answer="2024年营收3943亿",
             kb_id="kb1",
             regenerations=MAX_VERIFY_REGENERATIONS,
+            temporal_years=[2023, 2024, 2025],
         )
         result = await verify_node(state)
         assert result == {
@@ -331,9 +366,13 @@ async def test_verify_node_missing_confirmed_already_guided(monkeypatch):
         "src.agents.graph.verify.ask_confirm._ask_web_confirm",
         AsyncMock(side_effect=AssertionError("已确认过联网，不应再次询问")),
     )
-    _ctx, token = _make_ctx(temporal_years=[2023, 2024, 2025], web_confirmed=True)
+    _ctx, token = _make_ctx(web_confirmed=True)
     try:
-        state = _make_state(answer="2024年营收3943亿", kb_id="kb1")
+        state = _make_state(
+            answer="2024年营收3943亿",
+            kb_id="kb1",
+            temporal_years=[2023, 2024, 2025],
+        )
         state.messages = [
             SystemMessage(
                 content="知识库缺失年份 [2023, 2025]，用户已确认联网，请调用 search_web 工具补充。"
@@ -364,9 +403,13 @@ async def test_verify_node_already_guided_partial_queries_sends_hint(monkeypatch
     被静默吞掉（否则 agent 无新指令空转烧保险丝，被误判网络未覆盖）。
     """
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
-    _ctx, token = _make_ctx(temporal_years=[2023, 2024, 2025], web_confirmed=True)
+    _ctx, token = _make_ctx(web_confirmed=True)
     try:
-        state = _make_state(answer="2024年营收3943亿", kb_id="kb1")
+        state = _make_state(
+            answer="2024年营收3943亿",
+            kb_id="kb1",
+            temporal_years=[2023, 2024, 2025],
+        )
         state.messages = [
             SystemMessage(
                 content=(
@@ -397,9 +440,13 @@ async def test_verify_node_already_guided_partial_queries_sends_hint(monkeypatch
 async def test_verify_node_already_guided_hint_deduped(monkeypatch):
     """hint 已发过 → 重申轮按短语查重命中，不再重复追加（至多发一次）。"""
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
-    _ctx, token = _make_ctx(temporal_years=[2023, 2024, 2025], web_confirmed=True)
+    _ctx, token = _make_ctx(web_confirmed=True)
     try:
-        state = _make_state(answer="2024年营收3943亿", kb_id="kb1")
+        state = _make_state(
+            answer="2024年营收3943亿",
+            kb_id="kb1",
+            temporal_years=[2023, 2024, 2025],
+        )
         state.messages = [
             SystemMessage(
                 content=(
@@ -429,9 +476,13 @@ async def test_verify_node_already_guided_hint_deduped(monkeypatch):
 async def test_verify_node_complete_passes_through_without_judge(monkeypatch):
     """态 B 完整性通过 + 答案已带 [n] 过 KB 护栏 → 直通 format（不再跑忠实度 judge）。"""
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
-    _ctx, token = _make_ctx(temporal_years=[2024])
+    _ctx, token = _make_ctx()
     try:
-        state = _make_state(answer="2024年营收3943亿[1]", kb_id="kb1")
+        state = _make_state(
+            answer="2024年营收3943亿[1]",
+            kb_id="kb1",
+            temporal_years=[2024],
+        )
         result = await verify_node(state)
         assert result == {
             "answer": "2024年营收3943亿[1]",
@@ -460,9 +511,12 @@ def _make_web_contexts() -> list[RAGContext]:
 async def test_verify_node_unbound_web_no_citation_guides(monkeypatch):
     """未绑定 KB + 已联网检索 + 回答无 [n] 引用 → 注入标注引导并置重生成信号。"""
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
-    _ctx, token = _make_ctx(tool_contexts=_make_web_contexts())
+    _ctx, token = _make_ctx()
     try:
-        state = _make_state(answer="建议选择 2核2G 配置，性价比较高")
+        state = _make_state(
+            answer="建议选择 2核2G 配置，性价比较高",
+            tool_contexts=_make_web_contexts(),
+        )
         result = await verify_node(state)
         assert result["_needs_regenerate"] is True
         assert len(result["messages"]) == 1
@@ -477,9 +531,12 @@ async def test_verify_node_unbound_web_no_citation_guides(monkeypatch):
 async def test_verify_node_unbound_web_with_citation_passthrough(monkeypatch):
     """未绑定 KB + 回答已带 [n] 引用 → 直通 format，不注入不重生成。"""
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
-    _ctx, token = _make_ctx(tool_contexts=_make_web_contexts())
+    _ctx, token = _make_ctx()
     try:
-        state = _make_state(answer="建议选择 2核2G 配置[1]，性价比较高")
+        state = _make_state(
+            answer="建议选择 2核2G 配置[1]，性价比较高",
+            tool_contexts=_make_web_contexts(),
+        )
         result = await verify_node(state)
         assert result == {
             "answer": "建议选择 2核2G 配置[1]，性价比较高",
@@ -496,11 +553,12 @@ async def test_verify_node_unbound_web_fuse_exhausted_passthrough(monkeypatch):
     语义随态 A 保险丝换源：上限判断由 _agent_iterations 改为 _verify_regenerations。
     """
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
-    _ctx, token = _make_ctx(tool_contexts=_make_web_contexts())
+    _ctx, token = _make_ctx()
     try:
         state = _make_state(
             answer="建议选择 2核2G 配置",
             regenerations=MAX_VERIFY_REGENERATIONS,
+            tool_contexts=_make_web_contexts(),
         )
         result = await verify_node(state)
         assert result == {
@@ -515,9 +573,12 @@ async def test_verify_node_unbound_web_fuse_exhausted_passthrough(monkeypatch):
 async def test_verify_node_unbound_web_already_guided_passthrough(monkeypatch):
     """未绑定 KB + 标注指引已注入过 → 直通不重复注入（防多轮堆积）。"""
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
-    _ctx, token = _make_ctx(tool_contexts=_make_web_contexts())
+    _ctx, token = _make_ctx()
     try:
-        state = _make_state(answer="建议选择 2核2G 配置")
+        state = _make_state(
+            answer="建议选择 2核2G 配置",
+            tool_contexts=_make_web_contexts(),
+        )
         state.messages = [
             SystemMessage(
                 content="你刚才的回答引用了联网搜索结果，但没有标注来源编号，请为联网引用标注来源编号"
@@ -536,7 +597,7 @@ async def test_verify_node_unbound_web_already_guided_passthrough(monkeypatch):
 async def test_verify_node_unbound_no_web_passthrough(monkeypatch):
     """未绑定 KB + 未联网（无 web context）→ 纯对话直通，不注入。"""
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
-    _ctx, token = _make_ctx(tool_contexts=[])  # ctx 存在但无 web 检索上下文
+    _ctx, token = _make_ctx()  # ctx 存在但无 web 检索上下文
     try:
         state = _make_state(answer="纯对话回答")
         result = await verify_node(state)
@@ -556,10 +617,12 @@ async def test_web_citation_guard_regen_resets_web_quota():
     """态 A web_citation_guard regen → 同步归零 search_web 配额（web_count=0）。"""
     from src.agents.graph.verify.guardrails import web_citation_guard
 
-    state = AgentState(answer="建议选择 2核2G 配置")
+    state = AgentState(
+        answer="建议选择 2核2G 配置",
+        tool_contexts=_make_web_contexts(),
+    )
     ctx = RequestContext(
         session_id="s1",
-        tool_contexts=_make_web_contexts(),
         web_count=settings.WEB_SEARCH_PER_TURN_LIMIT,  # 首段配额已耗尽
     )
     decision = await web_citation_guard(state, ctx)
@@ -574,10 +637,12 @@ async def test_web_citation_guard_passthrough_keeps_web_quota():
     """态 A 已带引用直通（None，非 regen）→ 不复位 search_web 配额。"""
     from src.agents.graph.verify.guardrails import web_citation_guard
 
-    state = AgentState(answer="建议选择 2核2G 配置[1]，性价比较高")
+    state = AgentState(
+        answer="建议选择 2核2G 配置[1]，性价比较高",
+        tool_contexts=_make_web_contexts(),
+    )
     ctx = RequestContext(
         session_id="s1",
-        tool_contexts=_make_web_contexts(),
         web_count=settings.WEB_SEARCH_PER_TURN_LIMIT,
     )
     decision = await web_citation_guard(state, ctx)
@@ -607,9 +672,11 @@ async def test_kb_guardrail_guides_when_no_citation():
     """态 B 有 kb context 无 [n] → 注入 KB 溯源指引 regen（复位主循环预算不占保险丝）。"""
     from src.agents.graph.verify.guardrails import kb_citation_guardrail
 
-    state = AgentState(answer="腾讯2024年营收3943亿")
-    ctx = RequestContext(session_id="s1", tool_contexts=_make_kb_ctx_contexts())
-    decision = await kb_citation_guardrail(state, ctx)
+    state = AgentState(
+        answer="腾讯2024年营收3943亿",
+        tool_contexts=_make_kb_ctx_contexts(),
+    )
+    decision = await kb_citation_guardrail(state)
     assert decision is not None
     assert decision["_needs_regenerate"] is True
     assert VERIFY_KB_CITATION_MARKER in decision["messages"][0].content
@@ -622,9 +689,11 @@ async def test_kb_guardrail_skips_when_abstention():
     """拒答/知识库未覆盖 → 不强灌引用。"""
     from src.agents.graph.verify.guardrails import kb_citation_guardrail
 
-    state = AgentState(answer="未在文档中找到相关数据")
-    ctx = RequestContext(session_id="s1", tool_contexts=_make_kb_ctx_contexts())
-    assert await kb_citation_guardrail(state, ctx) is None
+    state = AgentState(
+        answer="未在文档中找到相关数据",
+        tool_contexts=_make_kb_ctx_contexts(),
+    )
+    assert await kb_citation_guardrail(state) is None
 
 
 @pytest.mark.asyncio
@@ -632,9 +701,11 @@ async def test_kb_guardrail_passes_when_cited():
     """答案带 [n] → 直接通过。"""
     from src.agents.graph.verify.guardrails import kb_citation_guardrail
 
-    state = AgentState(answer="腾讯2024年营收3943亿[1]")
-    ctx = RequestContext(session_id="s1", tool_contexts=_make_kb_ctx_contexts())
-    assert await kb_citation_guardrail(state, ctx) is None
+    state = AgentState(
+        answer="腾讯2024年营收3943亿[1]",
+        tool_contexts=_make_kb_ctx_contexts(),
+    )
+    assert await kb_citation_guardrail(state) is None
 
 
 # ── kb_citation_guardrail delegate 语义（regen 复位 + 专家分析豁免，M7）──
@@ -645,13 +716,12 @@ async def test_kb_guardrail_regen_resets_delegate_used():
     """kb_citation_guardrail regen dict 复位 _delegate_used（防 regen 预算被 +2 放大）。"""
     from src.agents.graph.verify.guardrails import kb_citation_guardrail
 
-    ctx = RequestContext(
-        session_id="s1",
+    state = AgentState(
+        answer="腾讯2024年营收3943亿",
         tool_contexts=_make_kb_ctx_contexts(),
     )
-    state = AgentState(answer="腾讯2024年营收3943亿")
     state._delegate_used = True  # 模拟 delegate 已发生
-    decision = await kb_citation_guardrail(state, ctx)
+    decision = await kb_citation_guardrail(state)
     assert decision is not None
     assert decision["_delegate_used"] is False  # regen=全新 5 轮预算
     assert decision["_agent_iterations"] == 0
@@ -663,11 +733,8 @@ async def test_kb_guardrail_skips_expert_analysis():
     from src.agents.graph.verify.guardrails import kb_citation_guardrail
     from src.config.const import EXPERT_ANALYSIS_MARKER
 
-    ctx = RequestContext(
-        session_id="s1",
+    state = AgentState(
+        answer=f"建议关注流动性风险（{EXPERT_ANALYSIS_MARKER}，材料未覆盖）",
         tool_contexts=_make_kb_ctx_contexts(),
     )
-    state = AgentState(
-        answer=f"建议关注流动性风险（{EXPERT_ANALYSIS_MARKER}，材料未覆盖）"
-    )
-    assert await kb_citation_guardrail(state, ctx) is None
+    assert await kb_citation_guardrail(state) is None
