@@ -174,6 +174,8 @@ class Event(str, Enum):
     EXCEPTION_CHAIN = "exception chain"
     # skill 委派跳过（AgentService 装配期：skills 目录缺失/注册表为空）
     DELEGATE_SKIP = "delegate skip"
+    # 能力清单读取失败降级（Task 9：/api/skills、/api/agents fail-open 空列表）
+    CAPABILITY_DEGRADED = "capability degraded"
 
     # [delegate] fork 子代理委派（delegate-hardening-observability）
     DELEGATE_START = "delegate start"

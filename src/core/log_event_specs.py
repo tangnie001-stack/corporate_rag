@@ -292,6 +292,9 @@ EVENT_SPECS: dict[str, EventSpec] = {
     "delegate skip": EventSpec(
         "delegate skip", "app", "warning", ("reason", "skills_dir")
     ),
+    "capability degraded": EventSpec(
+        "capability degraded", "app", "warning", ("resource", "reason")
+    ),
     # [delegate] fork 子代理委派（delegate-hardening-observability）
     "delegate start": EventSpec(
         "delegate start",

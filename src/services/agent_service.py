@@ -45,6 +45,7 @@ from src.infra.llm.langfuse_tracing import LangfuseTracer
 from src.infra.llm.prompt_manager import PromptManager
 from src.infra.llm.request_context import RequestContext
 from src.infra.search.bm25_index import BM25Index
+from src.services.capability_service import CapabilityService
 from src.utils.sse import (
     SSEAbstentionEvent,
     SSEAgentUsedEvent,
@@ -696,6 +697,8 @@ class AgentService:
             tool_sink=fork_tool_pool,
             skill_direct_node=skill_direct_node,
         )
+        # 能力清单服务（Task 9）：由两个注册表派生只读清单，api 层只转发
+        self.capability_service = CapabilityService(skill_registry, preset_registry)
         core_logging.log_event(Event.SERVICE_READY)
 
     def _preload_skills_text(self, skill_names: list[str]) -> str:
