@@ -77,3 +77,4 @@ class ChatStreamRequest(BaseModel):
     kb_id: str  # 知识库 UUID（空串表示不检索（未绑定 KB））
     query: str  # 用户问题
     deep_thinking: bool = False  # 深度思考开关
+    agent: str = ""  # 会话绑定智能体预设名（ASCII slug；空=未指定；与已绑定值不一致时服务端忽略）

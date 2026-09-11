@@ -57,3 +57,22 @@ class TestSessionAgentPersistsThroughChain:
         result = await persistence.bind_session_agent("sess_1", "finance-expert")
         assert result is True
         repo.bind_session_agent.assert_awaited_once_with("sess_1", "finance-expert")
+
+    async def test_get_session_agent_returns_bound(self):
+        """get_session_agent 读取会话已绑定名并透传。"""
+        repo = MagicMock()
+        session = MagicMock()
+        session.agent = "finance-expert"
+        repo.get_session_by_id = AsyncMock(return_value=session)
+        persistence = PersistenceService(repo)
+        result = await persistence.get_session_agent("sess_1")
+        assert result == "finance-expert"
+        repo.get_session_by_id.assert_awaited_once_with("sess_1")
+
+    async def test_get_session_agent_returns_empty_when_missing(self):
+        """会话不存在 → 返回空串（未绑定）。"""
+        repo = MagicMock()
+        repo.get_session_by_id = AsyncMock(return_value=None)
+        persistence = PersistenceService(repo)
+        result = await persistence.get_session_agent("sess_1")
+        assert result == ""

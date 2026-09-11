@@ -52,6 +52,20 @@ class PersistenceService:
         """
         return await self._chat_repo.bind_session_agent(session_id, agent)
 
+    async def get_session_agent(self, session_id: str) -> str:
+        """读取会话已绑定的智能体名。
+
+        Args:
+            session_id: 会话 ID
+
+        Returns:
+            已绑定的智能体预设名；会话不存在时返回空串（未绑定）
+        """
+        session = await self._chat_repo.get_session_by_id(session_id)
+        if session is not None:
+            return session.agent
+        return ""
+
     async def save_messages(
         self,
         session_id: str,

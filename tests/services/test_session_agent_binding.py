@@ -1,0 +1,88 @@
+"""会话智能体 bind-once：首轮绑定 / 沿用 / 忽略不一致 + warn / 未注册降级。"""
+
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from src.services.agent_service import AgentService
+
+pytestmark = pytest.mark.asyncio
+
+
+def _service(
+    bound: str = "", known: list[str] | None = None
+) -> tuple[AgentService, AsyncMock]:
+    """构造只带绑定所需依赖的 AgentService（跳过 __init__）。"""
+    svc = AgentService.__new__(AgentService)
+    svc._chat_manager = AsyncMock()
+    svc._chat_manager.bind_session_agent_async = AsyncMock(return_value=True)
+    registry = MagicMock()
+    registry.get = MagicMock(
+        side_effect=lambda name: MagicMock(name=name) if name in (known or []) else None
+    )
+    svc._preset_registry = registry
+    return svc, svc._chat_manager
+
+
+async def test_binds_on_first_request():
+    """未绑定 + 合法 → 固化并返回该值。"""
+    svc, chat_manager = _service(known=["finance-expert"])
+    assert (
+        await svc._resolve_session_agent("sess_1", "finance-expert") == "finance-expert"
+    )
+    chat_manager.bind_session_agent_async.assert_awaited_once_with(
+        "sess_1", "finance-expert"
+    )
+
+
+async def test_empty_request_keeps_unbound():
+    """未绑定 + 传入空 → 保持未绑定（不写库）。"""
+    svc, chat_manager = _service(known=["finance-expert"])
+    assert await svc._resolve_session_agent("sess_1", "") == ""
+    chat_manager.bind_session_agent_async.assert_not_awaited()
+
+
+async def test_inconsistent_request_is_ignored_with_warning(monkeypatch):
+    """已绑定 + 传入不同值 → 忽略传入值、按绑定值继续，记 warning（不阻断）。"""
+    svc, chat_manager = _service(known=["finance-expert", "legal-expert"])
+    warned: list[dict] = []
+    monkeypatch.setattr(
+        "src.services.agent_service.core_logging.log_event",
+        lambda event, **fields: warned.append({"event": event, **fields}),
+    )
+
+    result = await svc._resolve_session_agent(
+        "sess_1", "legal-expert", bound="finance-expert"
+    )
+
+    assert result == "finance-expert"
+    chat_manager.bind_session_agent_async.assert_not_awaited()
+    assert any("agent" in str(item) for item in warned)
+
+
+async def test_unknown_request_is_ignored():
+    """未绑定 + 传入未注册名 → 忽略 + 返回空（降级系统默认）。"""
+    svc, _ = _service(known=[])
+    assert await svc._resolve_session_agent("sess_1", "ghost") == ""
+
+
+async def test_stream_chat_wires_effective_agent():
+    """stream_chat 解析生效智能体后写入 ctx.agent 与 launch_context（首轮绑定）。"""
+    svc = AgentService.__new__(AgentService)
+    chat_manager = AsyncMock()
+    chat_manager.get_history_async.return_value = []
+    chat_manager.get_session_agent_async.return_value = ""
+    chat_manager.bind_session_agent_async = AsyncMock(return_value=True)
+    svc._chat_manager = chat_manager
+    registry = MagicMock()
+    registry.get = MagicMock(return_value=MagicMock())
+    svc._preset_registry = registry
+    svc._graph = MagicMock()
+
+    _, launch_ctx = await svc.stream_chat("kb1", "s1", "q", agent="finance-expert")
+
+    assert launch_ctx["ctx"].agent == "finance-expert"
+    assert launch_ctx["agent"] == "finance-expert"
+    chat_manager.bind_session_agent_async.assert_awaited_once_with(
+        "s1", "finance-expert"
+    )

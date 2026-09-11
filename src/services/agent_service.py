@@ -43,6 +43,7 @@ from src.infra.llm.request_context import RequestContext
 from src.infra.search.bm25_index import BM25Index
 from src.utils.sse import (
     SSEAbstentionEvent,
+    SSEAgentUsedEvent,
     SSEAskUserEvent,
     SSECitationEvent,
     SSEDelegateEvent,
@@ -511,6 +512,10 @@ async def _run_generation(
         )  # 共享列表引用，取消路径亦持续可见
     if abort_signal is not None and abort_signal.is_set():
         raise asyncio.CancelledError
+    # 进入图事件循环前回传一次 agent_used（含本会话绑定值，前端据此即时纠正
+    # 顶栏；空串=未绑定→系统默认）。须早于首个 graph 事件入缓冲
+    agent_event = SSEAgentUsedEvent(agent=ctx.agent)
+    manager.add_event(session_id, agent_event.type, agent_event.payload_for_buffer())
     # 澄清通道与图事件循环并行：ask_user / web_confirm 经 clarify_channel
     # 投递的问题 payload 须转 SSE 写入缓冲，否则前端收不到澄清卡
     drain_task = asyncio.create_task(
@@ -631,6 +636,9 @@ class AgentService:
         # 未命中（目录缺失/注册表为空）时置 None，直出节点退化为兜底文案
         skill_registry = None
         skill_executor = None
+        # preset_registry 提升到分支外：_resolve_session_agent 绑定校验需读取，
+        # skills 目录缺失/注册表为空时保持 None（绑定降级为忽略 + warning）
+        preset_registry: AgentPresetRegistry | None = None
         if Path(skills_dir).exists():
             skill_registry = SkillRegistry(SkillLoader(Path(skills_dir)))
             skill_registry.reload_if_changed()  # description 在 make_delegate_task 时按当前注册表生成
@@ -651,6 +659,8 @@ class AgentService:
             core_logging.log_event(
                 Event.DELEGATE_SKIP, reason="skills_dir_missing", skills_dir=skills_dir
             )
+
+        self._preset_registry = preset_registry
 
         skill_direct_node = None
         if skill_registry is not None and skill_executor is not None:
@@ -676,6 +686,7 @@ class AgentService:
         session_id: str,
         query: str,
         deep_thinking: bool = False,
+        agent: str = "",
     ) -> tuple[AsyncGenerator[SSEEvent, None], dict]:
         """准备一轮生成的订阅生成器与启动上下文，不再启动后台任务。
 
@@ -691,13 +702,15 @@ class AgentService:
             query: 用户查询文本
             deep_thinking: 深度思考开关（默认 False）；为 True 时 agent LLM
                 以思考模式调用（enable_thinking）
+            agent: 请求体传入的智能体预设名（ASCII slug；空=未指定）。
+                生效值经 _resolve_session_agent bind-once 解析后写入 ctx.agent
 
         Returns:
             (subscription_generator, launch_context)：
             - subscription_generator：订阅事件缓冲的 SSE 消费者生成器
               （status / token / citation / ask_user / error / done 事件）
             - launch_context：启动后台任务所需的上下文 dict，键包括
-              history / ctx / graph / session_id / kb_id / query / deep_thinking
+              history / ctx / graph / session_id / kb_id / query / deep_thinking / agent
         """
         # 顺序约束（prompt 上下文正确性关键）：先取历史（不含当前 query），
         # 再写 Redis user
@@ -722,8 +735,54 @@ class AgentService:
             "query": query,
             "deep_thinking": deep_thinking,
         }
+        # bind-once：读会话已绑定值，解析本轮生效智能体（首轮绑定 / 沿用 /
+        # 不一致忽略 + warning），写入 ctx.agent 供 fork 执行者选择与 agent_used 回传
+        bound_raw = await self._chat_manager.get_session_agent_async(session_id)
+        effective_agent = await self._resolve_session_agent(
+            session_id, agent, bound=bound_raw
+        )
+        ctx.agent = effective_agent
+        launch_context["agent"] = effective_agent
         # 主 POST 订阅不按 180s 空闲收流（长静默由任务生命周期收口，含 ask_user
         # 等待、fork 长跑等合法静默）；resume 端点（sessions/events）保留空闲兜底
         return _subscribe_events(
             session_id, streaming_manager, max_idle=None
         ), launch_context
+
+    async def _resolve_session_agent(
+        self, session_id: str, requested: str, bound: str = ""
+    ) -> str:
+        """解析本会话生效的智能体名（bind-once，无 400）。
+
+        Args:
+            session_id: 会话 ID
+            requested: 请求体传入的智能体名（可为空）
+            bound: 会话已绑定的智能体名（空=未绑定）
+
+        Returns:
+            生效值；已绑定一律返回绑定值（传入不一致 → 忽略 + warning）
+        """
+        if bound:
+            if requested and requested != bound:
+                core_logging.log_event(
+                    Event.AGENT_BIND_IGNORED,
+                    session_id=session_id,
+                    bound=bound,
+                    requested=requested,
+                )
+            return bound
+        if not requested:
+            return ""
+        if (
+            self._preset_registry is None
+            or self._preset_registry.get(requested) is None
+        ):
+            core_logging.log_event(
+                Event.AGENT_BIND_IGNORED,
+                session_id=session_id,
+                bound="",
+                requested=requested,
+            )
+            return ""
+        await self._chat_manager.bind_session_agent_async(session_id, requested)
+        return requested

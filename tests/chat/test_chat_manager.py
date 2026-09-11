@@ -219,3 +219,21 @@ async def test_save_user_and_assistant_async(monkeypatch):
     await cm.save_assistant_async("s1", "kb1", "a", None, "interrupted")
     assert calls[0] == ("user", "s1", "kb1", "q")
     assert calls[1] == ("assistant", "s1", "kb1", "a", "interrupted")
+
+
+@pytest.mark.asyncio
+async def test_get_session_agent_async():
+    """get_session_agent_async：未注入持久化返回空串；注入后委托 persistence。"""
+    from src.chat.manager import ChatManager
+
+    async def fake_get_session_agent(session_id):
+        return "finance-expert"
+
+    cm = ChatManager.__new__(ChatManager)
+    cm._persistence = type(
+        "P", (), {"get_session_agent": staticmethod(fake_get_session_agent)}
+    )()  # type: ignore[assignment]  # 测试用匿名 fake 对象，接口与 PersistenceService 对齐即可
+    assert await cm.get_session_agent_async("s1") == "finance-expert"
+
+    cm._persistence = None
+    assert await cm.get_session_agent_async("s1") == ""

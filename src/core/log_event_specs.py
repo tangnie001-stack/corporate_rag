@@ -97,6 +97,12 @@ EVENT_SPECS: dict[str, EventSpec] = {
         "event convert failed", "agent", "warning", ("item_type", "err")
     ),
     "service ready": EventSpec("service ready", "agent", "info"),
+    "agent bind ignored": EventSpec(
+        "agent bind ignored",
+        "agent",
+        "warning",
+        ("session_id", "bound", "requested"),
+    ),
     # [verify] 验证管道（3.2 批）
     "skip": EventSpec("skip", "verify", "info", ("reason",)),
     "completeness check": EventSpec(

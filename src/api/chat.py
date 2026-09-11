@@ -277,6 +277,7 @@ async def _stream_rag_response(
     user_id: str = "",
     deep_thinking: bool = False,
     release_lock: Callable[[], None] | None = None,
+    agent: str = "",
 ) -> AsyncGenerator[str, None]:
     """以 SSE 事件流推送 RAG 响应 — 委托给 agent_service。
 
@@ -299,13 +300,15 @@ async def _stream_rag_response(
             agent LLM 的 enable_thinking 参数，默认 False）
         release_lock: 后台任务完成时释放 per-session 并发锁的同步回调
             （由 chat_stream 注入，幂等）；无锁场景（测试直调）传 None
+        agent: 请求体传入的智能体预设名（透传给 agent_service，最终
+            经 bind-once 解析为会话生效值）
     """
     if release_lock is None:
         release_lock = lambda: None
 
     try:
         subscription, launch_ctx = await svc.agent_service.stream_chat(
-            kb_id, session_id, query, deep_thinking
+            kb_id, session_id, query, deep_thinking, agent=agent
         )
     except Exception as e:  # noqa: BLE001
         # 任务未启动，锁无后台任务可释放，本路径直接释放避免挂到 TTL
@@ -421,6 +424,7 @@ async def chat_stream(
     kb_id = body.kb_id
     query = body.query
     deep_thinking = body.deep_thinking
+    agent = body.agent
     user_id = getattr(request.state, "user_id", "") if request else ""
 
     # 并发防护顺序：先查进程内注册表（is_running），再取 Redis 锁。
@@ -478,7 +482,14 @@ async def chat_stream(
     async def _stream_with_lock() -> AsyncGenerator[str, None]:
         """持有并发锁流式推送 RAG 响应（锁由后台任务完成时释放，SSE 断连不提前释放）。"""
         async for event in _stream_rag_response(
-            svc, kb_id, session_id, query, user_id, deep_thinking, release_lock_cb
+            svc,
+            kb_id,
+            session_id,
+            query,
+            user_id,
+            deep_thinking,
+            release_lock_cb,
+            agent,
         ):
             yield event
 

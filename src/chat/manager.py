@@ -107,6 +107,19 @@ class ChatManager:
             return await self._persistence.bind_session_agent(session_id, agent)
         return False
 
+    async def get_session_agent_async(self, session_id: str) -> str:
+        """读取会话已绑定的智能体名，未注入持久化时返回空串。
+
+        Args:
+            session_id: 会话 ID
+
+        Returns:
+            已绑定的智能体预设名；未接入持久化或未绑定时返回空串
+        """
+        if self._persistence:
+            return await self._persistence.get_session_agent(session_id)
+        return ""
+
     async def save_messages_async(
         self,
         session_id: str,

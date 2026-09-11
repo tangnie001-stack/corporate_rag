@@ -238,6 +238,21 @@ class SSETaskEvent:
         return {"action": self.action, "task": self.task}
 
 
+@dataclass
+class SSEAgentUsedEvent:
+    """会话绑定智能体回传（语义=本会话绑定值，不含 fork 执行者）。"""
+
+    agent: str = ""  # 本会话绑定的智能体名（空=未绑定）
+    type: str = "agent_used"  # SSE 事件名（event: agent_used）
+    seq: int | None = field(
+        default=None, compare=False, repr=False
+    )  # SSE 帧序列号（消费者注入；None 不序列化，不参与相等比较）
+
+    def payload_for_buffer(self) -> dict:
+        """缓冲/落盘用载荷。"""
+        return {"type": self.type, "agent": self.agent}
+
+
 SSEEvent = (
     SSEStatusEvent
     | SSETokenEvent
@@ -250,6 +265,7 @@ SSEEvent = (
     | SSEReasoningDeltaEvent  # reasoning 思考增量
     | SSEDelegateEvent  # delegate fork 子代理过程事件
     | SSETaskEvent  # task 任务/进度看板变更事件
+    | SSEAgentUsedEvent  # agent_used 会话绑定智能体回传
 )
 
 
@@ -458,6 +474,22 @@ def sse_task(event: SSETaskEvent) -> str:
     return f"event: task\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def sse_agent_used(agent: str, seq: int | None = None) -> str:
+    """构建 SSE agent_used 事件。
+
+    Args:
+        agent: 本会话绑定的智能体名（空=未绑定）
+        seq: SSE 帧序列号（消费者注入，None 不序列化）
+
+    Returns:
+        SSE 格式的文本行
+    """
+    data: dict[str, str | int] = {"agent": agent}
+    if seq is not None:
+        data["seq"] = seq
+    return f"event: agent_used\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
 def to_sse(event: SSEEvent) -> str:
     """将结构化事件转为 SSE 格式字符串。
 
@@ -522,6 +554,8 @@ def to_sse(event: SSEEvent) -> str:
             return sse_reasoning_delta(delta, seq)
         case SSETaskEvent(action=action, task=task, seq=seq):
             return sse_task(SSETaskEvent(action=action, task=task, seq=seq))
+        case SSEAgentUsedEvent(agent=agent, seq=seq):
+            return sse_agent_used(agent, seq)
 
 
 def from_payload(etype: str, payload: dict) -> "SSEEvent":
@@ -585,4 +619,6 @@ def from_payload(etype: str, payload: dict) -> "SSEEvent":
         )
     if etype == "task":
         return SSETaskEvent(action=payload["action"], task=payload["task"])
+    if etype == "agent_used":
+        return SSEAgentUsedEvent(agent=payload["agent"])
     raise ValueError(f"unknown sse event type: {etype}")

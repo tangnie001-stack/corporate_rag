@@ -10,6 +10,7 @@ from src.agents.graph.state import LangGraphEvent, LangGraphKey, LangGraphNode
 from src.chat.streaming import _subscribe_buffer, _subscribe_events, streaming_manager
 from src.services.agent_service import AgentService, _convert_event, _dual_stream
 from src.utils.sse import (
+    SSEAgentUsedEvent,
     SSEAskUserEvent,
     SSECitationEvent,
     SSEDoneEvent,
@@ -343,6 +344,7 @@ def _make_service() -> tuple[AgentService, AsyncMock]:
     service._llm = Mock()
     chat_manager = AsyncMock()
     chat_manager.get_history_async.return_value = []
+    chat_manager.get_session_agent_async.return_value = ""
     chat_manager.add_message_async = AsyncMock()
     service._chat_manager = chat_manager
     service._prompt_manager = Mock()
@@ -434,8 +436,12 @@ class TestStreamChatWrapper:
         async def fake_add(session_id, role, content, **kwargs):
             calls.append(("add", role, content))
 
+        async def fake_get_session_agent(session_id):
+            return ""
+
         svc._chat_manager.get_history_async = fake_get_history
         svc._chat_manager.add_message_async = fake_add
+        svc._chat_manager.get_session_agent_async = fake_get_session_agent
 
         # 后台任务所需最小图：零事件，避免任务异常噪音
         async def empty_astream(*args, **kwargs):
@@ -475,7 +481,10 @@ class TestStreamChatWrapper:
         _launch_finalize(launch_ctx)
         it = agen.__aiter__()
         first = await it.__anext__()
-        assert first == SSETokenEvent("你好")
+        # agent_used 恒在进入图循环前回传一次，早于首个 graph 事件（token）
+        assert isinstance(first, SSEAgentUsedEvent)
+        token = await it.__anext__()
+        assert token == SSETokenEvent("你好")
         abort_signal = streaming_manager.get_abort_signal("session-aclose")
         assert abort_signal is not None
         await agen.aclose()  # 模拟客户端断开

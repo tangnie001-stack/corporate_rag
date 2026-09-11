@@ -21,7 +21,7 @@ def test_chat_stream_returns_sse():
         yield SSETokenEvent("净利润")
         yield SSEDoneEvent(trace_id="")
 
-    async def fake_stream_chat(kb_id, session_id, query, deep_thinking=False):
+    async def fake_stream_chat(kb_id, session_id, query, deep_thinking=False, agent=""):
         return (
             _sub(),
             {
@@ -94,7 +94,7 @@ def test_chat_stream_passes_deep_thinking():
         yield SSETokenEvent("ok")
         yield SSEDoneEvent(trace_id="")
 
-    async def fake_stream_chat(kb_id, session_id, query, deep_thinking=False):
+    async def fake_stream_chat(kb_id, session_id, query, deep_thinking=False, agent=""):
         captured["deep_thinking"] = deep_thinking
         return (
             _sub(),
@@ -127,6 +127,57 @@ def test_chat_stream_passes_deep_thinking():
             )
         assert response.status_code == 200
         assert captured["deep_thinking"] is True
+    finally:
+        app.dependency_overrides.pop(get_app_service, None)
+
+
+def test_chat_stream_passes_agent():
+    """agent 请求体字段应透传至 agent_service.stream_chat。
+
+    回归场景：前端选择会话智能体时，请求应携带 agent=预设名，
+    最终经 bind-once 绑定到会话并回传 agent_used；若断链则绑定失效。
+    """
+    from src.infra.llm.request_context import RequestContext
+    from src.utils.sse import SSEDoneEvent, SSETokenEvent
+
+    captured = {}
+
+    async def _sub():
+        yield SSETokenEvent("ok")
+        yield SSEDoneEvent(trace_id="")
+
+    async def fake_stream_chat(kb_id, session_id, query, deep_thinking=False, agent=""):
+        captured["agent"] = agent
+        return (
+            _sub(),
+            {
+                "history": [],
+                "ctx": RequestContext(session_id=session_id),
+                "graph": None,
+                "session_id": session_id,
+                "kb_id": kb_id,
+                "query": query,
+                "deep_thinking": deep_thinking,
+            },
+        )
+
+    mock_svc = AsyncMock()
+    mock_svc.agent_service.stream_chat = fake_stream_chat
+    app.dependency_overrides[get_app_service] = lambda: mock_svc
+
+    try:
+        with patch("src.api.chat._run_with_finalize", new=AsyncMock()):
+            response = client.post(
+                "/api/chat/stream",
+                json={
+                    "session_id": "s1",
+                    "kb_id": "kb-1",
+                    "query": "hi",
+                    "agent": "finance-expert",
+                },
+            )
+        assert response.status_code == 200
+        assert captured["agent"] == "finance-expert"
     finally:
         app.dependency_overrides.pop(get_app_service, None)
 

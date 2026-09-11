@@ -9,6 +9,7 @@ import pytest
 
 from src.utils.sse import (
     SSEAbstentionEvent,
+    SSEAgentUsedEvent,
     SSEAskUserEvent,
     SSECitationEvent,
     SSEDelegateEvent,
@@ -92,6 +93,8 @@ CASES = [
             "updated_at": 2.0,
         },
     ),
+    SSEAgentUsedEvent(agent="finance-expert"),
+    SSEAgentUsedEvent(),
 ]
 
 

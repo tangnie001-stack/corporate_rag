@@ -123,6 +123,7 @@ def _make_service() -> tuple[AgentService, AsyncMock]:
     service._llm = Mock()
     chat_manager = AsyncMock()
     chat_manager.get_history_async.return_value = []
+    chat_manager.get_session_agent_async.return_value = ""
     chat_manager.add_message_async = AsyncMock()
     service._chat_manager = chat_manager
     service._prompt_manager = Mock()
@@ -641,6 +642,34 @@ async def test_run_generation_writes_events_to_buffer(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_generation_emits_agent_used_event():
+    """进入图事件循环前发一次 agent_used（含会话绑定值），且早于首个 graph 事件。"""
+    from src.chat.streaming import StreamingRunManager
+    from src.infra.llm.request_context import RequestContext
+    from src.services.agent_service import _run_generation
+
+    mgr = StreamingRunManager()
+
+    async def fake_astream(*args, **kwargs):
+        yield _chat_model_stream_item("你好")
+        yield _chat_model_end_item("qwen-max")
+
+    fake_graph = Mock()
+    fake_graph.astream_events = fake_astream
+    ctx = RequestContext(session_id="s1")
+    ctx.agent = "finance-expert"
+    ctx.clarify_channel = asyncio.Queue()
+
+    await _run_generation("s1", "kb1", "q", [], False, ctx, mgr, graph=fake_graph)
+
+    events = mgr.get_events_since("s1", 0)
+    agent_payloads = [payload for _, et, payload in events if et == "agent_used"]
+    assert agent_payloads == [{"type": "agent_used", "agent": "finance-expert"}]
+    # agent_used 必须早于首个 graph 事件（token）
+    assert events[0][1] == "agent_used"
+
+
+@pytest.mark.asyncio
 async def test_run_generation_buffers_abstention_event(monkeypatch):
     """生产者将 _convert_event 产出的 abstention 事件写入缓冲。"""
     from src.chat.streaming import StreamingRunManager
@@ -969,7 +998,8 @@ async def test_run_generation_aborts_when_signal_set():
     # 置位后处理完当前事件即中断：第二个事件仍入缓冲，第三个事件未被消费
     assert consumed == ["a", "b"]
     events = mgr.get_events_since("s1", 0)
-    assert [et for _, et, _ in events] == ["token", "token"]
+    # agent_used 在进入图循环前恒发一次，随后是两次 token
+    assert [et for _, et, _ in events] == ["agent_used", "token", "token"]
 
 
 @pytest.mark.asyncio
