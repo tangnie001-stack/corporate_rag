@@ -36,6 +36,7 @@ from langchain_core.runnables.config import var_child_runnable_config
 from langgraph.prebuilt import create_react_agent
 
 from src.agents.skills.models import SkillContext, SkillRecord
+from src.agents.skills.rendering import render_skill_body
 from src.config import settings
 from src.config.const import (
     DELEGATE_DEFAULT_MAX_TURNS,
@@ -75,8 +76,8 @@ class SkillExecutor:
 
         Args:
             record: 命中的 SkillRecord
-            task: 主 agent 委托的任务描述（fork 时作子代理初始消息；inline 时填入
-                inline_prompt 的 {task} 占位）
+            task: 主 agent 委托的任务描述（fork 时同时作子代理初始消息与正文
+                $ARGUMENTS/{task} 占位替换值；inline 时填入 inline_prompt 占位）
 
         Returns:
             inline：渲染后的方法论文本；fork：子代理纯文本（截断/防失控超时文案）
@@ -86,7 +87,7 @@ class SkillExecutor:
         return await self._run_fork(record, task)
 
     def _render_inline(self, record: SkillRecord, task: str) -> str:
-        """渲染 inline_prompt：{task} 替换为任务文本（无占位则原样返回）。
+        """渲染 inline_prompt 的任务占位符（$ARGUMENTS 或 {task}；无占位则原样）。
 
         Args:
             record: inline SkillRecord
@@ -95,10 +96,7 @@ class SkillExecutor:
         Returns:
             渲染后的方法论文本
         """
-        prompt = record.inline_prompt or ""
-        if "{task}" in prompt:
-            return prompt.replace("{task}", task)
-        return prompt
+        return render_skill_body(record.inline_prompt or "", task)
 
     async def _run_fork(self, record: SkillRecord, task: str) -> str:
         """fork 执行：astream 级消费 + 三层防失控 + 思考跟随请求档。
@@ -117,10 +115,13 @@ class SkillExecutor:
             asyncio.CancelledError: ctx.abort_signal 置位（请求取消）
         """
         llm = self._resolve_fork_llm(record)
+        fork_body = record.fork_body
+        if fork_body is not None:
+            fork_body = render_skill_body(fork_body, task)
         sub_agent = create_react_agent(
             llm,
             tools=[],  # 零工具硬保证（design D7）：防递归 + 不污染主 ctx
-            prompt=record.fork_body,
+            prompt=fork_body,
         )
         ctx = current_request_ctx.get()
         max_turns = DELEGATE_DEFAULT_MAX_TURNS

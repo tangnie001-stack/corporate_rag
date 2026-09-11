@@ -98,6 +98,48 @@ async def test_inline_without_placeholder_returns_as_is():
 
 
 @pytest.mark.asyncio
+async def test_inline_renders_arguments_placeholder():
+    """inline：$ARGUMENTS 替换为任务文本（当前 skill 正文写法）。"""
+    rec = _record(inline_prompt="任务：$ARGUMENTS")
+    exe = SkillExecutor(main_llm=MagicMock())
+    out = await exe.execute(rec, task="计算毛利率")
+    assert out == "任务：计算毛利率"
+
+
+@pytest.mark.asyncio
+async def test_inline_renders_legacy_task_placeholder():
+    """inline：{task} 仍替换为任务文本（向后兼容旧写法）。"""
+    rec = _record(inline_prompt="方法论 {task}")
+    exe = SkillExecutor(main_llm=MagicMock())
+    out = await exe.execute(rec, task="计算毛利率")
+    assert out == "方法论 计算毛利率"
+
+
+@pytest.mark.asyncio
+async def test_fork_body_renders_arguments_placeholder():
+    """fork：正文（子代理 prompt）中的 $ARGUMENTS 替换为任务文本。"""
+    main_llm = MagicMock()
+    exe = SkillExecutor(main_llm=main_llm)
+    rec = _record(
+        context=SkillContext.FORK,
+        fork_body="按方法论分析。\n\n任务：$ARGUMENTS",
+        inline_prompt=None,
+        model=None,
+    )
+    fake_sub = _fake_sub_agent(
+        _event("on_chat_model_start"),
+        _event("on_chat_model_stream", chunk=AIMessageChunk(content="分析结果")),
+        _event("on_chat_model_end", output=AIMessage(content="分析结果")),
+    )
+    with patch(
+        "src.agents.skills.executor.create_react_agent", return_value=fake_sub
+    ) as mock_create:
+        await exe.execute(rec, task="分析年报")
+
+    assert mock_create.call_args.kwargs["prompt"] == "按方法论分析。\n\n任务：分析年报"
+
+
+@pytest.mark.asyncio
 async def test_fork_reuses_main_llm_when_model_empty():
     """fork 且未声明 model：复用主 agent llm 实例；经 astream_events 聚合结果。"""
     main_llm = MagicMock()

@@ -99,6 +99,9 @@ DEPRECATED_SKILL_FIELDS = (
     "thinking",
     "max-iterations",
 )  # 已废弃的 skill frontmatter 字段（读到时忽略并记 warning）
+# skill 正文任务占位符：$ARGUMENTS 为当前写法，{task} 为旧写法（保留向后兼容）；
+# 渲染时按序全部替换（见 skills.rendering.render_skill_body）
+SKILL_TASK_PLACEHOLDERS = ("$ARGUMENTS", "{task}")
 # 专家分析标记短语：fork 子代理"无源分析观点"由 4.1 引导主 agent 措辞（design D9），
 # kb_citation_guardrail 据此豁免（防纯分析型 fork 答案被误触发补标 regen，M7）
 EXPERT_ANALYSIS_MARKER = "基于领域经验的分析"
