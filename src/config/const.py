@@ -262,8 +262,8 @@ class SSEInteractionTexts:
     # ── 命令行直出兜底文案 ──
     # /xxx 命中不到 / 非 fork skill 时返回给用户的兜底文案（直出节点 fail-open）
     SKILL_DIRECT_UNAVAILABLE: str = "该技能不可直接执行，请去掉前缀后重试。"
-    # 直出节点请求上下文不可用文案（current_request_ctx 未设置）
-    SKILL_DIRECT_CTX_UNAVAILABLE: str = "Error: 请求上下文不可用"
+    # 直出节点请求上下文不可用文案（current_request_ctx 未设置；用户可见兜底，纯中文）
+    SKILL_DIRECT_CTX_UNAVAILABLE: str = "请求上下文不可用"
 
 
 # ── 来源权威分级（source-tier-labeling change）──

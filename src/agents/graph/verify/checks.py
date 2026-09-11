@@ -23,7 +23,7 @@ def completeness_check(required: list[int], answer: str) -> list[int]:
     """比对要求覆盖年份与答案实际覆盖年份，返回缺失。
 
     Args:
-        required: 问题要求覆盖年份（RequestContext.temporal_years）
+        required: 问题要求覆盖年份（AgentState.verify_temporal_years）
         answer: 答案文本
 
     Returns:

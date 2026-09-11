@@ -8,6 +8,7 @@ from src.agents.graph.skill_direct import make_skill_direct_node
 from src.agents.graph.state import AgentState
 from src.agents.graph.workflow import build_graph
 from src.agents.skills.models import SkillContext, SkillRecord
+from src.config.const import SSEInteractionTexts
 from src.infra.llm.request_context import RequestContext, current_request_ctx
 
 
@@ -128,13 +129,14 @@ async def test_direct_round_keeps_child_citations_and_zero_agent_rounds():
     assert final["_agent_iterations"] == 0
     assert [c["index"] for c in final["citations"]] == [1, 2]
     assert final["answer"].startswith("公司 2024 年营收")
+    assert final["verify_temporal_years"] == [2024]  # 子 ctx 年份传播进 state
     assert main_ctx.tool_contexts == []  # 主池保持为空（D7/D24）
     assert main_ctx.temporal_years == []
 
 
 @pytest.mark.asyncio
-async def test_unknown_or_inline_skill_falls_open():
-    """direct_skill 命中不到 / 非 fork → 兜底文案，不抛、不空转。"""
+async def test_inline_skill_falls_open():
+    """direct_skill 命中非 fork（INLINE）→ 兜底文案，不抛、不空转。"""
     record = SkillRecord(
         name="finance-qa",
         description="d",
@@ -156,3 +158,60 @@ async def test_unknown_or_inline_skill_falls_open():
 
     assert final["_needs_regenerate"] is False
     assert final["citations"] == []
+
+
+@pytest.mark.asyncio
+async def test_unknown_skill_falls_open():
+    """direct_skill 查不到（registry.get → None）→ 兜底文案，不抛、不空转、无引用。"""
+    record = SkillRecord(
+        name="finance-analyst",
+        description="d",
+        context=SkillContext.FORK,
+        fork_body="任务：$ARGUMENTS",
+        allowed_tools=[],
+    )
+    graph = _graph(_FakeExecutor(), record)
+    main_ctx = RequestContext(session_id="s1", kb_id="kb1", kb_bound=True)
+    token = current_request_ctx.set(main_ctx)
+    try:
+        final, _node_order = await _run_updates(
+            graph,
+            AgentState(
+                session_id="s1",
+                kb_id="kb1",
+                query="q",
+                direct_skill="no-such-skill",
+            ),
+        )
+    finally:
+        current_request_ctx.reset(token)
+
+    assert final["answer"] == SSEInteractionTexts.SKILL_DIRECT_UNAVAILABLE
+    assert final["_needs_regenerate"] is False
+    assert final["citations"] == []
+
+
+@pytest.mark.asyncio
+async def test_missing_ctx_falls_open():
+    """current_request_ctx 未设置 → 上下文兜底文案，不抛。"""
+    record = SkillRecord(
+        name="finance-analyst",
+        description="d",
+        context=SkillContext.FORK,
+        fork_body="任务：$ARGUMENTS",
+        allowed_tools=[],
+    )
+    graph = _graph(_FakeExecutor(), record)
+    token = current_request_ctx.set(None)
+    try:
+        final, _node_order = await _run_updates(
+            graph,
+            AgentState(
+                session_id="s1", kb_id="kb1", query="q", direct_skill=record.name
+            ),
+        )
+    finally:
+        current_request_ctx.reset(token)
+
+    assert final["answer"] == SSEInteractionTexts.SKILL_DIRECT_CTX_UNAVAILABLE
+    assert final["_needs_regenerate"] is False

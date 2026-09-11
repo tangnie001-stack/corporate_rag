@@ -207,11 +207,14 @@ class SkillExecutor:
             else:
                 result = self._truncate(text)
             # 回写本次委派最终返回给调用方的文本（含 idle/total/turn 中断文案；
-            # 取消路径抛异常不写）
+            # 取消路径抛异常不写）。当前无读取方，消费方在 Plan 3（确认门/直出），
+            # 勿当死代码清理
             if run is not None:
                 run.result_text = result
             return result
         finally:
+            # 回写本次委派停止原因；当前无读取方，消费方在 Plan 3（确认门/直出），
+            # 勿当死代码清理
             if run is not None:
                 run.stop_reason = run.ctx.fork_stop_reason
             current_request_ctx.reset(token_ctx)

@@ -33,7 +33,7 @@
 - [ ] 4.8 **预设预绑定 skill 预加载**：会话已绑定预设且声明 `skills:` 时，在该会话**首轮生成前**按 `/xxx` 同一路径注入一次（隐藏消息，不进 system prompt），后续轮次不重复注入
 - [ ] 4.9 **fork 直出的引用池并轨**（design D24）：`/xxx` 触发 fork 直出时，把子代理的 `tool_contexts` 作为本轮 `format` 的引用池（主池此时必为空），使 `citations` 正常产出、不误记 `INVALID_CITATION`；「不计入主编号」的旧约定限定为模型自动委派路径——**已由 Plan 2 完成**
 - [ ] 4.10 **图入口分派（design D26）**：`AgentState` 新增"直出决策"字段（解析出的 skill 名 + 任务文本）；`workflow.py:86` 的 `set_entry_point("agent")` 改为 `add_conditional_edges(START, route_entry, {...})`，`route_entry` 纯规则判断（无 LLM）——**已由 Plan 2 完成**
-- [ ] 4.11 **直出节点 + verify 语义适配（design D26）**：新增 `skill_direct` 节点（调用 fork 子代理 → 写 `answer`，并把子代理的 `tool_contexts` 写入 **`AgentState` 新增字段**（同时承载 `temporal_years`）→ 边到 `verify`）；材料判据统一由 `AgentState` 承载：`tool_contexts` 复用 + `verify_temporal_years` 新增，流程字段（`web_confirmed`/`verify_ask_count`/`web_guided`）仍读主 ctx（它们在同一次 verify 内被写后读，快照化会改行为）；`route_verify` 的 `_needs_regenerate` 在直出轮路由回 `skill_direct`（重跑上限 1 次）；**与确认门互斥**：确认门不通过时直接出结论+标注"未经确认"，不再进入 verify 重跑——**已由 Plan 2 完成**
+- [ ] 4.11 **直出节点 + verify 语义适配（design D26）**：新增 `skill_direct` 节点（调用 fork 子代理 → 写 `answer`，并把子代理的 `tool_contexts` 写入 **`AgentState` 新增字段**（同时承载 `temporal_years`）→ 边到 `verify`）；材料判据统一由 `AgentState` 承载：`tool_contexts` 复用 + `verify_temporal_years` 新增，流程字段（`web_confirmed`/`verify_ask_count`/`web_guided`）仍读主 ctx（它们在同一次 verify 内被写后读，快照化会改行为）；`route_verify` 的 `_needs_regenerate` 在直出轮路由回 `skill_direct`（重跑上限 1 次）；**与确认门互斥**：确认门不通过时直接出结论+标注"未经确认"，不再进入 verify 重跑——**已由 Plan 2 完成**；直出轮的回答交付/落库由 5.12 承接（本计划未覆盖）
 
 ## 5. 调用控制与 `/xxx` 路由
 
@@ -52,6 +52,10 @@
 - [ ] 5.9 **system prompt 三层组装**：`PromptManager` 拆出 `get_base_system_prompt()`（不含系统追加段）；新增 `build_system_prompt(persona, kb_bound, has_skills)`（`src/rag/prompt.py`）——①人设层（preset 正文 / `get_base_system_prompt()`）+ ②环境约束层（引用指令 + 委派引导 + 检索纪律 + `KB_UNBOUND_SYSTEM_PROMPT` + 日期，**顺序与现状一致**）；`build_prompt` 与 `build_simple_prompt` **两个调用点**都改走它；**保证未选 agent 时 system 段端到端逐字不变**
 - [ ] 5.10 **能力清单服务 + 接口**（design D19：**不引入 catalog 文件，由 registry 派生**）：`src/services/capability_service.py`（取 registry 的 `user_visible()` / 全部可加载预设；随懒重载自动更新，无独立缓存层）；`src/api/capabilities.py`（`GET /api/skills` / `GET /api/agents`，经 service 不直接读文件/扫描目录）；**响应走统一信封**（`data.skills` / `data.agents`）；skills 服务端过滤 `user-invocable: false`；读取失败返回空列表 + warn（不 500）
 - [ ] 5.11 测试：前缀路由 / **前缀清洗（当前轮与历史都不含 `/name`，落库仍为原文）** / **`/xxx` inline 单轮与 fork 直出（断言主 agent 0 LLM 轮 + citations 非空 + 无 `INVALID_CITATION`）** / 注入后持续生效 / 双轴过滤 / **绑定四态（首轮绑定、沿用、忽略+warn、未注册降级）** / 老会话 `bind-if-empty` 可绑定 / `agent_used` 流事件 / **未选 agent 时 system 段快照逐字一致** / 两接口信封结构 + 服务端过滤 + 失败降级 / **非法名称跳过** / `sessions/messages` 契约不变（`data` 仍为数组）
+
+- [ ] 5.12 **直出轮 answer 交付链路（Plan 3 前置，最终评审登记）**：让直出轮的回答经 SSE 交付并被落库。候选做法（择一，实现时定）：在 `_convert_event` 增加 `on_chain_end name=="skill_direct"` 捕获 `answer` 并产出 token/answer 事件；或让 `serialize_process` 在无 `"token"` 段时回落到直出节点的 `answer`；同步更新 `_run_generation` 的 `full_answer` / `capture.final_answer` 捕获源。**必须有一条走生产交付链（`astream_events` → `_convert_event` → `serialize_process`）的端到端测试**——当前直出测试全走 `graph.astream(stream_mode="updates")`，完全绕过交付层，是本次测试策略的系统性盲区。依据：`design.md` D22/D26；最终评审发现直出轮回答既不进 SSE token 流也不落库（缺口登记，本计划未覆盖）
+- [ ] 5.13 **I1（本计划欠项，随 5.12 落直出路径前必须解决）**：直出轮 `_needs_regenerate` 重跑不消费 verify 注入的 `SystemMessage` 指引（直出节点不读 `state.messages`）→ 无效重跑；不解决则直出轮的质量纠偏整条失效
+- [ ] 5.14 **I2（本计划欠项）**：生产环境 `agents/` 与 `skills/` 未挂载未 COPY（`Dockerfile` 只 `COPY src/ scripts/ deploy/`；`docker-compose.prod.yml` 只挂 `./skills`）→ 生产 `_resolve_executor` 恒 None、会话智能体能力静默降级；部署任务须同时落 `docker-compose.prod.yml` 挂载 + `Dockerfile` COPY
 
 ## 6. 前端
 
