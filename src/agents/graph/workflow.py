@@ -43,6 +43,7 @@ def build_graph(
     prompt_manager,
     tools=None,
     delegate_task: BaseTool | None = None,
+    tool_sink: list | None = None,
 ) -> CompiledStateGraph:
     """构建并编译 agent 循环图：agent → (tools|agent_finalize) → verify → format → END。
 
@@ -57,6 +58,8 @@ def build_graph(
     并追加 make_task_tools（task_create/get/list/update/output/stop，恒注册）。
     delegate_task 为可选委派工具（skill 库有内容时由 AgentService 注入），
     tools=None 默认分支原样透传给 make_rag_tools。
+    tool_sink 非 None 时把本次启用的工具追加进去，供 SkillExecutor 的延迟 provider
+    读取当前启用工具（打破工具集 ↔ executor 的循环依赖）。
     """
     builder = StateGraph(AgentState)
 
@@ -76,6 +79,9 @@ def build_graph(
         # monkeypatch 成空 list（test_graph.py:726 fake_make_rag_tools return []），
         # 防御性 list() 防止 None 解包 TypeError
         rag_tools = [*(base_tools or []), *make_task_tools()]
+
+    if tool_sink is not None:
+        tool_sink.extend(rag_tools)
 
     builder.add_node("agent", make_agent_model_node(llm, rag_tools, prompt_manager))
     builder.add_node("tools", make_agent_tools_node(rag_tools))

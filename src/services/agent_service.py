@@ -619,11 +619,17 @@ class AgentService:
         if not skills_dir:
             skills_dir = str(Path(__file__).resolve().parents[2] / "skills")
         delegate_task_tool = None
+        # fork 工具池 sink：build_graph 把当前启用工具写入本列表，SkillExecutor 的
+        # 延迟 provider 读取它按 skill 白名单筛选子代理工具（打破工具集 ↔ executor
+        # 循环依赖）。构造期为空，build_graph 完成后被填充
+        fork_tool_pool: list = []
         if Path(skills_dir).exists():
             skill_registry = SkillRegistry(SkillLoader(Path(skills_dir)))
             skill_registry.reload_if_changed()  # description 在 make_delegate_task 时按当前注册表生成
             if skill_registry.names():
-                skill_executor = SkillExecutor(self._llm)
+                skill_executor = SkillExecutor(
+                    self._llm, tool_provider=lambda: fork_tool_pool
+                )
                 delegate_task_tool = make_delegate_task(skill_registry, skill_executor)
             else:
                 # skills 目录存在但无任何 skill：delegate_task 不注册（描述会列空列表，注册无意义）
@@ -641,6 +647,7 @@ class AgentService:
             self._reranker,
             self._prompt_manager,
             delegate_task=delegate_task_tool,
+            tool_sink=fork_tool_pool,
         )
         core_logging.log_event(Event.SERVICE_READY)
 
