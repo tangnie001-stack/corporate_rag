@@ -2,7 +2,7 @@
 
 import json
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from src.infra.db.models.chat import MessageModel, SessionModel
@@ -17,18 +17,22 @@ class ChatRepo:
         self._sf = session_factory
 
     async def create_session(self, session) -> None:
-        """session: 带 .id .user_id .title .kb_id 属性的对象。
+        """session: 带 .id .user_id .title .kb_id .agent 属性的对象。
 
         幂等：同一 session_id 已存在（多轮对话重复持久化）时静默跳过，
         不抛主键冲突异常。
         """
         async with self._sf() as s:
             try:
+                agent = session.agent
+                if agent is None:
+                    agent = ""
                 s_obj = SessionModel(
                     id=session.id,
                     user_id=session.user_id,
                     title=session.title,
                     kb_id=session.kb_id,
+                    agent=agent,
                 )
                 s.add(s_obj)
                 await s.commit()
@@ -39,6 +43,26 @@ class ChatRepo:
                     raise
                 # 已存在 → 幂等跳过（首轮已创建，多轮对话不重复插入）
 
+    async def bind_session_agent(self, session_id: str, agent: str) -> bool:
+        """首次绑定会话智能体（bind-once）：仅当当前绑定为空时写入。
+
+        Args:
+            session_id: 会话 ID
+            agent: 已校验的智能体预设名（ASCII slug）
+
+        Returns:
+            True=本次写入成功（此前未绑定）；False=已绑定，未改动
+        """
+        async with self._sf() as s:
+            stmt = (
+                update(SessionModel)
+                .where(SessionModel.id == session_id, SessionModel.agent == "")
+                .values(agent=agent)
+            )
+            result = await s.execute(stmt)
+            await s.commit()
+            return result.rowcount > 0
+
     async def get_sessions(self, user_id: str = "") -> list:
         """返回 Row 对象（支持 .id 属性访问，兼容旧 SessionListItem 用法）。"""
         async with self._sf() as session:
@@ -47,6 +71,7 @@ class ChatRepo:
                     SessionModel.id,
                     SessionModel.title,
                     SessionModel.kb_id,
+                    SessionModel.agent,
                     SessionModel.created_at,
                     SessionModel.updated_at,
                     func.coalesce(KbModel.name, "未绑定知识库").label("kb_name"),

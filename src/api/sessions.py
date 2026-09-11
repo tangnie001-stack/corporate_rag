@@ -62,6 +62,7 @@ async def list_sessions(
                 updated_at=row["updated_at"].isoformat()
                 if row.get("updated_at")
                 else None,
+                agent=row.get("agent", ""),
             )
         )
     return ResponseModel(data=result)

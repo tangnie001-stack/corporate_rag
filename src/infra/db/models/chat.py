@@ -14,6 +14,11 @@ class SessionModel(Base, IDMixin, TimestampMixin):
 
     user_id: Mapped[str] = mapped_column(String(36), nullable=False)
     kb_id: Mapped[str] = mapped_column(String(36), default="")
+    agent: Mapped[str] = mapped_column(
+        String(64),
+        default="",
+        comment="会话绑定的智能体预设名（ASCII slug；空=未绑定）",
+    )
     title: Mapped[str] = mapped_column(String(256), default="新对话")
     is_deleted: Mapped[int] = mapped_column(Integer, default=0)
 

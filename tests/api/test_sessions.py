@@ -36,6 +36,20 @@ def test_list_sessions_empty(auth_client, mock_app_service):
     assert response.json()["data"] == []
 
 
+def test_list_sessions_echoes_agent(auth_client, mock_app_service):
+    """POST /api/sessions/list 回显会话绑定的智能体名，且 data 仍为数组。"""
+    mock_app_service.get_sessions = AsyncMock(
+        return_value=[make_session("s1", "财报问答", agent="finance-expert")]
+    )
+
+    response = auth_client.post("/api/sessions/list", json={})
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert isinstance(data, list)
+    assert data[0]["agent"] == "finance-expert"
+
+
 def test_session_messages(auth_client, mock_app_service):
     """POST /api/sessions/messages 返回消息列表。"""
     mock_app_service.get_session_by_id = AsyncMock(return_value=make_session("s1"))

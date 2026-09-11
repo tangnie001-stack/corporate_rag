@@ -226,3 +226,48 @@ async def test_user_created_at_before_assistant():
     msgs = await chat_repo.get_messages(session_id)
     assert [m.role for m in msgs] == ["user", "assistant"]
     assert msgs[0].created_at <= msgs[1].created_at
+
+
+@pytest.mark.asyncio
+async def test_bind_session_agent_is_bind_once():
+    """bind-once：首次写入成功；再次写入（含不同值）不改动已有绑定。"""
+    from src.infra.db.models.chat import SessionModel
+    from src.infra.db.mysql_db import ChatRepo
+
+    chat_repo = ChatRepo(session_factory)
+    sid = f"sess_{uuid.uuid4().hex[:12]}"
+    await chat_repo.create_session(
+        SessionModel(id=sid, user_id="u_agent", title="绑定测试", kb_id="")
+    )
+
+    assert await chat_repo.bind_session_agent(sid, "finance-expert") is True
+    assert await chat_repo.bind_session_agent(sid, "legal-expert") is False
+
+    rows = await chat_repo.get_sessions("u_agent")
+    target = [row for row in rows if row.id == sid]
+    assert len(target) == 1
+    assert target[0].agent == "finance-expert"
+
+
+@pytest.mark.asyncio
+async def test_create_session_with_agent_persists():
+    """create_session 落 agent；未传时落空串（存量语义不变）。"""
+    from src.infra.db.models.chat import SessionModel
+    from src.infra.db.mysql_db import ChatRepo
+
+    chat_repo = ChatRepo(session_factory)
+    sid = f"sess_{uuid.uuid4().hex[:12]}"
+    await chat_repo.create_session(
+        SessionModel(
+            id=sid,
+            user_id="u_agent",
+            title="带智能体",
+            kb_id="",
+            agent="finance-expert",
+        )
+    )
+
+    rows = await chat_repo.get_sessions("u_agent")
+    target = [row for row in rows if row.id == sid]
+    assert len(target) == 1
+    assert target[0].agent == "finance-expert"

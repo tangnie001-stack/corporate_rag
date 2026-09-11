@@ -19,6 +19,7 @@ class PersistenceService:
         title: str,
         kb_id: str,
         user_id: str = "",
+        agent: str = "",
     ) -> None:
         """异步创建会话记录。
 
@@ -27,16 +28,29 @@ class PersistenceService:
             title: 会话标题（截取首条消息前 20 字）
             kb_id: 关联的知识库 ID
             user_id: 所属用户 ID
+            agent: 会话绑定的智能体预设名（空=未绑定）
         """
         try:
             from src.infra.db.models.chat import SessionModel
 
             session = SessionModel(
-                id=session_id, user_id=user_id, title=title, kb_id=kb_id
+                id=session_id, user_id=user_id, title=title, kb_id=kb_id, agent=agent
             )
             await self._chat_repo.create_session(session)
         except Exception as e:  # noqa: BLE001
             core_logging.log_event(Event.SESSION_SAVE_FAILED, err=str(e))
+
+    async def bind_session_agent(self, session_id: str, agent: str) -> bool:
+        """委托 repo 首次绑定会话智能体（bind-once）。
+
+        Args:
+            session_id: 会话 ID
+            agent: 已校验的智能体预设名（ASCII slug）
+
+        Returns:
+            True=本次写入成功（此前未绑定）；False=已绑定，未改动
+        """
+        return await self._chat_repo.bind_session_agent(session_id, agent)
 
     async def save_messages(
         self,

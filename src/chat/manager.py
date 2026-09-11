@@ -74,6 +74,7 @@ class ChatManager:
         title: str,
         kb_id: str,
         user_id: str = "",
+        agent: str = "",
     ) -> None:
         """异步创建会话记录（首次消息时调用）。
 
@@ -85,9 +86,26 @@ class ChatManager:
             title: 会话标题（截取首条消息前 20 字）
             kb_id: 关联的知识库 ID
             user_id: 所属用户 ID
+            agent: 会话绑定的智能体预设名（空=未绑定）
         """
         if self._persistence:
-            await self._persistence.save_session(session_id, title, kb_id, user_id)
+            await self._persistence.save_session(
+                session_id, title, kb_id, user_id, agent
+            )
+
+    async def bind_session_agent_async(self, session_id: str, agent: str) -> bool:
+        """首次绑定会话智能体（bind-once），未注入持久化时返回 False。
+
+        Args:
+            session_id: 会话 ID
+            agent: 已校验的智能体预设名（ASCII slug）
+
+        Returns:
+            True=本次写入成功（此前未绑定）；False=已绑定或未接入持久化
+        """
+        if self._persistence:
+            return await self._persistence.bind_session_agent(session_id, agent)
+        return False
 
     async def save_messages_async(
         self,

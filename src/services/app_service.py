@@ -148,6 +148,7 @@ class AppService:
                 "message_count": s.message_count,
                 "created_at": s.created_at,
                 "updated_at": s.updated_at,
+                "agent": s.agent,
             }
             for s in items
         ]

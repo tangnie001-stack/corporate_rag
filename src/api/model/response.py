@@ -167,6 +167,7 @@ class SessionItem(BaseModel):
     message_count: int  # 消息数量
     created_at: str | None = None  # 创建时间
     updated_at: str | None = None  # 最后更新时间
+    agent: str = ""  # 会话绑定的智能体预设名（来源：sessions.agent；空=未绑定）
 
 
 class MessageItem(BaseModel):
