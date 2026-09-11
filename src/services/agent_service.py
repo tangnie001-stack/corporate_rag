@@ -199,6 +199,8 @@ def _convert_event(
       on_tool_end name == "retrieve_kb" → SSEStatusEvent 检索完成
       on_chain_end name == "format" → output.citations 逐个转 SSECitationEvent
       on_chain_end name == "agent_finalize" → 捕获最终 answer/tool_contexts 到 capture
+      on_chain_end name == "skill_direct" → 直出轮 answer 转 SSETokenEvent 交付，
+      同时捕获 final_answer/tool_contexts 到 capture（供落库）
     其余事件忽略。
 
     Args:
@@ -337,6 +339,12 @@ def _convert_event(
             output = item.get(LangGraphKey.DATA, {}).get(LangGraphKey.OUTPUT) or {}
             capture.final_answer = output.get("answer", "")
             capture.final_contexts = output.get("tool_contexts", [])
+        if name == LangGraphNode.SkillDirect.NAME and capture is not None:
+            output = item.get(LangGraphKey.DATA, {}).get(LangGraphKey.OUTPUT) or {}
+            direct_answer = output.get("answer", "")
+            capture.final_answer = direct_answer
+            capture.final_contexts = output.get("tool_contexts", [])
+            return [SSETokenEvent(direct_answer)]
         return []
 
     return []

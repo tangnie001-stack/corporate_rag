@@ -10,7 +10,11 @@ import uuid
 from src.agents.graph.state import AgentState, LangGraphNode
 from src.agents.skills.delegate_run import DelegateRun
 from src.agents.skills.models import SkillContext
-from src.config.const import SSEInteractionTexts
+from src.config.const import (
+    VERIFY_CITATION_MARKER,
+    VERIFY_KB_CITATION_MARKER,
+    SSEInteractionTexts,
+)
 from src.core import logging as core_logging
 from src.core.log_events import Event
 from src.infra.llm.request_context import current_request_ctx
@@ -85,7 +89,22 @@ def make_skill_direct_node(skill_registry, executor):
             skill_name=record.name,
             ctx=main_ctx.child(),
         )
-        text = await executor.execute(record, state.query, run)
+        # 重跑消费 verify 注入的引用标注指引：state.messages 里含 VERIFY_CITATION_MARKER
+        # 或 VERIFY_KB_CITATION_MARKER 的 SystemMessage（verify 护栏注入）即上一轮
+        # verify 要求补标来源的指引，直出轮重跑时须把它带回子代理，否则指引在直出
+        # 轮被丢弃、子代理仍不补标
+        retry_guidance = ""
+        for message in state.messages:
+            content = message.content if isinstance(message.content, str) else ""
+            if (
+                VERIFY_CITATION_MARKER in content
+                or VERIFY_KB_CITATION_MARKER in content
+            ):
+                retry_guidance = content
+        task_text = state.query
+        if retry_guidance:
+            task_text = f"{state.query}\n\n{retry_guidance}"
+        text = await executor.execute(record, task_text, run)
         return {
             "answer": text,
             "tool_contexts": run.ctx.tool_contexts,

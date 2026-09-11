@@ -8,7 +8,11 @@ from src.agents.graph.skill_direct import make_skill_direct_node
 from src.agents.graph.state import AgentState
 from src.agents.graph.workflow import build_graph
 from src.agents.skills.models import SkillContext, SkillRecord
-from src.config.const import SSEInteractionTexts
+from src.config.const import (
+    VERIFY_CITATION_MARKER,
+    VERIFY_KB_CITATION_MARKER,
+    SSEInteractionTexts,
+)
 from src.infra.llm.request_context import RequestContext, current_request_ctx
 
 
@@ -289,3 +293,77 @@ async def test_missing_ctx_falls_open():
 
     assert final["answer"] == SSEInteractionTexts.SKILL_DIRECT_CTX_UNAVAILABLE
     assert final["_needs_regenerate"] is False
+
+
+class _CapturingExecutor:
+    """替身：捕获传入子代理的 task 文本，便于断言重跑指引是否追加。"""
+
+    def __init__(self):
+        self.seen_task = None
+
+    async def execute(self, record, task, run):
+        self.seen_task = task
+        return "答案[1]"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("marker", [VERIFY_CITATION_MARKER, VERIFY_KB_CITATION_MARKER])
+async def test_direct_round_consumes_verify_citation_guidance(marker):
+    """直出轮重跑：state.messages 里 verify 注入的引用标注指引追加到子代理 task。"""
+    from langchain_core.messages import SystemMessage
+
+    record = SkillRecord(
+        name="finance-analyst",
+        description="d",
+        context=SkillContext.FORK,
+        fork_body="任务：$ARGUMENTS",
+        allowed_tools=[],
+    )
+    executor = _CapturingExecutor()
+    node = make_skill_direct_node(_FakeRegistry(record), executor)
+    guidance = SystemMessage(content=marker)
+    state = AgentState(
+        session_id="s1",
+        kb_id="kb1",
+        query="2024 年营收",
+        direct_skill=record.name,
+        messages=[guidance],
+    )
+    main_ctx = RequestContext(session_id="s1", kb_id="kb1", kb_bound=True)
+    token = current_request_ctx.set(main_ctx)
+    try:
+        result = await node(state)
+    finally:
+        current_request_ctx.reset(token)
+
+    assert executor.seen_task == f"2024 年营收\n\n{marker}"
+    assert result["answer"] == "答案[1]"
+
+
+@pytest.mark.asyncio
+async def test_direct_round_passes_query_unchanged_without_guidance():
+    """直出轮无 verify 指引：task 保持原 query，不追加空指引段。"""
+    record = SkillRecord(
+        name="finance-analyst",
+        description="d",
+        context=SkillContext.FORK,
+        fork_body="任务：$ARGUMENTS",
+        allowed_tools=[],
+    )
+    executor = _CapturingExecutor()
+    node = make_skill_direct_node(_FakeRegistry(record), executor)
+    state = AgentState(
+        session_id="s1",
+        kb_id="kb1",
+        query="2024 年营收",
+        direct_skill=record.name,
+    )
+    main_ctx = RequestContext(session_id="s1", kb_id="kb1", kb_bound=True)
+    token = current_request_ctx.set(main_ctx)
+    try:
+        result = await node(state)
+    finally:
+        current_request_ctx.reset(token)
+
+    assert executor.seen_task == "2024 年营收"
+    assert result["answer"] == "答案[1]"
