@@ -17,7 +17,7 @@ from src.config import settings
 from src.config.const import DelegateStopReason, SSEInteractionTexts
 from src.core import logging as core_logging
 from src.core.log_events import Event
-from src.infra.llm.request_context import current_request_ctx
+from src.infra.llm.request_context import RequestContext, current_request_ctx
 from src.rag.stream import estimate_usage
 
 # idle 到点哨兵：区别于 None（事件源正常收尾），供 consume_fork_events 分流
@@ -53,6 +53,30 @@ class _ForkStreamState:
     get_next: asyncio.Future | None = None  # 飞行中的 __anext__
 
 
+def _resolve_stream_ctx(run: DelegateRun | None) -> tuple[RequestContext | None, str]:
+    """解析本次 fork 事件消费所用的请求上下文与委派 id。
+
+    显式 if/else 表达（项目禁止三元）；ctx 仍可能为 None（run 与当前请求
+    上下文均无），由调用方按既有分支处理。
+
+    Args:
+        run: 本次委派运行态；None 时读当前请求上下文（生产 delegate_task 的
+            两参路径），非 None 时读 run.ctx 子上下文
+
+    Returns:
+        (ctx, delegate_id)：ctx 可能为 None；ctx 为 None 时 delegate_id 为空串
+    """
+    if run is not None:
+        ctx = run.ctx
+    else:
+        ctx = current_request_ctx.get()
+    if ctx is not None:
+        delegate_id = ctx.delegate_id
+    else:
+        delegate_id = ""
+    return ctx, delegate_id
+
+
 async def consume_fork_events(
     sub_agent, run: DelegateRun | None, task: str, skill_name: str, max_turns: int
 ) -> str:
@@ -74,14 +98,7 @@ async def consume_fork_events(
     Raises:
         asyncio.CancelledError: ctx.abort_signal 置位（reason=cancelled）
     """
-    if run is not None:
-        ctx = run.ctx
-    else:
-        ctx = current_request_ctx.get()
-    if ctx is not None:
-        delegate_id = ctx.delegate_id
-    else:
-        delegate_id = ""
+    ctx, delegate_id = _resolve_stream_ctx(run)
     state = _ForkStreamState(
         idle_timeout=settings.DELEGATE_MAX_IDLE_S,
         max_turns=max_turns,
