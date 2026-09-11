@@ -71,6 +71,8 @@ VERIFY_CITATION_MARKER: str = "请为联网引用标注来源编号"
 # verify KB 强制溯源指引 SystemMessage 的标记短语（态 B）：检索到 KB context 但答案无
 # [n] 时注入，驱动 agent 补标后重生成一次（完整性通过后、judge 前，只引导一次）
 VERIFY_KB_CITATION_MARKER: str = "请为知识库引用标注来源编号"
+FORK_CONFIRM_MARKER: str = "CONFIRM_REQUIRED:"
+"""子代理"需确认"信号行首标记（编排层规则检测；子代理不持有 ask_user）。"""
 ASK_USER_TIMEOUT = 120  # ask_user 等待用户回答超时秒数
 HISTORY_MAX_TURNS = 10  # 历史注入保留最近轮数
 HISTORY_TOKEN_RATIO = 0.3  # 历史 token 占 context 窗口上限比例
@@ -274,6 +276,12 @@ class SSEInteractionTexts:
     SKILL_DIRECT_UNAVAILABLE: str = "该技能不可直接执行，请去掉前缀后重试。"
     # 直出节点请求上下文不可用文案（current_request_ctx 未设置；用户可见兜底，纯中文）
     SKILL_DIRECT_CTX_UNAVAILABLE: str = "请求上下文不可用"
+
+    # ── 直出轮确认门文案 ──
+    # 确认被拒/超时/槽被占时拼在答案尾部的"未经确认"标注（用户可见）
+    CONFIRM_UNCONFIRMED_NOTE: str = "\n\n> 注：本结论未经用户确认，仅供参考。"
+    # 确认提问模板：{question}=子代理经 FORK_CONFIRM_MARKER 提出的确认问题
+    CONFIRM_QUESTION_TMPL: str = "执行该技能需要你确认：{question}"
 
 
 # ── 来源权威分级（source-tier-labeling change）──

@@ -48,7 +48,11 @@ from src.config.const import (
     DelegateStopReason,
     SSEInteractionTexts,
 )
-from src.config.prompts import FORK_DEFAULT_EXECUTOR_PROMPT, FORK_TASK_APPEND_TMPL
+from src.config.prompts import (
+    FORK_DEFAULT_EXECUTOR_PROMPT,
+    FORK_EXECUTION_CONTRACT,
+    FORK_TASK_APPEND_TMPL,
+)
 from src.infra.llm.request_context import current_request_ctx
 from src.models import get_llm  # 模块级 import：测试需 patch executor.get_llm
 
@@ -273,20 +277,22 @@ class SkillExecutor:
         )
 
     def _executor_system_prompt(self, preset) -> str:
-        """解析 fork 子代理的 system prompt（执行者人设）。
+        """解析 fork 子代理的 system prompt（执行者人设 + 执行契约）。
 
         Args:
             preset: 执行者 AgentPreset；None 表示未选执行者预设
 
         Returns:
             preset 非空且 system_prompt 非空时返回其人设，否则返回系统默认
-            FORK_DEFAULT_EXECUTOR_PROMPT。本层不构造 PromptManager、不拉 Langfuse。
+            FORK_DEFAULT_EXECUTOR_PROMPT；两种情况下均在末尾追加执行契约
+            FORK_EXECUTION_CONTRACT（契约是执行约束，不由内容作者决定）。
+            本层不构造 PromptManager、不拉 Langfuse。
         """
         if preset is not None:
             prompt = preset.system_prompt
             if prompt:
-                return prompt
-        return FORK_DEFAULT_EXECUTOR_PROMPT
+                return prompt + FORK_EXECUTION_CONTRACT
+        return FORK_DEFAULT_EXECUTOR_PROMPT + FORK_EXECUTION_CONTRACT
 
     def _fork_tools(self, record: SkillRecord, preset):
         """按 allowed-tools ∩ 执行者 tools 选子代理工具（无 provider 时为零工具）。"""

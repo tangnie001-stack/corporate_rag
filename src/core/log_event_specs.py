@@ -319,4 +319,11 @@ EVENT_SPECS: dict[str, EventSpec] = {
     "skill direct skip": EventSpec(
         "skill direct skip", "agent", "info", ("skill", "reason")
     ),
+    # [agent] 直出轮确认门（design D18）
+    "fork confirm asked": EventSpec(
+        "fork confirm asked", "agent", "info", ("session_id",)
+    ),
+    "fork confirm unconfirmed": EventSpec(
+        "fork confirm unconfirmed", "agent", "warning", ("session_id", "reason")
+    ),
 }

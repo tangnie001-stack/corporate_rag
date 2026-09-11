@@ -8,6 +8,10 @@ answer 与"本轮材料"（引用池 + 要求覆盖年份）搬进 AgentState，
 import uuid
 
 from src.agents.graph.state import AgentState, LangGraphNode
+from src.agents.graph.verify.confirm_gate import (
+    ask_confirm_question,
+    detect_confirm_request,
+)
 from src.agents.skills.delegate_run import DelegateRun
 from src.agents.skills.models import SkillContext
 from src.config.const import (
@@ -105,6 +109,29 @@ def make_skill_direct_node(skill_registry, executor):
         if retry_guidance:
             task_text = f"{state.query}\n\n{retry_guidance}"
         text = await executor.execute(record, task_text, run)
+        # 直出轮确认门（design D18）：规则检测子代理的"需确认"marker（0 LLM 调用），
+        # 命中则复用澄清链路问用户，答复后带答复重跑一次；重跑结果**不再过确认门**
+        # （一次性），照常进 verify。被拒/超时/槽被占 → 出结论 + 标注"未经确认"，
+        # 不进 verify 重跑（与 D22「每轮最多重跑 1 次」互斥而非叠加）。
+        question = detect_confirm_request(text)
+        if question:
+            reply = await ask_confirm_question(question, state.session_id)
+            if reply is None:
+                # 拒绝/超时/槽被占 → 出结论 + 标注"未经确认"，不再进 verify 重跑
+                return {
+                    "answer": text + SSEInteractionTexts.CONFIRM_UNCONFIRMED_NOTE,
+                    "tool_contexts": run.ctx.tool_contexts,
+                    "verify_temporal_years": run.ctx.temporal_years,
+                    "_needs_regenerate": False,
+                }
+            run = DelegateRun(
+                delegate_id=uuid.uuid4().hex[:8],
+                skill_name=record.name,
+                ctx=main_ctx.child(),
+            )
+            text = await executor.execute(
+                record, f"{state.query}\n\n用户补充说明：{reply}", run
+            )
         return {
             "answer": text,
             "tool_contexts": run.ctx.tool_contexts,

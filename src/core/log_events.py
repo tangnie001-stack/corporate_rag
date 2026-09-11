@@ -180,6 +180,9 @@ class Event(str, Enum):
 
     # [agent] 命令行直出跳过（skill_direct 节点：未命中 / 非 fork skill → 兜底）
     SKILL_DIRECT_SKIP = "skill direct skip"
+    # [agent] 直出轮确认门（design D18）：命中 marker 向用户提问 / 未能确认按未确认处理
+    FORK_CONFIRM_ASKED = "fork confirm asked"
+    FORK_CONFIRM_UNCONFIRMED = "fork confirm unconfirmed"
 
 
 @dataclass(frozen=True)

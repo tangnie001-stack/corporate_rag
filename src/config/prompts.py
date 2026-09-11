@@ -20,6 +20,8 @@
   两者互不依赖，但遵循相同的"常量集中管理"理念
 """
 
+from src.config.const import FORK_CONFIRM_MARKER
+
 # ====== 系统指令 ======
 
 # ====== delegate（主从委派）引导段 ======
@@ -302,4 +304,13 @@ FORK_TASK_APPEND_TMPL: str = "任务：{task}"
 FORK_DEFAULT_EXECUTOR_PROMPT: str = (
     "你是一个企业知识库智能助手，作为委派子代理执行被指派的具体任务。"
     "只依据任务给出的材料与方法论作答，不得编造；输出结构化分析文本，不标注引用编号 [n]。"
+)
+
+# fork 执行契约（design D18）：追加进子代理 system prompt，要求子代理需要用户确认时
+# 单独输出一行 `CONFIRM_REQUIRED: <问题>` 并停止作答，编排层据此规则检测（0 LLM 调用）
+# 复用澄清链路问用户。契约是执行约束，不随执行者人设（preset）内容作者意愿而增减。
+FORK_EXECUTION_CONTRACT: str = (
+    "\n\n执行契约（必须遵守）："
+    f"如果你需要用户先确认才能给出结论，请单独输出一行 `{FORK_CONFIRM_MARKER} <你的问题>`"
+    "并停止作答，不要自行假设后给出结论；其余情况直接给出结论。"
 )
