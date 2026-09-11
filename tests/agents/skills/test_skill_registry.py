@@ -108,3 +108,52 @@ def test_lazy_reload_no_change_keeps_records(tmp_path):
     first = reg.get("a")
     reg.reload_if_changed()
     assert reg.get("a") is first
+
+
+def _make_registry(tmp_path, frontmatter: str, name: str = "finance-qa"):
+    from src.agents.skills.loader import SkillLoader
+    from src.agents.skills.registry import SkillRegistry
+
+    skill_dir = tmp_path / name
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(frontmatter, encoding="utf-8")
+    registry = SkillRegistry(SkillLoader(tmp_path))
+    registry.reload_if_changed()
+    return registry
+
+
+def test_user_visible_excludes_non_invocable(tmp_path):
+    """user-invocable:false 的 skill 不出现在用户候选列表。"""
+    registry = _make_registry(
+        tmp_path,
+        "---\nname: hidden-skill\ndescription: 仅模型可用\nuser-invocable: false\n---\n正文\n",
+        name="hidden-skill",
+    )
+
+    assert registry.user_visible() == []
+    assert [r.name for r in registry.model_visible()] == ["hidden-skill"]
+
+
+def test_model_visible_excludes_disable_model_invocation(tmp_path):
+    """disable-model-invocation:true 的 skill 不出现在模型候选列表。"""
+    registry = _make_registry(
+        tmp_path,
+        "---\nname: manual-only\ndescription: 仅用户可调\n"
+        "disable-model-invocation: true\n---\n正文\n",
+        name="manual-only",
+    )
+
+    assert [r.name for r in registry.user_visible()] == ["manual-only"]
+    assert registry.model_visible() == []
+
+
+def test_to_tool_description_only_lists_model_visible(tmp_path):
+    """delegate_task 的可用列表只含模型可见 skill。"""
+    registry = _make_registry(
+        tmp_path,
+        "---\nname: manual-only\ndescription: 仅用户可调\n"
+        "disable-model-invocation: true\n---\n正文\n",
+        name="manual-only",
+    )
+
+    assert registry.to_tool_description() == "当前无可用 skill"

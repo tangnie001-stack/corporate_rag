@@ -69,8 +69,24 @@ class SkillRegistry:
         """当前注册的全部 skill 名（有序，供 description/错误提示）。"""
         return sorted(self._records)
 
+    def user_visible(self) -> list[SkillRecord]:
+        """返回允许用户 `/xxx` 调用的 skill（按名排序）。"""
+        return [
+            record
+            for _, record in sorted(self._records.items())
+            if record.user_invocable
+        ]
+
+    def model_visible(self) -> list[SkillRecord]:
+        """返回允许模型自动 delegate_task 调用的 skill（按名排序）。"""
+        return [
+            record
+            for _, record in sorted(self._records.items())
+            if not record.disable_model_invocation
+        ]
+
     def to_tool_description(self, max_chars: int = 500) -> str:
-        """生成 delegate_task 的可用 skill 列表文本（渐进披露，预算截断）。
+        """生成 delegate_task 的可用 skill 列表文本（仅列模型可见项，预算截断）。
 
         每行一个 skill："<名>: <whenToUse>"。总长度超 max_chars 时截断并追加
         "..."，保证 delegate_task.description 不撑爆工具 schema 预算。
@@ -79,11 +95,12 @@ class SkillRegistry:
             max_chars: description 长度上限（字符）
 
         Returns:
-            description 文本；无 skill 时返回"当前无可用 skill"
+            description 文本；无可见 skill 时返回"当前无可用 skill"
         """
-        if not self._records:
+        visible = self.model_visible()
+        if not visible:
             return "当前无可用 skill"
-        lines = [f"{rec.name}: {rec.description}" for rec in self._records.values()]
+        lines = [f"{rec.name}: {rec.description}" for rec in visible]
         text = "\n".join(lines)
         if len(text) > max_chars:
             text = text[: max_chars - 3] + "..."
