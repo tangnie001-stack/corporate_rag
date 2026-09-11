@@ -603,21 +603,194 @@ git commit -m "feat(delegate): fork 子代理改用 create_agent，人设来自 
 > 预检 R1：本任务提前完成 change 的 3.4（装配 presets），Plan 3 只做会话层读取。
 
 **Files:**
-- Modify: `src/agents/skills/executor.py`（`_resolve_executor(record)`）
-- Modify: `src/services/agent_service.py`（构造 `AgentPresetRegistry` 并注入 executor + 会话 agent 名来源）
+- Modify: `src/infra/llm/request_context.py`（新增 `agent: str = ""` 字段）
+- Modify: `src/agents/skills/executor.py`（构造参数加 `preset_registry`；新增 `_resolve_executor` / `_fork_max_turns`；`_run_fork` 接线）
+- Modify: `src/services/agent_service.py`（构造 `AgentPresetRegistry` 并注入）
 - Test: `tests/agents/skills/test_fork_executor_selection.py`（新建）
 
 **Interfaces:**
-- Consumes: Task 4 的 `_build_sub_agent(record, preset, task)`；`src/agents/presets/`（Plan 1 交付）
-- Produces: 执行者优先级 `skill.agent` > 会话选定智能体 > 系统默认；`maxTurns` 取 `preset.max_turns`，空则既有 `DELEGATE_DEFAULT_MAX_TURNS`
+- Consumes（Plan 1 已交付，签名已实机核对）：
+  - `AgentPresetLoader(agents_root: Path).load_all() -> list[AgentPreset]`
+  - `AgentPresetRegistry(loader).reload_if_changed()`（同名冲突抛 `ValueError`，fail-fast）/ `.get(name) -> AgentPreset | None`（**未命中返回 None**，不抛）
+  - `AgentPreset` 字段：`name` / `display_name` / `description` / `system_prompt` / `tools: list[str]` / `skills: list[str]` / `max_turns: int | None`（None=系统默认）/ `source_path`
+  - **`src/agents/presets/__init__.py` 是空文件**（无 re-export）→ 必须从子模块导入
+- Produces：
+  - `SkillExecutor(main_llm, tool_provider: Callable[[], list] | None = None, preset_registry: AgentPresetRegistry | None = None)`
+  - `_resolve_executor(record: SkillRecord, session_agent: str) -> AgentPreset | None`
+  - `_fork_max_turns(preset: AgentPreset | None) -> int`
 
-- [ ] **Step 1: 写失败测试**（三条优先级 + maxTurns 回落）
-- [ ] **Step 2: 跑测试确认失败**
-- [ ] **Step 3: 实现 `_resolve_executor`**：
+**关键事实：**
+- `RequestContext` 现**没有**承载会话智能体名的字段 → 本任务新增 `agent: str = ""`（来源：会话绑定值，由 Plan 3 写入；本任务只读，读不到即空串 → 落系统默认）。
+- `settings` 里只有 `SKILLS_DIR`，**没有** `AGENTS_DIR` → 预设根目录按 skills 的既有推导方式取 `Path(__file__).resolve().parents[2] / "agents"`（仓库顶层 `agents/`，现有 `agents/finance-expert.md` 可作 frontmatter 模板）。
+- `_run_fork` 目前把 `preset=None` 硬编码给 `_build_sub_agent`。会话智能体名必须在**切子 ctx 之前**从主 ctx 读（`child()` 不复制 `agent`，本任务也不改 `child()`）。
+
+- [ ] **Step 1: 写失败测试**
+
+`tests/agents/skills/test_fork_executor_selection.py`：
 
 ```python
-    def _resolve_executor(self, record: SkillRecord, session_agent: str) -> AgentPreset | None:
-        """按优先级选执行者预设：skill.agent > 会话智能体 > None（系统默认）。"""
+"""fork 执行者选择：skill.agent > 会话智能体 > 系统默认；maxTurns 回落。"""
+
+from pathlib import Path
+
+from src.agents.presets.loader import AgentPresetLoader
+from src.agents.presets.registry import AgentPresetRegistry
+from src.agents.skills.executor import SkillExecutor
+from src.agents.skills.models import SkillContext, SkillRecord
+from src.config.const import DELEGATE_DEFAULT_MAX_TURNS
+
+_AGENT_MD = """---
+name: {name}
+description: {name} 预设
+system_prompt: 你是{name}
+maxTurns: {max_turns}
+---
+
+人设正文。
+"""
+
+
+def _registry(tmp_path: Path, specs: list[tuple[str, int]]) -> AgentPresetRegistry:
+    """按 (name, maxTurns) 写临时预设文件并建立已加载的注册表。"""
+    for name, max_turns in specs:
+        (tmp_path / f"{name}.md").write_text(
+            _AGENT_MD.format(name=name, max_turns=max_turns), encoding="utf-8"
+        )
+    registry = AgentPresetRegistry(AgentPresetLoader(tmp_path))
+    registry.reload_if_changed()
+    return registry
+
+
+def _fork_record(**overrides) -> SkillRecord:
+    """构造 fork SkillRecord，默认不声明 agent。"""
+    defaults = {
+        "name": "finance-analyst",
+        "description": "d",
+        "context": SkillContext.FORK,
+        "fork_body": "任务：$ARGUMENTS",
+        "allowed_tools": [],
+        "agent": "",
+        "source_path": Path("/tmp/finance-analyst/SKILL.md"),
+    }
+    defaults.update(overrides)
+    return SkillRecord(**defaults)
+
+
+def test_skill_agent_wins_over_session_agent(tmp_path):
+    """skill.agent 命中时优先于会话选定智能体。"""
+    exe = SkillExecutor(
+        main_llm=object(),
+        preset_registry=_registry(tmp_path, [("legal-expert", 3), ("finance-expert", 7)]),
+    )
+    preset = exe._resolve_executor(_fork_record(agent="legal-expert"), "finance-expert")
+    assert preset is not None
+    assert preset.name == "legal-expert"
+
+
+def test_session_agent_used_when_skill_declares_none(tmp_path):
+    """skill 未声明 agent → 用会话选定智能体。"""
+    exe = SkillExecutor(
+        main_llm=object(), preset_registry=_registry(tmp_path, [("finance-expert", 7)])
+    )
+    preset = exe._resolve_executor(_fork_record(), "finance-expert")
+    assert preset is not None
+    assert preset.name == "finance-expert"
+
+
+def test_unknown_names_fall_back_to_system_default(tmp_path):
+    """skill.agent 与会话智能体都查不到 → None（系统默认人设）。"""
+    exe = SkillExecutor(
+        main_llm=object(), preset_registry=_registry(tmp_path, [("finance-expert", 7)])
+    )
+    assert exe._resolve_executor(_fork_record(agent="ghost"), "ghost") is None
+
+
+def test_no_registry_falls_back_to_system_default():
+    """未装配 registry → 恒 None，不抛。"""
+    exe = SkillExecutor(main_llm=object())
+    assert exe._resolve_executor(_fork_record(agent="finance-expert"), "finance-expert") is None
+
+
+def test_fork_max_turns_uses_preset_then_default(tmp_path):
+    """maxTurns：preset 声明值优先；未声明或 preset 为 None 时用 DELEGATE_DEFAULT_MAX_TURNS。"""
+    exe = SkillExecutor(
+        main_llm=object(), preset_registry=_registry(tmp_path, [("finance-expert", 7)])
+    )
+    preset = exe._resolve_executor(_fork_record(), "finance-expert")
+
+    assert exe._fork_max_turns(preset) == 7
+    assert exe._fork_max_turns(None) == DELEGATE_DEFAULT_MAX_TURNS
+
+
+def test_fork_max_turns_defaults_when_preset_omits_max_turns(tmp_path):
+    """preset 未写 maxTurns（None）→ 回落 DELEGATE_DEFAULT_MAX_TURNS。"""
+    (tmp_path / "bare.md").write_text(
+        "---\nname: bare\ndescription: bare\nsystem_prompt: 你是 bare\n---\n\n正文。\n",
+        encoding="utf-8",
+    )
+    registry = AgentPresetRegistry(AgentPresetLoader(tmp_path))
+    registry.reload_if_changed()
+    exe = SkillExecutor(main_llm=object(), preset_registry=registry)
+    preset = exe._resolve_executor(_fork_record(), "bare")
+
+    assert preset is not None
+    assert preset.max_turns is None
+    assert exe._fork_max_turns(preset) == DELEGATE_DEFAULT_MAX_TURNS
+```
+
+- [ ] **Step 2: 跑测试确认失败**
+
+Run: `pytest tests/agents/skills/test_fork_executor_selection.py -v`
+Expected: FAIL —— `TypeError: __init__() got an unexpected keyword argument 'preset_registry'`
+
+- [ ] **Step 3: 加 `RequestContext.agent`**
+
+`src/infra/llm/request_context.py` 在 `deep_thinking` 字段附近追加（中文行内注释写清来源/范围/用途）：
+
+```python
+    agent: str = ""  # 会话绑定智能体名（来源：Plan 3 由 sessions.agent 写入；范围：请求内只读；用途：fork 执行者选择的第二优先级；空=未绑定→系统默认）
+```
+
+- [ ] **Step 4: 实现执行者选择与 maxTurns**
+
+`src/agents/skills/executor.py`：
+
+```python
+from src.agents.presets.models import AgentPreset
+from src.agents.presets.registry import AgentPresetRegistry
+```
+
+构造参数（R15 只加 `tool_provider`，本任务按 R1 补 `preset_registry`）：
+
+```python
+    def __init__(
+        self,
+        main_llm,
+        tool_provider: Callable[[], list] | None = None,
+        preset_registry: AgentPresetRegistry | None = None,
+    ) -> None:
+        """初始化执行器。
+
+        Args:
+            main_llm: 主 agent 的 llm 实例（fork 未声明 model 时按 model_name 继承复用）
+            tool_provider: 延迟求值的"当前启用工具"来源（None=子代理零工具）
+            preset_registry: 智能体预设注册表（None=不做执行者选择，落系统默认人设）
+        """
+```
+
+```python
+    def _resolve_executor(
+        self, record: SkillRecord, session_agent: str
+    ) -> AgentPreset | None:
+        """按优先级选执行者预设：skill.agent > 会话智能体 > None（系统默认）。
+
+        Args:
+            record: fork SkillRecord（其 agent 字段为最高优先级）
+            session_agent: 会话绑定智能体名（空串=未绑定）
+
+        Returns:
+            命中的 AgentPreset；两处都查不到（或未装配 registry）返回 None
+        """
         if self._preset_registry is None:
             return None
         if record.agent:
@@ -629,109 +802,752 @@ git commit -m "feat(delegate): fork 子代理改用 create_agent，人设来自 
             if preset is not None:
                 return preset
         return None
-```
-会话智能体名从 `current_request_ctx.get()` 上的新字段读取（Plan 3 会写它；本任务先在 ctx 上加 `agent: str = ""` 供 Plan 3 填充，读不到即空串 → 落系统默认）。
 
-- [ ] **Step 4: 跑测试确认通过** → [ ] **Step 5: 提交**
+    def _fork_max_turns(self, preset: AgentPreset | None) -> int:
+        """取 fork 子代理的 turn 上限：preset.max_turns 优先，缺省回落系统默认。"""
+        if preset is None:
+            return DELEGATE_DEFAULT_MAX_TURNS
+        if preset.max_turns is None:
+            return DELEGATE_DEFAULT_MAX_TURNS
+        return preset.max_turns
+```
+
+`_run_fork` 里把 `preset=None` 换成解析结果（**在切子 ctx 之前读会话智能体名**）：
+
+```python
+        ctx = current_request_ctx.get()
+        session_agent = ctx.agent if ctx is not None else ""
+        preset = self._resolve_executor(record, session_agent)
+        sub_agent = self._build_sub_agent(record, preset)
+        max_turns = self._fork_max_turns(preset)
+```
+（`max_turns` 原为 `DELEGATE_DEFAULT_MAX_TURNS` 常量赋值，改为上面的调用；`ctx` 若已在函数内取过就复用，不要重复 `get()`。注意保持 `_run_fork` < 80 行。）
+
+- [ ] **Step 5: 装配点构造 registry**
+
+`src/services/agent_service.py`（`skills_dir` 推导之后、注册分支之前加 `agents_dir`；导入放本地 import 块）：
+
+```python
+        from src.agents.presets.loader import AgentPresetLoader
+        from src.agents.presets.registry import AgentPresetRegistry
+
+        agents_dir = Path(__file__).resolve().parents[2] / "agents"
+```
+
+```python
+            if skill_registry.names():
+                preset_registry = AgentPresetRegistry(AgentPresetLoader(agents_dir))
+                preset_registry.reload_if_changed()  # 同名冲突 fail-fast（配置错误）
+                skill_executor = SkillExecutor(
+                    self._llm,
+                    tool_provider=lambda: fork_tool_pool,
+                    preset_registry=preset_registry,
+                )
+                delegate_task_tool = make_delegate_task(skill_registry, skill_executor)
+```
+
+- [ ] **Step 6: 跑测试确认通过**
+
+Run: `pytest tests/agents/skills/test_fork_executor_selection.py tests/agents/skills/ -v && pytest tests/ -q`
+Expected: PASS
+
+- [ ] **Step 7: 提交**
+
+```bash
+git add src/infra/llm/request_context.py src/agents/skills/executor.py src/services/agent_service.py tests/agents/skills/test_fork_executor_selection.py
+git commit -m "feat(delegate): fork 执行者按 skill.agent > 会话智能体 > 系统默认选择，maxTurns 生效"
+```
 
 ---
 
-### Task 6: 确认门（仅直出轮）与重跑预算互斥
+### Task 6: fork 工具硬约束（剔除交互/委派工具）
+
+> **范围变更（R22，已确认）**：change 的 4.6「确认门」**移出本计划到 Plan 3** —— 确认门的触发方（`/xxx` 直出）与消费方都属 Plan 3，且它不服务本计划"引用链不断"的核心目标。但**前提约束必须在本计划落地**：子代理不得持有 `ask_user` / `delegate_task`，否则一个 skill 只要写 `allowed-tools: ask_user` 就能拿到交互工具，直接推翻 D18 的确认门设计（并且 `delegate_task` 会引入递归委派）。
 
 **Files:**
-- Create: `src/agents/graph/verify/confirm_gate.py`
-- Modify: `src/agents/graph/verify/node.py`（直出轮先过确认门）
-- Test: `tests/agents/graph/test_confirm_gate.py`（新建）
+- Modify: `src/config/const.py`（新增 `FORK_FORBIDDEN_TOOLS`）
+- Modify: `src/agents/skills/fork_tools.py`（筛选时减去禁用集）
+- Test: `tests/agents/skills/test_fork_tools.py`（追加用例）
 
 **Interfaces:**
-- Consumes: 既有 `ask_user`/`pending_asks` 单槽与 `SSEInteractionTexts`
-- Produces: `async def confirm_gate(state, run) -> dict | None`：检测到"需确认"信号 → 走 `ask_user` → 返回重跑指令（上限 1 次）；**任何不通过路径返回 `{"_needs_regenerate": False}` 且带标注**，不再进入 verify 重跑（R7）
+- Consumes: Task 3 的 `select_fork_tools(allowed, available, executor_tools=None)`
+- Produces: `select_fork_tools` 的返回值恒不含 `FORK_FORBIDDEN_TOOLS` 中的工具
 
-- [ ] **Step 1~4: TDD 四个分支**（请求确认→答复→重跑；无信号直通；拒绝/超时→出结论+标注；预算不与 verify 叠加）
+- [ ] **Step 1: 追加失败测试**
+
+`tests/agents/skills/test_fork_tools.py` 追加：
+
+```python
+@tool("delegate_task")
+def _delegate(skill: str, task: str) -> str:
+    """委派。"""
+    return skill
+
+
+def test_ask_user_is_never_handed_to_sub_agent():
+    """D18：子代理不持有面向用户的交互工具，即使 skill 显式声明也不给。"""
+    assert select_fork_tools(["ask_user"], [_ask]) == []
+
+
+def test_delegate_task_is_never_handed_to_sub_agent():
+    """D7：子代理不得再委派（防递归），即使 skill 显式声明也不给。"""
+    assert select_fork_tools(["delegate_task"], [_delegate]) == []
+
+
+def test_forbidden_tools_do_not_block_allowed_readonly_tools():
+    """禁用集只剔除自身，不影响同一白名单里的只读检索工具。"""
+    picked = select_fork_tools(["ask_user", "retrieve_kb"], [_ask, _retrieve])
+    assert [t.name for t in picked] == ["retrieve_kb"]
+```
+
+- [ ] **Step 2: 跑测试确认失败**
+
+Run: `pytest tests/agents/skills/test_fork_tools.py -v`
+Expected: FAIL —— 前两条断言当前会返回含 `ask_user` / `delegate_task` 的列表
+
+- [ ] **Step 3: 实现**
+
+`src/config/const.py`（放 `SKILL_TASK_PLACEHOLDERS` 附近，中文注释说明依据）：
+
+```python
+FORK_FORBIDDEN_TOOLS = ("ask_user", "delegate_task")
+"""fork 子代理永不可持有的工具名。
+
+ask_user：D18 —— 子代理不直接交互，需要确认时由编排层确认门代为询问。
+delegate_task：D7 —— 子代理不再委派，防递归与上下文爆炸。
+"""
+```
+
+`src/agents/skills/fork_tools.py`：把 `names` 的计算改为先建白名单再减去禁用集（用 `set.difference` 或 `for` 循环，不要三元）：
+
+```python
+    if not allowed:
+        return []
+    names = set(allowed)
+    names -= set(FORK_FORBIDDEN_TOOLS)
+    if not names:
+        return []
+    if executor_tools:
+        names &= set(executor_tools)
+```
+
+（`names` 为空时提前返回是可选的优化；保留与否都行，但**不得**因此改变既有四条用例的语义。）
+
+- [ ] **Step 4: 跑测试确认通过**
+
+Run: `pytest tests/agents/skills/test_fork_tools.py tests/agents/skills/ -v`
+Expected: PASS（含既有 4 条）
+
 - [ ] **Step 5: 提交**
 
+```bash
+git add src/config/const.py src/agents/skills/fork_tools.py tests/agents/skills/test_fork_tools.py
+git commit -m "fix(delegate): fork 工具剔除 ask_user/delegate_task，落实子代理不交互不递归"
+```
+
 ---
 
-### Task 7: 直出路径的引用池回传（D24）
+### Task 7: verify 判据随材料走（材料载体 = AgentState）
+
+> 预检 R5 + **R5-amended**：判据的**材料**统一走 `AgentState`，但**流程字段不走**。
+> **为什么不把 `web_confirmed`/`verify_ask_count`/`web_guided` 也快照化**：这三个字段在同一次 verify 调用内被**写后读**（`regen_decision.py:79` 写 `ctx.web_confirmed = True` → `:87` 立刻读它决定分支；`ask_confirm.py:36` 自增 `verify_ask_count`），一旦改成读快照就会丢掉刚写入的值，行为改变。它们本就是请求级流程状态、且子代理从不写它们，留在主 ctx 是正确的。
 
 **Files:**
-- Modify: `src/agents/skills/delegate_run.py`（`result_text` 已含；`ctx` 提供引用池）
-- Modify: `src/agents/graph/state.py`（`tool_contexts` 复用；无需新字段——由 Task 8 的直出节点写入）
-- Test: `tests/agents/skills/test_fork_citation_pool.py`（新建）
+- Modify: `src/agents/graph/state.py`（新增 `verify_temporal_years` 字段）
+- Modify: `src/agents/graph/agent_node.py`（`agent_finalize` 顺带写该字段）
+- Modify: `src/agents/graph/verify/node.py`（年份判据改读 `state`）
+- Modify: `src/agents/graph/verify/guardrails.py`（引用池判据改读 `state.tool_contexts`）
+- Test: `tests/agents/graph/test_verify_material_source.py`（新建）
 
 **Interfaces:**
-- Consumes: Task 1 的 `DelegateRun`；既有 `format_node`（已读 `state.tool_contexts`）
-- Produces: 直出轮 `format` 的引用池 = 子代理池（`run.ctx.tool_contexts`），不改写主 ctx
+- Consumes: 既有 `AgentState.tool_contexts`（已由 `agent_finalize` 写入主 ctx 池；`format_node` 已在读）
+- Produces:
+  - `AgentState.verify_temporal_years: list[int]`
+  - `_has_web_context(state) -> bool` / `_has_kb_context(state) -> bool`（签名由 `ctx` 改为 `state`）
 
-- [ ] **Step 1~3: TDD**：构造一个子代理在子池写入 2 条 + 答案含 `[1][2]` 的直出轮，断言 `citations` 非空（index 1/2）、`INVALID_CITATION` 信号**未**产生、主池仍为空。
-- [ ] **Step 4: 提交**
+**关键事实（已实机核对）：**
+- `AgentState` 是 **`@dataclass`**（不是 TypedDict）→ 加字段无需 reducer。
+- `state.tool_contexts` 已经是"本轮材料池"的既有载体：常规轮由 `agent_finalize`（`agent_node.py:205`）从主 ctx 写入；直出轮将由 Task 8 的直出节点写入子代理池。**因此引用池不需要新字段**，只需把护栏的读取源从 ctx 改成 state。
+- 只有 `temporal_years` 需要新载体（verify 用它做年份完整性比对，`verify/node.py:44`）。
+- `web_citation_guard` 里有一处 **写** ctx（`guardrails.py:98` `ctx.web_count = 0`）→ 该函数必须继续接收 `ctx`。
+- `kb_citation_guardrail` 若无其它 ctx 用途，把 `ctx` 形参一并删除（避免留未使用参数），同步改 `verify/node.py` 的调用。
+
+- [ ] **Step 1: 写失败测试**
+
+`tests/agents/graph/test_verify_material_source.py`：
+
+```python
+"""verify 的判据材料必须随 AgentState 走，而不是读主 ctx。
+
+常规轮由 agent_finalize 把主 ctx 池快照进 state；直出轮由直出节点把子代理池写进 state。
+故"主 ctx 池"与"判据材料"必须解耦：state 有材料 → 护栏生效；state 无材料 → 即使主 ctx
+有材料也不生效（证明不再偷看主 ctx）。
+"""
+
+import pytest
+
+from src.agents.graph.state import AgentState
+from src.agents.graph.verify.node import verify_node
+from src.infra.llm.request_context import RequestContext, current_request_ctx
+
+
+class _KbContext:
+    """最小 RAGContext 替身（只需 kind 供 _has_kb_context 判定）。"""
+
+    def __init__(self, content: str = "2023 年营收 100 亿"):
+        self.content = content
+        self.source = "annual.pdf"
+        self.page = 12
+        self.score = 0.9
+        self.kind = "kb"
+        self.tier = ""
+
+    def to_prompt_text(self) -> str:
+        return self.content
+
+
+def _state(**overrides) -> AgentState:
+    """构造绑定 KB 的 state，判据材料缺省为空。"""
+    defaults = {
+        "session_id": "s1",
+        "kb_id": "kb1",
+        "query": "2024 年营收",
+        "answer": "公司经营稳健，业务持续增长。",
+        "tool_contexts": [],
+        "verify_temporal_years": [],
+    }
+    defaults.update(overrides)
+    return AgentState(**defaults)
+
+
+@pytest.mark.asyncio
+async def test_guardrail_uses_state_materials_not_main_ctx(monkeypatch):
+    """直出轮形态：主 ctx 池为空、材料在 state → 护栏仍生效（不再空转）。"""
+    main_ctx = RequestContext(session_id="s1", kb_id="kb1", kb_bound=True)
+    token = current_request_ctx.set(main_ctx)
+    try:
+        state = _state(tool_contexts=[_KbContext()])
+        out = await verify_node(state)
+    finally:
+        current_request_ctx.reset(token)
+
+    assert out["_needs_regenerate"] is True
+    assert main_ctx.tool_contexts == []  # 主池不被改写（D7/D24）
+
+
+@pytest.mark.asyncio
+async def test_main_ctx_materials_are_not_read_any_more(monkeypatch):
+    """反向证明：主 ctx 有材料但 state 没有 → 护栏不生效（判据只看 state）。"""
+    main_ctx = RequestContext(session_id="s1", kb_id="kb1", kb_bound=True)
+    main_ctx.tool_contexts.append(_KbContext())
+    token = current_request_ctx.set(main_ctx)
+    try:
+        state = _state(tool_contexts=[])
+        out = await verify_node(state)
+    finally:
+        current_request_ctx.reset(token)
+
+    assert out["_needs_regenerate"] is False
+
+
+@pytest.mark.asyncio
+async def test_year_check_uses_state_verify_temporal_years(monkeypatch):
+    """年份完整性判据来自 state.verify_temporal_years（不是主 ctx）。"""
+    main_ctx = RequestContext(session_id="s1", kb_id="kb1", kb_bound=True)
+    main_ctx.temporal_years = [2024]  # 主 ctx 有年份，但 state 没有 → 不做完整性校验
+    token = current_request_ctx.set(main_ctx)
+    try:
+        state = _state(answer="2023 年营收 100 亿。", tool_contexts=[])
+        out = await verify_node(state)
+    finally:
+        current_request_ctx.reset(token)
+
+    assert out["_needs_regenerate"] is False
+```
+
+> 说明：`verify_node` 需 `settings.VERIFY_ENABLED=True`（默认即 True）；若测试环境默认关闭，在文件顶部加 `monkeypatch.setenv` 或在用例内 `monkeypatch.setattr(settings, "VERIFY_ENABLED", True)`——实现者按实跑结果决定，并在报告里写明。
+
+- [ ] **Step 2: 跑测试确认失败**
+
+Run: `pytest tests/agents/graph/test_verify_material_source.py -v`
+Expected: FAIL —— `test_guardrail_uses_state_materials_not_main_ctx` 当前会因主 ctx 池空而静默放行
+
+- [ ] **Step 3: 加 state 字段并让 `agent_finalize` 写入**
+
+`src/agents/graph/state.py` 在 `tool_contexts` 附近追加：
+
+```python
+    verify_temporal_years: list[int] = field(
+        default_factory=list
+    )  # verify 判据材料：本轮要求覆盖年份（来源：常规轮 agent_finalize 从主 ctx 写入 / 直出轮直出节点从子 ctx 写入；用途：年份完整性比对；空=不校验）
+```
+
+`src/agents/graph/agent_node.py` 的 `agent_finalize` 追加返回值（保持既有 `answer` / `tool_contexts` 不变）：
+
+```python
+    ctx = current_request_ctx.get()
+    if ctx is not None:
+        contexts = ctx.tool_contexts
+        years = ctx.temporal_years
+    else:
+        contexts = []
+        years = []
+    return {"answer": answer, "tool_contexts": contexts, "verify_temporal_years": years}
+```
+
+- [ ] **Step 4: 护栏与 verify 改读 state**
+
+`src/agents/graph/verify/guardrails.py`：
+- `_has_web_context(ctx)` → `_has_web_context(state: AgentState) -> bool`，体内 `for c in state.tool_contexts`。
+- `_has_kb_context(ctx)` → `_has_kb_context(state: AgentState) -> bool`，同上。
+- `web_citation_guard(state, ctx)`：`ctx` **保留**（`ctx.web_count = 0` 的写）；内部判定改用 `_has_web_context(state)`。
+- `kb_citation_guardrail(state, ctx)`：若 `ctx` 除 `_has_kb_context` 外再无用途 → **删除 `ctx` 形参**，内部改用 `_has_kb_context(state)`。
+- docstring 同步（判据来源从"当前请求上下文"改为"AgentState 承载的本轮材料"）。
+
+`src/agents/graph/verify/node.py`：
+- `required = state.verify_temporal_years`（原来的 `ctx.temporal_years if ctx is not None else []` 删除）。
+- `ctx` 仍保留（`decide_missing_web` 需要 `web_confirmed` / `web_guided`）。
+- 按 Step 4 的结论调整 `kb_citation_guardrail` 调用参数。
+
+- [ ] **Step 5: 跑测试确认通过（含既有 verify 测试回归）**
+
+Run: `pytest tests/agents/graph/test_verify_material_source.py tests/agents/graph/ -v && pytest tests/ -q`
+Expected: PASS —— **既有 verify / 护栏测试必须逐条不变通过**（常规轮行为等价）
+
+- [ ] **Step 6: 提交**
+
+```bash
+git add src/agents/graph/state.py src/agents/graph/agent_node.py src/agents/graph/verify/node.py src/agents/graph/verify/guardrails.py tests/agents/graph/test_verify_material_source.py
+git commit -m "refactor(verify): 判据材料改由 AgentState 承载，直出轮不再空转（D26）"
+```
 
 ---
 
-### Task 8: 图入口分派 + `skill_direct` 节点 + verify 判据统一（D26）
+### Task 8: 图入口分派 + `skill_direct` 节点 + 直出引用池（D26/D24）
 
 **Files:**
-- Modify: `src/agents/graph/state.py`（新增 `direct_skill: str = ""` 与 `verify_inputs: VerifyInputs | None = None`；新增 `VerifyInputs` dataclass）
-- Create: `src/agents/graph/verify/inputs.py`（`VerifyInputs` + `verify_inputs_from_ctx(ctx)`）
-- Modify: `src/agents/graph/workflow.py`（入口条件边 + `skill_direct` 节点 + `route_verify` 增回直出的路由）
-- Modify: `src/agents/graph/agent_node.py`（`agent_finalize` 顺带写 `verify_inputs`）
-- Modify: `src/agents/graph/verify/node.py` + `guardrails.py`（判据改读 `VerifyInputs`）
-- Modify: `src/services/agent_service.py`（初始 state 注入 `direct_skill`——Plan 3 填值，本任务可由测试直接注入）
-- Test: `tests/agents/graph/test_entry_dispatch.py`、`tests/agents/graph/test_direct_verify_source.py`（新建）
+- Create: `src/agents/graph/skill_direct.py`（`route_entry` + `make_skill_direct_node` + 未装配兜底节点）
+- Modify: `src/config/const.py`（`LangGraphNode` 内加 `SkillDirect.NAME`；`SSEInteractionTexts` 加两条直出兜底文案）
+- Modify: `src/core/log_events.py` + `src/core/log_event_specs.py`（登记 `SKILL_DIRECT_SKIP`；**先登记再启用**）
+- Modify: `src/agents/graph/state.py`（新增 `direct_skill: str = ""`）
+- Modify: `src/agents/graph/workflow.py`（`START` 条件入口 + `skill_direct` 节点注册 + `skill_direct → verify` 边 + `route_verify` 增回直出的路由）
+- Modify: `src/services/agent_service.py`（把 `skill_registry` / `skill_executor` 传入 `build_graph`）
+- Test: `tests/agents/graph/test_entry_dispatch.py`、`tests/agents/graph/test_direct_skill_round.py`（新建）
 
 **Interfaces:**
-- Consumes: Task 4/5 的 executor；Task 7 的引用池回传
-- Produces: `route_entry(state) -> str`（`"agent"` | `"skill_direct"`）；`make_skill_direct_node(executor, preset_registry)`；`VerifyInputs(tool_contexts, temporal_years, missing_years, web_confirmed, verify_ask_count, web_guided)`
+- Consumes: Task 5 的 executor（`execute(record, task, run)`）/ Task 3 的 `make_delegate_task`；Task 7 的 `verify_temporal_years` 载体；`SkillRegistry.get(name) -> SkillRecord | None`（registry.py:57，**未命中返回 None**）、`SkillRegistry.reload_if_changed()`
+- Produces:
+  - `route_entry(state: AgentState) -> str`（`"agent"` | `"skill_direct"`）
+  - `make_skill_direct_node(skill_registry, executor) -> Callable[[AgentState], Awaitable[dict]]`
+  - `build_graph(..., skill_direct_node=None)`
 
-- [ ] **Step 1~6: TDD 要点**
-  1. `route_entry`：`direct_skill` 非空 → `skill_direct`；空 → `agent`（既有行为不变）
-  2. 直出节点：调 executor → 写 `answer` / `tool_contexts`(=子池) / `verify_inputs`(=子 ctx 快照)；**主 agent 轮次为 0**（用 sink 计数断言 `agent` 节点未被调用）
-  3. `verify_node` 改用 `state.verify_inputs or verify_inputs_from_ctx(ctx)`；`agent_finalize` 常规轮写入该快照 → **常规轮行为逐字不变**（快照与旧 ctx 读取等价）
-  4. `route_verify`：直出轮 `_needs_regenerate` → `skill_direct`；常规轮 → `agent`
-  5. 护栏改吃 `VerifyInputs` 后，直出轮**不再静默跳过**（构造"子池有 kb 材料 + 答案无 `[n]`" → 断言护栏触发）
-- [ ] **Step 7: 跑测试确认通过** → [ ] **Step 8: 提交**
+**关键事实（已实机核对）：**
+- `langgraph.graph.START` 可用（`__start__`）；现图用 `builder.set_entry_point("agent")`。
+- `LangGraphNode` 是"每个节点一个嵌套类、`NAME` 为注册名"的结构（`state.py:73-85`）→ 新增 `class SkillDirect: NAME: str = "skill_direct"`。
+- `format_node` 读 `state.tool_contexts`，越界 `[n]` 会打 `Signal.INVALID_CITATION`（`nodes.py:79-90`）→ 直出轮只要把子代理池写进 `state.tool_contexts`，引用链与信号就都正确。
+- 直出节点**不做** delegate start/end SSE 事件（`delegate_task.py` 才有）——见本任务末尾的 R23 说明。
+
+- [ ] **Step 1: 写失败测试**
+
+`tests/agents/graph/test_entry_dispatch.py`：
+
+```python
+"""图入口分派：direct_skill 非空 → skill_direct；空 → 常规 agent 轮。"""
+
+from src.agents.graph.skill_direct import route_entry
+from src.agents.graph.state import AgentState
+
+
+def test_entry_routes_direct_when_skill_selected():
+    """命令行直出：direct_skill 非空 → skill_direct。"""
+    assert route_entry(AgentState(session_id="s1", direct_skill="finance-analyst")) == "skill_direct"
+
+
+def test_entry_routes_agent_when_no_skill():
+    """常规轮：direct_skill 为空 → agent（既有行为不变）。"""
+    assert route_entry(AgentState(session_id="s1")) == "agent"
+```
+
+`tests/agents/graph/test_direct_skill_round.py`：
+
+```python
+"""直出轮整链：主 agent 零 LLM 轮、子代理材料进 state、引用不丢。"""
+
+import pytest
+
+from src.agents.graph.skill_direct import make_skill_direct_node
+from src.agents.graph.state import AgentState
+from src.agents.graph.workflow import build_graph
+from src.agents.skills.models import SkillContext, SkillRecord
+from src.infra.llm.request_context import RequestContext, current_request_ctx
+
+
+class _KbContext:
+    """最小 RAGContext 替身。"""
+
+    def __init__(self, content: str, page: int):
+        self.content = content
+        self.source = "annual.pdf"
+        self.page = page
+        self.score = 0.9
+        self.kind = "kb"
+        self.tier = ""
+
+    def to_prompt_text(self) -> str:
+        return self.content
+
+
+class _FakeRegistry:
+    """只实现直出节点用到的 get / reload。"""
+
+    def __init__(self, record):
+        self._record = record
+
+    def reload_if_changed(self) -> None:
+        return None
+
+    def get(self, name):
+        if name == self._record.name:
+            return self._record
+        return None
+
+
+class _FakeExecutor:
+    """替身：在子池写 2 条材料并返回带 [1][2] 的答案。"""
+
+    def __init__(self):
+        self.seen_run = None
+
+    async def execute(self, record, task, run=None):
+        self.seen_run = run
+        run.ctx.tool_contexts.append(_KbContext("2024 年营收 1000 亿", 12))
+        run.ctx.tool_contexts.append(_KbContext("2023 年营收 900 亿", 13))
+        run.ctx.temporal_years.append(2024)
+        return "公司 2024 年营收 1000 亿[1]，同比增至 900 亿[2]。"
+
+
+def _graph(fake_executor, record, **kwargs):
+    """构建带直出节点的最小图（tools 传空避免真实检索）。"""
+    node = make_skill_direct_node(_FakeRegistry(record), fake_executor)
+    return build_graph(
+        vector_store=None,
+        bm25=None,
+        llm=None,
+        reranker=None,
+        prompt_manager=None,
+        tools=[],
+        skill_direct_node=node,
+        **kwargs,
+    )
+
+
+@pytest.mark.asyncio
+async def test_direct_round_keeps_child_citations_and_zero_agent_rounds():
+    """直出轮：主 agent 0 轮、citations 落在子代理池、主池不被污染。"""
+    record = SkillRecord(
+        name="finance-analyst",
+        description="d",
+        context=SkillContext.FORK,
+        fork_body="任务：$ARGUMENTS",
+        allowed_tools=[],
+    )
+    fake = _FakeExecutor()
+    graph = _graph(fake, record)
+    main_ctx = RequestContext(session_id="s1", kb_id="kb1", kb_bound=True)
+    token = current_request_ctx.set(main_ctx)
+    try:
+        out = await graph.ainvoke(
+            AgentState(
+                session_id="s1",
+                kb_id="kb1",
+                query="2024 年营收",
+                direct_skill=record.name,
+            )
+        )
+    finally:
+        current_request_ctx.reset(token)
+
+    assert out["_agent_iterations"] == 0  # 主 agent 一轮都没跑
+    assert [c["index"] for c in out["citations"]] == [1, 2]
+    assert out["answer"].startswith("公司 2024 年营收")
+    assert main_ctx.tool_contexts == []  # 主池保持为空（D7/D24）
+    assert main_ctx.temporal_years == []
+
+
+@pytest.mark.asyncio
+async def test_unknown_or_inline_skill_falls_open():
+    """direct_skill 命中不到 / 非 fork → 兜底文案，不抛、不空转。"""
+    record = SkillRecord(
+        name="finance-qa",
+        description="d",
+        context=SkillContext.INLINE,
+        inline_prompt="方法论 $ARGUMENTS",
+    )
+    graph = _graph(_FakeExecutor(), record)
+    main_ctx = RequestContext(session_id="s1", kb_id="kb1", kb_bound=True)
+    token = current_request_ctx.set(main_ctx)
+    try:
+        out = await graph.ainvoke(
+            AgentState(session_id="s1", kb_id="kb1", query="q", direct_skill="finance-qa")
+        )
+    finally:
+        current_request_ctx.reset(token)
+
+    assert out["_needs_regenerate"] is False
+    assert out["citations"] == []
+```
+
+> 实现者注意：`build_graph` 现有签名已含 `tools=None` 覆盖参数（`workflow.py:63`）；`vector_store=None` 等占位参数只有在 `tools` 已给出时才不会被使用。若 `build_graph` 对 `llm`/`prompt_manager` 有非 None 断言，改用轻量替身对象并在报告里写明。
+
+- [ ] **Step 2: 跑测试确认失败**
+
+Run: `pytest tests/agents/graph/test_entry_dispatch.py tests/agents/graph/test_direct_skill_round.py -v`
+Expected: FAIL —— `ModuleNotFoundError: src.agents.graph.skill_direct`
+
+- [ ] **Step 3: 常量与事件登记（先登记再启用）**
+
+`src/config/const.py`：
+```python
+    class SkillDirect:
+        NAME: str = "skill_direct"  # 命令行直出节点（/xxx 命中 fork skill）
+```
+`SSEInteractionTexts` 追加两条用户可见文案：
+```python
+    SKILL_DIRECT_UNAVAILABLE: str = "该技能不可直接执行，请去掉前缀后重试。"
+    SKILL_DIRECT_CTX_UNAVAILABLE: str = "Error: 请求上下文不可用"
+```
+`src/core/log_events.py`：`Event` 加 `SKILL_DIRECT_SKIP = "skill_direct_skip"`；`src/core/log_event_specs.py` 加对应 `EventSpec`（prefix 用 `"agent"`，level `"info"`，fields `("skill", "reason")`）——两处必须同名，否则 import 期 `AssertionError`。
+
+- [ ] **Step 4: `state.py` 加字段**
+
+```python
+    direct_skill: str = ""  # 本轮命令行直出的 fork skill 名（来源：AgentService 解析 /xxx 后注入初始 state，Plan 3 填值；用途：入口分派与重生成目标；空=常规轮）
+```
+
+- [ ] **Step 5: 新建 `src/agents/graph/skill_direct.py`**
+
+```python
+"""命令行直出节点（D22/D24/D26）。
+
+/xxx 命中 fork skill 时，主 agent 零 LLM 轮：直接跑 fork 子代理，把子代理的
+answer 与"本轮材料"（引用池 + 要求覆盖年份）搬进 AgentState，再交给 verify/format。
+子代理跑在自己的 RequestContext 里，主 ctx 不被写入（D7/D24）。
+"""
+
+import uuid
+
+from src.agents.graph.state import AgentState, LangGraphNode
+from src.agents.skills.delegate_run import DelegateRun
+from src.agents.skills.models import SkillContext
+from src.config.const import SSEInteractionTexts
+from src.core import logging as core_logging
+from src.core.log_events import Event
+from src.infra.llm.request_context import current_request_ctx
+
+
+def route_entry(state: AgentState) -> str:
+    """入口分派：命中命令行直出 → skill_direct；其余 → 常规 agent 轮。"""
+    if state.direct_skill:
+        return LangGraphNode.SkillDirect.NAME
+    return "agent"
+
+
+def make_skill_direct_node(skill_registry, executor):
+    """构造直出节点。
+
+    Args:
+        skill_registry: SkillRegistry（懒重载后按名解析 SkillRecord）
+        executor: SkillExecutor（经 execute(record, task, run) 跑 fork 子代理）
+
+    Returns:
+        图节点函数：写 answer / tool_contexts / verify_temporal_years
+    """
+
+    async def skill_direct(state: AgentState) -> dict:
+        main_ctx = current_request_ctx.get()
+        if main_ctx is None:
+            return {
+                "answer": SSEInteractionTexts.SKILL_DIRECT_CTX_UNAVAILABLE,
+                "_needs_regenerate": False,
+            }
+        skill_registry.reload_if_changed()
+        record = skill_registry.get(state.direct_skill)
+        if record is None or record.context != SkillContext.FORK:
+            core_logging.log_event(
+                Event.SKILL_DIRECT_SKIP, skill=state.direct_skill, reason="not_fork"
+            )
+            return {
+                "answer": SSEInteractionTexts.SKILL_DIRECT_UNAVAILABLE,
+                "_needs_regenerate": False,
+            }
+        run = DelegateRun(
+            delegate_id=uuid.uuid4().hex[:8], skill_name=record.name, ctx=main_ctx.child()
+        )
+        text = await executor.execute(record, state.query, run)
+        return {
+            "answer": text,
+            "tool_contexts": run.ctx.tool_contexts,
+            "verify_temporal_years": run.ctx.temporal_years,
+        }
+
+    return skill_direct
+
+
+def unavailable_skill_direct(state: AgentState) -> dict:
+    """未装配 executor 时的兜底直出节点（fail-open，让 verify/format 正常收尾）。"""
+    return {
+        "answer": SSEInteractionTexts.SKILL_DIRECT_UNAVAILABLE,
+        "_needs_regenerate": False,
+    }
+```
+
+- [ ] **Step 6: `workflow.py` 接入入口与路由**
+
+- 追加形参 `skill_direct_node=None`，导入 `from langgraph.graph import END, START, StateGraph`。
+- 注册节点（**恒注册**，避免"条件边映射到不存在的节点"）：
+```python
+    builder.add_node(
+        LangGraphNode.SkillDirect.NAME,
+        skill_direct_node if skill_direct_node is not None else unavailable_skill_direct,
+    )
+```
+- 入口改为条件边，并删掉 `builder.set_entry_point("agent")`：
+```python
+    builder.add_conditional_edges(
+        START,
+        route_entry,
+        {"agent": "agent", LangGraphNode.SkillDirect.NAME: LangGraphNode.SkillDirect.NAME},
+    )
+```
+- 直出节点 → verify：
+```python
+    builder.add_edge(LangGraphNode.SkillDirect.NAME, "verify")
+```
+- `route_verify` 增回直出的分支：
+```python
+def route_verify(state: AgentState) -> str:
+    if state._needs_regenerate:
+        if state.direct_skill:
+            return LangGraphNode.SkillDirect.NAME
+        return "agent"
+    return LangGraphNode.Format.NAME
+```
+- docstring 同步（入口/直出节点/回直出）。
+
+- [ ] **Step 7: `agent_service` 传入直出节点**
+
+`skill_registry` / `skill_executor` 都在 `__init__` 里已存在（skills 分支内）；把它们提到分支外可见的位置（未命中时置 `None`），再：
+```python
+        skill_direct_node = None
+        if skill_registry is not None and skill_executor is not None:
+            skill_direct_node = make_skill_direct_node(skill_registry, skill_executor)
+        self._graph = build_graph(..., skill_direct_node=skill_direct_node)
+```
+（`make_skill_direct_node` 从 `src.agents.graph.skill_direct` 本地导入。`direct_skill` 的**填值**属 Plan 3，本任务不接线。）
+
+- [ ] **Step 8: 跑测试确认通过**
+
+Run: `pytest tests/agents/graph/ -v && pytest tests/ -q`
+Expected: PASS —— 既有图测试全部不变通过（`direct_skill=""` 时入口行为与 `set_entry_point("agent")` 等价）
+
+- [ ] **Step 9: 提交**
+
+```bash
+git add src/agents/graph/skill_direct.py src/agents/graph/state.py src/agents/graph/workflow.py src/config/const.py src/core/log_events.py src/core/log_event_specs.py src/services/agent_service.py tests/agents/graph/test_entry_dispatch.py tests/agents/graph/test_direct_skill_round.py
+git commit -m "feat(graph): 图入口分派 + skill_direct 直出节点，引用池与校验判据随材料走（D24/D26）"
+```
+
+> **R23（记录，不在本计划实现）**：直出路径**不发** `delegate` start/end SSE 事件（子代理 delta 会经共享 `clarify_channel` 流出，但没有"开始/结束"包裹）。前端卡片需要 start/end 时由 Plan 3 补（触发方与 UI 契约都在那里）。**若判断有误**：直出轮 UI 只有增量、没有卡片头尾，观感缺一截，Plan 3 补 20 行即可。
 
 ---
 
-### Task 9: 收口（事件登记 / 防复发 / 文档 / 门禁）
+### Task 9: 收口（事件登记 / 防复发 / 部署 / 文档 / 门禁）
 
 **Files:**
-- Modify: `src/core/log_events.py`（登记 `delegate slot`… 等新事件）
-- Modify: `docs/agents/defensive-patterns.md`（登记本次两类缺陷：活跃状态按 id 分槽、构造期快照进程级注册表）
-- Modify: `docs/agents/api_contract.md`（`execute()` 签名与 `DelegateRun` 契约）
-- Modify: `docs/agents/code-map.md`（`fork_stream.py` / `fork_tools.py` / `delegate_run.py` / `verify/inputs.py`）
-- Modify: `docs/openspec/changes/session-agent-and-skill-invocation/tasks.md`（4.8 标注移入 Plan 3；3.4 标注由 Plan 2 完成；4.7 限定"确认门仅直出轮"）
+- Modify: `docker-compose.override.yml`（挂载 `agents/`）
+- Modify: `docs/agents/defensive-patterns.md`（登记本次两类缺陷）
+- Modify: `docs/agents/api_contract.md`（`SkillExecutor.execute` 签名与 `DelegateRun` 契约）
+- Modify: `docs/agents/code-map.md`（`fork_stream.py` / `fork_tools.py` / `delegate_run.py` / `skill_direct.py` / `presets/`）
+- Modify: `docs/agents/glossary.md`（如需：直出节点、执行者选择术语）
+- Modify: `docs/openspec/changes/session-agent-and-skill-invocation/tasks.md`（分工标注回写）
 - Test: 全量门禁
 
-- [ ] **Step 1: 登记日志事件**（按"开放登记制"先 `Event` + `EVENT_SPECS` 再启用）
-- [ ] **Step 2: 登记防御模式两条**（现象→规则格式）
-- [ ] **Step 3: 契约/文档同步**（一事一档，别处链接不复制）
-- [ ] **Step 4: 回写 change 的 tasks.md 分工标注**（R1/R6/R7 落地）
-- [ ] **Step 5: 跑全量门禁**（`pytest tests/ -v` / `ruff check .` / `pyright src/` / `check_docs`）
+- [ ] **Step 1: 开发环境挂载 `agents/`（R20）**
+
+`docker-compose.override.yml` 的 app volumes 追加一行（与 `skills/` 对齐）：
+```yaml
+      - /mnt/d/code/demo/AIAgent/corporate_rag/agents:/app/agents
+```
+验证：`docker compose config | grep -A 8 "app:"` 能看到该挂载；若容器在运行，`docker compose up -d --force-recreate app` 后 `docker compose exec app ls /app/agents` 能列出 `finance-expert.md`。
+
+- [ ] **Step 2: 登记防御模式两条**
+
+`docs/agents/defensive-patterns.md` 按"现象 → 规则"格式追加到对应章节（并发 / Prompt 或新章节）：
+1. **进程级注册表不得在构造期快照**：现象——`SkillLoader` 在构造时快照 `readonly_map()`，而生产构造 loader 早于工具注册 → fail-safe 永不触发（Plan 1 最终评审发现）；规则——需要进程级事实时在**解析/使用期**惰性读取，不在构造期缓存。
+2. **活跃状态按调用分槽，不挂在共享上下文单值字段上**：现象——一轮内多个 `delegate_task` 被 `asyncio.gather` 并发调度，把 `delegate_id`/停止原因写在共享 `RequestContext` 单值字段上会互相覆盖（串号）；规则——每次调用一个独立实例（`DelegateRun`）并由调用方逐层传递；若必须落 ctx，落**该次调用的独立子 ctx**。
+
+- [ ] **Step 3: 契约 / 文档同步（一事一档，别处链接不复制）**
+
+- `docs/agents/api_contract.md`：`SkillExecutor.execute(record, task, run=None) -> str` 的 `run` 语义（承载子 ctx / delegate_id / stop_reason / result_text）；`DelegateRun` 字段表；`select_fork_tools` 的交集口径与禁用集；`make_skill_direct_node` 的入参。
+- `docs/agents/code-map.md`：新增模块登记（`fork_stream.py` / `fork_tools.py` / `delegate_run.py` / `skill_direct.py` / `presets/`）。
+- `docs/agents/glossary.md`：按需补"直出（skill_direct）/ 执行者选择"术语，**不复制** design.md 正文，只留一句话 + 指针。
+
+- [ ] **Step 4: 回写 change 的 tasks.md 分工标注**
+
+`docs/openspec/changes/session-agent-and-skill-invocation/tasks.md`：
+- 3.4 标注「由 Plan 2 提前完成」；
+- 4.6（确认门）标注「移出 Plan 2 → Plan 3」（R22）；
+- 4.7 补一句限定「确认门四个分支的测试随 4.6 进 Plan 3」；
+- 4.11 的"按轮次选择来源"改述为「材料判据统一由 `AgentState` 承载（R5-amended）：`tool_contexts` 复用 + `verify_temporal_years` 新增；流程字段（`web_confirmed`/`verify_ask_count`/`web_guided`）仍读主 ctx」。
+
+- [ ] **Step 5: 跑全量门禁**
+
+```
+pytest tests/ -v
+ruff check .
+pyright src/
+python -m src.cli.check_docs
+```
+
 - [ ] **Step 6: 提交**
+
+```bash
+git add docker-compose.override.yml docs/agents/defensive-patterns.md docs/agents/api_contract.md docs/agents/code-map.md docs/agents/glossary.md docs/openspec/changes/session-agent-and-skill-invocation/tasks.md
+git commit -m "docs(delegate): 收口执行层——防御模式/契约/文档/分工标注/开发挂载"
+```
+
 
 ---
 
 ## Self-Review
 
-**1. Spec coverage（对照 change 的 4.x）**
+**1. Spec coverage（对照 change 的 4.x，T1–T5 已交付，T6–T9 已按真实形状补全）**
 
-| change 任务 | 覆盖 |
-|---|---|
-| 4.1 独立 RequestContext + `delegate_id` 分槽 | T1 + T2 |
-| 4.2 `create_agent` + 人设/任务分离 + 工具交集 | T3（seam）+ T4 |
-| 4.3 执行者选择顺序 | T5 |
-| 4.4 `_resolve_fork_llm` 简化 + `maxTurns` | Plan 1 已做 thinking/常量部分；`maxTurns` 在 T5 |
-| 4.5 打破循环依赖 | T3（按 R2 前置） |
-| 4.6 确认门 | T6 |
-| 4.7 测试 | 各任务内嵌 + T9 门禁 |
-| 4.8 预加载 | **移出**（R6 → Plan 3） |
-| 4.9 直出引用池并轨 | T7 |
-| 4.10 图入口分派 | T8 |
-| 4.11 直出节点 + verify 语义适配 | T8 |
+| change 任务 | 覆盖 | 状态 |
+|---|---|---|
+| 4.1 独立 RequestContext + `delegate_id` 分槽 | T1 + T2 | ✅ 已交付 |
+| 4.2 `create_agent` + 人设/任务分离 + 工具交集 | T3（seam）+ T4 | ✅ 已交付 |
+| 4.3 执行者选择顺序 | T5 | ✅ 已交付 |
+| 4.4 `_resolve_fork_llm` 简化 + `maxTurns` | Plan 1 已做 thinking/常量；`maxTurns` 在 T5 | ✅ 已交付 |
+| 4.5 打破循环依赖 | T3（按 R2 前置） | ✅ 已交付 |
+| 4.6 确认门 | **移出**（R22 → Plan 3）；本计划只落"子代理不持有交互/委派工具"的前提约束（T6） | ⏭ 移出 |
+| 4.7 测试 | 各任务内嵌 + T9 门禁 | 进行中 |
+| 4.8 预加载 | **移出**（R6 → Plan 3） | ⏭ 移出 |
+| 4.9 直出引用池并轨 | T8（`state.tool_contexts` = 子代理池） | 待做 |
+| 4.10 图入口分派 | T8（`route_entry` + `START` 条件边） | 待做 |
+| 4.11 直出节点 + verify 语义适配 | T7（判据材料随 state）+ T8（直出节点 + `route_verify` 回直出） | 待做 |
 
-**2. Placeholder scan**：Task 5–9 的部分步骤以要点+验收标准给出（未逐行贴码）——**这是本计划的已知缺口**：Task 5–9 在执行前需按 Plan 1 的粒度补全代码块与测试代码。执行时若某步无码可实现，先补步再实现。
+**2. Placeholder scan**：T1–T5 已按"逐行可粘贴"粒度交付并落地；T6–T9 已按同一粒度补齐（关键代码块 + 完整测试代码 + 精确行号前提）。已知的**刻意留白**：
+- T8 的"直出轮不发 delegate start/end 事件"是 R23 的显式延后（Plan 3 补）。
+- T8 测试里 `build_graph(vector_store=None, ...)` 的最小图构造若与既有签名断言冲突，允许改用轻量替身，但必须在报告里写明。
 
-**3. Type consistency**：`DelegateRun(delegate_id, skill_name, ctx, stop_reason, result_text)`（T1 定义 → T2/T5/T7/T8 消费）；`select_fork_tools(allowed, available, executor_tools=None)`（T3 定义 → T4 消费）；`VerifyInputs`（T8 定义并在 T8/T9 消费）；`SkillExecutor.execute(record, task, run=None)`（T2 定 → T5/T8 消费）。命名已核对一致。
+**3. Type consistency（对照已落地代码）**：
+- `DelegateRun(delegate_id, skill_name, ctx, stop_reason=None, result_text="")`（T1 定义 → T2/T8 消费）✅
+- `select_fork_tools(allowed, available, executor_tools=None)`（T3 定义 → T4 消费；T6 追加禁用集）✅
+- `SkillExecutor(main_llm, tool_provider=None, preset_registry=None)` / `.execute(record, task, run=None)`（T2/T3/T5 定，T8 消费）✅
+- `consume_fork_events(sub_agent, run, user_content, skill_name, max_turns)`（T3/T4 定）✅
+- `build_graph(..., tools=None, tool_sink=None, skill_direct_node=None)`（T3 定 tool_sink，T8 加 skill_direct_node）✅
+- `AgentState.direct_skill: str` / `AgentState.verify_temporal_years: list[int]`（T8 / T7 定，互相消费）✅
+- 节点名 `LangGraphNode.SkillDirect.NAME`（T8 定，workflow/route_verify 消费）✅
 
-**4. 阻塞与前置**：R1（preset 装配）在 T5 内完成；T8 依赖 T4/T5/T7；`/xxx` 触发属 Plan 3（R8）。
+**4. 阻塞与前置**：R1（preset 装配）在 T5 内完成 ✅；T7 不依赖 T6；T8 依赖 T4/T5/T7；`/xxx` 触发属 Plan 3（R8）；确认门属 Plan 3（R22）。**T6 → T7 → T8 → T9 为串行**（T7/T8 同改 `state.py`，T8 消费 T7 的字段）。
