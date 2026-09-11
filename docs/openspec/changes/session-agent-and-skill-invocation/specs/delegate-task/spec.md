@@ -29,18 +29,25 @@
 
 ### Requirement: 材料由主 agent 预检索
 
-当 fork 子代理无检索工具时，主 agent SHALL 在 delegate 前先检索好，把 context 作为 task 一部分传入。
+当 fork 子代理无检索工具时，主 agent SHALL 在 delegate 前先检索好，把 context 作为 task 一部分传入。**该预检索只适用于"模型自动委派"路径**（主 agent 已跑过一轮、手上有上下文）。
 
 #### Scenario: 无检索工具时预检索
 
-- **WHEN** fork 子代理工具集不含 retrieve_kb/search_web
+- **WHEN** fork 子代理工具集不含 retrieve_kb/search_web（模型自动委派路径）
 - **THEN** 主 agent 在 delegate 前完成检索，材料全凭 task 携带
 
 #### Scenario: 有检索工具时自行检索
 
 - **WHEN** fork skill 的 allowed-tools 含 retrieve_kb/search_web
-- **THEN** 子代理可在独立 RequestContext 内自行检索，结果不计入主 agent 的引用编号
+- **THEN** 子代理可在独立 RequestContext 内自行检索
 - **AND** 子代理正文可正常引用其工具
+- **AND** 在**模型自动委派**路径下，其结果不计入主 agent 的引用编号（主 agent 之后自己写答案、自己引用）；**`/xxx` 触发 fork 直出**路径的引用池归属见下一条 Requirement
+
+#### Scenario: `/xxx` 触发的 fork 不做预检索
+
+- **WHEN** 用户用 `/xxx` 触发一个 `context: fork` skill（主 agent 零 LLM 轮，见 `agent-service`）
+- **THEN** 不执行"主 agent 预检索"（主 agent 本轮无上下文可预检索）
+- **AND** 该 skill 的 `allowed-tools` 应包含所需检索工具；若既无检索工具又无外部材料，子代理仅凭 skill 正文与用户输入作答，并在结果中如实说明证据不足
 
 ## ADDED Requirements
 
@@ -89,3 +96,25 @@ fork 子代理 SHALL NOT 持有面向用户的交互工具（`ask_user` / `ask_c
 
 - **WHEN** 检查 fork 子代理的工具集
 - **THEN** 不含 `ask_user` / `ask_confirm`（需要交互的 skill 应改用 `context: inline`）
+
+### Requirement: fork 直出路径的引用池归属
+
+`/xxx` 触发的 fork **直出**（主 agent 零 LLM 轮，见 `agent-service`）时，本轮 citations SHALL **以子代理的 `tool_contexts` 为引用池**（其编号与子代理答案中的 `[n]` 天然一一对应），交由 `format` 节点组装来源。
+
+理由：该路径下主 agent **从未调用检索工具**，主引用池必为空；若沿用主池，`format` 会把子代理答案里的全部 `[n]` 判为越界丢弃（`citations: []`），答案看起来有引用却查不到来源，同时误记 `INVALID_CITATION` 信号；而两条引用护栏均以"主池有 context"为前提，会**静默放行**、无任何告警。
+
+#### Scenario: 直出路径产出引用
+
+- **WHEN** 用户 `/xxx` 触发一个 `context: fork` skill，子代理检索到 2 条 KB 结果并在答案中标注 `[1][2]`
+- **THEN** 该轮 `citations` 非空，`index` 为 1、2，`source`/`page`/`snippet`/`tier` 取自子代理引用池
+- **AND** 前端来源横条与引用抽屉正常渲染
+
+#### Scenario: 不产生幻觉引用误报
+
+- **WHEN** 直出路径的答案标注了合法范围内的 `[n]`
+- **THEN** 不产生 `INVALID_CITATION` 信号（不把合法引用统计为模型幻觉编号）
+
+#### Scenario: 主 agent 自动委派路径不受影响
+
+- **WHEN** 主 agent 自动委派（非 `/xxx`）并在随后自己写出答案
+- **THEN** citations 仍由其自身引用池组装（子代理检索不计入主编号），行为与既有一致

@@ -42,7 +42,7 @@
 | 需求 | 描述 | 来源对比 | 优先级 | 预估成本 | 依赖 |
 |------|------|---------|--------|---------|------|
 | C-01 | SQLAlchemy ORM | 替换手写 PyMySQL，减少 SQL 注入风险 | P1 | 中 | 无 |
-| C-02 | Alembic 数据库迁移 | 自动化 schema 版本管理，支持回滚 | P1 | 低 | C-01 |
+| C-02 | Alembic 数据库迁移 | 自动化 schema 版本管理，支持回滚。**现状核实（2026-09-11）**：迁移链**已分叉**——根 `alembic/` 仅 `e6304ba3a9ef_init_models.py`，而 `src/infra/db/mysql_db/alembic/versions/` 另有 `create_feedback` / `add_feedback_trace_id` 等 3 个版本；`alembic.ini` 的 `script_location` 指向**根目录**，即更新的一条 revision 不在生效链上。同时存在手工 SQL 约定 `scripts/migrations/*.sql`（最近为 `2026-08-31-add-message-status.sql`）。**归并前必须先比对线上 `alembic_version` 表**确认实际生效链，否则会生成孤立 revision 或漏列 | P1 | 中 | 无 |
 | C-03 | 数据库连接池 | 生产环境连接池管理 | P1 | 低 | C-01 |
 | C-04 | 查询语句集中管理 | 目前 SQL 分散在各模块 | P1 | 低 | 无 |
 

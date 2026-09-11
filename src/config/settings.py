@@ -95,7 +95,7 @@ EMBEDDING_BATCH_SIZE: int = int(os.getenv("EMBEDDING_BATCH_SIZE", "20"))
 RERANK_MODEL: str = os.getenv("RERANK_MODEL", "qwen3-rerank")
 # Rerank API Key（fallback 到 DASHSCOPE_API_KEY，非 LLM_API_KEY）
 RERANK_API_KEY: str = os.getenv("RERANK_API_KEY") or os.getenv("DASHSCOPE_API_KEY", "")
-# Tavily 联网搜索（web-search-fallback）
+# Tavily 联网搜索（web-search-fallback） https://www.tavily.com/
 TAVILY_API_KEY: str = os.getenv(
     "TAVILY_API_KEY", ""
 )  # Tavily API Key（仅 .env，gitignored）
