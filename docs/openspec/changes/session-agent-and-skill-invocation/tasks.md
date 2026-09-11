@@ -51,7 +51,7 @@
 - [ ] 5.8 **会话智能体绑定与沿用（bind-once，无 400）**：服务层 `resolve_session_agent(session_id, requested)`——校验只查注册表；未绑定 + 合法 → `bind_session_agent` 固化；已绑定 → 一律用绑定值（传入空＝静默沿用；传入非空且不同＝**忽略 + warning**，不拒绝）；传入未注册 → 忽略 + warning；绑定校验与写入**在 `StreamingResponse` 之前**完成；**`agent_used` 走流事件回传**（与 `model_used` 同层；**语义 = 本会话绑定智能体名**，不含 fork 执行者）；已删除预设的历史会话 → 降级默认 prompt + warn
 - [ ] 5.9 **system prompt 三层组装**：`PromptManager` 拆出 `get_base_system_prompt()`（不含系统追加段）；新增 `build_system_prompt(persona, kb_bound, has_skills)`（`src/rag/prompt.py`）——①人设层（preset 正文 / `get_base_system_prompt()`）+ ②环境约束层（引用指令 + 委派引导 + 检索纪律 + `KB_UNBOUND_SYSTEM_PROMPT` + 日期，**顺序与现状一致**）；`build_prompt` 与 `build_simple_prompt` **两个调用点**都改走它；**保证未选 agent 时 system 段端到端逐字不变**
 - [ ] 5.10 **能力清单服务 + 接口**（design D19：**不引入 catalog 文件，由 registry 派生**）：`src/services/capability_service.py`（取 registry 的 `user_visible()` / 全部可加载预设；随懒重载自动更新，无独立缓存层）；`src/api/capabilities.py`（`GET /api/skills` / `GET /api/agents`，经 service 不直接读文件/扫描目录）；**响应走统一信封**（`data.skills` / `data.agents`）；skills 服务端过滤 `user-invocable: false`；读取失败返回空列表 + warn（不 500）
-- [ ] 5.11 测试：前缀路由 / **前缀清洗（当前轮与历史都不含 `/name`，落库仍为原文）** / **`/xxx` inline 单轮与 fork 直出（断言主 agent 0 LLM 轮 + citations 非空 + 无 `INVALID_CITATION`）** / 注入后持续生效 / 双轴过滤 / **绑定四态（首轮绑定、沿用、忽略+warn、未注册降级）** / 老会话 `bind-if-empty` 可绑定 / `agent_used` 流事件 / **未选 agent 时 system 段快照逐字一致** / 两接口信封结构 + 服务端过滤 + 失败降级 / **非法名称跳过** / `sessions/messages` 契约不变（`data` 仍为数组）
+- [ ] 5.11 测试：前缀路由 / **前缀清洗（当前轮与历史都不含 `/name`，落库仍为原文）** / **`/xxx` inline 单轮与 fork 直出（断言主 agent 0 LLM 轮 + citations 非空 + 无 `INVALID_CITATION`）** / 注入后持续生效 / 双轴过滤 / **绑定四态（首轮绑定、沿用、忽略+warn、未注册降级）** / 老会话 `bind-if-empty` 可绑定 / `agent_used` 流事件 / **未选 agent 时 system 段快照逐字一致** / 两接口信封结构 + 服务端过滤 + 失败降级 / **非法名称跳过** / `sessions/messages` 契约不变（`data` 仍为数组）——**已由 Plan 3 完成**（各断言落点逐条核对见本 change 收口报告 task-10-report.md）
 
 - [ ] 5.12 **直出轮 answer 交付链路（Plan 3 前置，最终评审登记）**：让直出轮的回答经 SSE 交付并被落库。候选做法（择一，实现时定）：在 `_convert_event` 增加 `on_chain_end name=="skill_direct"` 捕获 `answer` 并产出 token/answer 事件；或让 `serialize_process` 在无 `"token"` 段时回落到直出节点的 `answer`；同步更新 `_run_generation` 的 `full_answer` / `capture.final_answer` 捕获源。**必须有一条走生产交付链（`astream_events` → `_convert_event` → `serialize_process`）的端到端测试**——当前直出测试全走 `graph.astream(stream_mode="updates")`，完全绕过交付层，是本次测试策略的系统性盲区。依据：`design.md` D22/D26；最终评审发现直出轮回答既不进 SSE token 流也不落库（缺口登记，本计划未覆盖）
 - [ ] 5.13 **I1（本计划欠项，随 5.12 落直出路径前必须解决）**：直出轮 `_needs_regenerate` 重跑不消费 verify 注入的 `SystemMessage` 指引（直出节点不读 `state.messages`）→ 无效重跑；不解决则直出轮的质量纠偏整条失效
@@ -71,13 +71,13 @@
 
 ## 7. 契约与文档同步
 
-- [ ] 7.1 `docs/agents/api_contract.md`：新增 `agent` 请求字段语义（**值为预设 `name`（英文 slug），非 id**；空＝沿用；不一致**不报错**、以服务端已绑定值为准）、`/xxx` 前缀语义与踩坑（含"落库保留原文、组装 prompt 时剥离"）、**`sessions/list` 新增 `agent` 字段**（`sessions/messages` 契约不变）、流事件 `agent_used`
-- [ ] 7.2 `docs/agents/glossary.md`：新增「智能体预设」「会话级 vs 消息级」术语
-- [ ] 7.3 `docs/agents/code-map.md`：登记 `agents/` 内容目录与 `src/agents/presets/`
-- [ ] 7.4 `CLAUDE.md`：目录结构速览补 `agents/`；文档组织表按需登记
-- [ ] 7.5 修订 `agent-delegation-skills` 的 D7 说明（标注被本 change 修订）
-- [ ] 7.6 `data-flow.md`：补「答案校验与引用格式化链路」一节（**本 change 筹备期已完成**，落地时核对与最终实现一致）
-- [ ] 7.7 `reference-projects.md`：更新 agency-agents 条目（作为智能体预设来源）+ 记录本次调研结论（R1 执行框架、`create_react_agent` 废弃）
+- [ ] 7.1 `docs/agents/api_contract.md`：新增 `agent` 请求字段语义（**值为预设 `name`（英文 slug），非 id**；空＝沿用；不一致**不报错**、以服务端已绑定值为准）、`/xxx` 前缀语义与踩坑（含"落库保留原文、组装 prompt 时剥离"）、**`sessions/list` 新增 `agent` 字段**（`sessions/messages` 契约不变）、流事件 `agent_used`——**已由 Plan 3 完成**（落为 api_contract.md「5.6 会话智能体与 `/xxx` 契约」）
+- [ ] 7.2 `docs/agents/glossary.md`：新增「智能体预设」「会话级 vs 消息级」术语——**已由 Plan 3 完成**（此前已在 glossary.md「智能体预设与调用控制」登记，收口核对无需新增）
+- [ ] 7.3 `docs/agents/code-map.md`：登记 `agents/` 内容目录与 `src/agents/presets/`——**已由 Plan 3 完成**（`agents/` 与 `src/agents/presets/` 已登记；收口补 `prefix.py` / `capability_service.py` / `capabilities.py`）
+- [ ] 7.4 `CLAUDE.md`：目录结构速览补 `agents/`；文档组织表按需登记——**已由 Plan 3 完成**
+- [ ] 7.5 修订 `agent-delegation-skills` 的 D7 说明（标注被本 change 修订）——**已由 Plan 3 完成**（D7 加「已被修订」标注，指向本 change 的 design D6/D7）
+- [ ] 7.6 `data-flow.md`：补「答案校验与引用格式化链路」一节（**本 change 筹备期已完成**，落地时核对与最终实现一致）——**已由 Plan 3 完成**（核对对齐：`state.tool_contexts` / `state.verify_temporal_years` 承载与直出轮判据来源）
+- [ ] 7.7 `reference-projects.md`：更新 agency-agents 条目（作为智能体预设来源）+ 记录本次调研结论（R1 执行框架、`create_react_agent` 废弃）——**已由 Plan 3 完成**（langgraph 条目补 `create_react_agent` → `create_agent` 结论）
 - [ ] 7.8 `docs/agents/logging-rules.md` + `src/core/log_events.py`：登记本次新增事件（前缀沿用已有 `[agent]`）——`agent mismatch ignored`（已绑定但与传入不同，warning 报警）、`agent unknown fallback`（未注册，warning）、`agent bind`（首轮绑定，info）等；按"开放登记制"先登记 `Event` 枚举 + `EVENT_SPECS` 再启用
 - [ ] 7.9 `docs/agents/defensive-patterns.md`：在「并发」分区登记本次缺陷类别——**每请求上下文的活跃状态必须按 id 分槽**（现象：一轮多委派被 `asyncio.gather` 并发调度，而 `RequestContext` 用单值字段承载活跃 `delegate_id`，互相覆盖导致 SSE/看板串号）
 - [ ] 7.10 `docs/agents/requirements_pool.md`：登记**独立遗留问题**——alembic 迁移链分叉（根 `alembic/` 仅 1 个版本 vs `src/infra/db/mysql_db/alembic/` 3 个版本，`alembic.ini` 指向根目录，另有手工 SQL 约定），需先比对线上 `alembic_version` 再决定归并方案（**不在本 change 修**）

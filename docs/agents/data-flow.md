@@ -137,7 +137,7 @@ agent（bind_tools）
   └ 无 tool_calls → agent_finalize（提取末条 AIMessage → answer，读入 tool_contexts）
 
 verify（态 B，verify/node.py:42-62）按序：
-  A. completeness_check（checks.py:22）：required=ctx.temporal_years 与答案实际年份比对
+  A. completeness_check（checks.py:22）：required=state.verify_temporal_years 与答案实际年份比对
      （required 为空 = 时间解析未触发 → 跳过）
        缺失非空 → decide_missing_web（regen_decision.py:49）并返回其结果，本轮 verify 结束：
          _ask_web_confirm 询问"缺失年份是否联网补充"（SSE ask_user id=web_confirm）
@@ -195,7 +195,7 @@ src/agents/tools/web_tools.py:131-141。
 | # | 环节 | 职责 | 触发/条件 | 代码 |
 |---|------|------|------|------|
 | 1 | 态分派 | 按 `state.kb_id` 分派态 A（纯对话）/ 态 B（绑 KB）两套校验链 | 每次进 verify | `verify/node.py:35-62` |
-| 2 | 完整性校验 | 正则 `\d{4}` 提取答案年份，与 `ctx.temporal_years` 比对 | 态 B 且 required 非空 | `verify/checks.py:22` |
+| 2 | 完整性校验 | 正则 `\d{4}` 提取答案年份，与 `state.verify_temporal_years` 比对 | 态 B 且 required 非空 | `verify/checks.py:22` |
 | 3 | 缺失年份联网询问 | 经 clarify_channel 问用户"是否联网补充"；会话内记住（`ctx.web_confirmed`） | 态 B 且有缺失 | `verify/ask_confirm.py` |
 | 4 | 缺失年份决策化 | ①用户意愿优先 → ②看上一轮 `search_web` queries 是否带全缺失年份（带全=网络已穷尽→注记直通）→ ③保险丝 → ④注入指引/hint + regen | 态 B 且有缺失 | `verify/regen_decision.py` |
 | 5 | KB 溯源护栏 | 有 KB context 但答案无 `[n]` 且非拒答 → 注入溯源指引 → regen 一次 | 态 B 完整性通过后 | `verify/guardrails.py` |
@@ -218,6 +218,10 @@ src/agents/tools/web_tools.py:131-141。
 - **引用预览不是截开头**：`_relevant_snippet` 用最长公共子串定位"回答真正依据的那一段"，
   避免 parent-child 长 chunk（相关句在深处）的预览与回答无关、误导用户以为引用不支撑回答；
   无有效重叠（`< 15` 字符）时回退取开头 200 字。
+- **直出轮判据来源随材料走**：`/xxx` 命中 fork skill 的直出轮主 ctx 无材料，`skill_direct`
+  节点把子代理 ctx 的 `tool_contexts` / `temporal_years` 写入 `state.tool_contexts` /
+  `state.verify_temporal_years`；verify 的引用护栏（读 `state.tool_contexts`）与完整性校验
+  （读 `state.verify_temporal_years`）判据都来自 state 字段而非主 ctx，故直出轮校验不空转。
 
 ### 字段级生产-消费矩阵（StateGraph）
 
@@ -231,9 +235,13 @@ src/agents/tools/web_tools.py:131-141。
 |---|---|---|
 | `agent` | `messages`, `_history`, `kb_id` | `messages`（LLM 输出含 tool_calls）, `_agent_iterations` |
 | `tools` | `messages`（末条 tool_calls） | `messages`（ToolMessage 追加） |
-| `agent_finalize` | `messages` | `answer`, `tool_contexts` |
-| `verify` | `answer`, `kb_id`, `messages`（查上一轮 search_web 与指引查重） | `answer`, `_needs_regenerate`, `messages`（regen 指引 SystemMessage）, `_verify_regenerations` |
+| `agent_finalize` | `messages` | `answer`, `tool_contexts`, `verify_temporal_years` |
+| `skill_direct`（直出轮） | `direct_skill`, `query`, `messages`（查 verify 引用指引） | `answer`, `tool_contexts`, `verify_temporal_years`, `_needs_regenerate` |
+| `verify` | `answer`, `kb_id`, `tool_contexts`, `verify_temporal_years`, `messages`（查上一轮 search_web 与指引查重） | `answer`, `_needs_regenerate`, `messages`（regen 指引 SystemMessage）, `_verify_regenerations` |
 | `format` | `answer`, `tool_contexts` | `citations` |
+
+图入口经 `route_entry(state)` 条件边分派：`state.direct_skill` 非空 → `skill_direct`
+（`/xxx` 命中 fork skill 的直出轮，主 agent 零 LLM 轮），否则 → `agent`。
 
 工具（retrieve_kb / search_web / ask_user）不写 state：检索上下文累积到
 `RequestContext.tool_contexts`（contextvar），由 `agent_finalize` 读入 `state.tool_contexts`；

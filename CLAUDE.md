@@ -42,9 +42,9 @@ Python 3.11+ / FastAPI / ChromaDB / LangChain / DashScope / MySQL 8.0 / Redis 7 
 
 速览（改代码前仍须查 code-map.md 定位文件）：
 
-- **后端** `src/`：分层 `api/ → services/ → agents/ + rag/ + chat/ + chunking/ + infra/`；入口 `src/main.py`，模型工厂 `src/models.py`，agent 循环 `src/agents/graph/`，主从委派 `src/agents/skills/`
+- **后端** `src/`：分层 `api/ → services/ → agents/ + rag/ + chat/ + chunking/ + infra/`；入口 `src/main.py`，模型工厂 `src/models.py`，agent 循环 `src/agents/graph/`，主从委派 `src/agents/skills/`，智能体预设 `src/agents/presets/`
 - **前端** `deploy/nginx/html/`：`chat.html`（对话页，自包含）/ `index.html`（知识库管理页）/ `login.html`；Nginx 静态托管、无构建步骤，路由见 `deploy/nginx/nginx.conf`
-- **运行时内容库** 顶层 `skills/<name>/SKILL.md`（业务侧管理，compose volume 挂载进容器 `/app/skills`）；`.claude/skills/` 为开发期工具链 skill（如 openspec），两者语义不同。实现与术语见 glossary.md「技能委派」
+- **运行时内容库** 顶层 `skills/<name>/SKILL.md`（业务侧管理，compose volume 挂载进容器 `/app/skills`）与 `agents/<name>.md`（智能体预设内容库）；`.claude/skills/` 为开发期工具链 skill（如 openspec），两者语义不同。实现与术语见 glossary.md「技能委派」「智能体预设」
 - **测试** `tests/`：与 `src/` 模块一一对应
 
 ### 层间调用规则

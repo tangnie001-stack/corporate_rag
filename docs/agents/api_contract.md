@@ -923,6 +923,38 @@ agent（LLM + bind_tools）← entry_point
 
 入参：`skill_registry`（`SkillRegistry`，懒重载后按名解析 `SkillRecord`）、`executor`（`SkillExecutor`）。返回图节点函数：命中 fork skill 时以独立 `DelegateRun` 跑子代理，把结果写入 `answer`、把本轮材料（引用池 → `tool_contexts`、要求覆盖年份 → `verify_temporal_years`）搬进 `AgentState`，再交 verify/format；不改写主 ctx。配套 `route_entry(state)` 入口分派：`state.direct_skill` 非空 → `skill_direct`，否则 → `agent`。未装配 executor 时用 `unavailable_skill_direct` 兜底。
 
+### 5.6 会话智能体与 `/xxx` 契约
+
+本节为 Plan 3（change `session-agent-and-skill-invocation`）新增接口契约；语义依据见该 change 的 design D1/D19/D20/D22/D24/D25/D26。
+
+#### `POST /chat/stream` 请求体新增 `agent: str = ""`
+
+| 项 | 语义 |
+|----|------|
+| 值域 | 预设 `name`（ASCII slug，`^[A-Za-z0-9][A-Za-z0-9_-]*$`），**不是 id**；空串 = 沿用会话已绑定值 |
+| 绑定 | bind-once：未绑定 + 合法 → 固化；已绑定 → 一律以绑定值为准 |
+| 不一致 | 已绑定 + 传入非空且不同 → **服务端忽略传入值 + warning，无 400**（D1/D20） |
+| 未注册 | 传入名未注册 → 忽略 + warning；未绑定时降级系统默认 prompt |
+
+#### `/xxx` 前缀解析与清洗（D22/D25）
+
+- 命令判定：只在**行首**且 `/` 后形如 ASCII slug 才按命令解析；不以 `/` 开头或 `/` 后不构成命令形态 → 按普通文本。
+- 未注册：`/` 开头且形如命令但未注册 → 返回「skill 不存在 + 可用列表」（**不静默**）；`user-invocable:false` → 提示「只能由模型调用」。
+- **落库与 Redis 历史保留原文**：当前轮 `query` 与历史 user 消息保留 `/name` 原文，仅在**组装 prompt 时**剥离（当前轮与历史都剥）。
+- 踩坑：不要在 `add_message_async` / `save_user_async` 前改写 `query`——清洗只发生在组装 prompt 的 `_initial_messages`，落库必须用原文。
+
+#### `POST /sessions/list` 新增 `agent` 字段
+
+`data` 数组每项新增 `"agent": "finance-expert"`（会话绑定智能体名，未绑定为空串）；**`sessions/messages` 契约不变，`data` 仍为数组**。
+
+#### 流事件 `agent_used`
+
+载荷 `{"agent": string}`；与 `model_used` 同层回传；**语义 = 本会话绑定智能体名**（空 = 未绑定），**不含 fork 执行者**（skill 声明 `agent:` 覆盖执行者时，`agent_used` 仍是会话绑定值，D20）。
+
+#### `GET /api/skills` / `GET /api/agents`
+
+统一信封 `data.skills` / `data.agents`（前端按 `body.data` 解析）。skills 服务端过滤 `user-invocable: false`（只列 `user_visible()`）；读取失败 fail-open 返回空列表 + warning（不 500）。
+
 ---
 
 ## 6. 数据流全貌

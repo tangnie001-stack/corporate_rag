@@ -35,13 +35,15 @@
 main.py            FastAPI 入口：app 工厂 + 异常处理器 + 中间件挂载 + 路由注册
 api/               纯路由层：请求校验 → 调 service → 返回（不写业务逻辑）
   ├─ model/        Pydantic 请求体(request.py) / 响应体(response.py)
-  └─ sse_utils.py  SSE 格式化（chat.py 不得内联）
+  ├─ sse_utils.py  SSE 格式化（chat.py 不得内联）
+  └─ capabilities.py  /api/skills、/api/agents（能力清单，经 service 派生）
 services/          业务编排：app_service → kb / document / chat(agent)
   agent_service.py 图生命周期 + 一次生成的主循环（_run_generation）
+  capability_service.py  能力清单：/api/skills、/api/agents 由 registry 派生（fail-open）
 agents/            LangGraph agent 循环
   ├─ graph/        workflow(建图) / state / agent_node / nodes / verify / skill_direct(命令行直出节点)
   ├─ tools/        retrieve_kb、ask_user、search_web、task、registry( + readonly 声明表)
-  ├─ skills/       主从委派运行时：loader/registry/executor/delegate_task/models/invocation + fork 执行层 fork_stream/fork_tools/delegate_run
+  ├─ skills/       主从委派运行时：loader/registry/executor/delegate_task/models/invocation/prefix(/xxx 解析与清洗纯函数) + fork 执行层 fork_stream/fork_tools/delegate_run
   └─ presets/      智能体预设：models / loader / registry
 rag/               检索与知识库路由：retrieval / context / prompt / stream / temporal
 chat/              对话管理：manager(Redis) / persistence(MySQL) / streaming / task_registry / process_log

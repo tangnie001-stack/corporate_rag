@@ -56,6 +56,9 @@ context=inline → delegate_task 返回 skill 的 inline_prompt（含 {task} 占
 **内容规模约束**：inline_prompt 应控制在短方法论规模（≤500 字）——内容注入后留在 messages 历史，长文会造成上下文累积膨胀（多轮 inline 不同 skill 会累积）。领域长文内容应建模为 fork skill（独立子代理上下文，不占主对话）。
 
 ### D7. fork 执行：create_react_agent 子代理，零工具
+
+> **已被修订**：本 D7 已被 `session-agent-and-skill-invocation` 修订（fork 工具放开 + 执行者选择），以该 change 的 design D6/D7 为准。
+
 context=fork → delegate_task 内部用 create_react_agent 起独立子代理。**子代理工具集恒空**——材料由主 agent 先检索好塞进 task。
 **为何恒空而非 allowed-tools 白名单**：现有业务工具（retrieve_kb/search_web）均写主请求共享的 `RequestContext.tool_contexts`（单例 ContextVar）。子代理若持这些工具，调用时会污染主 agent 的 tool_contexts（引用编号错乱）与 ask/pending_asks（澄清槽冲突）。给子代理做独立 RequestContext 隔离成本高（子 ctx + 独立编号 + 结果合并），属已知扩展点（见 Risks）。首版零工具使 D7 隔离承诺无例外。`allowed-tools` frontmatter 字段**保留但标注预留**，本版恒不启用。
 **构建期解耦（防循环依赖）**：SkillExecutor **不持有 make_rag_tools 实例**。make_rag_tools → delegate_task → SkillExecutor →（若再依赖 make_rag_tools 产工具）→ 循环。零工具下 executor 无需构造子代理工具集，循环依赖天然消失。

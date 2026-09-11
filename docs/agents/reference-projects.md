@@ -23,6 +23,7 @@
 
 **langgraph-1.2.10**
 - LangGraph 官方源码。StateGraph、流式事件（astream_events）、子图、Checkpoint、Human-in-the-loop。
+- **注意**：`create_react_agent` 已废弃（官方迁至 `langchain.agents.create_agent`），参数名 `system_prompt`（非 `prompt`）；本项目 fork 子代理已改用 `create_agent`（调研结论见 change `session-agent-and-skill-invocation` D16）。
 - **何时查阅**：改 `src/agents/graph/` 下 workflow/state/agent_node 时；排查 graph 执行事件、流式行为时。
 
 **fastapi-0.141.1**
