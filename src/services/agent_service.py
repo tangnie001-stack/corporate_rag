@@ -598,6 +598,8 @@ class AgentService:
         reranker=None,
         prompt_manager: PromptManager | None = None,
     ):
+        from src.agents.presets.loader import AgentPresetLoader
+        from src.agents.presets.registry import AgentPresetRegistry
         from src.agents.skills import (
             SkillExecutor,
             SkillLoader,
@@ -618,6 +620,8 @@ class AgentService:
         skills_dir = settings.SKILLS_DIR
         if not skills_dir:
             skills_dir = str(Path(__file__).resolve().parents[2] / "skills")
+        # 智能体预设根目录：与 skills 同源推导（仓库顶层 agents/），供 fork 执行者选择
+        agents_dir = Path(__file__).resolve().parents[2] / "agents"
         delegate_task_tool = None
         # fork 工具池 sink：build_graph 把当前启用工具写入本列表，SkillExecutor 的
         # 延迟 provider 读取它按 skill 白名单筛选子代理工具（打破工具集 ↔ executor
@@ -627,8 +631,12 @@ class AgentService:
             skill_registry = SkillRegistry(SkillLoader(Path(skills_dir)))
             skill_registry.reload_if_changed()  # description 在 make_delegate_task 时按当前注册表生成
             if skill_registry.names():
+                preset_registry = AgentPresetRegistry(AgentPresetLoader(agents_dir))
+                preset_registry.reload_if_changed()  # 同名冲突 fail-fast（配置错误）
                 skill_executor = SkillExecutor(
-                    self._llm, tool_provider=lambda: fork_tool_pool
+                    self._llm,
+                    tool_provider=lambda: fork_tool_pool,
+                    preset_registry=preset_registry,
                 )
                 delegate_task_tool = make_delegate_task(skill_registry, skill_executor)
             else:

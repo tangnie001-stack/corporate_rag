@@ -33,6 +33,8 @@ from collections.abc import Callable
 from langchain.agents import create_agent
 from langchain_core.runnables.config import var_child_runnable_config
 
+from src.agents.presets.models import AgentPreset
+from src.agents.presets.registry import AgentPresetRegistry
 from src.agents.skills.delegate_run import DelegateRun
 from src.agents.skills.fork_stream import consume_fork_events
 from src.agents.skills.fork_tools import select_fork_tools
@@ -55,7 +57,10 @@ class SkillExecutor:
     """按 skill context 分发执行：inline 注入 / fork 子代理。"""
 
     def __init__(
-        self, main_llm, tool_provider: Callable[[], list] | None = None
+        self,
+        main_llm,
+        tool_provider: Callable[[], list] | None = None,
+        preset_registry: AgentPresetRegistry | None = None,
     ) -> None:
         """初始化执行器。
 
@@ -64,9 +69,12 @@ class SkillExecutor:
                 model_name 继承复用；声明 model 或请求上下文可及时经 get_llm 新建）
             tool_provider: 延迟 provider，返回当前启用工具列表（供 fork 按
                 allowed-tools 筛选）。None = 无可用工具（子代理零工具）
+            preset_registry: 智能体预设注册表（fork 执行者选择来源）。None =
+                不做执行者选择，恒落系统默认人设
         """
         self._main_llm = main_llm
         self._tool_provider = tool_provider
+        self._preset_registry = preset_registry
         # 主 agent llm 为 ChatOpenAI 族（get_llm 产物）时 model_name 为标准属性；
         # 测试替身/无该属性的模型对象按 None 处理（缺省 None 走 get_llm 默认模型）
         model_name = None
@@ -150,6 +158,13 @@ class SkillExecutor:
         Raises:
             asyncio.CancelledError: abort_signal 置位（请求取消）
         """
+        # 会话智能体名必须在切子 ctx 之前读主 ctx（child() 不复制 agent，
+        # 切后 current_request_ctx 已指向子 ctx）
+        ctx = current_request_ctx.get()
+        if ctx is None:
+            session_agent = ""
+        else:
+            session_agent = ctx.agent
         if run is not None:
             # 子 ctx 为本次委派独占：注入本次 id 并复位停止原因，供 consume_fork_events
             # 读取与中断写入（无并发串号）
@@ -157,10 +172,11 @@ class SkillExecutor:
             run.ctx.fork_stop_reason = None
             child_ctx = run.ctx
         else:
-            child_ctx = current_request_ctx.get()
+            child_ctx = ctx
         user_content = self._render_fork_task(record, task)
-        sub_agent = self._build_sub_agent(record, preset=None)
-        max_turns = DELEGATE_DEFAULT_MAX_TURNS
+        preset = self._resolve_executor(record, session_agent)
+        sub_agent = self._build_sub_agent(record, preset)
+        max_turns = self._fork_max_turns(preset)
         total_timeout = self._fork_total_timeout(child_ctx)
         # 隔离子代理回调传播：不 reset 会经 var_child_runnable_config 把外层
         # callback handler 传进 create_agent，子代理 LLM 事件泄漏到外层
@@ -200,6 +216,38 @@ class SkillExecutor:
                 run.stop_reason = run.ctx.fork_stop_reason
             current_request_ctx.reset(token_ctx)
             var_child_runnable_config.reset(token)
+
+    def _resolve_executor(
+        self, record: SkillRecord, session_agent: str
+    ) -> AgentPreset | None:
+        """按优先级选执行者预设：skill.agent > 会话智能体 > None（系统默认）。
+
+        Args:
+            record: fork SkillRecord（其 agent 字段为最高优先级）
+            session_agent: 会话绑定智能体名（空串=未绑定）
+
+        Returns:
+            命中的 AgentPreset；两处都查不到（或未装配 registry）返回 None
+        """
+        if self._preset_registry is None:
+            return None
+        if record.agent:
+            preset = self._preset_registry.get(record.agent)
+            if preset is not None:
+                return preset
+        if session_agent:
+            preset = self._preset_registry.get(session_agent)
+            if preset is not None:
+                return preset
+        return None
+
+    def _fork_max_turns(self, preset: AgentPreset | None) -> int:
+        """取 fork 子代理的 turn 上限：preset.max_turns 优先，缺省回落系统默认。"""
+        if preset is None:
+            return DELEGATE_DEFAULT_MAX_TURNS
+        if preset.max_turns is None:
+            return DELEGATE_DEFAULT_MAX_TURNS
+        return preset.max_turns
 
     def _build_sub_agent(self, record: SkillRecord, preset):
         """构建 fork 子代理：system=执行者人设、user=skill 正文、tools=交集。

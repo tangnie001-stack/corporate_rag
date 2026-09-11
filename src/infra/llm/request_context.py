@@ -55,6 +55,7 @@ class RequestContext:
     web_guided: bool = False  # 本轮 verify 指派联网检索标记（来源：verify 节点注入联网指引时置位（Task 2）；范围：请求内有效；用途：search_web 据此排除 verify 指派联网的 to_web 误报）
     temporal_parsed: bool = False  # 本轮是否已完成时间解析（来源：retrieve_kb 时间解析块置位；用途：turn 内最多解析一次，避免重复 DB+LLM 且不覆盖已置位约束）
     deep_thinking: bool = False  # 请求级深思考开关（来源：chat/stream 请求入口 deep_thinking 参数；范围：请求内只读；用途：fork 未声明 thinking 时决定 enable_thinking）
+    agent: str = ""  # 会话绑定智能体名（来源：Plan 3 由 sessions.agent 写入；范围：请求内只读；用途：fork 执行者选择的第二优先级；空=未绑定→系统默认）
     delegate_id: str = ""  # 当前活跃委派 id（来源：delegate_task fork 分支生成短 uuid；范围：单次委派期间有效；用途：delegate start/增量/end 事件与日志贯穿标识；无活跃委派为空串）
     fork_stop_reason: str | None = (
         None  # 最近一次 fork 停止原因（来源：executor 中断时写入 DelegateStopReason 值；范围：委派期间有效；用途：delegate_task 终态区分 normal 与中断、task 注册表终态；None=正常完成或未执行）
