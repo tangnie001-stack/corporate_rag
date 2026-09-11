@@ -2,8 +2,9 @@
 
 - inline：返回 skill 正文（render 后的方法论），主 agent 自己执行（不产生子代理）。
 - fork：create_react_agent(llm, tools=[], prompt=fork_body) 生成独立零工具
-  子代理，初始消息 = task，返回纯文本（不带 [n]）。零工具 = 防递归硬保证 + 不
-  写共享 RequestContext.tool_contexts（design D7/D8/D9）。
+  子代理，初始消息 = task，返回纯文本（不带 [n]）。零工具 = 防递归硬保证。
+  执行期把 current_request_ctx 切到子上下文（run.ctx）：工具检索与引用编号落子
+  池，不污染主 agent 引用池（design D7/D8/D9/R3）。
 
 可观测性（design D11）：fork 子代理复用主 agent 的 llm 实例（或 get_llm 新建实例）——
 与主 agent **同级观测**（同一实例自带 callbacks；Langfuse 是否捕获取决于网关层，应用层
@@ -29,12 +30,14 @@ CancelledError 由主任务按取消路径收尾。
 """
 
 import asyncio
+import dataclasses
 import time
 
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables.config import var_child_runnable_config
 from langgraph.prebuilt import create_react_agent
 
+from src.agents.skills.delegate_run import DelegateRun
 from src.agents.skills.models import SkillContext, SkillRecord
 from src.agents.skills.rendering import render_skill_body
 from src.config import settings
@@ -71,20 +74,24 @@ class SkillExecutor:
             model_name = None
         self._main_model_name = model_name
 
-    async def execute(self, record: SkillRecord, task: str) -> str:
+    async def execute(
+        self, record: SkillRecord, task: str, run: DelegateRun | None = None
+    ) -> str:
         """执行一个 skill，返回给主 agent 的文本。
 
         Args:
             record: 命中的 SkillRecord
             task: 主 agent 委托的任务描述（fork 时同时作子代理初始消息与正文
                 $ARGUMENTS/{task} 占位替换值；inline 时填入 inline_prompt 占位）
+            run: 本次 fork 委派运行态；None 时用当前主 ctx、不隔离（既有 inline /
+                无 ctx 调用路径）；非 None 时切到 run.ctx 子上下文执行
 
         Returns:
             inline：渲染后的方法论文本；fork：子代理纯文本（截断/防失控超时文案）
         """
         if record.context == SkillContext.INLINE:
             return self._render_inline(record, task)
-        return await self._run_fork(record, task)
+        return await self._run_fork(record, task, run)
 
     def _render_inline(self, record: SkillRecord, task: str) -> str:
         """渲染 inline_prompt 的任务占位符（$ARGUMENTS 或 {task}；无占位则原样）。
@@ -98,48 +105,58 @@ class SkillExecutor:
         """
         return render_skill_body(record.inline_prompt or "", task)
 
-    async def _run_fork(self, record: SkillRecord, task: str) -> str:
-        """fork 执行：astream 级消费 + 三层防失控 + 思考跟随请求档。
+    async def _run_fork(
+        self, record: SkillRecord, task: str, run: DelegateRun | None = None
+    ) -> str:
+        """fork 执行：子上下文隔离 + astream 级消费 + 三层防失控 + 思考跟随请求档。
 
         Args:
             record: fork SkillRecord
             task: 任务描述（子代理初始 HumanMessage）
+            run: 本次委派运行态；None 时用当前主 ctx（不隔离），非 None 时切到
+                run.ctx 子上下文执行，工具检索写入子引用池
 
         Returns:
             子代理聚合纯文本（截断对齐原实现）；因 idle/total/turn 中断统一返回
-            DELEGATE_TIMEOUT_TEXT 并把 reason 写入 ctx.fork_stop_reason；
+            DELEGATE_TIMEOUT_TEXT 并把 reason 写入子 ctx 的 fork_stop_reason；
             请求取消（abort_signal 置位）抛 asyncio.CancelledError（reason=cancelled），
             由调用方（delegate_task → 主任务）按取消路径收尾。
 
         Raises:
-            asyncio.CancelledError: ctx.abort_signal 置位（请求取消）
+            asyncio.CancelledError: abort_signal 置位（请求取消）
         """
-        llm = self._resolve_fork_llm(record)
+        if run is not None:
+            # 子 ctx 为本次委派独占：注入本次 id 并复位停止原因，供 _consume_fork_events
+            # 读取与中断写入（无并发串号）
+            run.ctx.delegate_id = run.delegate_id
+            run.ctx.fork_stop_reason = None
+            child_ctx = run.ctx
+        else:
+            child_ctx = current_request_ctx.get()
         fork_body = record.fork_body
         if fork_body is not None:
-            fork_body = render_skill_body(fork_body, task)
-        sub_agent = create_react_agent(
-            llm,
-            tools=[],  # 零工具硬保证（design D7）：防递归 + 不污染主 ctx
-            prompt=fork_body,
-        )
-        ctx = current_request_ctx.get()
+            # fork_body 作子代理 prompt：渲染任务占位符（$ARGUMENTS/{task}）。用副本
+            # 承载，避免改写 registry 缓存的 SkillRecord（并发委派共享该对象）
+            record = dataclasses.replace(
+                record, fork_body=render_skill_body(fork_body, task)
+            )
+        sub_agent = self._build_sub_agent(record, preset=None)
         max_turns = DELEGATE_DEFAULT_MAX_TURNS
-        deep_thinking = ctx.deep_thinking if ctx is not None else False
-        total_timeout = (
-            settings.DELEGATE_TOTAL_TIMEOUT_THINKING_S
-            if deep_thinking
-            else settings.DELEGATE_TOTAL_TIMEOUT_S
-        )
+        total_timeout = self._fork_total_timeout(child_ctx)
         # 隔离子代理回调传播：不 reset 会经 var_child_runnable_config 把外层
         # callback handler 传进 create_react_agent，子代理 LLM 事件泄漏到外层
         # graph.astream_events（SSE token 污染 + full_answer 累积子代理原文）。
         # reset 后子代理事件只走其自身 handler，由本方法显式接入（scope=delegate）。
         token = var_child_runnable_config.set(None)
+        # 切到子 ctx：工具经 ContextVar 读 ctx，检索与引用编号落子池，
+        # 主 agent 引用池不受影响（design D7/R3）
+        token_ctx = current_request_ctx.set(child_ctx)
         try:
             try:
                 text = await asyncio.wait_for(
-                    self._consume_fork_events(sub_agent, record, task, ctx, max_turns),
+                    self._consume_fork_events(
+                        sub_agent, record, task, child_ctx, max_turns
+                    ),
                     timeout=total_timeout,
                 )
             except TimeoutError:
@@ -149,12 +166,56 @@ class SkillExecutor:
                 # 因此 cancel 会继续上抛到 delegate_task 的 except asyncio.CancelledError
                 # （该 CancelledError 已在 _consume_fork_events 置 fork_stop_reason=cancelled）。
                 # 端到端验证见 Task J；勿在此加 except CancelledError 防吞（会破坏取消语义）
-                if ctx is not None:
-                    ctx.fork_stop_reason = DelegateStopReason.TOTAL
-                return SSEInteractionTexts.DELEGATE_TIMEOUT_TEXT
-            return self._truncate(text)
+                if child_ctx is not None:
+                    child_ctx.fork_stop_reason = DelegateStopReason.TOTAL
+                result = SSEInteractionTexts.DELEGATE_TIMEOUT_TEXT
+            else:
+                result = self._truncate(text)
+            # 回写本次委派最终返回给调用方的文本（含 idle/total/turn 中断文案；
+            # 取消路径抛异常不写）
+            if run is not None:
+                run.result_text = result
+            return result
         finally:
+            if run is not None:
+                run.stop_reason = run.ctx.fork_stop_reason
+            current_request_ctx.reset(token_ctx)
             var_child_runnable_config.reset(token)
+
+    def _build_sub_agent(self, record: SkillRecord, preset):
+        """构建 fork 子代理（本任务零工具 + fork_body 作 prompt）。
+
+        Args:
+            record: fork SkillRecord（fork_body 已渲染任务占位符）
+            preset: 执行者预设（Task 5 接入人设；本任务恒为 None）
+
+        Returns:
+            create_react_agent 返回的子代理
+        """
+        return create_react_agent(
+            self._resolve_fork_llm(record),
+            tools=self._fork_tools(record, preset),
+            prompt=record.fork_body,
+        )
+
+    def _fork_tools(self, record: SkillRecord, preset):
+        """按 allowed-tools ∩ 执行者 tools 选子代理工具（本任务为占位，Task 3 接入筛选）。"""
+        return []
+
+    @staticmethod
+    def _fork_total_timeout(ctx) -> float:
+        """按请求思考档选 fork 总时长保险丝。
+
+        Args:
+            ctx: 当前请求上下文（可能为 None）
+
+        Returns:
+            deep_thinking 档取 DELEGATE_TOTAL_TIMEOUT_THINKING_S，否则默认档
+            DELEGATE_TOTAL_TIMEOUT_S（无 ctx 亦走默认档）
+        """
+        if ctx is not None and ctx.deep_thinking:
+            return settings.DELEGATE_TOTAL_TIMEOUT_THINKING_S
+        return settings.DELEGATE_TOTAL_TIMEOUT_S
 
     async def _consume_fork_events(
         self, sub_agent, record: SkillRecord, task: str, ctx, max_turns: int
