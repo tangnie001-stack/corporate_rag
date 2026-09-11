@@ -17,20 +17,29 @@ from pathlib import Path
 
 import yaml
 
+from src.agents.skills.invocation import derive_invocation_flags
 from src.agents.skills.models import SkillContext, SkillRecord
+from src.agents.tools.readonly import readonly_map
 from src.config.const import CAPABILITY_NAME_PATTERN, DEPRECATED_SKILL_FIELDS
 
 
 class SkillLoader:
     """从 skills_root 扫描并解析全部 SKILL.md 为 SkillRecord。"""
 
-    def __init__(self, skills_root: Path) -> None:
+    def __init__(
+        self, skills_root: Path, tool_readonly: dict[str, bool] | None = None
+    ) -> None:
         """初始化加载器。
 
         Args:
             skills_root: skills 内容库根目录（含 <name>/SKILL.md 子目录）
+            tool_readonly: 工具名 -> 是否只读 映射（供双轴默认推导）；
+                None 时读进程级声明表 readonly_map()
         """
         self.skills_root = skills_root
+        if tool_readonly is None:
+            tool_readonly = readonly_map()
+        self._tool_readonly = tool_readonly
 
     def load_all(self) -> list[SkillRecord]:
         """扫描 skills_root 下全部 skill，解析为 SkillRecord 列表。
@@ -77,6 +86,10 @@ class SkillLoader:
         description = self._resolve_description(meta, body)
         context = self._resolve_context(meta, name)
         inline_prompt, fork_body = self._resolve_body(context, body)
+        allowed_tools = self._resolve_allowed_tools(meta)
+        user_invocable, disable_model_invocation = self._resolve_invocation_flags(
+            meta, allowed_tools, name
+        )
         return SkillRecord(
             name=name,
             description=description,
@@ -85,11 +98,9 @@ class SkillLoader:
             fork_body=fork_body,
             agent=self._resolve_optional_str(meta, "agent"),
             model=self._resolve_optional_str(meta, "model"),
-            allowed_tools=self._resolve_allowed_tools(meta),
-            user_invocable=self._resolve_bool(meta, "user-invocable", True),
-            disable_model_invocation=self._resolve_bool(
-                meta, "disable-model-invocation", False
-            ),
+            allowed_tools=allowed_tools,
+            user_invocable=user_invocable,
+            disable_model_invocation=disable_model_invocation,
             source_path=path.resolve(),
         )
 
@@ -140,12 +151,33 @@ class SkillLoader:
             return None
         return value
 
-    def _resolve_bool(self, meta: dict, key: str, default: bool) -> bool:
-        """解析可选的布尔字段（非布尔视为未声明，回落 default）。"""
-        value = meta.get(key)
-        if not isinstance(value, bool):
-            return default
-        return value
+    def _resolve_invocation_flags(
+        self, meta: dict, allowed_tools: list[str], name: str
+    ) -> tuple[bool, bool]:
+        """解析双轴：显式声明优先，未声明则按工具只读性推导（fail-safe）。"""
+        declared_user = meta.get("user-invocable")
+        declared_model = meta.get("disable-model-invocation")
+        derived_user, derived_model = derive_invocation_flags(
+            allowed_tools, self._tool_readonly
+        )
+        if isinstance(declared_user, bool):
+            user_invocable = declared_user
+        else:
+            user_invocable = derived_user
+        if isinstance(declared_model, bool):
+            disable_model_invocation = declared_model
+        else:
+            disable_model_invocation = derived_model
+            if derived_model:
+                warnings.warn(
+                    f"skill {name} 含非只读工具但未显式声明 disable-model-invocation，已默认关闭模型自动调用"
+                    "（如需开放请显式写 disable-model-invocation: false）"
+                )
+        if not user_invocable and disable_model_invocation:
+            warnings.warn(
+                f"skill {name} 既不可用户调用也不可模型调用（死 skill），请检查双轴声明"
+            )
+        return user_invocable, disable_model_invocation
 
     def _resolve_allowed_tools(self, meta: dict) -> list[str]:
         """解析 allowed-tools：支持逗号分隔字符串（主流写法）与 YAML 列表（兼容）。"""
