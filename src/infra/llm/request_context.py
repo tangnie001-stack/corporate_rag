@@ -60,6 +60,26 @@ class RequestContext:
         None  # 最近一次 fork 停止原因（来源：executor 中断时写入 DelegateStopReason 值；范围：委派期间有效；用途：delegate_task 终态区分 normal 与中断、task 注册表终态；None=正常完成或未执行）
     )
 
+    def child(self) -> "RequestContext":
+        """派生一个子代理上下文：共享通道与取消信号，独立引用池与计数。
+
+        用途：fork 子代理在自己的引用池里检索与编号，不污染主 agent（design D7/D24）。
+        共享项：clarify_channel / abort_signal —— 委派事件必须能回到同一条 SSE 通道，
+        取消必须能即时中断子代理；二者若各持一份，事件与取消都会断链。
+
+        Returns:
+            新的 RequestContext；tool_contexts / 各计数 / temporal_* / missing_years /
+            web_* 全部为默认初值（子代理独立累计）。
+        """
+        return RequestContext(
+            session_id=self.session_id,
+            kb_id=self.kb_id,
+            kb_bound=self.kb_bound,
+            clarify_channel=self.clarify_channel,
+            abort_signal=self.abort_signal,
+            deep_thinking=self.deep_thinking,
+        )
+
 
 current_request_ctx: ContextVar[RequestContext | None] = ContextVar(
     "current_request_ctx", default=None
