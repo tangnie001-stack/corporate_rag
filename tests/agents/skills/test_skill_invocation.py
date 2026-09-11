@@ -112,3 +112,39 @@ def test_dead_skill_warns(tmp_path):
         records = SkillLoader(tmp_path, tool_readonly={}).load_all()
 
     assert len(records) == 1
+
+
+def test_loader_reads_readonly_table_lazily_at_parse(tmp_path):
+    """loader 在解析时读取进程级只读表，而非构造期快照。
+
+    生产时序：SkillLoader 先于工具注册构造（工具在 build_graph 内注册），
+    构造期快照会漏掉后注册的工具，使"含写类工具默认锁模型端"的 fail-safe
+    永不生效。本用例用 patch.dict 把进程级表临时清空（模拟构造时工具未注册），
+    构造 loader 后才声明写类工具，解析仍须锁定模型端；退出时表自动还原，
+    不污染同会话其它用例。
+    """
+    from unittest.mock import patch
+
+    from src.agents.skills.loader import SkillLoader
+    from src.agents.tools.readonly import declare_readonly
+
+    skill_dir = tmp_path / "fixwave-skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: fixwave-skill\n"
+        "description: 修复波次回归用例\n"
+        "allowed-tools: fixwave_publish_tool\n"
+        "---\n"
+        "正文\n",
+        encoding="utf-8",
+    )
+
+    with patch.dict("src.agents.tools.readonly._TOOL_READONLY", {}, clear=True):
+        loader = SkillLoader(tmp_path)  # 构造时进程级表为空
+        declare_readonly("fixwave_publish_tool", False)  # 构造后才注册（写类）
+
+        with pytest.warns(UserWarning, match="disable-model-invocation"):
+            records = loader.load_all()
+
+    assert records[0].disable_model_invocation is True

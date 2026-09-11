@@ -33,12 +33,13 @@ class SkillLoader:
 
         Args:
             skills_root: skills 内容库根目录（含 <name>/SKILL.md 子目录）
-            tool_readonly: 工具名 -> 是否只读 映射（供双轴默认推导）；
-                None 时读进程级声明表 readonly_map()
+            tool_readonly: 工具名 -> 是否只读 映射（供双轴默认推导）；None 表示
+                在每次解析时读进程级声明表 readonly_map()（延迟解析：工具注册
+                晚于 loader 构造，构造期快照会漏掉后注册的工具）
         """
         self.skills_root = skills_root
-        if tool_readonly is None:
-            tool_readonly = readonly_map()
+        # 存原值（含 None），不在此快照 readonly_map()：生产在工具注册前构造 loader，
+        # 快照会让双轴推导读到空表；延迟到解析时读取才能反映当前注册结果
         self._tool_readonly = tool_readonly
 
     def load_all(self) -> list[SkillRecord]:
@@ -154,12 +155,18 @@ class SkillLoader:
     def _resolve_invocation_flags(
         self, meta: dict, allowed_tools: list[str], name: str
     ) -> tuple[bool, bool]:
-        """解析双轴：显式声明优先，未声明则按工具只读性推导（fail-safe）。"""
+        """解析双轴：显式声明优先，未声明则按工具只读性推导（fail-safe）。
+
+        未显式注入只读表时，在解析时读取当前进程级声明表 readonly_map()，
+        以反映构造之后才完成的工具注册。
+        """
+        if self._tool_readonly is None:
+            table = readonly_map()
+        else:
+            table = self._tool_readonly
         declared_user = meta.get("user-invocable")
         declared_model = meta.get("disable-model-invocation")
-        derived_user, derived_model = derive_invocation_flags(
-            allowed_tools, self._tool_readonly
-        )
+        derived_user, derived_model = derive_invocation_flags(allowed_tools, table)
         if isinstance(declared_user, bool):
             user_invocable = declared_user
         else:
