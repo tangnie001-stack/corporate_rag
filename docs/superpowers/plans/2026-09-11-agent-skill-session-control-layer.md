@@ -581,7 +581,7 @@ Expected: FAIL —— `AttributeError: 'AgentService' object has no attribute '_
         launch_context["agent"] = effective_agent
 ```
 
-> `get_session_agent_async` 是 T1 的 `ChatManager` 上需要补的一个薄方法（`await self._persistence.get_session_agent(session_id)` → repo `get_session_by_id(...).agent`）；若不想新增，可复用 `get_sessions` 过滤——**择一，本任务内完成并在报告里写明**。
+> **已钉死（不再二选一）**：`ChatManager.get_session_agent_async(session_id) -> str` = `await self._persistence.get_session_agent(session_id)`；`PersistenceService.get_session_agent` = `session = await self._chat_repo.get_session_by_id(session_id)` → `return session.agent if session is not None else ""`（**不用 `getattr` 兜底**）。**不采用**"复用 `get_sessions` 过滤"（为取一个字段拉 50 条会话列表不划算）。两者都要在 T3 内实现并纳入其测试断言。
 
 ```python
     async def _resolve_session_agent(
@@ -680,8 +680,9 @@ git commit -m "feat(session): 请求 agent 字段 + bind-once 解析 + agent_use
 **Interfaces:**
 - Produces：
   - `PromptManager.get_base_system_prompt() -> str` —— **"基础段"**：`_get(PROMPT_NAMES["system"], _FALLBACK_SYSTEM_PROMPT)`，**不做**引用指令 / 委派引导 / 日期追加
-  - `build_system_prompt(persona: str, kb_bound: bool, has_skills: bool) -> list[SystemMessage]` —— 返回 system 消息列表（未绑定 KB 时**两条**，与现状同构）
+  - `build_system_prompt(persona: str, kb_bound: bool, has_skills: bool, prompt_manager) -> list[SystemMessage]` —— 返回 system 消息列表（未绑定 KB 时**两条**，与现状同构）
   - `build_prompt(query, context, history, prompt_manager, kb_bound=True, persona="", has_skills=False)`（新增两个带默认值的形参，**旧调用点零改动**）
+- **两个新形参的来源（本任务不负责接线，但必须知道）**：由 **T5** 写进 `RequestContext`（`ctx.persona` = 会话绑定预设的 `system_prompt`；`ctx.has_skills` = `bool(skill_registry.model_visible())`），再由 **T5b** 的 `_initial_messages` 读取并传入 `build_prompt`。因此本任务的测试直接给形参传值即可，**不要**在 `prompt.py` 里去查 registry（那会引入 rag→agents 的依赖反向）。
 
 **不可动摇的不变量（本任务的核心验收）**：`persona=""` 时，`build_prompt` 产出的 `messages` 与改动前**逐字相同**（含消息条数）。为此：
 - 环境约束层的追加顺序必须与现状一致：基础段 → `INLINE_CITATION_INSTRUCTION`（带 `not in` 幂等守卫）→ `DELEGATE_GUIDANCE_SECTION`（带守卫）→ `_with_current_date()`。
@@ -846,7 +847,7 @@ def build_system_prompt(
     return messages
 ```
 
-> `_with_current_date` 从 `src/infra/llm/prompt_manager.py` import（当前是模块私有函数，**改为可从 prompt.py 复用**：优先直接 import 该私有函数；若嫌跨模块引用私有名，则在 `prompt.py` 内复制其 12 行实现并加注释说明"与 PromptManager 的日期追加同源"——**择一并在报告里写明**）。
+> `_with_current_date` **已钉死**：直接 `from src.infra.llm.prompt_manager import _with_current_date`（单一事实来源——若在 `prompt.py` 复制一份，两处日期格式将来会漂移，而"未选 agent 时 system 段逐字不变"这条不变量正是靠它成立）。
 
 `build_prompt` / `build_simple_prompt` 改为：
 
@@ -877,66 +878,320 @@ git commit -m "feat(prompt): system prompt 三层组装（人设层 + 环境约�
 
 ---
 
+### Task 5b: 注入型隐藏消息的持久化与隐藏（T5 / T8 的共同前置，**必须先做**）
+
+> **为什么独立成一步**：规格三处独立要求——`specs/skill-invocation/spec.md:34`「`/xxx` 触发 SHALL 把 skill 内容作为**一条隐藏消息**注入会话上下文；**后续轮次 SHALL 仍然看到**」、`:41`「前端消息流**不展示**该注入消息，但模型可见」、`specs/agent-preset/spec.md:83` 与 `agent-service/spec.md:5/15`「**不进 system prompt**」，外加 `design.md:154`「**随历史持久化**」。用一个"每请求就丢的 state 字段"无法满足其中任何一条，所以先把注入通道做成持久化消息。
+
+**Files:**
+- Modify: `src/config/const.py`（`SKILL_INJECTION_PREFIX` 标记）
+- Modify: `src/services/agent_service.py`（新增 `_inject_skill_message`）
+- Modify: `src/agents/graph/agent_node.py`（历史映射：把标记行抽成独立 `HumanMessage` 放主 system 段之后）
+- Modify: `src/api/sessions.py`（`sessions/messages` **按标记过滤**，前端不展示）
+- Test: `tests/services/test_skill_injection_persist.py`、`tests/agents/graph/test_injected_history.py`、`tests/api/test_sessions.py`（追加）
+
+**Interfaces:**
+- Produces：
+  - `SKILL_INJECTION_PREFIX: str`（内容前缀标记，形如 `"[[skill-injection]]"`）
+  - `AgentService._inject_skill_message(session_id: str, kb_id: str, text: str) -> "ChatMessage"` —— 写 Redis + DB，并**返回一条可供本轮使用的 `ChatMessage`**
+  - 历史里的标记行 → 独立 `HumanMessage`（**位移到主 system 段之后、普通对话历史之前**）
+
+**机制（A′：marker 标记的持久化 user 消息）**
+1. **载体**：一条 `role="user"` 的历史消息，内容 = `SKILL_INJECTION_PREFIX + "\n" + 正文`。不新增 schema、不做第二次迁移。
+2. **本轮可见**：`_inject_skill_message` 写回 Redis 后，把新构造的那条 `ChatMessage` **追加到本轮 `launch_context["history"]`**（不必回头再读一次 Redis），保证本轮 prompt 就带上它。
+3. **跨轮可见**：因为它已写入 Redis（`chat_history:{sid}`）与 `conversation_history`，**后续轮次的 `get_history_async` 自然读回** → 满足"生效范围=会话级"。
+4. **前端隐藏**：`sessions/messages` 过滤掉 `content.startswith(SKILL_INJECTION_PREFIX)` 的行（`data` 仍是数组，契约不变）。
+5. **不进 system prompt 的组装**：`build_system_prompt` 完全不知道它；`_initial_messages` 把它抽成**独立**的 `HumanMessage` 放在主 system 段之后、普通历史之前——既不进人设层/环境约束层，也避免"对话中途插 system 消息"的兼容风险（部分模型要求 system 只在首位）。
+6. **顺序要求**：注入必须在**读历史之后、写用户原文之前**发生（保持 `stream_chat` 既有的"先取历史（不含当前 query）→ 再写 user"顺序不变）。
+
+- [ ] **Step 1: 写失败测试**
+
+`tests/services/test_skill_injection_persist.py`：
+
+```python
+"""注入型隐藏消息：写 Redis + DB、本轮可见、后续轮可从历史读回。"""
+
+from unittest.mock import AsyncMock, MagicMock
+
+from src.config.const import SKILL_INJECTION_PREFIX
+from src.services.agent_service import AgentService
+
+
+def _service() -> tuple[AgentService, AsyncMock]:
+    svc = AgentService.__new__(AgentService)
+    svc._chat_manager = AsyncMock()
+    svc._chat_manager.add_message_async = AsyncMock()
+    svc._chat_manager.save_user_async = AsyncMock()
+    return svc, svc._chat_manager
+
+
+async def test_injection_writes_redis_and_db_with_marker():
+    """注入同时写 Redis 与 DB，且内容带标记前缀。"""
+    svc, chat_manager = _service()
+    entry = await svc._inject_skill_message("sess_1", "kb1", "方法论正文")
+
+    assert entry.content.startswith(SKILL_INJECTION_PREFIX)
+    assert "方法论正文" in entry.content
+    chat_manager.add_message_async.assert_awaited_once()
+    saved = chat_manager.save_user_async.await_args[0]
+    assert saved[0] == "sess_1"
+    assert SKILL_INJECTION_PREFIX in saved[2]
+
+
+async def test_injection_returns_entry_for_current_turn():
+    """返回的 ChatMessage 可直接追加进本轮 history（保证本轮就生效）。"""
+    svc, _ = _service()
+    entry = await svc._inject_skill_message("sess_1", "kb1", "方法论正文")
+    assert entry.role == "user"
+```
+
+`tests/agents/graph/test_injected_history.py`：
+
+```python
+"""历史里的注入标记行 → 独立 HumanMessage，位于 system 段之后、普通历史之前。"""
+
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+from src.agents.graph.agent_node import _initial_messages
+from src.agents.graph.state import AgentState
+from src.config.const import SKILL_INJECTION_PREFIX
+from src.infra.llm.request_context import RequestContext, current_request_ctx
+
+
+class _HistoryMsg:
+    """最小历史消息替身（只读 role / content）。"""
+
+    def __init__(self, role: str, content: str):
+        self.role = role
+        self.content = content
+
+
+def test_injected_history_becomes_separate_human_message(monkeypatch):
+    """注入行抽成独立 HumanMessage 且排在普通历史之前；普通历史不受影响。"""
+    pm = MagicMock()
+    pm.get_base_system_prompt.return_value = "基础段"
+    pm.get_system_prompt.return_value = "基础段"
+    pm.get_user_template.return_value = "用户模板"
+
+    state = AgentState(
+        session_id="s1",
+        kb_id="kb1",
+        query="腾讯2024",
+        _history=[
+            _HistoryMsg("user", SKILL_INJECTION_PREFIX + "\n方法论正文"),
+            _HistoryMsg("user", "上一轮问题"),
+            _HistoryMsg("assistant", "上一轮回答"),
+        ],
+    )
+    ctx = RequestContext(session_id="s1")
+    ctx.known_skill_names = set()
+    ctx.persona = ""
+    ctx.has_skills = False
+    token = current_request_ctx.set(ctx)
+    try:
+        messages = _initial_messages(state, pm)
+    finally:
+        current_request_ctx.reset(token)
+
+    types = [type(m) for m in messages]
+    assert types.index(SystemMessage) == 0
+    injected_idx = next(i for i, m in enumerate(messages) if isinstance(m, HumanMessage) and SKILL_INJECTION_PREFIX in m.content)
+    prev_user_idx = next(i for i, m in enumerate(messages) if isinstance(m, HumanMessage) and m.content == "上一轮问题")
+    assert injected_idx < prev_user_idx          # 注入在普通历史之前
+    assert messages[injected_idx].content.startswith(SKILL_INJECTION_PREFIX)
+```
+
+`tests/api/test_sessions.py` 追加：mock 的 `get_messages` 返回一条带标记的行 + 一条普通行，断言 `/sessions/messages` 的 `data` **只含普通行**且仍是数组。
+
+- [ ] **Step 2: 跑测试确认失败**
+
+Run: `pytest tests/services/test_skill_injection_persist.py tests/agents/graph/test_injected_history.py -v`
+Expected: FAIL —— `ImportError: SKILL_INJECTION_PREFIX` / `AttributeError: _inject_skill_message`
+
+- [ ] **Step 3: 加标记常量**
+
+`src/config/const.py`（`FORK_FORBIDDEN_TOOLS` 附近）：
+
+```python
+SKILL_INJECTION_PREFIX: str = "[[skill-injection]]"
+"""注入型隐藏消息的内容前缀标记。
+
+用途：① `sessions/messages` 据此过滤（前端不展示）；② `agent_node._initial_messages`
+据此把该行抽成独立 HumanMessage（模型可见）。标记必须是 ASCII 且用户不可能自然打出。
+"""
+```
+
+- [ ] **Step 4: 实现注入通道**
+
+`src/services/agent_service.py`：
+
+```python
+    async def _inject_skill_message(
+        self, session_id: str, kb_id: str, text: str
+    ) -> "ChatMessage":
+        """把 skill 正文作为一条隐藏消息写入会话上下文（Redis + DB）。
+
+        Args:
+            session_id: 会话 ID
+            kb_id: 当前知识库 ID（落库用，可为空）
+            text: 已渲染的 skill 正文
+
+        Returns:
+            新构造的 ChatMessage；调用方应把它**追加到本轮 history**（否则本轮 prompt 看不到）
+        """
+        content = f"{SKILL_INJECTION_PREFIX}\n{text}"
+        await self._chat_manager.add_message_async(session_id, "user", content)
+        await self._chat_manager.save_user_async(session_id, kb_id, content)
+        return ChatMessage(role="user", content=content)
+```
+（顶部 import `SKILL_INJECTION_PREFIX` 与 `ChatMessage`——后者与 `chat/manager.py:get_history_async` 用的是同一个类。）
+
+- [ ] **Step 5: 历史映射改造**
+
+`src/agents/graph/agent_node.py` 的 `_initial_messages`：
+
+```python
+    def _initial_messages(state: AgentState, prompt_manager) -> list[BaseMessage]:
+        # 历史窗口截断（最近 N 轮 + token 双上限）后再组装初始消息
+        history = _truncate_history(state._history or [])
+        ctx = current_request_ctx.get()
+        if ctx is not None:
+            persona = ctx.persona
+            has_skills = ctx.has_skills
+            known = ctx.known_skill_names
+        else:
+            persona = ""
+            has_skills = False
+            known = set()
+        injected: list[BaseMessage] = []
+        normal: list[ChatMessage] = []
+        for msg in history:
+            if msg.role == "user" and msg.content.startswith(SKILL_INJECTION_PREFIX):
+                injected.append(HumanMessage(content=msg.content))
+            else:
+                normal.append(msg)
+        messages = build_prompt(
+            clean_prefix(state.query, known),
+            "",
+            normal,
+            prompt_manager,
+            kb_bound=bool(state.kb_id),
+            persona=persona,
+            has_skills=has_skills,
+        )
+        # 注入消息放在主 system 段之后、普通对话历史之前（不进人设层/环境约束层）
+        if injected:
+            insert_at = 0
+            for i, m in enumerate(messages):
+                if isinstance(m, SystemMessage):
+                    insert_at = i + 1
+            messages[insert_at:insert_at] = injected
+        return messages
+```
+> 注意：`build_prompt` 内部对 `normal` 的历史消息做同样的 `clean_prefix` 清洗（见 T5 Step 3 的说明），两处都从 `ctx.known_skill_names` 取名单。
+
+- [ ] **Step 6: 前端隐藏（`sessions/messages` 过滤）**
+
+`src/api/sessions.py` 里构造返回列表处，过滤标记行（保持 `data` 为数组、其余字段不变）：
+
+```python
+        visible = [
+            m for m in result
+            if not (m.role == "user" and (m.content or "").startswith(SKILL_INJECTION_PREFIX))
+        ]
+```
+（`result` 即现有 `data` 的列表来源；只加这一层过滤，不改其它映射。）
+
+- [ ] **Step 7: 跑测试确认通过**
+
+Run: `pytest tests/services/test_skill_injection_persist.py tests/agents/graph/test_injected_history.py tests/api/test_sessions.py -v && pytest tests/ -q`
+Expected: PASS
+
+- [ ] **Step 8: 提交**
+
+```bash
+git add src/config/const.py src/services/agent_service.py src/agents/graph/agent_node.py src/api/sessions.py tests/services/test_skill_injection_persist.py tests/agents/graph/test_injected_history.py tests/api/test_sessions.py
+git commit -m "feat(session): 注入型隐藏消息持久化（marker 标记 + 前端隐藏 + 跨轮生效）"
+```
+
+---
+
 ### Task 5: `/xxx` 生成入口接线（inline 单轮 / fork 直出 / 未知前缀 / 读时清洗）
 
 **Files:**
-- Modify: `src/services/agent_service.py`（`stream_chat` 内解析前缀并分派；`self._skill_registry` 提升）
-- Modify: `src/infra/llm/request_context.py`（新增 `known_skill_names: set[str]`）
-- Modify: `src/agents/graph/state.py`（`make_initial_state` 加 `direct_skill=""` 与 `injected_system=""`）
-- Modify: `src/agents/graph/agent_node.py`（`_initial_messages` 注入 `injected_system` + 历史消息读时清洗）
-- Modify: `src/agents/graph/skill_direct.py`（未知前缀 → 返回"不存在 + 可用列表"文案）
-- Modify: `src/infra/search/query_router.py:184`（`_format_history` 读时清洗）
-- Test: `tests/services/test_skill_prefix_dispatch.py`（新建）、`tests/agents/graph/test_injected_system.py`（新建）
+- Modify: `src/services/agent_service.py`（`stream_chat` 内解析前缀并分派；提升 `self._skill_registry`；写 `ctx.persona` / `ctx.has_skills` / `ctx.known_skill_names`）
+- Modify: `src/infra/llm/request_context.py`（新增 `known_skill_names: set[str]` / `persona: str` / `has_skills: bool`）
+- Modify: `src/agents/graph/state.py`（`make_initial_state` 加 `direct_skill=""`）
+- Modify: `src/agents/graph/agent_node.py`（历史读时清洗 + persona/has_skills 传给 `build_prompt`）
+- Modify: `src/agents/graph/skill_direct.py`（查不到 → "不存在 + 可用列表"；**与"非 FORK"分开**成两条文案）
+- Modify: `src/infra/search/query_router.py:184`（`_format_history` 读时清洗；**补 import `current_request_ctx`**）
+- Test: `tests/services/test_skill_prefix_dispatch.py`、`tests/agents/graph/test_prefix_cleaning.py`（新建）
 
 **Interfaces:**
-- Consumes：T2 的 `parse_prefix` / `clean_prefix`；T3 的 `ctx.agent`；Plan 2 的 `direct_skill` 与 `skill_direct` 节点
+- Consumes：T2 的 `parse_prefix` / `clean_prefix`；T3 的 `ctx.agent`；T5b 的 `_inject_skill_message`；Plan 2 的 `direct_skill` 与 `skill_direct` 节点
 - Produces：
-  - `RequestContext.known_skill_names: set[str]`（读时清洗的名单来源）
-  - `make_initial_state(cls, session_id, kb_id, query, history, deep_thinking=False, direct_skill="", injected_system="")`
-  - `AgentState.injected_system: str = ""`（隐藏指令：inline 技能正文 / T8 预加载内容）
+  - `RequestContext.known_skill_names: set[str]`（**只含 `user_visible()` 的名字**——`specs/skill-invocation/spec.md:62` 要求 `user-invocable:false` 禁止 `/xxx` 调用）
+  - `RequestContext.persona: str` / `RequestContext.has_skills: bool`（T4 的 `build_system_prompt` 的两个入参来源）
+  - `make_initial_state(cls, session_id, kb_id, query, history, deep_thinking=False, direct_skill="")`
+
+**关键修正（本轮复审）**：① `known_names` 必须取 `self._skill_registry.user_visible()` 的名字，**不是** `names()`（后者含 `user-invocable:false`，会让禁用技能被 `/xxx` 调起）；② inline 注入走 **T5b 的持久化隐藏消息**，不再用"每请求的 state 字段"（否则第二轮就失效，违反「持续生效」）；③ `persona` / `has_skills` 经 `RequestContext` 传给 `agent_node`（graph 层不持有 preset registry，否则会话智能体人设永远为空）。
 
 **分派规则（三态 → 四路）**
 | 解析结果 | 处理 |
 |---|---|
 | `plain` | 现状不变（走 `agent`，主 agent 多轮） |
-| `known` + `record.context == INLINE` | 渲染 `record.inline_prompt`（`$ARGUMENTS` = `parsed.task`）→ 写入 `injected_system` 注入；**不设** `direct_skill` → 主 agent 单轮 |
+| `known` + 记录**不可用户调用** | 不可能出现：`known_names` 只含 `user_visible()` 的名字（见上"关键修正①"） |
+| `known` + `record.context == INLINE` | 渲染 `record.inline_prompt`（`$ARGUMENTS` = `parsed.task`）→ **经 T5b `_inject_skill_message` 持久化注入**，并把返回的 `ChatMessage` 追加进本轮 history；**不设** `direct_skill` → 主 agent 单轮 |
 | `known` + `record.context == FORK` | 设 `direct_skill = name`，`query = parsed.task` → 图入口分派到 `skill_direct`（主 agent 零 LLM 轮） |
 | `unknown` | **也设 `direct_skill = name`** —— 复用 `skill_direct` 的 fail-open 通道输出"不存在 + 可用列表"（**不新增短路机制**，见 P3-R7） |
 
 - [ ] **Step 1: 写失败测试**
 
-`tests/services/test_skill_prefix_dispatch.py`：用 `AgentService.__new__` 构造（照 `tests/services/test_agent_service.py:116` 的既有范式），注入 fake skill registry / preset registry / chat_manager，断言：
-- `plain` → `launch_context["direct_skill"] == ""` 且 `injected_system == ""`；
-- inline 技能 → `injected_system` 含渲染后的方法论、`direct_skill == ""`、`query` 为去前缀后的任务文本；
+`tests/services/test_skill_prefix_dispatch.py`：用 `AgentService.__new__` 构造（照 `tests/services/test_agent_service.py:116` 的既有范式），注入 fake skill registry（`names()` 与 `user_visible()` 返回**不同**集合，用来判别是否只认 user-invocable）/ preset registry / chat_manager，断言：
+- `plain` → `launch_context["direct_skill"] == ""`，且**没有**写注入消息；
+- **inline 可用技能** → `direct_skill == ""`、`launch_context["query"] == parsed.task`、**`add_message_async` 被调用了两次且其中一次内容带 `SKILL_INJECTION_PREFIX`**（持久化注入）、`launch_context["history"]` 末尾是该注入条目；
+- **`user-invocable: false` 的技能**（只出现在 `names()` 不在 `user_visible()`）→ 按 `unknown` 处理（`direct_skill == 该名`，走 fail-open 文案），**不得**当作 `known` 注入；
 - fork 技能 → `direct_skill == "finance-analyst"`、`query == parsed.task`；
 - 未知技能 → `direct_skill == "ghost"`；
-- 三种情况下 `add_message_async` 收到的仍是**原文**（落库保留原文，D25）。
+- 以上所有情况下，写用户消息用的仍是**原文 `query`**（落库保留原文，D25）；
+- `ctx.persona` 等于会话预设的 `system_prompt`（未绑定或无 preset 时为空串）、`ctx.has_skills` 等于 `bool(model_visible())`。
 
-`tests/agents/graph/test_injected_system.py`：`agent_finalize`/`_initial_messages` 组装时，`state.injected_system` 非空 → 在 system 段之后追加**一条 `SystemMessage`**，且历史里的 `user` 消息前缀被 `clean_prefix` 剥掉（用 registered name 的 `/name xxx` 历史消息断言）。
+`tests/agents/graph/test_prefix_cleaning.py`：历史里的 `/name xxx` 行（`name` 属于 `ctx.known_skill_names`）在组装 prompt 时被剥掉前缀；不在名单里的 `/ghost xxx` 原样保留；`state.query` 同样被剥。
 
-- [ ] **Step 2: 跑测试确认失败** → Run: `pytest tests/services/test_skill_prefix_dispatch.py tests/agents/graph/test_injected_system.py -v`
+- [ ] **Step 2: 跑测试确认失败** → Run: `pytest tests/services/test_skill_prefix_dispatch.py tests/agents/graph/test_prefix_cleaning.py -v`
 
 - [ ] **Step 3: 实现**
 
-- `RequestContext` 加字段（行内注释写来源/范围/用途）：
-```python
-    known_skill_names: set[str] = field(
-        default_factory=set
-    )  # 已注册技能名集合（来源：stream_chat 解析前缀前一次性写入；范围：请求内只读；用途：历史消息读时清洗 /xxx 前缀）
-```
-- `AgentState` 加 `injected_system: str = ""`；`make_initial_state` 加 `direct_skill=""`、`injected_system=""` 两个带默认值的形参并写进返回的 state。
-- `agent_service.stream_chat`：在建 `ctx` 之后、`launch_context` 之前插入分派块（伪码给出分支，实际写法用完整 `if/elif/else`，**禁三元**）：
+- `RequestContext` 加三个字段（行内注释写来源/范围/用途）：`known_skill_names: set[str]`（**只含 user_visible 的名字**）、`persona: str = ""`、`has_skills: bool = False`。
+- `AgentState` 加 `direct_skill: str = ""`（**不加** `injected_system`——注入走 T5b 的持久化消息）；`make_initial_state` 加 `direct_skill=""` 形参并写进返回的 state。
+- `_run_generation`：把 `launch_context["direct_skill"]` 传进 `make_initial_state`。
+- `agent_node._initial_messages`：见 T5b Step 5 的完整实现（抽注入行 + 读 `ctx.persona`/`ctx.has_skills`/`ctx.known_skill_names` + 对 `state.query` 与普通历史做 `clean_prefix`）。
+- `query_router._format_history`（`:184`）：对每条 `content` 做 `clean_prefix(content, known_names)`；`known_names` 从 `current_request_ctx.get()` 取——**该模块当前没有这个 import，需补**。
+- `skill_direct` 节点：把"查不到"与"非 FORK"**分开**成两条文案——`record is None` → `SSEInteractionTexts.UNKNOWN_SKILL_PREFIX.format(skill=..., available=...)`（可用列表取 `skill_registry.user_visible()` 的名字拼串）；`record.context != FORK` → 保留既有 `SKILL_DIRECT_UNAVAILABLE`。
+- `agent_service.stream_chat`：在建 `ctx` 之后、`launch_context` 之前插入分派块（实际写法用完整 `if/elif/else`，**禁三元**）：
 
 ```python
-        known = set(self._skill_registry.names())
+        # 只取"用户可调用"的技能名（user-invocable:false 禁止 /xxx 调用）
+        known = set(r.name for r in self._skill_registry.user_visible())
         ctx.known_skill_names = known
+        # persona / has_skills：T4 的 build_system_prompt 入参来源（graph 层拿不到 registry）
+        session_preset = None
+        if self._preset_registry is not None and effective_agent:
+            session_preset = self._preset_registry.get(effective_agent)
+        if session_preset is not None:
+            ctx.persona = session_preset.system_prompt
+        else:
+            ctx.persona = ""
+        ctx.has_skills = bool(self._skill_registry.model_visible())
+
         parsed = parse_prefix(query, known, self._skill_registry)
         direct_skill = ""
-        injected_system = ""
         effective_query = query
         if parsed.kind == "known":
-            if parsed.record is not None and parsed.record.context == SkillContext.INLINE:
-                injected_system = render_skill_body(parsed.record.inline_prompt or "", parsed.task)
+            record = parsed.record
+            if record is not None and record.context == SkillContext.INLINE:
+                injected_text = render_skill_body(record.inline_prompt or "", parsed.task)
+                entry = await self._inject_skill_message(session_id, kb_id, injected_text)
+                history = history + [entry]        # 本轮即生效（T5b）
                 effective_query = parsed.task
             else:
                 direct_skill = parsed.skill_name
@@ -945,20 +1200,15 @@ git commit -m "feat(prompt): system prompt 三层组装（人设层 + 环境约�
             direct_skill = parsed.skill_name
             effective_query = parsed.task
         launch_context["direct_skill"] = direct_skill
-        launch_context["injected_system"] = injected_system
+        launch_context["history"] = history
         launch_context["query"] = effective_query
 ```
-（`launch_context` 中原 `query` 键的值改为 `effective_query`。**已核实**：`src/api/chat.py:326-336` 的 `answer_builder` 用的正是 `launch_ctx["query"]` → 因此改这一个键就能让图里的 `state.query` 变成清洗后的文本，无需再改 API 层。**但** `stream_chat` 里 `add_message_async(...)` 与 `chat.py:449-450` 的落库仍必须用**原文 `query`**——两者的先后顺序不要调换。）
-- `_run_generation`：把 `launch_context` 的 `direct_skill` / `injected_system` 传进 `make_initial_state`。
-- `agent_node._initial_messages`：先按 `build_prompt(...)` 建 system + 历史，再在 system 段之后插入 `SystemMessage(content=state.injected_system)`（非空时），历史 `user` 内容改为 `clean_prefix(msg.content, ctx.known_skill_names)`。
-- `query_router._format_history`：同法清洗（读 `current_request_ctx`）。
-- `skill_direct` 节点：`record is None` 分支改为返回 `SSEInteractionTexts.UNKNOWN_SKILL_PREFIX.format(skill=..., available=...)`（可用列表取 `skill_registry.names()` 拼串）。
-
+（四点注意：① `launch_context` 的 `query` 改为 `effective_query`、`history` 需写回（因为 T5b 可能追加了一条注入消息）；② **已核实** `src/api/chat.py:326-336` 的 `answer_builder` 用的正是 `launch_ctx["query"]` 与 `launch_ctx["history"]`，因此改这两个键就能让图里的 `state.query` / `state._history` 生效，无需再改 API 层；③ `add_message_async(...)`（写用户原文）与 `chat.py:449-450` 的落库仍必须用**原文 `query`**，顺序不要调换；④ `effective_agent` 来自 T3 的 `_resolve_session_agent`。）
 - [ ] **Step 4: 跑测试确认通过** → Run: `pytest tests/services/ tests/agents/graph/ -v && pytest tests/ -q`
 - [ ] **Step 5: 提交**
 
 ```bash
-git add src/services/agent_service.py src/infra/llm/request_context.py src/agents/graph/state.py src/agents/graph/agent_node.py src/agents/graph/skill_direct.py src/infra/search/query_router.py tests/services/test_skill_prefix_dispatch.py tests/agents/graph/test_injected_system.py
+git add src/services/agent_service.py src/infra/llm/request_context.py src/agents/graph/state.py src/agents/graph/agent_node.py src/agents/graph/skill_direct.py src/infra/search/query_router.py tests/services/test_skill_prefix_dispatch.py tests/agents/graph/test_prefix_cleaning.py
 git commit -m "feat(skills): /xxx 生成入口分派（inline 单轮 / fork 直出 / 未知告警）与读时清洗"
 ```
 
@@ -1053,6 +1303,7 @@ git commit -m "fix(graph): 直出轮回答经 SSE 交付并落库，重跑消费
 2. 编排层按**规则**检测（0 LLM 调用），命中后**复用澄清链路**问用户——照抄 `ask_confirm._ask_web_confirm`（`src/agents/graph/verify/ask_confirm.py`）的写法：`ctx.clarify_channel.put({"type":"ask_user", ...})` + 进程级 `pending_asks[session_id]` 单槽 + `wait_with_abort_and_timeout(fut, ctx.abort_signal, ASK_USER_TIMEOUT)`。
 3. 答复 → **带答复重跑一次**子代理；被拒 / 超时 / 槽被占 → 基于现有信息出结论 + 尾部标注"未经确认"，**不再进 verify 重跑**（与 D22「每轮最多重跑 1 次」互斥而非叠加，**不需要额外计数器**）。
 4. 放行（用户已答复）时返回的重跑结果仍照常进 verify（verify 自己决定是否再重跑一次）——注意此时**不得**再调确认门（一次性）。
+5. **额度记账（已钉死）**：确认门**不消耗** `ctx.ask_count`（那是 LLM 澄清额度），也**不消耗** `ctx.verify_ask_count`（那是 verify 的联网确认额度）——三者是不同语义的独立计数；它只用 `pending_asks` 的**单槽**做互斥。理由与 `ask_confirm` 使用独立计数完全同源：混用会让某一类询问被另一类"吃掉"。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -1392,15 +1643,15 @@ git commit -m "feat(graph): 直出轮确认门（规则检测 + 复用澄清链�
 - Test: `tests/services/test_preset_skill_preload.py`（新建）
 
 **Interfaces:**
-- Consumes：T3 的生效 `effective_agent`；T5 的 `injected_system` / `direct_skill`；Plan 1 的 `AgentPreset.skills`（`list[str]`，声明顺序即渲染顺序）；Plan 2 的 `render_skill_body(body, task)`
-- Produces：`AgentService._preload_skills_text(skill_names: list[str]) -> str`
+- Consumes：T3 的生效 `effective_agent`；T5 的 `direct_skill` 与 `ctx.known_skill_names`；**T5b 的 `_inject_skill_message`**；Plan 1 的 `AgentPreset.skills`（`list[str]`，声明顺序即渲染顺序）；Plan 2 的 `render_skill_body(body, task)`
+- Produces：`AgentService._preload_skills_text(skill_names: list[str]) -> str`；`AgentService._preload_if_first_round(effective_agent: str, history: list) -> str`
 
-**规则（§4.8 + design D12）**
-- 仅当**三个条件同时成立**时注入：① 本轮**没有**显式 `/xxx`（`direct_skill == ""`）且没有 inline 注入（`injected_system == ""`）；② 会话**已绑定**预设（`effective_agent` 非空）；③ 该预设声明了 `skills:` 非空。
+**规则（§4.8 + design D12/D154）**
+- 仅当**三个条件同时成立**时注入：① 本轮**没有**显式 `/xxx`（`direct_skill == ""`）**且 history 里的首轮判定成立**（见下"只在首轮"）；② 会话**已绑定**预设（`effective_agent` 非空）；③ 该预设声明了 `skills:` 非空。
 - 该预设的每个 skill 取正文（`inline_prompt` 优先，回落 `fork_body`）用 `render_skill_body(body, "")` 渲染（**不带任务文本**——预加载注入的是方法论，不是某次任务），按 `skills` 声明顺序用 `"\n\n"` 拼接。
-- **只在首轮注入**：判定 `not history`（`stream_chat` 第一个 await 拿到的历史不含当前 query，首轮必为空）。
-- 声明的技能名查不到 → 记 `SKILL_PRELOAD_SKIP`（warn）并跳过该条，**不影响其余技能**。
-- 注入物走 T5 的 `injected_system`（隐藏 `SystemMessage`），**不进 system prompt 人设层**。
+- **只在首轮注入**：判定 `not history`。`stream_chat` 第一个 await 拿到的历史不含当前 query，首轮必为空；若本轮已有 inline `/xxx`（T5 已往 history 追加过注入条目），history 也非空 → **自动跳过**（这正好实现条件①，无需额外 flag）。
+- 声明的技能名查不到 → 记 `SKILL_PRELOAD_SKIP`（warn）并跳过该条，**不影响其余技能**（查不到的判定用 `user_visible()` 名单，与 T5 同源）。
+- **注入物走 T5b 的 `_inject_skill_message`**（持久化隐藏消息），**不是** system prompt，也不是每请求字段——否则第二轮就不生效（`specs/agent-preset/spec.md:83`「以隐藏消息注入会话上下文（不进 system prompt）」）。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -1465,29 +1716,31 @@ def test_preload_skips_unknown_skill(monkeypatch):
 
 
 async def test_preload_only_on_first_round(monkeypatch):
-    """首轮注入、第二轮不注入（history 非空即跳过）。"""
+    """首轮返回正文、非首轮返回空（history 非空即跳过）。"""
     svc = _service({"a": _Record("a", inline="方法论 A")})
     svc._preset_registry = MagicMock()
     preset = MagicMock()
     preset.skills = ["a"]
     svc._preset_registry.get = MagicMock(return_value=preset)
 
-    # 首轮：history 为空 → 注入
-    assert svc._preload_if_first_round("finance-expert", [], "") == "方法论 A"
-    # 第二轮：history 非空 → 不注入
-    assert svc._preload_if_first_round("finance-expert", [object()], "") == ""
+    assert svc._preload_if_first_round("finance-expert", []) == "方法论 A"
+    assert svc._preload_if_first_round("finance-expert", [object()]) == ""
 
 
-def test_preload_skipped_when_prefix_or_inline_present():
-    """本轮已有 /xxx 或 inline 注入 → 不预加载（避免双重注入）。"""
+def test_preload_skipped_when_inline_already_injected():
+    """本轮已有 inline `/xxx`（T5 已往 history 追加注入条目）→ 不预加载（条件①）。"""
     svc = _service({"a": _Record("a", inline="方法论 A")})
     svc._preset_registry = MagicMock()
     preset = MagicMock()
     preset.skills = ["a"]
     svc._preset_registry.get = MagicMock(return_value=preset)
 
-    assert svc._preload_if_first_round("finance-expert", [], "已有 inline") == ""
+    assert svc._preload_if_first_round("finance-expert", [object()]) == ""
 ```
+
+- [ ] **Step 3b: 首轮注入走 T5b 的持久化通道（断言写库 + 本轮可见）**
+
+追加一条测试：`_preload_if_first_round` 命中后，`stream_chat` 会调用 `_inject_skill_message` 一次（`add_message_async` 收到带 `SKILL_INJECTION_PREFIX` 的内容），且 `launch_context["history"]` 末尾是该注入条目。
 
 - [ ] **Step 2: 跑测试确认失败**
 
@@ -1526,21 +1779,16 @@ Expected: FAIL —— `AttributeError: 'AgentService' object has no attribute '_
             parts.append(render_skill_body(body, ""))
         return "\n\n".join(parts)
 
-    def _preload_if_first_round(
-        self, effective_agent: str, history: list, injected_system: str
-    ) -> str:
-        """首轮预加载判定：仅在无 /xxx、无 inline 注入、首轮且预设声明 skills 时注入。
+    def _preload_if_first_round(self, effective_agent: str, history: list) -> str:
+        """首轮预加载判定：仅在首轮、已绑定预设且该预设声明 skills 时给出待注入正文。
 
         Args:
             effective_agent: 本会话生效的智能体名（空=未绑定）
-            history: 本轮之前的历史消息（空=首轮）
-            injected_system: T5 已算出的 inline 注入内容（非空表示本轮已有显式技能）
+            history: 本轮的历史消息（**若本轮已有 inline `/xxx` 注入，T5 已往其中追加条目**→非空）
 
         Returns:
             预加载正文；任一条件不满足返回空串
         """
-        if injected_system:
-            return ""
         if history:
             return ""
         if not effective_agent:
@@ -1556,11 +1804,16 @@ Expected: FAIL —— `AttributeError: 'AgentService' object has no attribute '_
 `stream_chat` 内 T5 分派块**之后**、`launch_context` 之前插入：
 
 ```python
-        injected_system = self._preload_if_first_round(
-            effective_agent, history, injected_system
-        )
+        if direct_skill == "":
+            preload_text = self._preload_if_first_round(effective_agent, history)
+            if preload_text:
+                preload_entry = await self._inject_skill_message(
+                    session_id, kb_id, preload_text
+                )
+                history = history + [preload_entry]
+                launch_context["history"] = history
 ```
-（若预加载命中，`launch_context["injected_system"]` 自然带上它。）
+（预加载与 `/xxx` 走**同一条**持久化隐藏消息通道（T5b）；`launch_context["history"]` 需写回，本轮与后续轮才都生效。）
 
 - [ ] **Step 4: 登记 `SKILL_PRELOAD_SKIP`**
 
@@ -1859,10 +2112,11 @@ git commit -m "feat(api): 能力清单服务与 /api/skills、/api/agents 只读
 | §5.11 断言 | 落在哪 |
 |---|---|
 | 前缀路由（plain/known/unknown 三态） | `tests/agents/skills/test_skill_prefix.py`（T2） |
-| 前缀清洗（当前轮与历史都不含 `/name`，**落库仍为原文**） | `tests/services/test_skill_prefix_dispatch.py` + `tests/agents/graph/test_injected_system.py`（T5） |
-| `/xxx` inline 单轮 | 同上（T5：`direct_skill==""` + `injected_system` 非空） |
+| 前缀清洗（当前轮与历史都不含 `/name`，**落库仍为原文**） | `tests/services/test_skill_prefix_dispatch.py` + `tests/agents/graph/test_prefix_cleaning.py`（T5） |
+| `/xxx` inline 单轮 | 同上（T5：`direct_skill==""` + 本轮 `history` 末尾有注入条目） |
 | `/xxx` fork 直出（主 agent 0 LLM 轮 + citations 非空 + 无 `INVALID_CITATION`） | `tests/agents/graph/test_direct_skill_round.py`（Plan 2）+ `tests/services/test_direct_round_delivery.py`（T6） |
-| 注入后持续生效 | `tests/agents/graph/test_injected_system.py`（T5：第二轮仍带 `injected_system`） |
+| 注入后持续生效（跨轮） | `tests/services/test_skill_injection_persist.py` + `tests/agents/graph/test_injected_history.py`（T5b：写 Redis+DB、标记行抽成独立 HumanMessage） |
+| 注入对前端隐藏 | `tests/api/test_sessions.py`（T5b：`sessions/messages` 过滤标记行且仍为数组） |
 | 双轴过滤 | `tests/agents/skills/test_skill_registry.py`（Plan 1）+ `test_capabilities.py`（T9：`user-invocable:false` 不出现） |
 | 绑定四态（首轮绑定 / 沿用 / 忽略+warn / 未注册降级） | `tests/services/test_session_agent_binding.py`（T3） |
 | 老会话 `bind-if-empty` 可绑定 | `tests/infra/db/test_mysql_db.py::test_bind_session_agent_is_bind_once`（T1） |
@@ -1896,12 +2150,13 @@ git commit -m "docs(session-agent): 收口契约/术语/结构/调研与 §5.11 
 
 | change 任务 | 覆盖 | 满配度 |
 |---|---|---|
-| 5.4 前缀解析 + 执行形态分派 + 读时清洗 | T2（解析/清洗）+ T5（分派/接线） | T2 满配；**T5 步骤含完整分派代码，但 `_run_generation` 与 `agent_node` 的具体插入行需执行时按锚点落** |
+| 5.4 前缀解析 + 执行形态分派 + 读时清洗 | T2（解析/清洗）+ T5（分派/接线）+ T5b（注入通道） | 满配 |
+| 隐藏消息注入与持久化（「持续生效」Requirement） | T5b | 满配（含前端隐藏 + 跨轮可见 + 本轮可见三条断言） |
 | 5.5 未命中判定 + 文案 | T2（三态）+ T5（fail-open 通道）+ T2 Step 4（文案） | 满配 |
 | 5.6 请求 `agent` 字段 | T3 | 满配 |
 | 5.7 存储链（4 小项） | T1 | 满配 |
-| 5.8 bind-once + `agent_used` | T3 | 满配（`get_session_agent_async` 两种实现择一，已在步骤内说明） |
-| 5.9 三层 prompt 组装 | T4 | 满配（含逐字不变守卫；`_with_current_date` 复用方式二选一，已说明） |
+| 5.8 bind-once + `agent_used` | T3 | 满配（读绑定值已钉死为 `get_session_agent_async`） |
+| 5.9 三层 prompt 组装 | T4 | 满配（含逐字不变守卫；`_with_current_date` 已钉死为直接 import） |
 | 5.10 能力清单服务 + 接口 | T9 | 满配 |
 | 5.11 测试 | 各任务内嵌 + T10 Step 4 清单核对表 | 满配（清单逐条映射到具体用例） |
 | 5.12 直出轮交付/落库 | T6 | 满配（含生产链端到端测试要求） |
@@ -1911,11 +2166,9 @@ git commit -m "docs(session-agent): 收口契约/术语/结构/调研与 §5.11 
 | 4.8 预设预绑定预加载 | T8 | 满配 |
 | 7.1–7.7 文档同步 | T10 | 满配（逐份文档的落地清单） |
 
-**2. Placeholder scan**：**T1–T10 全部满配**（含可直接粘贴的测试代码与实现代码；T10 为文档与门禁，已给出逐份文档的落地清单与 §5.11 逐条映射表）。已知的**刻意留白**仅两处，均已在步骤内说明处理方式：
-- T4 的 `_with_current_date` 复用方式二选一（import 私有函数 / 本地复制 12 行）；
-- T3 的"读会话已绑定 agent"两种实现二选一（新增 `get_session_agent_async` / 复用 `get_sessions` 过滤）。
+**2. Placeholder scan**：**T1–T10（含 T5b）全部满配**（含可直接粘贴的测试代码与实现代码；T10 为文档与门禁，已给出逐份文档的落地清单与 §5.11 逐条映射表）。**无刻意留白**——两处原有的二选一（T3 的读绑定值、T4 的 `_with_current_date` 复用）已在本轮复审中钉死为单一实现。
 
-**3. Type consistency**：`PrefixParse(kind, skill_name, task, record)`（T2 定 → T5 消费）；`parse_prefix(text, known_names, registry)` / `clean_prefix(text, known_names)`（T2 定 → T5 消费）；`bind_session_agent(session_id, agent) -> bool`（T1 定 → T3 消费）；`_resolve_session_agent(session_id, requested, bound="")`（T3 定）；`get_base_system_prompt()` / `build_system_prompt(persona, kb_bound, has_skills, prompt_manager) -> list[SystemMessage]`（T4 定 → T5/T8 消费）；`RequestContext.known_skill_names: set[str]`（T5 定 → `agent_node`/`query_router` 消费）；`AgentState.injected_system: str`（T5 定 → T8 复用）；`SSEAgentUsedEvent(agent, type, seq)`（T3 定）。命名已核对一致。
+**3. Type consistency**：`PrefixParse(kind, skill_name, task, record)`（T2 定 → T5 消费）；`parse_prefix(text, known_names, registry)` / `clean_prefix(text, known_names)`（T2 定 → T5/T5b 消费）；`bind_session_agent(session_id, agent) -> bool`（T1 定 → T3 消费）；`get_session_agent(session_id) -> str` / `get_session_agent_async(session_id) -> str`（T3 定）；`_resolve_session_agent(session_id, requested, bound="")`（T3 定）；`get_base_system_prompt()` / `build_system_prompt(persona, kb_bound, has_skills, prompt_manager) -> list[SystemMessage]`（T4 定 → T5b 经 ctx 消费）；`RequestContext.known_skill_names: set[str]` / `persona: str` / `has_skills: bool`（T5 定 → T5b/`query_router` 消费）；`SKILL_INJECTION_PREFIX: str` + `AgentService._inject_skill_message(session_id, kb_id, text) -> ChatMessage`（T5b 定 → T5/T8 消费）；`AgentService._preload_skills_text(skill_names)` / `_preload_if_first_round(effective_agent, history)`（T8 定）；`SSEAgentUsedEvent(agent, type, seq)`（T3 定）；`detect_confirm_request(answer)` / `ask_confirm_question(question, session_id)`（T7 定）。命名已核对一致。
 
 **4. 阻塞与前置 / 已知并接受的延后**
 - **5.14（生产部署缺口）—— 已接受的延后，不是遗漏**：`Dockerfile` 只 `COPY src/ scripts/ deploy/`，`docker-compose.prod.yml` 只挂 `./skills`、**没有** `agents/` → 生产环境 `_resolve_executor` 恒 `None`、会话智能体能力静默降级。**本轮决定：先在开发环境跑通，不动生产部署**（开发侧 `docker-compose.override.yml` 已挂 `agents/` + `skills/`）。**上生产前必须补**：① `docker-compose.prod.yml` 的 app volumes 增加 `agents/` 与 `skills/` 挂载；② 或 `Dockerfile` 增加 `COPY skills/ agents/`。**触发条件**：任何一个部署包发布前。**若判断有误**：生产上线后「会话智能体」整条主线零效果，且日志里只会看到执行者选择静默降级。
@@ -1926,5 +2179,4 @@ git commit -m "docs(session-agent): 收口契约/术语/结构/调研与 §5.11 
   4. `/finance-analyst …` 这类的 **fork** 技能：主 agent **0 轮 LLM**、回答**可见且落库**（`conversation_history.assistant` 非空）、`citations` 非空；
   5. 技能 chip 插入 `/name ` 与输入框 `/` 补全都生效（Enter 不误发）；
   6. 常规轮（不选智能体、不选技能）回归通过：流式 token / citation / done 正常，无新增 console error。
-- T5 依赖 T2/T3/T4 全部就绪（顺序：T1 → T2 → T3 → T4 → T5 → T6 → T7/T8 → T9 → T10）。
-- T7（确认门）与 T8（预加载）彼此独立，可换序。
+- **执行顺序（T5b 必须提前）**：T1 → T2 → T3 → T4 → **T5b** → T5 → T6 → T7/T8 → T9 → T10。T5b 是 T5（inline 注入）与 T8（预加载注入）的**共同前置**；T7（确认门）与 T8（预加载）彼此独立，可换序。

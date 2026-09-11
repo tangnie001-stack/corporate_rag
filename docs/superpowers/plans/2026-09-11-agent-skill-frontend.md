@@ -282,6 +282,7 @@ function selectSkill(name){
 function renderSkillMenu(idPrefix){
   const box = $(idPrefix + 'List');
   if(!box) return;
+  const hasReal = state.skills.some(function(s){ return !!s.name; });  // 是否有真实技能
   const current = state.skill || '';
   box.innerHTML = state.skills.map(function(s){
     const selected = (s.name === current);
@@ -293,7 +294,7 @@ function renderSkillMenu(idPrefix){
       + (desc ? '<span class="agent-item-desc">' + escapeHtml(desc) + '</span>' : '') + '</span>'
       + '<span class="check">' + (selected ? '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg>' : '') + '</span>'
       + '</div>';
-  }).join('');
+  }).join('') + (hasReal ? '' : '<div class="slash-empty">暂无可调用技能</div>');   // 空态提示（规格 chat-harness-ui）
   Array.prototype.forEach.call(box.querySelectorAll('.agent-item'), function(el){
     el.addEventListener('mousedown', function(ev){
       ev.preventDefault();                       // 保焦点，避免输入框失焦
