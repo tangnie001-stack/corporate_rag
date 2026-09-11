@@ -1,11 +1,10 @@
 """SkillLoader — 扫描 skills/<name>/SKILL.md 并解析 frontmatter + 正文。
 
 SKILL.md 结构：YAML frontmatter（--- 包裹）+ 正文。frontmatter 字段：
-name/description/context/model/thinking/allowed-tools/max-iterations（横线键转
-下划线）。解析规则：
+name/description/context/model/allowed-tools（横线键转下划线）。解析规则：
 - name 缺省用目录名；description 缺省用正文首段
 - context 非法值回落 inline 并记 warning（fail-open，不阻塞加载）
-- 正文按 context 存 inline_prompt（inline）或 agent_prompt（fork）
+- 正文按 context 存 inline_prompt（inline）或 fork_body（fork）
 - 只扫一层 skills/<name>/SKILL.md，不递归（目录即 skill 边界）
 """
 
@@ -21,9 +20,7 @@ _FRONTMATTER_KEYS = {
     "description": str,
     "context": str,
     "model": str | None,
-    "thinking": bool | None,
     "allowed-tools": list,
-    "max-iterations": int | None,
 }
 
 
@@ -94,28 +91,20 @@ class SkillLoader:
         model = meta.get("model")
         if not isinstance(model, str):
             model = None
-        thinking = meta.get("thinking")
-        if not isinstance(thinking, bool):
-            thinking = None
-        max_iterations = meta.get("max-iterations")
-        if isinstance(max_iterations, bool) or not isinstance(max_iterations, int):
-            max_iterations = None
         if context == SkillContext.INLINE:
             inline_prompt = body
-            agent_prompt = None
+            fork_body = None
         else:
             inline_prompt = None
-            agent_prompt = body
+            fork_body = body
         return SkillRecord(
             name=name,
             description=description,
             context=context,
             inline_prompt=inline_prompt,
-            agent_prompt=agent_prompt,
+            fork_body=fork_body,
             model=model,
-            thinking=thinking,
             allowed_tools=[str(t) for t in allowed_tools],
-            max_iterations=max_iterations,
             source_path=path.resolve(),
         )
 

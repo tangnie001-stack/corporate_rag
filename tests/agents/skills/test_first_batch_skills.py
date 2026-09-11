@@ -33,13 +33,13 @@ def test_fork_prompt_must_not_mention_tool_names():
     """fork skill 正文不出现任何工具名（零工具子代理，见 design D7/D9）。"""
     records = {r.name: r for r in SkillLoader(SKILLS_DIR).load_all()}
     analyst = records["finance-analyst"]
-    body = analyst.agent_prompt or ""
+    body = analyst.fork_body or ""
     for tool_name in ("retrieve_kb", "search_web", "ask_user", "delegate_task"):
         assert tool_name not in body, f"fork skill 正文不应出现工具名 {tool_name}"
 
 
 def test_fork_prompt_under_delegate_result_limit():
-    """fork skill 正文（子代理 system_prompt）控制在合理规模内。"""
+    """fork skill 正文（子代理 user message 任务内容）控制在合理规模内。"""
     records = {r.name: r for r in SkillLoader(SKILLS_DIR).load_all()}
-    body = records["finance-analyst"].agent_prompt or ""
+    body = records["finance-analyst"].fork_body or ""
     assert len(body) <= DELEGATE_RESULT_LIMIT

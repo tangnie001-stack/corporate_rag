@@ -119,7 +119,7 @@ def test_skill_body_tool_names_exist_in_code():
     if not skills_root.exists():
         return  # skills 目录未建（Task 9 前）→ 跳过，Task 9 后必有
     for rec in SkillLoader(skills_root).load_all():
-        body = (rec.inline_prompt or "") + (rec.agent_prompt or "")
+        body = (rec.inline_prompt or "") + (rec.fork_body or "")
         for tool_name in set(_TOOL_PATTERN.findall(body)):
             assert tool_name in known, (
                 f"skill {rec.name} 正文引用工具 {tool_name} 但代码未注册（已改名/删除？）"

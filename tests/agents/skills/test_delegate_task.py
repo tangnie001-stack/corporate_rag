@@ -23,7 +23,7 @@ def _record(
             description=f"{name} 规则",
             context=context,
             inline_prompt=body,
-            agent_prompt=None,
+            fork_body=None,
             model=model,
             source_path=Path(f"/tmp/{name}/SKILL.md"),
         )
@@ -32,7 +32,7 @@ def _record(
         description=f"{name} 专家",
         context=context,
         inline_prompt=None,
-        agent_prompt=body,
+        fork_body=body,
         model=model,
         source_path=Path(f"/tmp/{name}/SKILL.md"),
     )

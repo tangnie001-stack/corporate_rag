@@ -1,7 +1,7 @@
 """SkillExecutor — inline 指令注入 / fork 零工具子代理执行。
 
 - inline：返回 skill 正文（render 后的方法论），主 agent 自己执行（不产生子代理）。
-- fork：create_react_agent(llm, tools=[], prompt=agent_prompt) 生成独立零工具
+- fork：create_react_agent(llm, tools=[], prompt=fork_body) 生成独立零工具
   子代理，初始消息 = task，返回纯文本（不带 [n]）。零工具 = 防递归硬保证 + 不
   写共享 RequestContext.tool_contexts（design D7/D8/D9）。
 
@@ -12,16 +12,15 @@ astream_events(v2) 显式消费：LLM 事件只走本消费循环（var_child_ru
 scope=delegate 配置），聚合正文经 ctx.clarify_channel 投 delegate delta 增量（thinking/
 content），delegate end 终态由 delegate_task finally 统一记录（本层不重复记）。
 
-模型/思考（design D12 + spec delegate-execution-controls）：skill 声明 model →
-get_llm(model=...) 新建；model 空 → 继承主 agent 的 model_name。skill 声明 thinking →
-新建实例 extra_body enable_thinking（显式开/关）；thinking 未声明但请求上下文可及 →
-跟随 ctx.deep_thinking 新建实例（enable_thinking=deep_thinking）；两者均不可得
-（无 ctx 且未声明）→ 复用主 agent 实例。
+模型/思考（spec delegate-execution-controls）：skill 声明 model → get_llm(model=...)
+新建；model 空 → 继承主 agent 的 model_name。请求上下文可及 → 新建实例携带
+extra_body.enable_thinking=ctx.deep_thinking（思考跟随请求档）；不可得（无 ctx）→
+复用主 agent 实例（思考走模型默认）。
 
 防失控（design D13 + spec delegate-execution-controls，三层）：事件级空闲超时
 （DELEGATE_MAX_IDLE_S，流式增量不误杀）+ 总时长保险丝（asyncio.wait_for，deep_thinking
 档 DELEGATE_TOTAL_TIMEOUT_THINKING_S / 默认档 DELEGATE_TOTAL_TIMEOUT_S）+ turn 上限
-（record.max_iterations 或 DELEGATE_DEFAULT_MAX_TURNS）。idle/total/turn 中断统一返回
+（DELEGATE_DEFAULT_MAX_TURNS）。idle/total/turn 中断统一返回
 DELEGATE_TIMEOUT_TEXT 并写 ctx.fork_stop_reason；请求取消（abort_signal 置位）抛
 CancelledError 由主任务按取消路径收尾。
 
@@ -59,7 +58,7 @@ class SkillExecutor:
 
         Args:
             main_llm: 主 agent 的 llm 实例（fork 且 skill 未声明 model 时按
-                model_name 继承复用；声明 model/thinking 时经 get_llm 新建）
+                model_name 继承复用；声明 model 或请求上下文可及时经 get_llm 新建）
         """
         self._main_llm = main_llm
         # 主 agent llm 为 ChatOpenAI 族（get_llm 产物）时 model_name 为标准属性；
@@ -102,7 +101,7 @@ class SkillExecutor:
         return prompt
 
     async def _run_fork(self, record: SkillRecord, task: str) -> str:
-        """fork 执行：astream 级消费 + 三层防失控 + thinking 继承。
+        """fork 执行：astream 级消费 + 三层防失控 + 思考跟随请求档。
 
         Args:
             record: fork SkillRecord
@@ -121,10 +120,10 @@ class SkillExecutor:
         sub_agent = create_react_agent(
             llm,
             tools=[],  # 零工具硬保证（design D7）：防递归 + 不污染主 ctx
-            prompt=record.agent_prompt,
+            prompt=record.fork_body,
         )
         ctx = current_request_ctx.get()
-        max_turns = record.max_iterations or DELEGATE_DEFAULT_MAX_TURNS
+        max_turns = DELEGATE_DEFAULT_MAX_TURNS
         deep_thinking = ctx.deep_thinking if ctx is not None else False
         total_timeout = (
             settings.DELEGATE_TOTAL_TIMEOUT_THINKING_S
@@ -166,7 +165,7 @@ class SkillExecutor:
             record: fork SkillRecord
             task: 子代理初始任务文本
             ctx: 当前请求上下文（可能为 None；None 时仅聚合不推送/不防失控）
-            max_turns: turn 上限（skill max_iterations 或默认）
+            max_turns: turn 上限（DELEGATE_DEFAULT_MAX_TURNS）
 
         Returns:
             聚合后的子代理最终正文纯文本（不含 reasoning）
@@ -393,40 +392,25 @@ class SkillExecutor:
         return ""
 
     def _resolve_fork_llm(self, record: SkillRecord):
-        """解析 fork 子代理的 llm 实例（model/thinking/deep_thinking 消费）。
+        """解析 fork 子代理的 llm 实例（model / deep_thinking 消费）。
 
         Args:
             record: fork SkillRecord
 
         Returns:
             llm 实例：
-            - 声明 model → get_llm(model=record.model, extra_body?) 新建
-            - 未声明 model 但 (thinking 声明 或 ctx.deep_thinking 可及) →
-              get_llm(model=主 agent model_name, extra_body.enable_thinking=...)
-              新建（新建实例才能携带 enable_thinking）
-            - 两者均不可得 → 复用主 agent llm 实例
-            enable_thinking 取值优先级：record.thinking（显式声明）>
-              ctx.deep_thinking（请求级，仅 thinking 未声明时跟随）> 模型默认
-            例外兜底：需新建实例携带 enable_thinking，但 record.model 为空且主 agent
-              model_name 不可得（测试替身/缺省）→ 退回复用主实例，防落到默认 LLM_MODEL
-              造成与主模型漂移（thinking 跟随在该场景降级为模型默认）
+            - 声明 model → get_llm(model=record.model) 新建（请求上下文可及则
+              附 extra_body.enable_thinking=ctx.deep_thinking）
+            - 未声明 model 但请求上下文可及 → get_llm(model=主 agent model_name,
+              extra_body.enable_thinking=ctx.deep_thinking) 新建
+            - 两者均不可得（无 ctx 且未声明 model）→ 复用主 agent llm 实例
+            enable_thinking 取值：ctx.deep_thinking（请求级档位）
         """
         ctx = current_request_ctx.get()
-        thinking = record.thinking
-        if thinking is None and ctx is not None:
+        if ctx is None:
+            thinking = None
+        else:
             thinking = ctx.deep_thinking
-
-        if (
-            thinking is not None
-            and record.model is None
-            and self._main_model_name is None
-        ):
-            core_logging.log_event(
-                Event.DELEGATE_SKIP,
-                reason="no_main_model_name_thinking_fallback",
-            )
-            return self._main_llm
-
         if record.model is None and thinking is None:
             return self._main_llm
 

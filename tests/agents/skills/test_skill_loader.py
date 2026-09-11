@@ -30,14 +30,14 @@ def test_load_inline_skill(tmp_path):
     assert rec.context == SkillContext.INLINE
     assert rec.inline_prompt is not None
     assert "先检索" in rec.inline_prompt
-    assert rec.agent_prompt is None
+    assert rec.fork_body is None
 
 
 def test_load_fork_skill(tmp_path):
     _write_skill(
         tmp_path,
         "finance-analyst",
-        "description: 财务建模专家\ncontext: fork\nmodel: qwen3.8-max\nthinking: true\n",
+        "description: 财务建模专家\ncontext: fork\nmodel: qwen3.8-max\n",
         "你是一名财务建模专家，基于给定材料做多步分析。",
     )
     records = SkillLoader(tmp_path).load_all()
@@ -45,9 +45,8 @@ def test_load_fork_skill(tmp_path):
     rec = records[0]
     assert rec.context == SkillContext.FORK
     assert rec.model == "qwen3.8-max"
-    assert rec.thinking is True
-    assert rec.agent_prompt is not None
-    assert "财务建模专家" in rec.agent_prompt
+    assert rec.fork_body is not None
+    assert "财务建模专家" in rec.fork_body
     assert rec.inline_prompt is None
 
 

@@ -86,9 +86,7 @@ TEMPORAL_RECENT_N_YEARS = 3
 MAX_DELEGATE_BONUS = (
     2  # delegate 轮后主 agent 迭代上限放宽轮数（整合余量，单请求总上限仍封顶）
 )
-DELEGATE_DEFAULT_MAX_TURNS = (
-    5  # fork 零工具默认 turn 上限（防御；开放工具后由 skill max_iterations 覆盖）
-)
+DELEGATE_DEFAULT_MAX_TURNS = 5  # fork 零工具默认 turn 上限（防御）
 DELEGATE_RESULT_LIMIT = 1000  # fork 结果回流主 agent 的截断阈值（字符）
 INLINE_PROMPT_MAX_CHARS = (
     500  # inline skill 正文规模上限（字符，防上下文累积膨胀，超出仅记 warning）
