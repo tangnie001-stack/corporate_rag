@@ -9,6 +9,7 @@ from src.agents.graph.state import AgentState
 from src.agents.graph.workflow import build_graph
 from src.agents.skills.models import SkillContext, SkillRecord
 from src.config.const import (
+    FORK_CONFIRM_MARKER,
     VERIFY_CITATION_MARKER,
     VERIFY_KB_CITATION_MARKER,
     SSEInteractionTexts,
@@ -338,6 +339,48 @@ async def test_direct_round_consumes_verify_citation_guidance(marker):
 
     assert executor.seen_task == f"2024 年营收\n\n{marker}"
     assert result["answer"] == "答案[1]"
+
+
+class _ConfirmMarkerExecutor:
+    """替身：首轮返回带确认 marker 的答案（驱动确认门）。"""
+
+    async def execute(self, record, task, run):
+        return f"结论正文。\n{FORK_CONFIRM_MARKER} 要按哪个口径？"
+
+
+@pytest.mark.asyncio
+async def test_unconfirmed_answer_strips_confirm_marker(monkeypatch):
+    """确认门被拒/超时 → 结论正文不含 marker 行，仅附"未经确认"标注。"""
+    record = SkillRecord(
+        name="finance-analyst",
+        description="d",
+        context=SkillContext.FORK,
+        fork_body="任务：$ARGUMENTS",
+        allowed_tools=[],
+    )
+    node = make_skill_direct_node(_FakeRegistry(record), _ConfirmMarkerExecutor())
+
+    async def _no_reply(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("src.agents.graph.skill_direct.ask_confirm_question", _no_reply)
+    state = AgentState(
+        session_id="s1",
+        kb_id="kb1",
+        query="2024 年营收",
+        direct_skill=record.name,
+    )
+    main_ctx = RequestContext(session_id="s1", kb_id="kb1", kb_bound=True)
+    token = current_request_ctx.set(main_ctx)
+    try:
+        result = await node(state)
+    finally:
+        current_request_ctx.reset(token)
+
+    assert "CONFIRM_REQUIRED:" not in result["answer"]
+    assert result["answer"].startswith("结论正文。")
+    assert SSEInteractionTexts.CONFIRM_UNCONFIRMED_NOTE in result["answer"]
+    assert result["_needs_regenerate"] is False
 
 
 @pytest.mark.asyncio

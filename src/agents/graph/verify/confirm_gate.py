@@ -34,6 +34,16 @@ def detect_confirm_request(answer: str) -> str:
     return ""
 
 
+def strip_confirm_marker(answer: str) -> str:
+    """移除子代理输出中的"需确认"标记行（内部协议串，不应对用户可见）。"""
+    kept = [
+        line
+        for line in answer.splitlines()
+        if not line.strip().startswith(FORK_CONFIRM_MARKER)
+    ]
+    return "\n".join(kept).strip()
+
+
 async def ask_confirm_question(question: str, session_id: str) -> str | None:
     """经澄清链路向用户提问并等待答复。
 

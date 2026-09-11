@@ -4,7 +4,11 @@ from unittest.mock import MagicMock
 
 from langchain_core.messages import SystemMessage
 
-from src.config.prompts import DELEGATE_GUIDANCE_SECTION, INLINE_CITATION_INSTRUCTION
+from src.config.prompts import (
+    DELEGATE_GUIDANCE_SECTION,
+    INLINE_CITATION_INSTRUCTION,
+    KB_BOUND_RETRIEVAL_DISCIPLINE,
+)
 from src.rag.prompt import build_prompt, build_system_prompt
 
 
@@ -63,6 +67,15 @@ def test_persona_without_skills_omits_delegate_section():
         persona="你是财务专家。", kb_bound=True, has_skills=False, prompt_manager=pm
     )
     assert DELEGATE_GUIDANCE_SECTION not in messages[0].content
+
+
+def test_persona_bound_keeps_retrieval_discipline():
+    """选定 agent 且绑定 KB → 环境约束层注入检索纪律（人设被替换后仍强制叠加）。"""
+    pm = _pm(base="基础段正文")
+    messages = build_system_prompt(
+        persona="你是财务专家。", kb_bound=True, has_skills=False, prompt_manager=pm
+    )
+    assert KB_BOUND_RETRIEVAL_DISCIPLINE in messages[0].content
 
 
 def test_no_persona_always_keeps_delegate_section():

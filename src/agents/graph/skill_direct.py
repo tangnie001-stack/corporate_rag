@@ -11,6 +11,7 @@ from src.agents.graph.state import AgentState, LangGraphNode
 from src.agents.graph.verify.confirm_gate import (
     ask_confirm_question,
     detect_confirm_request,
+    strip_confirm_marker,
 )
 from src.agents.skills.delegate_run import DelegateRun
 from src.agents.skills.models import SkillContext
@@ -117,9 +118,11 @@ def make_skill_direct_node(skill_registry, executor):
         if question:
             reply = await ask_confirm_question(question, state.session_id)
             if reply is None:
-                # 拒绝/超时/槽被占 → 出结论 + 标注"未经确认"，不再进 verify 重跑
+                # 拒绝/超时/槽被占 → 出结论 + 标注"未经确认"，不再进 verify 重跑；
+                # 剥离子代理的"需确认"marker 行，避免内部协议串泄漏给用户与历史
                 return {
-                    "answer": text + SSEInteractionTexts.CONFIRM_UNCONFIRMED_NOTE,
+                    "answer": strip_confirm_marker(text)
+                    + SSEInteractionTexts.CONFIRM_UNCONFIRMED_NOTE,
                     "tool_contexts": run.ctx.tool_contexts,
                     "verify_temporal_years": run.ctx.temporal_years,
                     "_needs_regenerate": False,
@@ -132,6 +135,9 @@ def make_skill_direct_node(skill_registry, executor):
             text = await executor.execute(
                 record, f"{state.query}\n\n用户补充说明：{reply}", run
             )
+            # 重跑结果不再过确认门（一次性），但若仍残留 marker 行须一并剥离，
+            # 否则内部协议串会漏到用户可见答案
+            text = strip_confirm_marker(text)
         return {
             "answer": text,
             "tool_contexts": run.ctx.tool_contexts,

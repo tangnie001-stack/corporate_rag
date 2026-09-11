@@ -5,6 +5,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from src.config.prompts import (
     DELEGATE_GUIDANCE_SECTION,
     INLINE_CITATION_INSTRUCTION,
+    KB_BOUND_RETRIEVAL_DISCIPLINE,
     KB_UNBOUND_SYSTEM_PROMPT,
 )
 from src.infra.llm.chat_message import ChatMessage
@@ -46,6 +47,11 @@ def build_system_prompt(
         base = persona
     else:
         base = prompt_manager.get_base_system_prompt()
+    # 环境约束层·检索纪律：仅当绑定 KB 且选定 agent（persona 非空）时注入。
+    # persona 为空时人设层即 FINANCIAL_SYSTEM_PROMPT，其处理流程 2–9 已含"先检索后作答"，
+    # 无条件注入会破坏"默认行为逐字不变（端到端快照）"需求。
+    if kb_bound and persona and KB_BOUND_RETRIEVAL_DISCIPLINE not in base:
+        base += KB_BOUND_RETRIEVAL_DISCIPLINE
     if INLINE_CITATION_INSTRUCTION not in base:
         base += INLINE_CITATION_INSTRUCTION
     if (has_skills or not persona) and DELEGATE_GUIDANCE_SECTION not in base:

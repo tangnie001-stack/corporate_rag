@@ -5,6 +5,7 @@ import pytest
 from src.agents.graph.verify.confirm_gate import (
     ask_confirm_question,
     detect_confirm_request,
+    strip_confirm_marker,
 )
 from src.config.const import FORK_CONFIRM_MARKER, SSEInteractionTexts
 
@@ -23,6 +24,23 @@ def test_detect_returns_empty_without_marker():
 def test_detect_ignores_marker_in_middle_only_of_a_line():
     """marker 必须出现在行首（防正文里偶然提到）。"""
     assert detect_confirm_request(f"前文 {FORK_CONFIRM_MARKER} 不是行首") == ""
+
+
+def test_strip_confirm_marker_removes_marker_line():
+    """剥离 marker 行，保留正文其余行。"""
+    text = f"我判断需要确认。\n{FORK_CONFIRM_MARKER} 要按 2024 还是 2023 口径？\n结论正文。"
+    assert strip_confirm_marker(text) == "我判断需要确认。\n结论正文。"
+
+
+def test_strip_confirm_marker_noop_without_marker():
+    """无 marker 时仅去首尾空白，不改正文。"""
+    assert strip_confirm_marker("这是正常结论。") == "这是正常结论。"
+
+
+def test_strip_confirm_marker_only_strips_line_starting_marker():
+    """marker 出现在行中（非行首）不剥离，仅行首 marker 行被移除。"""
+    text = f"前文 {FORK_CONFIRM_MARKER} 不是行首\n{FORK_CONFIRM_MARKER} 待确认\n收尾"
+    assert strip_confirm_marker(text) == f"前文 {FORK_CONFIRM_MARKER} 不是行首\n收尾"
 
 
 @pytest.mark.asyncio
