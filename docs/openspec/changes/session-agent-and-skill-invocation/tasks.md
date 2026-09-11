@@ -26,12 +26,14 @@
 - [ ] 4.1 为 fork 子代理建立**独立 RequestContext**（隔离 `tool_contexts` / 引用编号 / `pending_asks`），并把委派状态从 ctx 单值改为**按 `delegate_id` 分槽**（修 `request_context.py:58` 单值并发缺陷）
 - [ ] 4.2 `SkillExecutor` 改用 `langchain.agents.create_agent`（替代废弃的 `create_react_agent`）：system prompt = 执行者人设（agent preset 正文 / 系统默认 prompt）、user message = skill 正文（`fork_body`）、tools = 执行者 `tools` ∩ allowed-tools（空则零工具；**预设 `tools` 仅在此路径生效，不影响主 agent**）；`middleware` 参数**保留装配位但传空**
 - [ ] 4.3 执行者选择顺序：skill `agent:` > 会话选定智能体 > **系统默认人设**（`build_system_prompt(persona=None, …)` 组装出的默认 prompt，非新造 general-purpose）
-- [ ] 4.4 简化 `_resolve_fork_llm`：移除 `record.thinking` 优先级与 `no_main_model_name_thinking_fallback`，思考跟随 `ctx.deep_thinking`；子代理最大轮次改取执行者 `maxTurns`（**未声明时用新增常量 `DEFAULT_SUBAGENT_MAX_TURNS`**，`settings.py`，可 env 覆盖）
+- [ ] 4.4 简化 `_resolve_fork_llm`：移除 `record.thinking` 优先级与 `no_main_model_name_thinking_fallback`，思考跟随 `ctx.deep_thinking`；子代理最大轮次改取执行者 `maxTurns`（**未声明时复用既有常量 `DELEGATE_DEFAULT_MAX_TURNS`**，`src/config/const.py:89`，不新建常量）
 - [ ] 4.5 打破循环依赖（工具工厂注入 / 延迟构造，勿让 executor 直接持有 `make_rag_tools`）
 - [ ] 4.6 新增**确认门**节点：规则检测子代理返回的"需确认"信号 → 走 `ask_user`（复用澄清链路）→ 答复后重跑子代理（上限 1 次）；无信号直通 verify；被拒/超时/槽被占 → 出结论 + 标注"未经确认"
-- [ ] 4.7 测试：工具隔离不污染主 agent、执行者选择优先级、thinking 移除后行为、**一轮多委派并发不串号**、确认门四个分支、用的是 `create_agent` 而非 `create_react_agent`
+- [ ] 4.7 测试：工具隔离不污染主 agent、执行者选择优先级、thinking 移除后行为、**一轮多委派并发不串号**、确认门四个分支、用的是 `create_agent` 而非 `create_react_agent`、**入口分派（命令行 → skill_direct，普通文本 → agent）**、**直出轮 verify 判据来自子代理上下文且护栏不空转**
 - [ ] 4.8 **预设预绑定 skill 预加载**：会话已绑定预设且声明 `skills:` 时，在该会话**首轮生成前**按 `/xxx` 同一路径注入一次（隐藏消息，不进 system prompt），后续轮次不重复注入
 - [ ] 4.9 **fork 直出的引用池并轨**（design D24）：`/xxx` 触发 fork 直出时，把子代理的 `tool_contexts` 作为本轮 `format` 的引用池（主池此时必为空），使 `citations` 正常产出、不误记 `INVALID_CITATION`；「不计入主编号」的旧约定限定为模型自动委派路径
+- [ ] 4.10 **图入口分派（design D26）**：`AgentState` 新增"直出决策"字段（解析出的 skill 名 + 任务文本）；`workflow.py:86` 的 `set_entry_point("agent")` 改为 `add_conditional_edges(START, route_entry, {...})`，`route_entry` 纯规则判断（无 LLM）
+- [ ] 4.11 **直出节点 + verify 语义适配（design D26）**：新增 `skill_direct` 节点（调用 fork 子代理 → 写 `answer` 与 `tool_contexts`=子代理池 → 边到 `verify`）；直出轮 `verify_node` 与两条引用护栏的判据改用**子代理上下文**（`temporal_years` / `tool_contexts`）；`route_verify` 的 `_needs_regenerate` 在直出轮路由回 `skill_direct`（重跑子代理上限 1 次）
 
 ## 5. 调用控制与 `/xxx` 路由
 
@@ -49,8 +51,7 @@
 - [ ] 5.8 **会话智能体绑定与沿用（bind-once，无 400）**：服务层 `resolve_session_agent(session_id, requested)`——校验只查注册表；未绑定 + 合法 → `bind_session_agent` 固化；已绑定 → 一律用绑定值（传入空＝静默沿用；传入非空且不同＝**忽略 + warning**，不拒绝）；传入未注册 → 忽略 + warning；绑定校验与写入**在 `StreamingResponse` 之前**完成；**`agent_used` 走流事件回传**（与 `model_used` 同层）；已删除预设的历史会话 → 降级默认 prompt + warn
 - [ ] 5.9 **system prompt 三层组装**：`PromptManager` 拆出 `get_base_system_prompt()`（不含系统追加段）；新增 `build_system_prompt(persona, kb_bound, has_skills)`（`src/rag/prompt.py`）——①人设层（preset 正文 / `get_base_system_prompt()`）+ ②环境约束层（引用指令 + 委派引导 + 检索纪律 + `KB_UNBOUND_SYSTEM_PROMPT` + 日期，**顺序与现状一致**）；`build_prompt` 与 `build_simple_prompt` **两个调用点**都改走它；**保证未选 agent 时 system 段端到端逐字不变**
 - [ ] 5.10 **能力清单服务 + 接口**（design D19：**不引入 catalog 文件，由 registry 派生**）：`src/services/capability_service.py`（取 registry 的 `user_visible()` / 全部可加载预设；随懒重载自动更新，无独立缓存层）；`src/api/capabilities.py`（`GET /api/skills` / `GET /api/agents`，经 service 不直接读文件/扫描目录）；**响应走统一信封**（`data.skills` / `data.agents`）；skills 服务端过滤 `user-invocable: false`；读取失败返回空列表 + warn（不 500）
-- [ ] 5.11 **新增常量**：`DEFAULT_SUBAGENT_MAX_TURNS`（`src/config/settings.py`，可 env 覆盖，供 4.4 使用）
-- [ ] 5.12 测试：前缀路由 / **前缀清洗（当前轮与历史都不含 `/name`，落库仍为原文）** / **`/xxx` inline 单轮与 fork 直出（断言主 agent 0 LLM 轮 + citations 非空 + 无 `INVALID_CITATION`）** / 注入后持续生效 / 双轴过滤 / **绑定四态（首轮绑定、沿用、忽略+warn、未注册降级）** / 老会话 `bind-if-empty` 可绑定 / `agent_used` 流事件 / **未选 agent 时 system 段快照逐字一致** / 两接口信封结构 + 服务端过滤 + 失败降级 / **非法名称跳过** / `sessions/messages` 契约不变（`data` 仍为数组）
+- [ ] 5.11 测试：前缀路由 / **前缀清洗（当前轮与历史都不含 `/name`，落库仍为原文）** / **`/xxx` inline 单轮与 fork 直出（断言主 agent 0 LLM 轮 + citations 非空 + 无 `INVALID_CITATION`）** / 注入后持续生效 / 双轴过滤 / **绑定四态（首轮绑定、沿用、忽略+warn、未注册降级）** / 老会话 `bind-if-empty` 可绑定 / `agent_used` 流事件 / **未选 agent 时 system 段快照逐字一致** / 两接口信封结构 + 服务端过滤 + 失败降级 / **非法名称跳过** / `sessions/messages` 契约不变（`data` 仍为数组）
 
 ## 6. 前端
 

@@ -111,6 +111,23 @@ AgentService SHALL 在生成入口解析用户消息的 `/name` 前缀：命中 
 - **THEN** 直接调用 fork 子代理产出结果，主 agent 不先产生 LLM 轮
 - **AND** 子代理结果交由 `verify` 节点校验
 
+#### Scenario: 图入口按命令分派
+
+- **WHEN** 本轮是 `/xxx` 命中 `context: fork` 的直出轮
+- **THEN** 图入口（规则判断，无 LLM）直接路由到直出节点，不经过主 agent 节点
+- **AND** 非命令轮仍走主 agent 节点（既有行为不变）
+
+#### Scenario: 直出轮的校验判据来自子代理上下文
+
+- **WHEN** 直出轮进入 `verify`
+- **THEN** 年份完整性与引用护栏的判据取自**子代理上下文**（`temporal_years` / `tool_contexts`），而非空的主请求上下文
+- **AND** 护栏不因"主上下文无材料"而静默跳过
+
+#### Scenario: 直出轮的重生成目标
+
+- **WHEN** 直出轮的 `verify` 判定需要重生成
+- **THEN** 条件边路由回**直出节点**（重跑子代理），上限 1 次；不路由回主 agent 节点
+
 #### Scenario: fork 校验不通过重跑
 
 - **WHEN** 子代理结果未通过 `verify`

@@ -257,6 +257,7 @@ GET /api/agents   ← registry 全部可加载预设（name + display_name + des
 - **服务端过滤**：`GET /api/skills` 只返回 `user_visible()`（服务端隐藏 `user-invocable: false`），否则禁用项会出现在菜单里（"看见就想调、调了被拒"，与 D11 冲突）；`GET /api/agents` 天然只含可加载预设
 - 列表随 registry 的**懒重载**（文件 mtime 变化）自动更新，无需单独缓存层
 - **默认项不入清单**：选择器的首项「默认」由**前端合成**（`value=""`），后端不返回伪项。理由：`value=""` 正好对应"未绑定 → 系统默认 prompt"（D1）的既有语义，零后端分支；后端返回伪项会污染"预设 = 真实文件"的定义
+- 前端智能体选择器读 `/api/agents`；技能 chip 下拉与 `/` 补全读 `/api/skills`（同一候选，见 D21）
 - api 层只转发（守层间规则）；读取失败 fail-open（返回空列表 + warn，不 500）
 
 ### D24. fork 直出路径的引用池归属（citations 不能丢）
@@ -279,7 +280,25 @@ GET /api/agents   ← registry 全部可加载预设（name + display_name + des
 | **组装 prompt 时** | 用户消息（当前轮 `query` 与历史 user 消息）SHALL 剥掉 `/name ` 前缀后再转 `HumanMessage` |
 
 **理由**：① 不剥离则模型每轮都看到斜杠命令（可能模仿、或当路径复述），且与 D4 注入的隐藏消息重复（同一 skill 出现"命令 + 正文"两次）；② 若改成"剥离后落库"，则用户输入与存储不一致，且剩余文本为空时撞 `MessageModel.content` 非空约束；③ 清洗规则与 `/xxx` 解析**共用同一个函数**（一处事实来源），避免"能解析但洗不干净"的漂移。前端后续可选增强（不在本 change）：气泡内把 `/name` 渲染成"技能徽标"而非纯文本——依赖"落库保留原文"这一前提。
-- 前端智能体选择器读 `/api/agents`；技能 chip 下拉与 `/` 补全读 `/api/skills`（同一候选，见 D21）
+
+### D26. `/xxx` 直出路径的图入口分派与 verify 语义
+
+D22 定了"fork 直出、主 agent 0 次 LLM 轮"，但**现有图无法表达**：`workflow.py:86` 是 `builder.set_entry_point("agent")`，而 `agent` 节点每次执行必然调一次 LLM。故必须补三样：
+
+**① 图入口分派**
+```
+START ──route_entry──┬─ "agent"         （常规轮：opts/普通文本）
+                     └─ "skill_direct"  （/xxx 命中 fork skill 的直出轮）
+```
+- `AgentState` 新增字段承载"本轮直出决策"（解析出的 skill 名 + 任务文本），由 `AgentService` 在初始 state 注入
+- 入口改为 `add_conditional_edges(START, route_entry, {...})`；`route_entry` 纯规则判断（无 LLM）
+- 新增 `skill_direct` 节点：调用 fork 子代理 → 写 `answer` 与 `tool_contexts`（子代理池，见 D24）→ 边到 `verify`
+
+**② 直出轮的 verify 判据来源**：`verify_node` 与两条引用护栏当前都读**主请求上下文**（`ctx.temporal_years` / `ctx.tool_contexts`），直出轮主 ctx 必然为空 → 年份完整性校验与引用护栏**静默跳过**。直出轮 SHALL 改用**子代理上下文**作为判据来源（`temporal_years` / `tool_contexts`），即"本轮材料来自谁，就用谁的上下文校验"。
+
+**③ 直出轮的重生成目标**：`route_verify` 的 `_needs_regenerate=True` 现路由回 `"agent"`（主 agent）；直出轮的 SHALL 路由回 `"skill_direct"`（重跑子代理，上限 1 次，见 D22）。
+
+**理由**：D22 的用户价值（"我知道要谁来干"→ 不浪费一次主 agent LLM）只有靠入口分派才成立；而"直出省了一轮 LLM"必然意味着"主 ctx 没有材料"，所以校验与重生成的判据必须跟着材料走，否则整套 verify/引用护栏在直出轮退化为空转——这正是 D24 在 `format` 层已修的同一个根因，本决策把它补齐到 verify 层。
 
 ### D20. 错误处理总则
 
@@ -322,7 +341,7 @@ GET /api/agents   ← registry 全部可加载预设（name + display_name + des
 
 **前缀的存储与清洗**见 D25（写时保留原文、组装 prompt 时剥离）。
 
-**fork 直出路径的引用池归属**见 D24（主池为空，须改用子代理池，否则 citations 静默丢失）。
+**fork 直出路径的引用池归属**见 D24（主池为空，须改用子代理池，否则 citations 静默丢失）；**直出路径的图入口分派与 verify 语义**见 D26（入口条件边 + 直出节点 + 校验判据随材料走）。
 
 ### D23. `/xxx` 的两个用户入口共用一条通道（不新增调用路径）
 
@@ -391,7 +410,7 @@ GET /api/agents   ← registry 全部可加载预设（name + display_name + des
 - **[删 `thinking` / `max-iterations` 兼容性]** 存量若写 → 忽略并 warn；无现有 skill 使用，实际影响为零
 - **[人设质量是最大失败源]** MAST 研究（arXiv 2503.13657）中 Specification 类失败占 41.77% → 重视 `description`（何时使用）质量
 - **[R1 引入两套 state 概念]** 主图 `AgentState`（19 字段）与 `create_agent` 内部 state 并存 → 文档写清边界；引用池在 `RequestContext` 而非任一 state，避免误解
-- **[引用链在 fork 直出路径断裂]** 主 agent 零 LLM 轮 → 主引用池为空 → `format` 把子代理的 `[n]` 全判越界丢弃，且两条引用护栏都因"主池无 context"静默放行 → **D24**（子代理池作为本轮 citations 来源）+ 断言"直出路径 citations 非空、无 `INVALID_CITATION`"
+- **[引用链在 fork 直出路径断裂]** 主 agent 零 LLM 轮 → 主 ctx 无材料 → `format` 把子代理的 `[n]` 全判越界丢弃、两条引用护栏与年份完整性校验**静默空转**（都以"主 ctx 有 context"为前提）→ **D24**（format 层改用子代理池）+ **D26**（verify 层判据随材料走、重生成路由回直出节点）+ 断言"直出轮 citations 非空、无 `INVALID_CITATION`、护栏不空转"
 - **[alembic 迁移链分叉（既有问题）]** 现存两处 alembic 目录（根 `alembic/` 仅 1 个版本；`src/infra/db/mysql_db/alembic/` 有 3 个）+ `alembic.ini` 指向根目录 + 最近一次变更走手工 SQL → 本 change **走手工 SQL 绕开**（`scripts/migrations/`），分叉本身**登记为独立遗留问题**（修 chain 前须比对线上 `alembic_version` 表），不混入本 change
 - **[确认回路增加交互轮次]** 子代理请求确认 → 用户答 → 重跑子代理，用户感知为"多一次往返" → 仅在子代理确实无法自行判断时触发（靠子代理 prompt 约束"能自己定的别问"）
 - **[prompt 分层的回归风险]** 重构成三层可能悄悄改变"未选智能体"的默认行为 → **测试 T1**：未选 agent 时 `build_system_prompt()` 输出与现状**逐字一致**
@@ -403,7 +422,7 @@ GET /api/agents   ← registry 全部可加载预设（name + display_name + des
 2. **工具层**：`ToolEntry` 加 `readonly`（现有工具全 True）
 3. **智能体层**：新增 `agents/` 加载/注册表（含 `display_name`）；迁移 `finance-analyst` 人设段 → `agents/finance-expert.md`；**不新增 catalog 文件**（D19）
 4. **Prompt 层**：`build_prompt` 改三层组装（人设 + 环境约束）；`INLINE_CITATION_INSTRUCTION` 移入环境约束层；**保证未选 agent 行为逐字不变**
-5. **执行层**：fork 改用 `create_agent` + 独立 RequestContext + 按 `allowed-tools` 装配 + 执行者选择；`delegate_id` 分槽（并发安全）；确认门节点；**fork 直出的引用池并轨（D24）**
+5. **执行层**：fork 改用 `create_agent` + 独立 RequestContext + 按 `allowed-tools` 装配 + 执行者选择；`delegate_id` 分槽（并发安全）；确认门节点；**fork 直出的引用池并轨（D24）**；**图入口分派 + 直出节点 + verify 判据随材料走（D26）**
 6. **存储层**：**手工 SQL 迁移**加 `sessions.agent` 列（`scripts/migrations/<date>-add-session-agent.sql`，与既有实践一致，见 D19/Risks 的 alembic 分叉说明）；`SessionModel` / `ChatRepo`（`create_session` 带 agent、`get_sessions` SELECT 加 agent、新增 `bind_session_agent` 原子更新）/ `PersistenceService` / `ChatManager.save_session_async` 透传；**`SessionItem` 与 `sessions/list` 返回该字段**（前端回显 + 每轮携带的数据源；`sessions/messages` 保持 `data` 为数组不变）
 7. **路由层**：`agent` 请求字段 + **`bind-if-empty` 绑定（首次写入者胜）+ 不一致忽略并 warning + `agent_used` 流事件回传**（无 400）+ `/xxx` 前缀解析与执行形态（D22）+ **前缀读时清洗（D25）** + 双轴推导 + 候选过滤
 8. **接口层**：`GET /api/skills` / `GET /api/agents`（信封 + registry 派生/过滤，D19）；前端智能体选择器（知识库右侧，默认项前端合成）+ 技能选择器（深度思考右侧）+ `/` 补全（走 `frontend-design` skill 按设计稿落地，见 D21）
@@ -417,6 +436,6 @@ GET /api/agents   ← registry 全部可加载预设（name + display_name + des
 - **多模型**：会话级选模型 / agent preset 带 `model` 影响主 agent —— 因现有图与 llm 启动期绑定而暂缓，需单独设计
 - **`langgraph` 版本升级**（1.2.9 → 1.2.11 等）：非阻塞（`create_agent` 已装版本即有），建议独立维护事项，不混入本 change
 - **alembic 迁移链分叉**：两处 `<script_location>` 目录 + 手工 SQL 三种机制并存，`alembic.ini` 指向根目录（详见 Risks）→ 已登记为独立遗留问题（`requirements_pool.md`）
-- **`maxTurns` 的系统默认值**：v1 定为常量 `DEFAULT_SUBAGENT_MAX_TURNS`（`settings.py`，可 env 覆盖）；后续是否按模型/场景分档，随多模型设计一并评估
+- **`maxTurns` 的系统默认值**：**复用既有常量 `DELEGATE_DEFAULT_MAX_TURNS`**（`src/config/const.py:89`，`executor.py:127` 已在用），**不新建**第二个常量——避免同一语义两处定义；若嫌名字不贴切只做重命名，不新增
 
-（已结案：v1 `tools` 隔离深度 → 仅约束 fork 子代理，见 D3/D7；中途换智能体 → 绑定后以绑定值为准、不一致忽略并 warning（不阻断），见 D1；`/` 的中文自然度 → 由技能 chip 下拉提供按钮式入口，见 D21；`/xxx` 执行形态与未知 skill 判定 → 见 D22；两入口共用一条通道 → 见 D23；清单是否用 catalog → 取消 catalog、由 registry 派生，见 D19；`agent_used` 载体 → 流事件（与 `model_used` 同层），见 D20）
+（已结案：v1 `tools` 隔离深度 → 仅约束 fork 子代理，见 D3/D7；中途换智能体 → 绑定后以绑定值为准、不一致忽略并 warning（不阻断），见 D1；`/` 的中文自然度 → 由技能 chip 下拉提供按钮式入口，见 D21；`/xxx` 执行形态与未知 skill 判定 → 见 D22；两入口共用一条通道 → 见 D23；清单是否用 catalog → 取消 catalog、由 registry 派生，见 D19；`agent_used` 载体 → 流事件（与 `model_used` 同层），见 D20；直出路径的图入口与 verify 语义 → 见 D26；`maxTurns` 默认值 → 复用 `DELEGATE_DEFAULT_MAX_TURNS`）

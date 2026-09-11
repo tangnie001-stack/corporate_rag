@@ -26,6 +26,9 @@
 
 - **WHEN** 向 `agents/` 放入新的 `<name>.md` 并更新其 mtime
 - **THEN** 下一次请求 `GET /api/agents` 即包含该预设（**无需登记任何清单文件**）
+- **AND** 前端选择器随之可见
+
+> 限定：**接口与前端的"即时生效"成立**；`delegate_task` 工具 description 中的可用 skill 列表仍是**图构建期快照**（`make_delegate_task` 时生成，既有行为），新增 skill 需重启才对该清单生效。本 change 不改变该行为，如需一致需单独评估"每次调用重建 description"。
 
 #### Scenario: 读取失败 fail-open
 
