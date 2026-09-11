@@ -627,6 +627,10 @@ class AgentService:
         # 延迟 provider 读取它按 skill 白名单筛选子代理工具（打破工具集 ↔ executor
         # 循环依赖）。构造期为空，build_graph 完成后被填充
         fork_tool_pool: list = []
+        # skill_registry / skill_executor 提到分支外可见：直出节点（Task 8）需要二者，
+        # 未命中（目录缺失/注册表为空）时置 None，直出节点退化为兜底文案
+        skill_registry = None
+        skill_executor = None
         if Path(skills_dir).exists():
             skill_registry = SkillRegistry(SkillLoader(Path(skills_dir)))
             skill_registry.reload_if_changed()  # description 在 make_delegate_task 时按当前注册表生成
@@ -648,6 +652,12 @@ class AgentService:
                 Event.DELEGATE_SKIP, reason="skills_dir_missing", skills_dir=skills_dir
             )
 
+        skill_direct_node = None
+        if skill_registry is not None and skill_executor is not None:
+            from src.agents.graph.skill_direct import make_skill_direct_node
+
+            skill_direct_node = make_skill_direct_node(skill_registry, skill_executor)
+
         self._graph: CompiledStateGraph = build_graph(
             vector_store,
             bm25,
@@ -656,6 +666,7 @@ class AgentService:
             self._prompt_manager,
             delegate_task=delegate_task_tool,
             tool_sink=fork_tool_pool,
+            skill_direct_node=skill_direct_node,
         )
         core_logging.log_event(Event.SERVICE_READY)
 

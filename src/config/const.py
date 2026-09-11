@@ -259,6 +259,12 @@ class SSEInteractionTexts:
         "子代理已产出完整分析 {total} 字，摘要如下：\n{truncated}"
     )
 
+    # ── 命令行直出兜底文案 ──
+    # /xxx 命中不到 / 非 fork skill 时返回给用户的兜底文案（直出节点 fail-open）
+    SKILL_DIRECT_UNAVAILABLE: str = "该技能不可直接执行，请去掉前缀后重试。"
+    # 直出节点请求上下文不可用文案（current_request_ctx 未设置）
+    SKILL_DIRECT_CTX_UNAVAILABLE: str = "Error: 请求上下文不可用"
+
 
 # ── 来源权威分级（source-tier-labeling change）──
 # KB 内部文档固定档：resolve_source_tier 对 kind=kb 返回，不走域名解析

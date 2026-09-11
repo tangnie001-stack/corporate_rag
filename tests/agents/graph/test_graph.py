@@ -35,6 +35,7 @@ def test_graph_topology():
         "agent_finalize",
         "verify",
         "format",
+        "skill_direct",
     }
     # 固定流水线节点已删除
     for removed in (

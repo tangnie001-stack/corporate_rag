@@ -309,4 +309,8 @@ EVENT_SPECS: dict[str, EventSpec] = {
         "info",
         ("delegate_id", "ok", "reason", "elapsed_ms", "result_len"),
     ),
+    # [agent] 命令行直出跳过（skill_direct 节点兜底）
+    "skill direct skip": EventSpec(
+        "skill direct skip", "agent", "info", ("skill", "reason")
+    ),
 }

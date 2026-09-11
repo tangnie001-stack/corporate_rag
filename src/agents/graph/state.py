@@ -22,6 +22,7 @@ class AgentState:
         default_factory=lambda: current_trace_id.get() or "unknown"
     )  # 全链路追踪 ID（自动从 contextvar 读取）
     deep_thinking: bool = False  # 深度思考开关（来源：/chat/stream?deep_thinking；用途：agent LLM enable_thinking 参数）
+    direct_skill: str = ""  # 本轮命令行直出的 fork skill 名（来源：AgentService 解析 /xxx 后注入初始 state，Plan 3 填值；用途：入口分派与重生成目标；空=常规轮）
     # ── agent 循环 ──
     messages: Annotated[list[BaseMessage], add_messages] = field(
         default_factory=list
@@ -84,6 +85,9 @@ class LangGraphNode:
     class Format:
         NAME: str = "format"  # 引用格式化
         CITATIONS: str = "citations"  # 引用列表输出字段
+
+    class SkillDirect:
+        NAME: str = "skill_direct"  # 命令行直出节点（/xxx 命中 fork skill）
 
 
 class LangGraphEvent:

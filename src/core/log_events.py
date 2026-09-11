@@ -177,6 +177,9 @@ class Event(str, Enum):
     DELEGATE_MODEL_TURN = "delegate model turn"
     DELEGATE_END = "delegate end"
 
+    # [agent] 命令行直出跳过（skill_direct 节点：未命中 / 非 fork skill → 兜底）
+    SKILL_DIRECT_SKIP = "skill direct skip"
+
 
 @dataclass(frozen=True)
 class ReplayEvent:
