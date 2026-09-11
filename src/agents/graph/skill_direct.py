@@ -43,25 +43,32 @@ def make_skill_direct_node(skill_registry, executor):
             }
         skill_registry.reload_if_changed()
         record = skill_registry.get(state.direct_skill)
-        if record is None or not record.user_invocable:
-            # 未注册或用户不可调用（user-invocable:false）→ 同一 fail-open 文案：
-            # spec:62/66 禁止 /xxx 调用禁用技能，显式告知"不存在 + 可用列表"，
-            # 与"非 FORK 不可直出"分开成两条文案
+        if record is None:
+            # 未注册 → fail-open 文案：显式告知"不存在 + 可用列表"
             names = [r.name for r in skill_registry.user_visible()]
             if names:
                 available = "、".join(names)
             else:
                 available = "（无）"
-            if record is None:
-                reason = "not_found"
-            else:
-                reason = "not_user_invocable"
             core_logging.log_event(
-                Event.SKILL_DIRECT_SKIP, skill=state.direct_skill, reason=reason
+                Event.SKILL_DIRECT_SKIP, skill=state.direct_skill, reason="not_found"
             )
             return {
                 "answer": SSEInteractionTexts.UNKNOWN_SKILL_PREFIX.format(
                     skill=state.direct_skill, available=available
+                ),
+                "_needs_regenerate": False,
+            }
+        if not record.user_invocable:
+            # 已注册但 user-invocable:false → spec:66 提示"只能由模型调用"，而非"不存在"
+            core_logging.log_event(
+                Event.SKILL_DIRECT_SKIP,
+                skill=state.direct_skill,
+                reason="not_user_invocable",
+            )
+            return {
+                "answer": SSEInteractionTexts.SKILL_USER_DISABLED.format(
+                    skill=state.direct_skill
                 ),
                 "_needs_regenerate": False,
             }

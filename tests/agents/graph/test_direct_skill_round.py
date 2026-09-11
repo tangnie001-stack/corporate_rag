@@ -199,8 +199,8 @@ async def test_unknown_skill_falls_open():
 
 
 @pytest.mark.asyncio
-async def test_disabled_fork_skill_treated_as_unknown():
-    """user-invocable:false 的 fork 技能 → 不执行子代理，返回 UNKNOWN_SKILL_PREFIX。"""
+async def test_disabled_fork_skill_treated_as_disabled():
+    """user-invocable:false 的 fork 技能 → 不执行子代理，返回 SKILL_USER_DISABLED。"""
     record = SkillRecord(
         name="finance-analyst",
         description="d",
@@ -228,16 +228,16 @@ async def test_disabled_fork_skill_treated_as_unknown():
 
     assert fake.seen_run is None  # executor.execute 未被调用
     assert "agent" not in node_order
-    assert final["answer"] == SSEInteractionTexts.UNKNOWN_SKILL_PREFIX.format(
-        skill="finance-analyst", available="（无）"
+    assert final["answer"] == SSEInteractionTexts.SKILL_USER_DISABLED.format(
+        skill="finance-analyst"
     )
     assert final["_needs_regenerate"] is False
     assert final["citations"] == []
 
 
 @pytest.mark.asyncio
-async def test_disabled_inline_skill_treated_as_unknown():
-    """user-invocable:false 的 inline 技能 → 返回 UNKNOWN_SKILL_PREFIX（非 SKILL_DIRECT_UNAVAILABLE）。"""
+async def test_disabled_inline_skill_treated_as_disabled():
+    """user-invocable:false 的 inline 技能 → 返回 SKILL_USER_DISABLED（非 SKILL_DIRECT_UNAVAILABLE）。"""
     record = SkillRecord(
         name="finance-qa",
         description="d",
@@ -258,8 +258,8 @@ async def test_disabled_inline_skill_treated_as_unknown():
     finally:
         current_request_ctx.reset(token)
 
-    assert final["answer"] == SSEInteractionTexts.UNKNOWN_SKILL_PREFIX.format(
-        skill="finance-qa", available="（无）"
+    assert final["answer"] == SSEInteractionTexts.SKILL_USER_DISABLED.format(
+        skill="finance-qa"
     )
     assert final["_needs_regenerate"] is False
     assert final["citations"] == []

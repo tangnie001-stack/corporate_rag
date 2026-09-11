@@ -250,6 +250,8 @@ class SSEInteractionTexts:
     DELEGATE_UNKNOWN_SKILL: str = "skill 不存在: {skill}，可用 skill: {available}"
     # 未注册前缀的用户可见文案：{skill}=请求的 skill 名；{available}=可用 skill 列表
     UNKNOWN_SKILL_PREFIX: str = "技能不存在：/{skill}。可用技能：{available}"
+    # 已注册但 user-invocable:false 的前缀用户可见文案：{skill}=请求的 skill 名（spec:66 只能由模型调用）
+    SKILL_USER_DISABLED: str = "技能 /{skill} 只能由模型调用，无法通过 /xxx 手动触发。"
     # fork 超时文案（delegate_task 返回给 LLM，促其基于现有上下文作答）
     DELEGATE_TIMEOUT_TEXT: str = "Error: 领域专家分析超时，请基于已有检索上下文作答"
     # fork 中断/委派终态文案：中断时以 {reason} 填 DELEGATE_REASON_TEXT 的中文短词
