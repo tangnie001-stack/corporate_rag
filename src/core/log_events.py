@@ -82,6 +82,8 @@ class Event(str, Enum):
     SESSION_SAVE_FAILED = "session save failed"
     MESSAGE_SAVE_FAILED = "message save failed"
     TASK_REGISTERED = "task registered"
+    # [session] 预设预绑定 skill 预加载跳过（声明名查不到，不影响其余技能）
+    SKILL_PRELOAD_SKIP = "skill preload skip"
 
     # [db] 数据库层事件（3.4 批迁移登记：vector_store / file_store）
     CHROMA_CLIENT_READY = "chroma client ready"

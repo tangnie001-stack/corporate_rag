@@ -140,6 +140,9 @@ EVENT_SPECS: dict[str, EventSpec] = {
         "message save failed", "session", "warning", ("role", "err")
     ),
     "task registered": EventSpec("task registered", "session", "info"),
+    "skill preload skip": EventSpec(
+        "skill preload skip", "session", "warning", ("skill", "reason")
+    ),
     # [db] 向量检索 / 文件存储（3.4 批）
     "chroma client ready": EventSpec(
         "chroma client ready", "db", "info", ("persist_dir", "model")

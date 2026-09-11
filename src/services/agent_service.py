@@ -698,6 +698,54 @@ class AgentService:
         )
         core_logging.log_event(Event.SERVICE_READY)
 
+    def _preload_skills_text(self, skill_names: list[str]) -> str:
+        """按预设声明的 skills 顺序渲染并拼接各技能正文（隐藏注入用）。
+
+        Args:
+            skill_names: 预设 frontmatter 的 skills 列表（声明顺序即渲染顺序）
+
+        Returns:
+            用 "\\n\\n" 拼接的正文；全部查不到时返回空串
+        """
+        parts: list[str] = []
+        for name in skill_names:
+            if self._skill_registry is None:
+                break
+            record = self._skill_registry.get(name)
+            if record is None:
+                core_logging.log_event(
+                    Event.SKILL_PRELOAD_SKIP, skill=name, reason="not_found"
+                )
+                continue
+            body = record.inline_prompt
+            if not body:
+                body = record.fork_body
+            if not body:
+                continue
+            parts.append(render_skill_body(body, ""))
+        return "\n\n".join(parts)
+
+    def _preload_if_first_round(self, effective_agent: str, history: list) -> str:
+        """首轮预加载判定：仅在首轮、已绑定预设且该预设声明 skills 时给出待注入正文。
+
+        Args:
+            effective_agent: 本会话生效的智能体名（空=未绑定）
+            history: 本轮的历史消息（若本轮已有 inline `/xxx` 注入，T5 已往其中追加条目→非空）
+
+        Returns:
+            预加载正文；任一条件不满足返回空串
+        """
+        if history:
+            return ""
+        if not effective_agent:
+            return ""
+        if self._preset_registry is None:
+            return ""
+        preset = self._preset_registry.get(effective_agent)
+        if preset is None or not preset.skills:
+            return ""
+        return self._preload_skills_text(preset.skills)
+
     async def stream_chat(
         self,
         kb_id: str,
@@ -806,6 +854,16 @@ class AgentService:
         launch_context["direct_skill"] = direct_skill
         launch_context["history"] = history
         launch_context["query"] = effective_query
+        # 预设预绑定 skill 预加载：与 `/xxx` 走同一条持久化隐藏消息通道（T5b），
+        # 仅首轮（history 空）且本轮无显式 `/xxx`（direct_skill == ""）时注入一次。
+        if direct_skill == "":
+            preload_text = self._preload_if_first_round(effective_agent, history)
+            if preload_text:
+                preload_entry = await self._inject_skill_message(
+                    session_id, kb_id, preload_text
+                )
+                history = history + [preload_entry]
+                launch_context["history"] = history
         # 主 POST 订阅不按 180s 空闲收流（长静默由任务生命周期收口，含 ask_user
         # 等待、fork 长跑等合法静默）；resume 端点（sessions/events）保留空闲兜底
         return _subscribe_events(
