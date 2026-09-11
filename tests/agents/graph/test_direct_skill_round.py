@@ -42,7 +42,9 @@ class _FakeRegistry:
         return None
 
     def user_visible(self):
-        return [self._record]
+        if self._record.user_invocable:
+            return [self._record]
+        return []
 
 
 class _FakeExecutor:
@@ -191,6 +193,73 @@ async def test_unknown_skill_falls_open():
 
     assert final["answer"] == SSEInteractionTexts.UNKNOWN_SKILL_PREFIX.format(
         skill="no-such-skill", available="finance-analyst"
+    )
+    assert final["_needs_regenerate"] is False
+    assert final["citations"] == []
+
+
+@pytest.mark.asyncio
+async def test_disabled_fork_skill_treated_as_unknown():
+    """user-invocable:false 的 fork 技能 → 不执行子代理，返回 UNKNOWN_SKILL_PREFIX。"""
+    record = SkillRecord(
+        name="finance-analyst",
+        description="d",
+        context=SkillContext.FORK,
+        fork_body="任务：$ARGUMENTS",
+        allowed_tools=[],
+        user_invocable=False,
+    )
+    fake = _FakeExecutor()
+    graph = _graph(fake, record)
+    main_ctx = RequestContext(session_id="s1", kb_id="kb1", kb_bound=True)
+    token = current_request_ctx.set(main_ctx)
+    try:
+        final, node_order = await _run_updates(
+            graph,
+            AgentState(
+                session_id="s1",
+                kb_id="kb1",
+                query="q",
+                direct_skill=record.name,
+            ),
+        )
+    finally:
+        current_request_ctx.reset(token)
+
+    assert fake.seen_run is None  # executor.execute 未被调用
+    assert "agent" not in node_order
+    assert final["answer"] == SSEInteractionTexts.UNKNOWN_SKILL_PREFIX.format(
+        skill="finance-analyst", available="（无）"
+    )
+    assert final["_needs_regenerate"] is False
+    assert final["citations"] == []
+
+
+@pytest.mark.asyncio
+async def test_disabled_inline_skill_treated_as_unknown():
+    """user-invocable:false 的 inline 技能 → 返回 UNKNOWN_SKILL_PREFIX（非 SKILL_DIRECT_UNAVAILABLE）。"""
+    record = SkillRecord(
+        name="finance-qa",
+        description="d",
+        context=SkillContext.INLINE,
+        inline_prompt="方法论 $ARGUMENTS",
+        user_invocable=False,
+    )
+    graph = _graph(_FakeExecutor(), record)
+    main_ctx = RequestContext(session_id="s1", kb_id="kb1", kb_bound=True)
+    token = current_request_ctx.set(main_ctx)
+    try:
+        final, _node_order = await _run_updates(
+            graph,
+            AgentState(
+                session_id="s1", kb_id="kb1", query="q", direct_skill="finance-qa"
+            ),
+        )
+    finally:
+        current_request_ctx.reset(token)
+
+    assert final["answer"] == SSEInteractionTexts.UNKNOWN_SKILL_PREFIX.format(
+        skill="finance-qa", available="（无）"
     )
     assert final["_needs_regenerate"] is False
     assert final["citations"] == []
