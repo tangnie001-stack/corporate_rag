@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from src.agents.skills.loader import SkillLoader
 from src.agents.skills.models import SkillContext
 
@@ -98,3 +100,112 @@ def test_nested_skill_dirs_ignored(tmp_path):
     records = SkillLoader(tmp_path).load_all()
     assert len(records) == 1
     assert records[0].name == "a"
+
+
+def test_allowed_tools_comma_separated_string_is_split(tmp_path):
+    """allowed-tools 用逗号分隔字符串书写，内部转 list。"""
+    from src.agents.skills.loader import SkillLoader
+
+    skill_dir = tmp_path / "finance-qa"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: finance-qa\n"
+        "description: 财务问答\n"
+        "allowed-tools: retrieve_kb, search_web\n"
+        "---\n"
+        "先检索后答。\n",
+        encoding="utf-8",
+    )
+
+    records = SkillLoader(tmp_path).load_all()
+
+    assert len(records) == 1
+    assert records[0].allowed_tools == ["retrieve_kb", "search_web"]
+
+
+def test_non_ascii_name_is_skipped_with_warning(tmp_path):
+    """非 ASCII slug 名称记 warning 并跳过（不注册）。"""
+    from src.agents.skills.loader import SkillLoader
+
+    skill_dir = tmp_path / "财报分析"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: 财报分析\ndescription: 中文名\n---\n正文\n",
+        encoding="utf-8",
+    )
+
+    with pytest.warns(UserWarning, match="非法"):
+        records = SkillLoader(tmp_path).load_all()
+
+    assert records == []
+
+
+def test_deprecated_fields_are_ignored_with_warning(tmp_path):
+    """thinking / max-iterations 不再被识别，忽略并记 warning，不写入记录。"""
+    from src.agents.skills.loader import SkillLoader
+
+    skill_dir = tmp_path / "legacy-skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: legacy-skill\n"
+        "description: 遗留字段\n"
+        "thinking: true\n"
+        "max-iterations: 3\n"
+        "---\n"
+        "正文\n",
+        encoding="utf-8",
+    )
+
+    with pytest.warns(UserWarning, match="已废弃"):
+        records = SkillLoader(tmp_path).load_all()
+
+    assert len(records) == 1
+    assert records[0].name == "legacy-skill"
+
+
+def test_agent_field_is_parsed(tmp_path):
+    """frontmatter agent 字段解析为 fork 执行者名。"""
+    from src.agents.skills.loader import SkillLoader
+
+    skill_dir = tmp_path / "deep-analysis"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: deep-analysis\n"
+        "description: 深度分析\n"
+        "context: fork\n"
+        "agent: finance-expert\n"
+        "---\n"
+        "任务：$ARGUMENTS\n",
+        encoding="utf-8",
+    )
+
+    records = SkillLoader(tmp_path).load_all()
+
+    assert records[0].agent == "finance-expert"
+    assert records[0].fork_body is not None
+
+
+def test_explicit_dual_axis_fields_are_parsed(tmp_path):
+    """显式声明 user-invocable false 时原样写入记录。"""
+    from src.agents.skills.loader import SkillLoader
+
+    skill_dir = tmp_path / "report-publish"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: report-publish\n"
+        "description: 发布报告\n"
+        "user-invocable: false\n"
+        "disable-model-invocation: true\n"
+        "---\n"
+        "正文\n",
+        encoding="utf-8",
+    )
+
+    records = SkillLoader(tmp_path).load_all()
+
+    assert records[0].user_invocable is False
+    assert records[0].disable_model_invocation is True

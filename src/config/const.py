@@ -1,5 +1,6 @@
 """诊断日志标签、业务常量。"""
 
+import re
 from enum import Enum
 from typing import ClassVar
 
@@ -91,6 +92,13 @@ DELEGATE_RESULT_LIMIT = 1000  # fork 结果回流主 agent 的截断阈值（字
 INLINE_PROMPT_MAX_CHARS = (
     500  # inline skill 正文规模上限（字符，防上下文累积膨胀，超出仅记 warning）
 )
+# skill / agent preset 名允许的字符集（ASCII slug）：/xxx 命令天然是 ASCII 惯例，
+# 非 ASCII 名会让 `/财报分析` 落进"非命令形态"分支被静默当普通文本（design D15）
+CAPABILITY_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+DEPRECATED_SKILL_FIELDS = (
+    "thinking",
+    "max-iterations",
+)  # 已废弃的 skill frontmatter 字段（读到时忽略并记 warning）
 # 专家分析标记短语：fork 子代理"无源分析观点"由 4.1 引导主 agent 措辞（design D9），
 # kb_citation_guardrail 据此豁免（防纯分析型 fork 答案被误触发补标 regen，M7）
 EXPERT_ANALYSIS_MARKER = "基于领域经验的分析"
