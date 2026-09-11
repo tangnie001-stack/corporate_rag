@@ -19,7 +19,8 @@
 
 - **每个前端任务的实现必须调用 `frontend-design` skill 落地**（change tasks.md §6 的节首约定）；视觉方向、排版、交互动效**以规格 `pages/chat-agent-skill-selector-2026-09-11.md` 为唯一依据，不重新发散设计**；改完用 `playwright-cli` 对照设计稿验证。
 - **原型只作参考**：`chat-agent-skill-selector-mockup-2026-09-11.html` 给可用的内联 SVG path 与交互形态，但**页面结构以 chat.html 既有范式为准**（不要照搬 mockup 的骨架）。
-- 注释一律**中文**；新增 CSS 变量一律复用既有变量（`--primary` / `--primary-light` / `--surface` / `--border` / `--bg` / `--text` / `--text-secondary` / `--text-muted` / `--shadow` / `--shadow-lg`），**不新增颜色字面量**。
+- 注释一律**中文**；新增 CSS 变量一律复用既有变量（`--primary` / `--primary-light` / `--surface` / `--border` / `--bg` / `--text` / `--text-secondary` / `--text-muted` / `--shadow` / `--shadow-lg`），**不新增颜色字面量**。唯一例外是焦点环 `box-shadow: 0 0 0 3px rgba(59,130,246,0.3)` —— **逐字沿用** `.thinking-chip:focus-visible`（`chat.html:237`）的既有写法；若既有样式表已提供可复用的焦点类，优先复用该类而不重复声明。
+- **前端 JS 沿用 `chat.html` 自身风格**：该文件大量使用三元表达式与 `escapeHtml()`（如 `renderKbMenu` `:2491-2501`、`renderModelInfo` `:1643-1652`）。CLAUDE.md 的「不用三元表达式」是针对 Python 的语法约束，**不适用于此文件**；判断标准是"与文件既有写法一致"。转义一律走既有 `escapeHtml()`，**不得**把未转义的用户/配置文本拼进 `innerHTML`。
 - 图标一律**内联 SVG**（`viewBox="0 0 24 24"`、`stroke="currentColor"`、`stroke-width="2"`），**不使用 emoji**。
 - 新选择器与「知识库选择器 / 深度思考 chip」**同构**：智能体胶囊复制 `.kb-trigger` 的样式与 `role`/`aria` 属性结构；技能 chip 复制 `.thinking-chip` 的样式结构。
 - **不新增第三方库**；不改 `login.html` / `index.html`；不改后端。
@@ -136,7 +137,7 @@ function renderAgentMenu(){
       + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6"/></svg>'
       + '<span class="agent-item-info"><span class="agent-item-name">' + escapeHtml(a.display_name || a.name) + '</span>'
       + (desc ? '<span class="agent-item-desc">' + escapeHtml(desc) + '</span>' : '') + '</span>'
-      + '<span class="check"' + (selected?' data-on="1"':'') + '></span></div>';
+      + '<span class="check">' + (selected ? '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg>' : '') + '</span></div>';
   }).join('');
   box.innerHTML = items;
   Array.prototype.forEach.call(box.querySelectorAll('.agent-item'), function(el){

@@ -63,7 +63,10 @@
 - **P3-R2**：`agent` 的绑定点放在 **`AgentService.stream_chat` 之内、返回之前**（Plan 2 的 `stream_chat` 已经在这里建 `ctx`），而不是 API 层——因为只有服务层持有 `AgentPresetRegistry` 与 `ChatManager`。**若判断有误**：需把 registry 提升到 API 层依赖注入。
 - **P3-R3**：`agent_used` 复用既有 `model_info` 同层位置（post-loop 事件），**新增独立 `SSEAgentUsedEvent`**（不复用 `SSEModelInfoEvent` 的字段）——因为语义不同（会话绑定值 vs 本轮模型）且前端纠正顶栏需要独立事件名。**若判断有误**：前端要多解析一个字段。
 - **P3-R4**：`build_system_prompt(persona, kb_bound, has_skills)` 放 **`src/rag/prompt.py`**（`build_prompt` 的归属文件），`get_base_system_prompt()` 在 `PromptManager` 内——保持"prompt 组装在 rag/prompt.py、prompt 取值在 PromptManager"的既有分工。**若判断有误**：两处调用点要改 import。
-- **P3-R5**：T6 的直出交付**择"`_convert_event` 捕获 `skill_direct` 的 `on_chain_end` 产出 token 事件"**为默认方案（另一候选"`serialize_process` 回落"只作为兜底同时实现）。理由：token 事件是既有交付链的正规入口，前端零改动即可显示。**若判断有误**：改走 serialize 回落，前端仍可显示但无流式。
+- **P3-R5**：T6 的直出交付**只做主方案**——在 `_convert_event` 的 `on_chain_end` 分支捕获 `skill_direct` 的 `answer` 并产出 `SSETokenEvent`（**不做**"`serialize_process` 回落"的兜底）。理由：实测 `build_process_events` 对排除类型（`model_info`/`citation`/`done`/`error`）是 `continue` 而**不冲刷待定区**，因此只要产出 token 事件，末尾待定区就是直出正文、`purified_answer` 自然非空；再写回落是同一问题的第二份实现（YAGNI）。**判别方式**：T6 的端到端测试断言 `purified_answer` 非空——若该测试仍不过，才补回落。**若判断有误**：补一次 `process_log` 回落即可（约 6 行）。
+- **P3-R6**：`build_system_prompt` 的 `has_skills` **只在 `persona` 非空时**才决定是否追加委派引导段；`persona` 为空时**恒追加**（保住"未选 agent 时 system 段逐字不变"这条硬不变量）。**若判断有误**：未选 agent 的 system prompt 会少一段，逐字不变测试会红。
+- **P3-R7**：`unknown`（形如命令但未注册）**复用 `skill_direct` 的 fail-open 通道**（也设 `direct_skill = name`，由节点返回"不存在 + 可用列表"），**不新增短路机制**。理由：直出通道已具备"无法解析 → 出兜底文案"的能力，且 T6 会让该路径的回答正常交付；新增短路需要动 API 层的生成生命周期（写缓冲 + 跳过 `_run_generation`），成本远高于收益。**若判断有误**：未注册前缀的回答会经直出通道交付（观感与直答一致），或需改回短接。
+- **P3-R8**：`known_skill_names` 放 **`RequestContext`**（而非随参数层层传递）。理由：读时清洗发生在 `agent_node._initial_messages` 与 `query_router._format_history` 两处，二者都能拿到 `current_request_ctx`；走 ctx 只需一处写入、零签名改动。**若判断有误**：需给这两处补参数（`clean_prefix` 已是纯函数，改动面可控）。
 
 ---
 
@@ -568,7 +571,7 @@ Expected: FAIL —— `AttributeError: 'AgentService' object has no attribute '_
 
 - [ ] **Step 3: 实现绑定（`agent_service.py`）**
 
-- `__init__` 里把 Plan 2 T5 的局部 `preset_registry` 保存为 `self._preset_registry = preset_registry`（未命中分支存 `None`）。
+- `__init__` 里**先把 `preset_registry = None` 提到 `if Path(skills_dir).exists():` 之前**（否则 skills 目录缺失时后文引用未定义名会 `NameError`），skills 分支内赋真实注册表，分支之后统一 `self._preset_registry = preset_registry`。
 - `stream_chat` 签名加 `agent: str = ""`；在返回 `(_, launch_context)` **之前**：
 
 ```python
@@ -622,7 +625,7 @@ Expected: FAIL —— `AttributeError: 'AgentService' object has no attribute '_
     agent: str = ""  # 会话绑定智能体预设名（ASCII slug；空=未指定；与已绑定值不一致时服务端忽略）
 ```
 
-`src/api/chat.py`：把 `body.agent` 透传到 `svc.agent_service.stream_chat(kb_id, session_id, query, deep_thinking, agent=body.agent)`（找到既有调用点，按位置/关键字补齐）。
+`src/api/chat.py`：把 `body.agent` 透传到 `svc.agent_service.stream_chat(...)`（调用点在 `chat.py:307-309`，改为 `stream_chat(kb_id, session_id, query, deep_thinking, agent=body.agent)`）。**同一函数里 :449-450 的 `save_session_async(session_id, query[:20], kb_id, user_id)` 与 `save_user_async(session_id, kb_id, query)` 保持用原文，不要动**（落库保留原文，D25）。
 
 - [ ] **Step 5: 加 `agent_used` 流事件**
 
@@ -725,7 +728,7 @@ def test_no_persona_unbound_adds_second_system_message():
 
 
 def test_persona_replaces_base_segment():
-    """persona 非空 → 人设层用 persona，环境约束层照旧追加（顺序不变）。"""
+    """persona 非空 → 人设在最前、基础段不再出现，环境约束段仍追加在其后。"""
     pm = _pm(base="基础段正文")
     messages = build_system_prompt(
         persona="你是财务专家，只做财务分析。", kb_bound=True, has_skills=True, prompt_manager=pm
@@ -733,7 +736,27 @@ def test_persona_replaces_base_segment():
     content = messages[0].content
     assert content.startswith("你是财务专家，只做财务分析。")
     assert "基础段正文" not in content
-    assert content.endswith(pm.get_base_system_prompt.return_value + "环境约束") is False
+    assert INLINE_CITATION_INSTRUCTION in content
+
+
+def test_persona_without_skills_omits_delegate_section():
+    """has_skills=False 且 persona 非空 → 环境约束层不含委派引导段（P3-R6）。"""
+    pm = _pm(base="基础段正文")
+    messages = build_system_prompt(
+        persona="你是财务专家。", kb_bound=True, has_skills=False, prompt_manager=pm
+    )
+    assert DELEGATE_GUIDANCE_SECTION not in messages[0].content
+
+
+def test_no_persona_always_keeps_delegate_section():
+    """persona='' 时即使 has_skills=False 也保留委派引导段（逐字不变的前提）。"""
+    pm = _pm(base="基础段正文")
+    messages = build_system_prompt(
+        persona="", kb_bound=True, has_skills=False, prompt_manager=pm
+    )
+    assert messages[0].content == pm.get_system_prompt()
+```
+（文件顶部需 `from src.config.prompts import DELEGATE_GUIDANCE_SECTION, INLINE_CITATION_INSTRUCTION`。）
 
 
 def test_build_prompt_passes_persona_through():
@@ -743,8 +766,6 @@ def test_build_prompt_passes_persona_through():
     assert isinstance(messages[0], SystemMessage)
     assert messages[0].content.startswith("你是财务专家。")
 ```
-
-> 第三个用例的最后一条断言按实现落地后的实际拼接结果调整（人设 + 环境约束 + 日期），**但必须断言"人设在最前、基础段不出现"**——这是本任务的可判别点。
 
 `tests/infra/llm/test_prompt_manager_fallback.py` 追加：
 
@@ -927,7 +948,7 @@ git commit -m "feat(prompt): system prompt 三层组装（人设层 + 环境约�
         launch_context["injected_system"] = injected_system
         launch_context["query"] = effective_query
 ```
-（`launch_context` 中原 `query` 键的值改为 `effective_query`——**注意**：`add_message_async`/`save_user_async` 仍用**原文 `query`**，两者的先后顺序不要调换。）
+（`launch_context` 中原 `query` 键的值改为 `effective_query`。**已核实**：`src/api/chat.py:326-336` 的 `answer_builder` 用的正是 `launch_ctx["query"]` → 因此改这一个键就能让图里的 `state.query` 变成清洗后的文本，无需再改 API 层。**但** `stream_chat` 里 `add_message_async(...)` 与 `chat.py:449-450` 的落库仍必须用**原文 `query`**——两者的先后顺序不要调换。）
 - `_run_generation`：把 `launch_context` 的 `direct_skill` / `injected_system` 传进 `make_initial_state`。
 - `agent_node._initial_messages`：先按 `build_prompt(...)` 建 system + 历史，再在 system 段之后插入 `SystemMessage(content=state.injected_system)`（非空时），历史 `user` 内容改为 `clean_prefix(msg.content, ctx.known_skill_names)`。
 - `query_router._format_history`：同法清洗（读 `current_request_ctx`）。
@@ -947,9 +968,9 @@ git commit -m "feat(skills): /xxx 生成入口分派（inline 单轮 / fork 直�
 
 **Files:**
 - Modify: `src/services/agent_service.py`（`_convert_event` 增 `skill_direct` 分支；`_run_generation` 的 `full_answer` 与 `capture` 覆盖该来源）
-- Modify: `src/chat/process_log.py`（无 `"token"` 段时回落取直出 `answer` —— 兜底）
 - Modify: `src/agents/graph/skill_direct.py`（重跑时消费 `state.messages` 里 verify 注入的指引）
 - Test: `tests/services/test_direct_round_delivery.py`（新建，**必须走 `astream_events` 生产链**）
+- **不改** `src/chat/process_log.py`（见 P3-R5：产出 token 事件后 `purified_answer` 自然非空，回落属第二份实现）
 
 **Interfaces:**
 - Consumes：T5 的 `direct_skill`；Plan 2 的 `skill_direct` 节点与 `LangGraphNode.SkillDirect.NAME`
@@ -970,17 +991,20 @@ Expected: FAIL —— 无 token 事件、`purified_answer == ""`
 
 - [ ] **Step 3: 实现（按 P3-R5：主方案 + 兜底都做）**
 
-`src/services/agent_service.py` 的 `_convert_event`，在既有 `on_chain_end` 分支（`agent_service.py:331-334` 附近）增加：
+`src/services/agent_service.py` 的 `_convert_event`，在既有 `on_chain_end` 分支（`agent_service.py:315-337`）里、`format` 分支之后、`agent_finalize` 分支之后**追加**（注意该函数各分支是 `return [...]` 风格，**不要**改成累加列表）：
 
 ```python
-        if name == LangGraphNode.SkillDirect.NAME:
+        if name == LangGraphNode.SkillDirect.NAME and capture is not None:
+            output = item.get(LangGraphKey.DATA, {}).get(LangGraphKey.OUTPUT) or {}
             direct_answer = output.get("answer", "")
             capture.final_answer = direct_answer
             capture.final_contexts = output.get("tool_contexts", [])
-            produced.append(SSETokenEvent(direct_answer))
+            return [SSETokenEvent(direct_answer)]
+        return []
 ```
+（`LangGraphEvent` / `LangGraphKey` / `LangGraphNode` 已在 `agent_service.py` 顶部导入；`SSETokenEvent` 同文件已在用。）
 
-`src/chat/process_log.py` 的 `build_process_events`：若无任何 `"token"` 事件且存在 `"preamble"`，用最后一段 preamble 文本作为 `purified_answer`（**兜底**，防某条路径没产出 token 时再次落空）。
+`src/chat/process_log.py` **不需要改**：`build_process_events` 对 `model_info`/`citation`/`done`/`error` 是 `continue`（不冲刷待定区），所以上游产出 token 事件后，末尾待定区就是直出正文，`purified_answer` 自然非空（见 P3-R5）。若 Step 4 的端到端测试仍断言失败，再补"无 token 段时回落取末段 preamble 文本"的 6 行。
 
 `src/agents/graph/skill_direct.py`（5.13）：调用 executor 之前收集 verify 注入的指引并在重跑时传给子代理：
 
@@ -1010,28 +1034,351 @@ git commit -m "fix(graph): 直出轮回答经 SSE 交付并落库，重跑消费
 
 **Files:**
 - Create: `src/agents/graph/verify/confirm_gate.py`
-- Modify: `src/agents/skills/executor.py`（fork 执行契约里加"需确认时的 marker 输出要求"）
-- Modify: `src/config/prompts.py`（`FORK_EXECUTION_CONTRACT` 常量）
-- Modify: `src/config/const.py`（`FORK_CONFIRM_MARKER` + 未经确认标注文案）
-- Modify: `src/agents/graph/skill_direct.py`（直出轮先过确认门）
-- Test: `tests/agents/graph/test_confirm_gate.py`（新建）
+- Modify: `src/config/const.py`（`FORK_CONFIRM_MARKER` + `SSEInteractionTexts.CONFIRM_UNCONFIRMED_NOTE`）
+- Modify: `src/config/prompts.py`（`FORK_EXECUTION_CONTRACT`）
+- Modify: `src/agents/skills/executor.py:275-289`（`_executor_system_prompt` 追加执行契约）
+- Modify: `src/agents/graph/skill_direct.py:42-64`（直出轮在拿到子代理文本后过确认门）
+- Modify: `src/core/log_events.py` + `src/core/log_event_specs.py`（登记 `FORK_CONFIRM_ASKED` / `FORK_CONFIRM_UNCONFIRMED`）
+- Test: `tests/agents/graph/test_confirm_gate.py`、`tests/agents/skills/test_executor_contract.py`（新建）
 
 **Interfaces:**
-- Produces：`async def confirm_gate(state, run_ctx) -> dict | None`
-  - 无 marker → `None`（直通 verify）
-  - 有 marker 且用户答复 → 带答复重跑一次 → `{"answer": ..., "_needs_regenerate": False}`
-  - 有 marker 但被拒 / 超时 / 澄清槽被占 → `{"answer": answer + "未经确认"标注, "_needs_regenerate": False}`（**不再进 verify 重跑**）
+- Produces：
+  - `detect_confirm_request(answer: str) -> str` —— **纯函数**，命中 `FORK_CONFIRM_MARKER` 时返回其后的提问文本，未命中返回 `""`
+  - `ask_confirm_question(question: str, session_id: str) -> str | None` —— 复用澄清链路问用户；拒绝 / 超时 / 澄清槽被占 → `None`
+  - `S_SKILL_DIRECT_UNCONFIRMED_NOTE`（`SSEInteractionTexts` 文案，拼在答案尾部）
+  - `FORK_EXECUTION_CONTRACT`（追加进子代理 system prompt 的执行契约）
 
-**机制要点（design D18）**：子代理**不持有 `ask_user`**（Plan 2 已由 `FORK_FORBIDDEN_TOOLS` 硬保证），因此"需要确认"必须通过**正文 marker** 表达：`FORK_EXECUTION_CONTRACT` 告知子代理"需要用户确认时，输出一行 `CONFIRM_REQUIRED: <你的问题>`"。编排层按规则检测 marker（0 LLM 调用），复用既有澄清链路（`ctx.clarify_channel` + `pending_asks` 单槽，照 `ask_confirm.py` 的写法）。
+**机制（design D18，已按既有代码对齐）**
+1. fork 子代理**不持有 `ask_user`**（Plan 2 的 `FORK_FORBIDDEN_TOOLS` 已硬保证），所以"需确认"只能由**正文 marker**表达：执行契约要求子代理在需要确认时单独输出一行 `CONFIRM_REQUIRED: <问题>`。
+2. 编排层按**规则**检测（0 LLM 调用），命中后**复用澄清链路**问用户——照抄 `ask_confirm._ask_web_confirm`（`src/agents/graph/verify/ask_confirm.py`）的写法：`ctx.clarify_channel.put({"type":"ask_user", ...})` + 进程级 `pending_asks[session_id]` 单槽 + `wait_with_abort_and_timeout(fut, ctx.abort_signal, ASK_USER_TIMEOUT)`。
+3. 答复 → **带答复重跑一次**子代理；被拒 / 超时 / 槽被占 → 基于现有信息出结论 + 尾部标注"未经确认"，**不再进 verify 重跑**（与 D22「每轮最多重跑 1 次」互斥而非叠加，**不需要额外计数器**）。
+4. 放行（用户已答复）时返回的重跑结果仍照常进 verify（verify 自己决定是否再重跑一次）——注意此时**不得**再调确认门（一次性）。
 
-- [ ] **Step 1: 写失败测试**（四分支：请求确认→答复→重跑；无信号直通；拒绝/超时→出结论+标注；预算不与 verify 叠加）
+- [ ] **Step 1: 写失败测试**
+
+`tests/agents/graph/test_confirm_gate.py`：
+
+```python
+"""直出轮确认门：规则检测 + 复用澄清链路 + 与 verify 重跑互斥（D18）。"""
+
+import pytest
+
+from src.agents.graph.verify.confirm_gate import (
+    ask_confirm_question,
+    detect_confirm_request,
+)
+from src.config.const import FORK_CONFIRM_MARKER, SSEInteractionTexts
+from src.core.log_events import Event
+
+
+def test_detect_returns_question_when_marker_present():
+    """命中 marker → 返回其后的提问文本。"""
+    text = f"我判断需要确认。\n{FORK_CONFIRM_MARKER} 要按 2024 还是 2023 口径？"
+    assert detect_confirm_request(text) == "要按 2024 还是 2023 口径？"
+
+
+def test_detect_returns_empty_without_marker():
+    """无 marker → 空串（直通 verify）。"""
+    assert detect_confirm_request("这是正常结论。") == ""
+
+
+def test_detect_ignores_marker_in_middle_only_of_a_line():
+    """marker 必须出现在行首（防正文里偶然提到）。"""
+    assert detect_confirm_request(f"前文 {FORK_CONFIRM_MARKER} 不是行首") == ""
+
+
+@pytest.mark.asyncio
+async def test_ask_returns_none_when_ctx_missing():
+    """无请求上下文 → None（按未确认处理）。"""
+    assert await ask_confirm_question("问题？", "sess_1") is None
+
+
+class _FakeQueue:
+    """最小 clarify_channel 替身：只记录 put 的载荷。"""
+
+    def __init__(self):
+        self.items = []
+
+    async def put(self, item):
+        self.items.append(item)
+
+
+class _FakeSignal:
+    """最小 abort_signal 替身。"""
+
+    def is_set(self):
+        return False
+
+
+class _FakeCtx:
+    """最小 RequestContext 替身（够 ask_confirm_question 走通）。"""
+
+    def __init__(self):
+        self.clarify_channel = _FakeQueue()
+        self.abort_signal = _FakeSignal()
+
+
+def _patch_ctx(monkeypatch, ctx) -> _FakeCtx:
+    """把 confirm_gate 模块里的 current_request_ctx 换成固定返回 ctx 的替身。"""
+    holder = type("V", (), {"get": staticmethod(lambda: ctx)})
+    monkeypatch.setattr("src.agents.graph.verify.confirm_gate.current_request_ctx", holder)
+    return ctx
+
+
+@pytest.mark.asyncio
+async def test_ask_returns_none_when_wait_times_out(monkeypatch):
+    """等待返回超时文案（既有 wait_with_abort_and_timeout 返回哨兵而非抛异常）→ None。"""
+    ctx = _patch_ctx(monkeypatch, _FakeCtx())
+
+    async def _timeout_result(*args, **kwargs):
+        return SSEInteractionTexts.ASK_USER_TIMEOUT_TEXT
+
+    monkeypatch.setattr(
+        "src.agents.graph.verify.confirm_gate.wait_with_abort_and_timeout", _timeout_result
+    )
+    assert await ask_confirm_question("问题？", "sess_1") is None
+    assert ctx.clarify_channel.items  # 问题确实经澄清通道投递给了前端
+
+
+@pytest.mark.asyncio
+async def test_ask_returns_reply_text(monkeypatch):
+    """用户答复 `[{"selected": ["按 2024 口径"]}]`（clarify.py 的既有消费形状）→ 返回该文本。"""
+    _patch_ctx(monkeypatch, _FakeCtx())
+
+    async def _reply(*args, **kwargs):
+        return [{"selected": ["按 2024 口径"]}]
+
+    monkeypatch.setattr(
+        "src.agents.graph.verify.confirm_gate.wait_with_abort_and_timeout", _reply
+    )
+    assert await ask_confirm_question("问题？", "sess_1") == "按 2024 口径"
+```
+```
+
+`tests/agents/skills/test_executor_contract.py`：
+
+```python
+"""执行契约必须随执行者人设一起下发给子代理（否则确认门收不到 marker）。"""
+
+from pathlib import Path
+
+from src.agents.skills.executor import SkillExecutor
+from src.config.prompts import FORK_EXECUTION_CONTRACT
+
+
+def test_system_prompt_always_carries_execution_contract():
+    """无 preset 时：默认人设 + 执行契约。"""
+    exe = SkillExecutor(main_llm=object())
+    prompt = exe._executor_system_prompt(None)
+    assert FORK_EXECUTION_CONTRACT in prompt
+
+
+def test_preset_persona_also_carries_execution_contract():
+    """有 preset 时：preset 人设 + 执行契约（契约是执行约束，不由内容作者决定）。"""
+    class _Preset:
+        system_prompt = "你是财务专家。"
+
+    exe = SkillExecutor(main_llm=object())
+    prompt = exe._executor_system_prompt(_Preset())
+    assert prompt.startswith("你是财务专家。")
+    assert FORK_EXECUTION_CONTRACT in prompt
+```
+
 - [ ] **Step 2: 跑测试确认失败**
-- [ ] **Step 3: 实现**（`confirm_gate` + 常量 + 契约文案 + 直出节点接线；`MAX_VERIFY_REGENERATIONS` **不**被确认门消耗，二者互斥而非叠加）
-- [ ] **Step 4: 跑测试确认通过** → Run: `pytest tests/agents/graph/ -v && pytest tests/ -q`
-- [ ] **Step 5: 提交**
+
+Run: `pytest tests/agents/graph/test_confirm_gate.py tests/agents/skills/test_executor_contract.py -v`
+Expected: FAIL —— `ModuleNotFoundError: src.agents.graph.verify.confirm_gate` / `ImportError: FORK_EXECUTION_CONTRACT`
+
+- [ ] **Step 3: 常量与契约文案**
+
+`src/config/const.py`（`VERIFY_KB_CITATION_MARKER` 之后）：
+
+```python
+FORK_CONFIRM_MARKER: str = "CONFIRM_REQUIRED:"
+"""子代理"需确认"信号行首标记（编排层规则检测；子代理不持有 ask_user）。"""
+```
+
+`SSEInteractionTexts` 内：
+
+```python
+    CONFIRM_UNCONFIRMED_NOTE: str = "\n\n> 注：本结论未经用户确认，仅供参考。"
+    CONFIRM_QUESTION_TMPL: str = "执行该技能需要你确认：{question}"
+```
+
+`src/config/prompts.py`（`FORK_DEFAULT_EXECUTOR_PROMPT` 之后）：
+
+```python
+FORK_EXECUTION_CONTRACT: str = (
+    "\n\n执行契约（必须遵守）："
+    f"如果你需要用户先确认才能给出结论，请单独输出一行 `{FORK_CONFIRM_MARKER} <你的问题>`"
+    "并停止作答，不要自行假设后给出结论；其余情况直接给出结论。"
+)
+```
+（顶部 import `FORK_CONFIRM_MARKER` from `src.config.const`。）
+
+- [ ] **Step 4: 追加进子代理 system prompt**
+
+`src/agents/skills/executor.py` 的 `_executor_system_prompt`（现 :275-289）末尾改为：
+
+```python
+        if preset is not None:
+            prompt = preset.system_prompt
+            if prompt:
+                return prompt + FORK_EXECUTION_CONTRACT
+        return FORK_DEFAULT_EXECUTOR_PROMPT + FORK_EXECUTION_CONTRACT
+```
+
+- [ ] **Step 5: 实现确认门**
+
+`src/agents/graph/verify/confirm_gate.py`：
+
+```python
+"""直出轮确认门（design D18）——规则检测子代理的"需确认"信号并复用澄清链路问用户。
+
+fork 子代理不持有 ask_user（FORK_FORBIDDEN_TOOLS 硬保证），故"需确认"由正文
+marker 表达；本模块只做规则检测与"问一句"，编排（是否重跑、如何标注）由
+`skill_direct` 节点负责，保证本模块可纯测。
+"""
+
+import asyncio
+
+from src.agents.tools.ask_tools import wait_with_abort_and_timeout
+from src.config.const import (
+    ASK_USER_TIMEOUT,
+    FORK_CONFIRM_MARKER,
+    SSEInteractionTexts,
+)
+from src.core import logging as core_logging
+from src.core.log_events import Event
+from src.infra.llm.request_context import current_request_ctx, pending_asks
+
+
+def detect_confirm_request(answer: str) -> str:
+    """检测子代理返回的"需确认"信号。
+
+    Args:
+        answer: 子代理聚合文本
+
+    Returns:
+        命中行首 marker 时返回其后的提问文本（去空白）；未命中返回空串
+    """
+    for line in answer.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(FORK_CONFIRM_MARKER):
+            return stripped[len(FORK_CONFIRM_MARKER) :].strip()
+    return ""
+
+
+async def ask_confirm_question(question: str, session_id: str) -> str | None:
+    """经澄清链路向用户提问并等待答复。
+
+    Args:
+        question: 子代理提出的确认问题
+        session_id: 会话 ID（pending_asks 单槽键）
+
+    Returns:
+        用户的答复文本；ctx 缺失 / 超时 / 澄清槽被占 / 答复不可解析 → None
+    """
+    ctx = current_request_ctx.get()
+    if ctx is None:
+        return None
+    if session_id in pending_asks:
+        # 单槽保护：LLM 澄清或联网确认已挂起时放弃本次确认（按未确认处理）
+        return None
+    core_logging.log_event(Event.FORK_CONFIRM_ASKED, session_id=session_id)
+    payload = {
+        "type": "ask_user",
+        "questions": [
+            {
+                "id": "fork_confirm",
+                "question": SSEInteractionTexts.CONFIRM_QUESTION_TMPL.format(question=question),
+                "dimension": "free",
+                "options": [],
+                "multi_select": False,
+            }
+        ],
+    }
+    loop = asyncio.get_running_loop()
+    fut = loop.create_future()
+    pending_asks[session_id] = fut
+    try:
+        await ctx.clarify_channel.put(payload)
+        answers = await wait_with_abort_and_timeout(fut, ctx.abort_signal, ASK_USER_TIMEOUT)
+    finally:
+        pending_asks.pop(session_id, None)
+        fut.cancel()
+    # 请求取消（abort）时 wait_with_abort_and_timeout 抛 CancelledError，**必须原样透传**
+    # （不要 catch），由直出/委派的取消路径收尾；超时则返回文案哨兵，在此按"未确认"处理
+    # ——与 ask_confirm._ask_web_confirm 的判定口径保持一致。
+    if not isinstance(answers, list) or not answers:
+        core_logging.log_event(
+            Event.FORK_CONFIRM_UNCONFIRMED, session_id=session_id, reason="no_answer"
+        )
+        return None
+    first = answers[0]
+    if not isinstance(first, dict):
+        return None
+    text = first.get("text")
+    if not isinstance(text, str):
+        text = ""
+    if not text.strip():
+        # clarify.py 的既有消费形状是 selected 数组（自由问答也归一化到该字段）
+        selected = first.get("selected")
+        if isinstance(selected, list) and selected:
+            text = " ".join(str(item) for item in selected)
+    if not text.strip():
+        core_logging.log_event(
+            Event.FORK_CONFIRM_UNCONFIRMED, session_id=session_id, reason="empty"
+        )
+        return None
+    return text.strip()
+```
+
+- [ ] **Step 6: 直出节点接线（一次性重跑，不与 verify 叠加）**
+
+`src/agents/graph/skill_direct.py` 的 `skill_direct` 内，把 `text = await executor.execute(...)` 之后改为：
+
+```python
+        question = detect_confirm_request(text)
+        if question:
+            reply = await ask_confirm_question(question, state.session_id)
+            if reply is None:
+                # 拒绝/超时/槽被占 → 出结论 + 标注"未经确认"，不再进 verify 重跑
+                return {
+                    "answer": text + SSEInteractionTexts.CONFIRM_UNCONFIRMED_NOTE,
+                    "tool_contexts": run.ctx.tool_contexts,
+                    "verify_temporal_years": run.ctx.temporal_years,
+                    "_needs_regenerate": False,
+                }
+            run = DelegateRun(
+                delegate_id=uuid.uuid4().hex[:8],
+                skill_name=record.name,
+                ctx=main_ctx.child(),
+            )
+            text = await executor.execute(
+                record, f"{state.query}\n\n用户补充说明：{reply}", run
+            )
+        return {
+            "answer": text,
+            "tool_contexts": run.ctx.tool_contexts,
+            "verify_temporal_years": run.ctx.temporal_years,
+        }
+```
+（顶部补 import：`from src.agents.graph.verify.confirm_gate import ask_confirm_question, detect_confirm_request`。**重跑不再过确认门**——一次性。）
+
+- [ ] **Step 7: 登记两个日志事件**
+
+`Event` 加 `FORK_CONFIRM_ASKED = "fork_confirm_asked"`、`FORK_CONFIRM_UNCONFIRMED = "fork_confirm_unconfirmed"`；`EVENT_SPECS` 同名同集（`prefix="agent"`；前者 `level="info"`、`fields=("session_id",)`；后者 `level="warning"`、`fields=("session_id", "reason")`）。
+
+- [ ] **Step 8: 跑测试确认通过**
+
+Run: `pytest tests/agents/graph/test_confirm_gate.py tests/agents/skills/test_executor_contract.py tests/agents/graph/ tests/agents/skills/ -v && pytest tests/ -q`
+Expected: PASS
+
+- [ ] **Step 9: 提交**
 
 ```bash
-git add src/agents/graph/verify/confirm_gate.py src/agents/skills/executor.py src/config/prompts.py src/config/const.py src/agents/graph/skill_direct.py tests/agents/graph/test_confirm_gate.py
+git add src/agents/graph/verify/confirm_gate.py src/config/const.py src/config/prompts.py src/agents/skills/executor.py src/agents/graph/skill_direct.py src/core/log_events.py src/core/log_event_specs.py tests/agents/graph/test_confirm_gate.py tests/agents/skills/test_executor_contract.py
 git commit -m "feat(graph): 直出轮确认门（规则检测 + 复用澄清链路），与 verify 重跑互斥"
 ```
 
@@ -1040,21 +1387,195 @@ git commit -m "feat(graph): 直出轮确认门（规则检测 + 复用澄清链�
 ### Task 8: 预设预绑定 skill 预加载（§4.8）
 
 **Files:**
-- Modify: `src/services/agent_service.py`（首轮检测：会话已绑定预设且声明 `skills:` → 渲染并注入 `injected_system`）
-- Modify: `src/services/persistence.py` 或复用 T1 的 `get_session_agent`（读会话已绑定 agent）
+- Modify: `src/services/agent_service.py`（`stream_chat` 内在 T5 分派块之后加预加载；新增 `_preload_skills_text`）
+- Modify: `src/core/log_events.py` + `src/core/log_event_specs.py`（登记 `SKILL_PRELOAD_SKIP`）
 - Test: `tests/services/test_preset_skill_preload.py`（新建）
 
-**规则（§4.8 + design D12）**：会话**已绑定**预设且该预设声明 `skills:` 时，在该会话**首轮生成前**按 `/xxx` **同一路径**（即 `render_skill_body` + `injected_system`）注入一次；**后续轮次不重复注入**（判定：本轮 `history` 为空即首轮）；注入的是隐藏消息，**不进 system prompt 的人设层**。
+**Interfaces:**
+- Consumes：T3 的生效 `effective_agent`；T5 的 `injected_system` / `direct_skill`；Plan 1 的 `AgentPreset.skills`（`list[str]`，声明顺序即渲染顺序）；Plan 2 的 `render_skill_body(body, task)`
+- Produces：`AgentService._preload_skills_text(skill_names: list[str]) -> str`
 
-- [ ] **Step 1: 写失败测试**（首轮注入 / 第二轮不注入 / 预设未声明 skills 不注入 / 预设已被删除 → 只 warn 不注入）
+**规则（§4.8 + design D12）**
+- 仅当**三个条件同时成立**时注入：① 本轮**没有**显式 `/xxx`（`direct_skill == ""`）且没有 inline 注入（`injected_system == ""`）；② 会话**已绑定**预设（`effective_agent` 非空）；③ 该预设声明了 `skills:` 非空。
+- 该预设的每个 skill 取正文（`inline_prompt` 优先，回落 `fork_body`）用 `render_skill_body(body, "")` 渲染（**不带任务文本**——预加载注入的是方法论，不是某次任务），按 `skills` 声明顺序用 `"\n\n"` 拼接。
+- **只在首轮注入**：判定 `not history`（`stream_chat` 第一个 await 拿到的历史不含当前 query，首轮必为空）。
+- 声明的技能名查不到 → 记 `SKILL_PRELOAD_SKIP`（warn）并跳过该条，**不影响其余技能**。
+- 注入物走 T5 的 `injected_system`（隐藏 `SystemMessage`），**不进 system prompt 人设层**。
+
+- [ ] **Step 1: 写失败测试**
+
+`tests/services/test_preset_skill_preload.py`：
+
+```python
+"""预设预绑定 skill 首轮预加载：一次生效、不进 system prompt、缺失只 warn。"""
+
+from unittest.mock import AsyncMock, MagicMock
+
+from src.services.agent_service import AgentService
+
+
+class _Record:
+    """最小 SkillRecord 替身（preload 只读 inline_prompt / fork_body）。"""
+
+    def __init__(self, name: str, inline: str = "", fork: str = ""):
+        self.name = name
+        self.inline_prompt = inline
+        self.fork_body = fork
+
+
+def _service(records: dict[str, _Record]) -> AgentService:
+    """构造只带预加载所需依赖的 AgentService（跳过 __init__）。"""
+    svc = AgentService.__new__(AgentService)
+    registry = MagicMock()
+    registry.get = MagicMock(side_effect=lambda name: records.get(name))
+    svc._skill_registry = registry
+    return svc
+
+
+def test_preload_renders_in_declared_order():
+    """按 skills 声明顺序拼接，inline_prompt 优先于 fork_body。"""
+    svc = _service(
+        {
+            "a": _Record("a", inline="方法论 A：$ARGUMENTS"),
+            "b": _Record("b", fork="方法论 B"),
+        }
+    )
+    text = svc._preload_skills_text(["a", "b"])
+    assert text.index("方法论 A") < text.index("方法论 B")
+    assert text.count("\n\n") == 1
+
+
+def test_preload_renders_without_task_text():
+    """预加载不带任务文本：占位符渲染为空串（注入的是方法论）。"""
+    svc = _service({"a": _Record("a", inline="方法论 A：$ARGUMENTS")})
+    assert svc._preload_skills_text(["a"]) == "方法论 A："
+
+
+def test_preload_skips_unknown_skill(monkeypatch):
+    """声明了但查不到的技能 → 跳过该条，其余照常，且记 warn。"""
+    logged: list[dict] = []
+    monkeypatch.setattr(
+        "src.services.agent_service.core_logging.log_event",
+        lambda event, **fields: logged.append({"event": event, **fields}),
+    )
+    svc = _service({"a": _Record("a", inline="方法论 A")})
+    text = svc._preload_skills_text(["ghost", "a"])
+    assert text == "方法论 A"
+    assert any("ghost" in str(item) for item in logged)
+
+
+async def test_preload_only_on_first_round(monkeypatch):
+    """首轮注入、第二轮不注入（history 非空即跳过）。"""
+    svc = _service({"a": _Record("a", inline="方法论 A")})
+    svc._preset_registry = MagicMock()
+    preset = MagicMock()
+    preset.skills = ["a"]
+    svc._preset_registry.get = MagicMock(return_value=preset)
+
+    # 首轮：history 为空 → 注入
+    assert svc._preload_if_first_round("finance-expert", [], "") == "方法论 A"
+    # 第二轮：history 非空 → 不注入
+    assert svc._preload_if_first_round("finance-expert", [object()], "") == ""
+
+
+def test_preload_skipped_when_prefix_or_inline_present():
+    """本轮已有 /xxx 或 inline 注入 → 不预加载（避免双重注入）。"""
+    svc = _service({"a": _Record("a", inline="方法论 A")})
+    svc._preset_registry = MagicMock()
+    preset = MagicMock()
+    preset.skills = ["a"]
+    svc._preset_registry.get = MagicMock(return_value=preset)
+
+    assert svc._preload_if_first_round("finance-expert", [], "已有 inline") == ""
+```
+
 - [ ] **Step 2: 跑测试确认失败**
-- [ ] **Step 3: 实现**（在 `stream_chat` 的 T5 分派块之后：若 `direct_skill == "" and injected_system == ""` 且 `history` 为空 → 按预设的 `skills` 逐个渲染并按 "\n\n" 拼接写入 `injected_system`；多技能顺序 = frontmatter `skills` 声明顺序）
-- [ ] **Step 4: 跑测试确认通过** → Run: `pytest tests/services/ -v && pytest tests/ -q`
-- [ ] **Step 5: 提交**
+
+Run: `pytest tests/services/test_preset_skill_preload.py -v`
+Expected: FAIL —— `AttributeError: 'AgentService' object has no attribute '_preload_skills_text'`
+
+- [ ] **Step 3: 实现**
+
+`src/services/agent_service.py`（放在 `stream_chat` 之前，T3 的 `_resolve_session_agent` 附近）：
+
+```python
+    def _preload_skills_text(self, skill_names: list[str]) -> str:
+        """按预设声明的 skills 顺序渲染并拼接各技能正文（隐藏注入用）。
+
+        Args:
+            skill_names: 预设 frontmatter 的 skills 列表（声明顺序即渲染顺序）
+
+        Returns:
+            用 "\\n\\n" 拼接的正文；全部查不到时返回空串
+        """
+        parts: list[str] = []
+        for name in skill_names:
+            if self._skill_registry is None:
+                break
+            record = self._skill_registry.get(name)
+            if record is None:
+                core_logging.log_event(
+                    Event.SKILL_PRELOAD_SKIP, skill=name, reason="not_found"
+                )
+                continue
+            body = record.inline_prompt
+            if not body:
+                body = record.fork_body
+            if not body:
+                continue
+            parts.append(render_skill_body(body, ""))
+        return "\n\n".join(parts)
+
+    def _preload_if_first_round(
+        self, effective_agent: str, history: list, injected_system: str
+    ) -> str:
+        """首轮预加载判定：仅在无 /xxx、无 inline 注入、首轮且预设声明 skills 时注入。
+
+        Args:
+            effective_agent: 本会话生效的智能体名（空=未绑定）
+            history: 本轮之前的历史消息（空=首轮）
+            injected_system: T5 已算出的 inline 注入内容（非空表示本轮已有显式技能）
+
+        Returns:
+            预加载正文；任一条件不满足返回空串
+        """
+        if injected_system:
+            return ""
+        if history:
+            return ""
+        if not effective_agent:
+            return ""
+        if self._preset_registry is None:
+            return ""
+        preset = self._preset_registry.get(effective_agent)
+        if preset is None or not preset.skills:
+            return ""
+        return self._preload_skills_text(preset.skills)
+```
+
+`stream_chat` 内 T5 分派块**之后**、`launch_context` 之前插入：
+
+```python
+        injected_system = self._preload_if_first_round(
+            effective_agent, history, injected_system
+        )
+```
+（若预加载命中，`launch_context["injected_system"]` 自然带上它。）
+
+- [ ] **Step 4: 登记 `SKILL_PRELOAD_SKIP`**
+
+`Event` 加 `SKILL_PRELOAD_SKIP = "skill_preload_skip"`；`EVENT_SPECS` 同名同集（`prefix="session"`、`level="warning"`、`fields=("skill", "reason")`）。
+
+- [ ] **Step 5: 跑测试确认通过**
+
+Run: `pytest tests/services/test_preset_skill_preload.py tests/services/ -v && pytest tests/ -q`
+Expected: PASS
+
+- [ ] **Step 6: 提交**
 
 ```bash
-git add src/services/agent_service.py tests/services/test_preset_skill_preload.py
-git commit -m "feat(session): 预设预绑定 skill 首轮预加载（隐藏注入，一次生效）"
+git add src/services/agent_service.py src/core/log_events.py src/core/log_event_specs.py tests/services/test_preset_skill_preload.py
+git commit -m "feat(session): 预设预绑定 skill 首轮预加载（隐藏注入、一次生效）"
 ```
 
 ---
@@ -1064,24 +1585,243 @@ git commit -m "feat(session): 预设预绑定 skill 首轮预加载（隐藏注�
 **Files:**
 - Create: `src/services/capability_service.py`
 - Create: `src/api/capabilities.py`
-- Modify: `src/main.py`（注册路由，照既有 router 注册写法）
+- Modify: `src/main.py:196-208`（import + `include_router`）
+- Modify: `src/services/agent_service.py`（把 `skill_registry` / `preset_registry` 提升为 `self._*` 并构造 `self.capability_service`）
+- Modify: `src/core/log_events.py` + `src/core/log_event_specs.py`（登记 `CAPABILITY_DEGRADED`）
 - Test: `tests/services/test_capability_service.py`、`tests/api/test_capabilities.py`（新建）
 
 **Interfaces:**
+- Consumes：`SkillRegistry.user_visible() -> list[SkillRecord]`（`registry.py:72-78`，已按 `user_invocable` 过滤）；`AgentPresetRegistry.all() -> list[AgentPreset]`（`presets/registry.py:53-55`，已按名排序）
 - Produces：
-  - `CapabilityService(skill_registry, preset_registry)`；`list_skills() -> list[dict]`（`{"name","description"}`，取 `skill_registry.user_visible()`）；`list_agents() -> list[dict]`（`{"name","display_name","description"}`，取 `preset_registry.all()`）
+  - `CapabilityService(skill_registry, preset_registry)`
+  - `CapabilityService.list_skills() -> list[dict]` → `[{"name","description"}]`
+  - `CapabilityService.list_agents() -> list[dict]` → `[{"name","display_name","description"}]`
+  - `AgentService.capability_service: CapabilityService`
   - `GET /api/skills` → `ResponseModel(data={"skills": [...]})`；`GET /api/agents` → `ResponseModel(data={"agents": [...]})`
 
-**硬性要求（design D19）**：**不引入 catalog 文件**；api 层只转发（不直接读文件/扫目录）；skills 服务端过滤 `user-invocable: false`（由 `user_visible()` 保证）；读取失败 **fail-open**（返回空列表 + warn，**不 500**）。
+**硬性要求（design D19）**：**不引入 catalog 文件**（清单由 registry 派生）；api 层只转发（不读文件/不扫目录）；skills 服务端过滤 `user-invocable:false`（由 `user_visible()` 保证）；读取失败 **fail-open**（空列表 + 200，**不 500**）。`ResponseModel` 在 **`src/api/schema.py`**（不在 `model/response.py`）。
 
-- [ ] **Step 1: 写失败测试**（信封为 `data.skills` / `data.agents`；`user-invocable: false` 的技能不出现；注册表抛异常时返回空列表 + 200）
+- [ ] **Step 1: 写失败测试**
+
+`tests/services/test_capability_service.py`：
+
+```python
+"""能力清单服务：由 registry 派生、字段投影正确、无 registry 时降级空列表。"""
+
+from unittest.mock import MagicMock
+
+from src.services.capability_service import CapabilityService
+
+
+class _Skill:
+    def __init__(self, name: str, description: str):
+        self.name = name
+        self.description = description
+
+
+class _Preset:
+    def __init__(self, name: str, display_name: str, description: str):
+        self.name = name
+        self.display_name = display_name
+        self.description = description
+
+
+def test_list_skills_projects_name_and_description():
+    """只投影 name/description（不透传整对象）。"""
+    registry = MagicMock()
+    registry.user_visible.return_value = [_Skill("finance-qa", "财务问答")]
+    svc = CapabilityService(registry, MagicMock())
+    assert svc.list_skills() == [{"name": "finance-qa", "description": "财务问答"}]
+
+
+def test_list_agents_projects_display_name():
+    """agents 多一个 display_name（选择器显示中文名）。"""
+    preset_registry = MagicMock()
+    preset_registry.all.return_value = [_Preset("finance-expert", "财务专家", "财务分析")]
+    svc = CapabilityService(MagicMock(), preset_registry)
+    assert svc.list_agents() == [
+        {"name": "finance-expert", "display_name": "财务专家", "description": "财务分析"}
+    ]
+
+
+def test_missing_registry_returns_empty_list():
+    """registry 为 None（skills 目录缺失）→ 空列表，不抛。"""
+    svc = CapabilityService(None, None)
+    assert svc.list_skills() == []
+    assert svc.list_agents() == []
+```
+
+`tests/api/test_capabilities.py`：
+
+```python
+"""GET /api/skills、/api/agents：统一信封 + 服务端过滤 + 失败 fail-open。"""
+
+from unittest.mock import AsyncMock, MagicMock
+
+
+def test_skills_envelope(auth_client, mock_app_service):
+    """信封为 data.skills（前端按 body.data 解析）。"""
+    mock_app_service.agent_service.capability_service.list_skills = MagicMock(
+        return_value=[{"name": "finance-qa", "description": "财务问答"}]
+    )
+    resp = auth_client.get("/api/skills")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["code"] == "SUCCESS"
+    assert body["data"]["skills"][0]["name"] == "finance-qa"
+
+
+def test_agents_envelope(auth_client, mock_app_service):
+    """信封为 data.agents。"""
+    mock_app_service.agent_service.capability_service.list_agents = MagicMock(
+        return_value=[{"name": "finance-expert", "display_name": "财务专家", "description": "d"}]
+    )
+    resp = auth_client.get("/api/agents")
+    assert resp.status_code == 200
+    assert resp.json()["data"]["agents"][0]["display_name"] == "财务专家"
+
+
+def test_failure_returns_empty_list_not_500(auth_client, mock_app_service):
+    """读取失败 → 空列表 + 200（fail-open，不阻断选择器渲染）。"""
+    mock_app_service.agent_service.capability_service.list_skills = MagicMock(
+        side_effect=RuntimeError("boom")
+    )
+    resp = auth_client.get("/api/skills")
+    assert resp.status_code == 200
+    assert resp.json()["data"]["skills"] == []
+```
+
 - [ ] **Step 2: 跑测试确认失败**
-- [ ] **Step 3: 实现**（service 只做"取 + 转 dict"；api handler 标注返回类型 `ResponseModel`；异常 `try/except` 记 warn 返回空列表——**不用三元、不用 getattr**）
-- [ ] **Step 4: 跑测试确认通过** → Run: `pytest tests/services/test_capability_service.py tests/api/test_capabilities.py -v && pytest tests/ -q`
-- [ ] **Step 5: 提交**
+
+Run: `pytest tests/services/test_capability_service.py tests/api/test_capabilities.py -v`
+Expected: FAIL —— `ModuleNotFoundError: src.services.capability_service` / 404
+
+- [ ] **Step 3: 实现服务与接口**
+
+`src/services/capability_service.py`：
+
+```python
+"""能力清单服务（design D19）——清单由 registry 派生，不引入 catalog 文件。
+
+只做"取 + 投影"，不做缓存：registry 自身有懒重载（文件 mtime 变化自动生效），
+再加一层缓存就等于要养第二份陈旧源。api 层只转发。
+"""
+
+from src.agents.presets.registry import AgentPresetRegistry
+from src.agents.skills.registry import SkillRegistry
+
+
+class CapabilityService:
+    """对外暴露"可调用技能"与"可选智能体"两个只读清单。"""
+
+    def __init__(
+        self,
+        skill_registry: SkillRegistry | None,
+        preset_registry: AgentPresetRegistry | None,
+    ) -> None:
+        """注入两个注册表（可为 None —— skills 目录缺失时降级空列表）。"""
+        self._skill_registry = skill_registry
+        self._preset_registry = preset_registry
+
+    def list_skills(self) -> list[dict]:
+        """可被用户 `/xxx` 调用的技能（服务端已过滤 user-invocable:false）。"""
+        if self._skill_registry is None:
+            return []
+        records = self._skill_registry.user_visible()
+        return [{"name": r.name, "description": r.description} for r in records]
+
+    def list_agents(self) -> list[dict]:
+        """全部可加载的智能体预设（含 display_name，供选择器显示中文名）。"""
+        if self._preset_registry is None:
+            return []
+        presets = self._preset_registry.all()
+        return [
+            {"name": p.name, "display_name": p.display_name, "description": p.description}
+            for p in presets
+        ]
+```
+
+`src/api/capabilities.py`（照 `src/api/auth.py` 的写法）：
+
+```python
+"""能力清单只读接口 —— GET /api/skills、GET /api/agents（design D19）。"""
+
+from fastapi import APIRouter, Depends
+
+from src.api.dependencies import get_app_service
+from src.api.schema import ResponseModel
+from src.services.app_service import AppService
+
+router = APIRouter()
+
+
+@router.get("/skills", response_model=ResponseModel)
+async def list_skills(svc: AppService = Depends(get_app_service)):
+    """返回可被用户调用的技能清单。
+
+    Returns:
+        ResponseModel: data 为 {"skills": [{"name", "description"}]}；读取失败返回空列表（fail-open）
+    """
+    from src.core import logging as core_logging
+    from src.core.log_events import Event
+
+    try:
+        skills = svc.agent_service.capability_service.list_skills()
+    except Exception:  # noqa: BLE001 —— 配置类错误 fail-open，不阻断前端渲染
+        core_logging.log_event(Event.CAPABILITY_DEGRADED, resource="skills", reason="read_failed")
+        skills = []
+    return ResponseModel(data={"skills": skills})
+
+
+@router.get("/agents", response_model=ResponseModel)
+async def list_agents(svc: AppService = Depends(get_app_service)):
+    """返回全部可加载的智能体预设清单（含 display_name）。
+
+    Returns:
+        ResponseModel: data 为 {"agents": [{"name", "display_name", "description"}]}
+    """
+    from src.core import logging as core_logging
+    from src.core.log_events import Event
+
+    try:
+        agents = svc.agent_service.capability_service.list_agents()
+    except Exception:  # noqa: BLE001
+        core_logging.log_event(Event.CAPABILITY_DEGRADED, resource="agents", reason="read_failed")
+        agents = []
+    return ResponseModel(data={"agents": agents})
+```
+
+`src/main.py`：import 段加 `from src.api import capabilities as capabilities_routes`，并注册：
+
+```python
+app.include_router(capabilities_routes.router, prefix="/api", tags=["capabilities"])
+```
+
+- [ ] **Step 4: 提升 registry 到实例属性并装配**
+
+`src/services/agent_service.py` 的 `__init__`：
+- 在 skills 分支**之前**初始化 `skill_registry = None` / `preset_registry = None`（分支内赋值）。
+- skills 分支内 `self._skill_registry = skill_registry`（T5 也要用）、`self._preset_registry = preset_registry`。
+- `build_graph` 之后：
+
+```python
+        self.capability_service = CapabilityService(skill_registry, preset_registry)
+```
+（顶部 import `from src.services.capability_service import CapabilityService`；该模块只依赖 agents 层注册表，无循环 import。）
+
+- [ ] **Step 5: 登记 `CAPABILITY_DEGRADED`**
+
+`Event` 加 `CAPABILITY_DEGRADED = "capability_degraded"`；`EVENT_SPECS` 同名同集（`prefix="app"`、`level="warning"`、`fields=("resource", "reason")`）。
+
+- [ ] **Step 6: 跑测试确认通过**
+
+Run: `pytest tests/services/test_capability_service.py tests/api/test_capabilities.py -v && pytest tests/ -q`
+Expected: PASS
+
+- [ ] **Step 7: 提交**
 
 ```bash
-git add src/services/capability_service.py src/api/capabilities.py src/main.py tests/services/test_capability_service.py tests/api/test_capabilities.py
+git add src/services/capability_service.py src/api/capabilities.py src/main.py src/services/agent_service.py src/core/log_events.py src/core/log_event_specs.py tests/services/test_capability_service.py tests/api/test_capabilities.py
 git commit -m "feat(api): 能力清单服务与 /api/skills、/api/agents 只读接口（registry 派生，fail-open）"
 ```
 
@@ -1090,16 +1830,48 @@ git commit -m "feat(api): 能力清单服务与 /api/skills、/api/agents 只读
 ### Task 10: 收口（测试补齐 / 契约文档 / 门禁）
 
 **Files:**
-- Modify: `docs/agents/api_contract.md`（§7.1）、`docs/agents/glossary.md`（§7.2）、`docs/agents/code-map.md`（§7.3）、`CLAUDE.md`（§7.4）、`docs/agents/reference-projects.md`（§7.7）
-- Modify: `docs/agents/data-flow.md`（§7.6：核对"答案校验与引用格式化链路"与最终实现一致）
-- Modify: `docs/openspec/changes/agent-delegation-skills/*`（§7.5：标注 D7 被本 change 修订）
-- Modify: `docs/openspec/changes/session-agent-and-skill-invocation/tasks.md`（勾选/标注本轮完成的条目）
+- Modify: `docs/agents/api_contract.md`（§7.1）
+- Modify: `docs/agents/glossary.md`（§7.2）
+- Modify: `docs/agents/code-map.md`（§7.3）
+- Modify: `CLAUDE.md`（§7.4）
+- Modify: `docs/agents/data-flow.md`（§7.6）
+- Modify: `docs/agents/reference-projects.md`（§7.7）
+- Modify: `docs/openspec/changes/agent-delegation-skills/design.md` 或 `tasks.md`（§7.5：标注 D7 被本 change 修订）
+- Modify: `docs/openspec/changes/session-agent-and-skill-invocation/tasks.md`（把本轮完成项标注「已由 Plan 3 完成」）
 - Test: 全量门禁
 
-- [ ] **Step 1: 契约文档（§7.1）**：`agent` 字段语义（值=预设 `name`、空=沿用、不一致忽略+warn、**无 400**）、`/xxx` 前缀语义与踩坑（**落库保留原文、组装 prompt 时剥离**）、`sessions/list` 新增 `agent`（`sessions/messages` 契约不变）、`agent_used` 事件、两个清单接口的信封。
-- [ ] **Step 2: 术语与结构（§7.2/7.3/7.4）**：glossary 加「智能体预设」「会话级 vs 消息级」；code-map 登记 `agents/` 内容目录与 `src/agents/presets/`、`src/agents/skills/prefix.py`、`src/services/capability_service.py`、`src/api/capabilities.py`；`CLAUDE.md` 目录速览补 `agents/`。
-- [ ] **Step 3: 调研与依赖说明（§7.5/7.7）**：`agent-delegation-skills` 的 D7 标注被修订；`reference-projects.md` 更新 agency-agents 条目 + 记录"`create_react_agent` 废弃 → `create_agent`"结论。
-- [ ] **Step 4: 补齐 §5.11 剩余测试**（前缀清洗的当前轮与历史、注入后持续生效、双轴过滤、绑定四态、老会话 `bind-if-empty` 可绑定、`agent_used` 事件、未选 agent 时 system 段快照逐字一致、两接口信封、非法名称跳过、`sessions/messages` 契约不变）——逐条对照，缺哪条补哪条。
+- [ ] **Step 1: 契约文档（§7.1）** —— `docs/agents/api_contract.md` 追加一节（`### 5.6 会话智能体与 `/xxx` 契约`，紧接 Plan 2 收口时新增的 `5.5`）：
+  - `POST /chat/stream` 请求体 `agent: str = ""`：**值是预设 `name`（ASCII slug）不是 id**；空＝沿用；与已绑定值不一致 → **服务端忽略 + warning，无 400**（对齐 design D1/D20）。
+  - `/xxx` 前缀：只在**行首**且形如 ASCII slug 才按命令解析；未注册 → 返回"不存在 + 可用列表"（不静默）；**落库与 Redis 历史保留原文，仅在组装 prompt 时剥离**（design D25）——踩坑：不要在 `add_message_async` 前改写 `query`。
+  - `POST /sessions/list` 新增 `agent` 字段（**`sessions/messages` 契约不变，`data` 仍为数组**）。
+  - 流事件 `agent_used`：载荷 `{"agent": string}`；**语义 = 本会话绑定值，不含 fork 执行者**。
+  - `GET /api/skills` / `GET /api/agents`：统一信封 `data.skills` / `data.agents`；失败 fail-open 空列表。
+- [ ] **Step 2: 术语与结构（§7.2/7.3/7.4）**
+  - `glossary.md`：加「智能体预设」「会话级 vs 消息级」两条（一句话 + 指针到 design D1/D21，**不复制正文**）。
+  - `code-map.md`：登记 `agents/`（运行时内容目录，compose 挂载到 `/app/agents`）、`src/agents/presets/`、`src/agents/skills/prefix.py`、`src/services/capability_service.py`、`src/api/capabilities.py`。
+  - `CLAUDE.md` 目录速览：后端分层里补 `agents/` 与 presets 一句；「文档组织」表如新增归属文档则同步登记。
+- [ ] **Step 3: 调研与依赖说明（§7.5/7.7）**
+  - `agent-delegation-skills` 的 D7：加一行「本 D7 已被 `session-agent-and-skill-invocation` 修订（fork 工具放开 + 执行者选择），以该 change 的 design D3/D7 为准」。
+  - `reference-projects.md`：更新 agency-agents 条目（作为智能体预设来源）+ 记录「`create_react_agent` 已废弃 → `langchain.agents.create_agent`（`system_prompt` 非 `prompt`）」结论。
+  - `data-flow.md`：核对「答案校验与引用格式化链路」一节与最终实现一致（重点：`state.tool_contexts` / `verify_temporal_years` 的承载与直出轮的判据来源）。
+- [ ] **Step 4: 逐条核对 §5.11 的测试清单**（下表每行必须有一个**已存在且能判别**的用例；缺则补，补在对应任务的测试文件里）
+
+| §5.11 断言 | 落在哪 |
+|---|---|
+| 前缀路由（plain/known/unknown 三态） | `tests/agents/skills/test_skill_prefix.py`（T2） |
+| 前缀清洗（当前轮与历史都不含 `/name`，**落库仍为原文**） | `tests/services/test_skill_prefix_dispatch.py` + `tests/agents/graph/test_injected_system.py`（T5） |
+| `/xxx` inline 单轮 | 同上（T5：`direct_skill==""` + `injected_system` 非空） |
+| `/xxx` fork 直出（主 agent 0 LLM 轮 + citations 非空 + 无 `INVALID_CITATION`） | `tests/agents/graph/test_direct_skill_round.py`（Plan 2）+ `tests/services/test_direct_round_delivery.py`（T6） |
+| 注入后持续生效 | `tests/agents/graph/test_injected_system.py`（T5：第二轮仍带 `injected_system`） |
+| 双轴过滤 | `tests/agents/skills/test_skill_registry.py`（Plan 1）+ `test_capabilities.py`（T9：`user-invocable:false` 不出现） |
+| 绑定四态（首轮绑定 / 沿用 / 忽略+warn / 未注册降级） | `tests/services/test_session_agent_binding.py`（T3） |
+| 老会话 `bind-if-empty` 可绑定 | `tests/infra/db/test_mysql_db.py::test_bind_session_agent_is_bind_once`（T1） |
+| `agent_used` 流事件 | `tests/services/test_session_agent_binding.py` 或 `tests/chat/test_streaming.py`（T3：序列化 + 载荷） |
+| 未选 agent 时 system 段快照逐字一致 | `tests/rag/test_prompt_layers.py::test_no_persona_keeps_system_messages_byte_identical`（T4） |
+| 两接口信封结构 + 服务端过滤 + 失败降级 | `tests/api/test_capabilities.py`（T9） |
+| 非法名称跳过 | `tests/agents/presets/`（Plan 1）+ `test_preload_skips_unknown_skill`（T8） |
+| `sessions/messages` 契约不变（`data` 仍为数组） | `tests/api/test_sessions.py`（T1 追加断言） |
+
 - [ ] **Step 5: 跑全量门禁**
 
 ```
@@ -1113,7 +1885,7 @@ python -m src.cli.check_docs
 
 ```bash
 git add docs/ CLAUDE.md
-git commit -m "docs(session-agent): 收口契约/术语/结构/调研与测试补齐"
+git commit -m "docs(session-agent): 收口契约/术语/结构/调研与 §5.11 测试清单核对"
 ```
 
 ---
@@ -1130,16 +1902,18 @@ git commit -m "docs(session-agent): 收口契约/术语/结构/调研与测试�
 | 5.7 存储链（4 小项） | T1 | 满配 |
 | 5.8 bind-once + `agent_used` | T3 | 满配（`get_session_agent_async` 两种实现择一，已在步骤内说明） |
 | 5.9 三层 prompt 组装 | T4 | 满配（含逐字不变守卫；`_with_current_date` 复用方式二选一，已说明） |
-| 5.10 能力清单服务 + 接口 | T9 | 步骤级（代码形状已定，无逐行代码） |
-| 5.11 测试 | 各任务内嵌 + T10 Step 4 | 步骤级 |
+| 5.10 能力清单服务 + 接口 | T9 | 满配 |
+| 5.11 测试 | 各任务内嵌 + T10 Step 4 清单核对表 | 满配（清单逐条映射到具体用例） |
 | 5.12 直出轮交付/落库 | T6 | 满配（含生产链端到端测试要求） |
 | 5.13 直出轮重跑消费指引 | T6 Step 3 | 满配 |
 | 5.14 生产 `agents/`/`skills/` 挂载与 COPY | **未覆盖** | ⚠️ 见下 |
-| 4.6 确认门 | T7 | 步骤级（四分支已列，机制与常量已定，未逐行贴码） |
-| 4.8 预设预绑定预加载 | T8 | 步骤级 |
-| 7.1–7.7 文档同步 | T10 | 步骤级 |
+| 4.6 确认门 | T7 | 满配（`detect_confirm_request` 3 条 + `ask_confirm_question` 3 条 + 执行契约 2 条测试，含完整实现） |
+| 4.8 预设预绑定预加载 | T8 | 满配 |
+| 7.1–7.7 文档同步 | T10 | 满配（逐份文档的落地清单） |
 
-**2. Placeholder scan**：T7/T8/T9 + T10 的 Step 3 以"步骤 + 验收标准 + 关键签名/常量"给出，**未逐行贴码**——这是本计划的**已知缺口**（与 Plan 2 相同处理方式）：执行到这些任务前必须按 Plan 1/Plan 2 的粒度补齐代码块与测试代码，补齐后再派发。T1–T6 已满配（含可直接粘贴的测试与实现）。
+**2. Placeholder scan**：**T1–T10 全部满配**（含可直接粘贴的测试代码与实现代码；T10 为文档与门禁，已给出逐份文档的落地清单与 §5.11 逐条映射表）。已知的**刻意留白**仅两处，均已在步骤内说明处理方式：
+- T4 的 `_with_current_date` 复用方式二选一（import 私有函数 / 本地复制 12 行）；
+- T3 的"读会话已绑定 agent"两种实现二选一（新增 `get_session_agent_async` / 复用 `get_sessions` 过滤）。
 
 **3. Type consistency**：`PrefixParse(kind, skill_name, task, record)`（T2 定 → T5 消费）；`parse_prefix(text, known_names, registry)` / `clean_prefix(text, known_names)`（T2 定 → T5 消费）；`bind_session_agent(session_id, agent) -> bool`（T1 定 → T3 消费）；`_resolve_session_agent(session_id, requested, bound="")`（T3 定）；`get_base_system_prompt()` / `build_system_prompt(persona, kb_bound, has_skills, prompt_manager) -> list[SystemMessage]`（T4 定 → T5/T8 消费）；`RequestContext.known_skill_names: set[str]`（T5 定 → `agent_node`/`query_router` 消费）；`AgentState.injected_system: str`（T5 定 → T8 复用）；`SSEAgentUsedEvent(agent, type, seq)`（T3 定）。命名已核对一致。
 
