@@ -2,6 +2,7 @@
 name: finance-analyst
 description: 财务深度分析方法论（何时使用：需要多步建模、财务比率推算、趋势解读等深度分析；材料须由主 agent 预检索一并传入 task）
 context: fork
+model: qwen3.8-max
 ---
 
 按以下方法论完成财务深度分析：

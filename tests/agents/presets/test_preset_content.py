@@ -33,6 +33,9 @@ def test_finance_analyst_is_methodology_not_persona():
     records = SkillLoader(REPO_ROOT / "skills").load_all()
 
     record = next(r for r in records if r.name == "finance-analyst")
-    body = record.fork_body if record.fork_body is not None else record.inline_prompt
+    if record.fork_body is not None:
+        body = record.fork_body
+    else:
+        body = record.inline_prompt
     assert body is not None
     assert "你是一名" not in body
