@@ -233,7 +233,7 @@ git commit -m "feat(ui): 新建对话页智能体选择器（会话级、默认�
               </div>
 ```
 
-> `composer-bottom` 左侧当前只有 `thinking-chip`，技能 chip 紧随其后（间距由既有 `gap:10px` 提供；规格要求左侧组 `gap:6px`——**若与既有 10px 冲突，以既有值为准并在报告里说明**，视觉差异需在 `playwright-cli` 对照时确认可接受）。
+> 规格已按实际视觉改定：`composer-bottom` 左侧组间距 **10px**（原规格写 6px，与既有 `.composer-bottom{gap:10px}` 冲突；已把规格那一处改成 10px，`chat-agent-skill-selector-2026-09-11.md` L77）。因此技能 chip **只需紧随 `thinking-chip` 之后**，不需要包一层容器，也不新增 gap 声明。
 
 - [ ] **Step 3: 落 JS**
 
@@ -277,9 +277,60 @@ function selectSkill(name){
   if(state.skill){ insertSkillPrefix(state.skill); }
 }
 ```
-（`paintSkillChip()` 同时处理 `new`/`history` 两个 chip：空闲文案「技能」、激活文案 `技能 · <name>`、`.active` class 与 `aria-expanded`。）
+// 渲染技能菜单：首项「不使用技能」+ 真实技能；候选项带 data-name 供键盘选中
+// （option 的 id 与 aria-activedescendant 由 T5 的 paintMenuNav 运行时写入，此处不写 id）
+function renderSkillMenu(idPrefix){
+  const box = $(idPrefix + 'List');
+  if(!box) return;
+  const current = state.skill || '';
+  box.innerHTML = state.skills.map(function(s){
+    const selected = (s.name === current);
+    const label = s.name ? ('/' + s.name) : '不使用技能';
+    const desc = s.name ? (s.description || '') : '';
+    return '<div class="agent-item" role="option" tabindex="-1" aria-selected="' + (selected ? 'true' : 'false') + '" data-name="' + escapeHtml(s.name) + '">'
+      + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><path d="M3 5h7a4 4 0 0 1 4 4v10"/><path d="M21 5h-7a4 4 0 0 0-4 4v10"/></svg>'
+      + '<span class="agent-item-info"><span class="agent-item-name">' + escapeHtml(label) + '</span>'
+      + (desc ? '<span class="agent-item-desc">' + escapeHtml(desc) + '</span>' : '') + '</span>'
+      + '<span class="check">' + (selected ? '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg>' : '') + '</span>'
+      + '</div>';
+  }).join('');
+  Array.prototype.forEach.call(box.querySelectorAll('.agent-item'), function(el){
+    el.addEventListener('mousedown', function(ev){
+      ev.preventDefault();                       // 保焦点，避免输入框失焦
+      selectSkill(el.getAttribute('data-name'));
+    });
+  });
+}
 
-- [ ] **Step 4: 接线**：`boot()` 调 `loadSkills();`；两个 chip 的 click/keydown 开合；click-outside 关闭；`newSession()` 重置 `state.skill=''` 并 `paintSkillChip()`。
+// 开合与 chip 状态：idPrefix ∈ {'newSkill','historySkill'}（两个 chip 共用同一份 state.skill）
+function openSkillMenu(idPrefix){
+  closeTransientOverlays();                      // 互斥（T5）
+  $(idPrefix + 'Menu').classList.add('open');
+  $(idPrefix === 'newSkill' ? 'newSkillChip' : 'historySkillChip').setAttribute('aria-expanded', 'true');
+  renderSkillMenu(idPrefix);
+}
+function closeSkillMenu(){
+  ['newSkillMenu', 'historySkillMenu'].forEach(function(id){
+    const menu = $(id);
+    if(menu){ menu.classList.remove('open'); }
+  });
+  $('newSkillChip').setAttribute('aria-expanded', 'false');
+  $('historySkillChip').setAttribute('aria-expanded', 'false');
+}
+
+// chip 文案与选中态（两个 chip 同步显示同一 state.skill）
+function paintSkillChip(){
+  const label = state.skill ? ('技能 · ' + state.skill) : '技能';
+  ['newSkillChip', 'historySkillChip'].forEach(function(id){
+    const chip = $(id);
+    if(!chip) return;
+    chip.classList.toggle('active', !!state.skill);
+    chip.querySelector('span').textContent = label;
+  });
+}
+```
+
+- [ ] **Step 4: 接线**：`boot()` 调 `loadSkills();`；两个 chip 的 click 开合（T5 补键盘）；click-outside 关闭（在既有 `document` click 处理里补 `closeSkillMenu()`）；`newSession()` 重置 `state.skill=''` 并 `paintSkillChip()`。
 - [ ] **Step 5: playwright-cli 验证**：菜单**向上**弹出（`bottom: calc(100%+8px)`）、首项「不使用技能」、选中后输入框行首出现 `/name ` 且 chip 变蓝显示技能名、再点可换；历史对话页同样有该 chip。
 - [ ] **Step 6: 提交**
 
@@ -293,22 +344,190 @@ git commit -m "feat(ui): 技能选择器 chip（向上弹菜单、选中插入 /
 ### Task 3: 输入框 `/` 命令补全（与技能 chip 共用候选）
 
 **Files:**
-- Modify: `deploy/nginx/html/chat.html`（CSS：`.slash-menu`；JS：`onInputSlash()` / `renderSlashMenu()` / `applySlash()`）
+- Modify: `deploy/nginx/html/chat.html`（CSS：`.composer-container` 补 `position:relative`、新增 `.slash-*`；HTML：两个 composer 各加一个菜单容器；JS：`slashState` + `onInputSlash` / `slashMatches` / `renderSlashMenu` / `applySlash` / `handleSlashKeydown`；改造既有 `input` / `keydown` 监听）
 
 **Interfaces:**
-- Consumes：`state.skills`
-- Produces：`onInputSlash(input)`（绑定到既有 `input` 事件之后——**不要覆盖既有 `sendBtn.disabled` 逻辑**）
+- Consumes：`state.skills`（T2 已加载，含前端合成的 `{name:'', description:'不使用技能'}` 首项）、既有 `escapeHtml()`、`activeComposer()`
+- Produces：
+  - `slashState = { open: bool, frag: string, matches: Array, active: int }`
+  - `onInputSlash(input)` / `slashMatches(frag)` / `renderSlashMenu()` / `applySlash(name)` / `handleSlashKeydown(e) -> bool`（**返回 true = 已消费按键**）
 
-**规则**：仅在**行首**触发（`value[0] === '/'`），按其后已输入片段按 `name` 前缀过滤；↑/↓ 移动、Enter 选中（**拦截发送**）、Esc 关闭；插入 `/name ` 字面量后关闭；`user-invocable:false` 的已由服务端过滤。
+**交互规则（已定，逐条实现）**
+1. **触发**：仅输入框行首命中 `/^\/([A-Za-z0-9_-]*)$/`（与后端 `PREFIX_PATTERN` 的字符集**同源**）→ 开菜单；不命中（含 `/api/v1` 这类带 `/` 的路径、行内 `/`、`/` 后跟空格）→ 关菜单。
+2. **候选**：只取**真实技能**（`s.name` 非空，**排除**「不使用技能」首项），按 `name` **前缀**匹配 `frag`，按 `name` 字典序排序。
+3. **键盘**：↑/↓ 在候选内移动且**到边界即停（不环绕）**；Enter 有高亮项 → 插入不发送，**无匹配 → 关菜单且不发送**（防误发半截命令）；Esc → 关菜单（焦点留在输入框）。以上按键一律 `preventDefault()` 并由 `handleSlashKeydown` 返回 `true`。
+4. **鼠标**：候选支持点击选中（用 `mousedown` + `preventDefault()`，避免 textarea 失焦）。
+5. **插入**：把行首的 `/frag` 替换为 `/name `（保留其余文本），光标置于名称之后，并 `dispatchEvent(new Event('input'))` 以刷新发送键可用态。
+6. 菜单 `max-height` 复用 `320px`（与 chip 菜单一致）；无匹配时显示一行「没有匹配的技能」。
+7. `user-invocable:false` 的技能已由服务端过滤，前端不再判。
 
-- [ ] **Step 1: 落 CSS + HTML**：在活动 composer 容器内加 `<div class="slash-menu" id="newSlashMenu" role="listbox"></div>`（history 同理），样式复用 `.skill-menu` 的外观但改为**向下**（输入框在上方）：`top:calc(100% + 6px)`。
-- [ ] **Step 2: 落 JS**：`onInputSlash` 在 `initComposerEvents` 的既有 `input` 监听**之后**追加调用；`keydown` 里 Enter 分支：若 slash 菜单开着则**先** `applySlash()` 并 `preventDefault()`，否则走既有 `sendMessage()`。
-- [ ] **Step 3: playwright-cli 验证**：行首输入 `/fin` → 菜单列出 `finance-analyst` 等；Enter 插入 `/finance-analyst ` 且**不发送**；Esc 关闭；`/api/v1` 这类非 slug 不触发。
-- [ ] **Step 4: 提交**
+- [ ] **Step 1: 落 CSS**
+
+```css
+/* 输入框行首 / 命令补全：外观沿用技能菜单，改为向下弹出 */
+.composer-container{position:relative}
+.slash-menu{position:absolute;top:calc(100% + 6px);left:0;min-width:300px;max-height:320px;overflow-y:auto;background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-lg);z-index:30;display:none}
+.slash-menu.open{display:block}
+.slash-item{display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer}
+.slash-item:hover,.slash-item.active{background:var(--bg)}
+.slash-item-name{font-size:13px;color:var(--text);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.slash-item-desc{font-size:12px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.slash-empty{padding:10px 14px;font-size:12px;color:var(--text-muted)}
+@media (prefers-reduced-motion:reduce){.slash-menu{transition:none}}
+```
+> `.composer-container` 若已声明 `position`（先 grep 确认），**不要重复声明**。
+
+- [ ] **Step 2: 落 HTML（两个 composer 各一处：`chat.html:740-757`、`783-802`）**
+
+放在各自 `.composer-container` 内、`textarea` **之后**：
+
+```html
+              <div class="slash-menu" id="newSlashMenu" role="listbox" aria-label="技能候选"></div>
+```
+
+- [ ] **Step 3: 落 JS**
+
+```js
+// ===== 输入框行首 / 命令补全（与技能 chip 共用 state.skills）=====
+let slashState = { open:false, frag:'', matches:[], active:0 };
+const SLASH_FRAG_RE = /^\/([A-Za-z0-9_-]*)$/;   // 与后端 prefix.PREFIX_PATTERN 字符集同源
+
+// 候选：排除「不使用技能」首项（name 为空），按 name 前缀匹配后字典序排序
+function slashMatches(frag){
+  return state.skills
+    .filter(function(s){ return !!s.name && s.name.indexOf(frag) === 0; })
+    .sort(function(a,b){ return a.name.localeCompare(b.name); });
+}
+
+function renderSlashMenu(){
+  const c = activeComposer();
+  const box = c.slashMenu;
+  if(!box) return;
+  if(!slashState.open){ box.classList.remove('open'); return; }
+  if(slashState.matches.length === 0){
+    box.innerHTML = '<div class="slash-empty">没有匹配的技能</div>';
+    box.classList.add('open');
+    c.input.removeAttribute('aria-activedescendant');
+    return;
+  }
+  box.innerHTML = slashState.matches.map(function(s, i){
+    const on = (i === slashState.active);
+    return '<div class="slash-item' + (on ? ' active' : '') + '" id="' + c.idPrefix + 'SlashOpt' + i + '"'
+      + ' role="option" aria-selected="' + (on ? 'true' : 'false') + '" data-name="' + escapeHtml(s.name) + '">'
+      + '<span class="slash-item-name">/' + escapeHtml(s.name) + '</span>'
+      + (s.description ? '<span class="slash-item-desc">' + escapeHtml(s.description) + '</span>' : '')
+      + '</div>';
+  }).join('');
+  box.classList.add('open');
+  // 焦点留在输入框，用 aria-activedescendant 播报高亮项
+  c.input.setAttribute('aria-activedescendant', c.idPrefix + 'SlashOpt' + slashState.active);
+  Array.prototype.forEach.call(box.querySelectorAll('.slash-item'), function(el){
+    el.addEventListener('mousedown', function(ev){
+      ev.preventDefault();                       // 保焦点，避免 textarea 失焦
+      applySlash(el.getAttribute('data-name'));
+    });
+  });
+}
+
+function onInputSlash(input){
+  const m = SLASH_FRAG_RE.exec(input.value || '');
+  if(!m){
+    slashState.open = false;
+    slashState.matches = [];
+    renderSlashMenu();
+    return;
+  }
+  slashState.open = true;
+  slashState.frag = m[1];
+  slashState.matches = slashMatches(slashState.frag);
+  slashState.active = 0;
+  renderSlashMenu();
+}
+
+// 插入选中技能：行首 /frag → /name␣（保留其余文本），光标置于名称之后
+function applySlash(name){
+  const c = activeComposer();
+  const rest = (c.input.value || '').slice(slashState.frag.length + 1);  // +1 = 前导 '/'
+  const prefix = '/' + name + ' ';
+  c.input.value = prefix + rest;
+  c.input.focus();
+  c.input.setSelectionRange(prefix.length, prefix.length);
+  c.input.dispatchEvent(new Event('input'));
+  slashState.open = false;
+  slashState.matches = [];
+  renderSlashMenu();
+}
+
+// 键盘：返回 true = 已消费（调用方不得再走发送逻辑）
+function handleSlashKeydown(e){
+  if(!slashState.open) return false;
+  if(e.key === 'Escape'){
+    e.preventDefault();
+    slashState.open = false;
+    renderSlashMenu();
+    return true;
+  }
+  if(e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+    e.preventDefault();
+    if(slashState.matches.length){
+      if(e.key === 'ArrowDown' && slashState.active < slashState.matches.length - 1){
+        slashState.active += 1;
+      }
+      if(e.key === 'ArrowUp' && slashState.active > 0){
+        slashState.active -= 1;
+      }
+      renderSlashMenu();
+    }
+    return true;
+  }
+  if(e.key === 'Enter'){
+    e.preventDefault();
+    if(slashState.matches.length === 0){
+      slashState.open = false;                   // 无匹配：关菜单且不发送
+      renderSlashMenu();
+      return true;
+    }
+    applySlash(slashState.matches[slashState.active].name);
+    return true;
+  }
+  return false;
+}
+```
+
+- [ ] **Step 4: 改造既有监听（**唯一改动既有代码的地方**，保持 Enter 行为逐字不变）**
+
+`initComposerEvents`（`chat.html:2432-2447`）里两处监听改为：
+
+```js
+  c.input.addEventListener('input', function(){
+    onInputSlash(c.input);                       // 新增：行首 / 补全
+    c.sendBtn.disabled = !c.input.value.trim();  // 既有逻辑原样保留
+  });
+  c.input.addEventListener('keydown', function(e){
+    if(handleSlashKeydown(e)) return;            // 新增：补全优先消费按键
+    if(e.key === 'Enter'){ e.preventDefault(); sendMessage(); }   // 既有逻辑原样保留
+  });
+```
+并给 `composerNew()` / `composerHistory()` 返回的对象补 `slashMenu`（`$('newSlashMenu')` / `$('historySlashMenu')`）与 `idPrefix`（`'new'` / `'history'`）。`newSession()` 里补 `slashState.open = false;`。
+
+- [ ] **Step 5: playwright-cli 验证（逐条对照交互规则）**
+
+```
+playwright-cli open http://localhost/chat.html   # 需登录（cookie token）
+# ① 行首 /fin → 菜单列出 /finance-analyst（且不含「不使用技能」）
+# ② Enter → 输入框变 "/finance-analyst " 且【未发送】（消息列表无新增）
+# ③ Esc → 菜单关闭、焦点仍在输入框
+# ④ /api/v1 与 "abc /fin" → 菜单不出现
+# ⑤ /zzz → 显示「没有匹配的技能」，Enter 不发送
+# ⑥ 鼠标点击候选项 → 正确插入且不发送
+playwright-cli console   # 断言无新增 error
+```
+
+- [ ] **Step 6: 提交**
 
 ```bash
 git add deploy/nginx/html/chat.html
-git commit -m "feat(ui): 输入框行首 / 命令补全（与技能 chip 共用候选）"
+git commit -m "feat(ui): 输入框行首 / 命令补全（与技能 chip 共用候选，Enter 不误发）"
 ```
 
 ---
@@ -369,16 +588,203 @@ git commit -m "feat(ui): 请求体携带会话绑定 agent + agent_used 静默�
 ### Task 5: 无障碍与互斥
 
 **Files:**
-- Modify: `deploy/nginx/html/chat.html`
+- Modify: `deploy/nginx/html/chat.html`（新增 `closeTransientOverlays` / `menuNav` / `menuOptions` / `paintMenuNav` / `handleMenuKeydown`；改造 `openAgentMenu`/`openSkillMenu`、`openCiteDrawer`/`openTaskBoard`、既有 Esc 监听；给两个触发钮绑 click/keydown）
 
-- [ ] **Step 1: 补齐 aria 与键盘**：两个触发胶囊 `role="button"` / `aria-haspopup="listbox"` / `aria-expanded` / `tabindex="0"`；两个菜单 `role="listbox"` + 项 `role="option"` + `aria-selected`；Enter/Space 开合、↑/↓ 移动高亮（`aria-activedescendant` 可选）、Enter 选中、Esc 关闭并**把焦点归还触发胶囊**。
-- [ ] **Step 2: 互斥**：扩展 `closeAllDrawers()`（`:1548-1551`）→ 打开引用抽屉 / 任务面板时先关两个新菜单；打开任一新菜单时先 `closeCiteDrawer()` + `closeTaskBoard()`。Esc 的既有处理（`:2929-2938`）补"关新菜单"。
-- [ ] **Step 3: playwright-cli 验证**：键盘全流程（Tab 到胶囊 → Enter 开 → ↓ 移动 → Enter 选 → Esc 关且焦点回胶囊）；焦点环可见；`prefers-reduced-motion` 下无过渡动画；打开智能体菜单后打开引用抽屉 → 菜单自动关闭。
-- [ ] **Step 4: 提交**
+**Interfaces:**
+- Consumes：T1 的 `agentTrigger`/`agentMenu`/`closeAgentMenu`/`selectAgent`；T2 的 `newSkillChip`/`newSkillMenu`/`historySkillChip`/`historySkillMenu`/`closeSkillMenu`/`selectSkill`；既有 `closeKbMenu()`（`:2508`）、`openCiteDrawer()`（`:1402`）、`openTaskBoard()`（`:1525`）、既有 Esc 监听（`:2929-2938`）
+- Produces：`closeTransientOverlays()`；`handleMenuKeydown(kind, triggerId, menuId, idPrefix, e) -> bool`
+
+**已定的无障碍与互斥规则**
+1. ↑/↓ 在候选内移动、**到边界即停（不环绕）**。
+2. **加 `aria-activedescendant`**：焦点留在触发钮，高亮项由该属性播报（`role="option"` + `aria-selected` 由规格 L121 要求；`aria-activedescendant` 是本实现补的，因为焦点不在选项上）。
+3. **互斥扩大到全部"瞬时浮层"**：智能体菜单、技能菜单、KB 菜单、用户下拉四者**互斥单开**；打开任一新菜单前先关其余三个。引用抽屉 / 任务面板是"强浮层"，打开它们时也先关掉全部瞬时浮层。
+4. **Esc 优先级**：先关"新菜单"（若有开），否则走既有抽屉/面板逻辑——**在同一个监听里加分支，不新增监听**（既有注释已写明"task-board 复用既有 keydown，不重复注册监听"）。
+5. `prefers-reduced-motion` 下禁用两个新组件的全部 `transition`（T1/T2 的 media query 已覆盖，此处只需核对）。
+6. 选项 id 前缀**必须唯一**：智能体菜单 `agentOpt{i}`、左侧技能菜单 `newSkillOpt{i}`、历史页技能菜单 `historySkillOpt{i}`。
+
+- [ ] **Step 1: 落通用导航与互斥辅助函数**
+
+```js
+// ===== 无障碍与互斥（T5）：两个新菜单的通用键盘导航 + 瞬时浮层互斥 =====
+const menuNav = { agent:{ active:-1 }, skill:{ active:-1 } };
+
+// 统一关闭"瞬时浮层"：KB 菜单 / 智能体菜单 / 技能菜单 / 用户下拉。
+// 不含引用抽屉与任务面板（"强浮层"，由 closeAllDrawers 管）。
+function closeTransientOverlays(){
+  closeKbMenu();
+  closeAgentMenu();
+  closeSkillMenu();
+  const dd = document.getElementById('userDropdown');
+  if(dd){ dd.classList.remove('show'); }
+}
+
+function menuOptions(menu){
+  return Array.prototype.slice.call(menu.querySelectorAll('[role="option"]'));
+}
+
+// 候选 id + 高亮态（class / aria-selected / 触发钮的 aria-activedescendant 三处同步）
+function paintMenuNav(kind, triggerId, menuId, idPrefix){
+  const menu = $(menuId);
+  const trigger = $(triggerId);
+  if(!menu || !trigger) return;
+  const items = menuOptions(menu);
+  const active = menuNav[kind].active;
+  items.forEach(function(el, i){
+    const on = (i === active);
+    el.id = idPrefix + 'Opt' + i;
+    el.classList.toggle('active', on);
+    el.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+  if(active >= 0 && items[active]){
+    trigger.setAttribute('aria-activedescendant', items[active].id);
+  }else{
+    trigger.removeAttribute('aria-activedescendant');
+  }
+}
+
+// 通用键盘处理：返回 true = 已消费该按键
+function handleMenuKeydown(kind, triggerId, menuId, idPrefix, e){
+  const menu = $(menuId);
+  if(!menu || !menu.classList.contains('open')) return false;
+  const items = menuOptions(menu);
+  if(e.key === 'Escape'){
+    e.preventDefault();
+    menuNav[kind].active = -1;
+    if(kind === 'agent'){ closeAgentMenu(); } else { closeSkillMenu(); }
+    $(triggerId).focus();                       // 关闭后焦点归还触发钮（规格 L122）
+    return true;
+  }
+  if(e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+    e.preventDefault();
+    if(items.length){
+      if(e.key === 'ArrowDown' && menuNav[kind].active < items.length - 1){
+        menuNav[kind].active += 1;
+      }
+      if(e.key === 'ArrowUp' && menuNav[kind].active > 0){
+        menuNav[kind].active -= 1;
+      }
+      paintMenuNav(kind, triggerId, menuId, idPrefix);
+    }
+    return true;
+  }
+  if(e.key === 'Enter' || e.key === ' '){
+    e.preventDefault();
+    const active = menuNav[kind].active;
+    if(active >= 0 && items[active]){
+      const name = items[active].getAttribute('data-name') || '';
+      if(kind === 'agent'){ selectAgent(name); } else { selectSkill(name); }
+    }else if(kind === 'agent'){
+      closeAgentMenu();
+    }else{
+      closeSkillMenu();
+    }
+    $(triggerId).focus();
+    return true;
+  }
+  return false;
+}
+```
+
+- [ ] **Step 2: 给两个触发钮绑 click + keydown，并在开菜单前互斥**
+
+```js
+  // 智能体胶囊
+  $('agentTrigger').addEventListener('click', function(){
+    if($('agentMenu').classList.contains('open')){ closeAgentMenu(); return; }
+    openAgentMenu();
+  });
+  $('agentTrigger').addEventListener('keydown', function(e){
+    if(handleMenuKeydown('agent', 'agentTrigger', 'agentMenu', 'agent', e)) return;
+    if(e.key === 'Enter' || e.key === ' '){
+      e.preventDefault();
+      menuNav.agent.active = 0;                 // 键盘打开默认高亮首项（「默认」）
+      openAgentMenu();
+    }
+  });
+
+  // 技能 chip（new / history 各一份，id 前缀不同以免 option id 冲突）
+  [['newSkillChip','newSkillMenu','newSkill'], ['historySkillChip','historySkillMenu','historySkill']]
+    .forEach(function(trio){
+      const triggerId = trio[0], menuId = trio[1], prefix = trio[2];
+      $(triggerId).addEventListener('click', function(){
+        if($(menuId).classList.contains('open')){ closeSkillMenu(); return; }
+        openSkillMenu(prefix);
+      });
+      $(triggerId).addEventListener('keydown', function(e){
+        if(handleMenuKeydown('skill', triggerId, menuId, prefix, e)) return;
+        if(e.key === 'Enter' || e.key === ' '){
+          e.preventDefault();
+          menuNav.skill.active = 0;
+          openSkillMenu(prefix);
+        }
+      });
+    });
+```
+> **T2 已按本任务的要求实现**：`openSkillMenu(idPrefix)` 已接收前缀、`renderSkillMenu(idPrefix)` 已给候选项写 `data-name`、候选项复用 T1 的 `.agent-item` 样式（**不新增 `.skill-item`**）。本任务只补键盘与 aria。
+
+- [ ] **Step 3: 互斥接线（**只加一行，不改既有逻辑**）**
+
+- T1 的 `openAgentMenu` **首行**插入 `closeTransientOverlays();`（T2 的 `openSkillMenu` 已含该行）。
+- `openCiteDrawer()`（`:1402`）与 `openTaskBoard()`（`:1525`）**首行**插入 `closeTransientOverlays();`（不要删掉它们彼此之间既有的 `closeTaskBoard()` / `closeCiteDrawer()` 那一行）。
+- `closeAllDrawers()` 保持原样（它只管强浮层）。
+
+- [ ] **Step 4: 扩展既有 Esc 监听（不新增监听）**
+
+`chat.html:2929-2938` 的监听体改为：
+
+```js
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    // 优先级：瞬时浮层（新菜单）→ 强浮层（引用抽屉 / 任务面板）
+    if ($('agentMenu') && $('agentMenu').classList.contains('open')) {
+      closeAgentMenu();
+      $('agentTrigger').focus();
+      return;
+    }
+    if ($('newSkillMenu') && $('newSkillMenu').classList.contains('open')) {
+      closeSkillMenu();
+      $('newSkillChip').focus();
+      return;
+    }
+    if ($('historySkillMenu') && $('historySkillMenu').classList.contains('open')) {
+      closeSkillMenu();
+      $('historySkillChip').focus();
+      return;
+    }
+    const drawer = document.getElementById('citeDrawer');
+    if (drawer && drawer.classList.contains('open')) {
+      closeCiteDrawer();
+    } else if (taskBoard.open) {
+      closeTaskBoard();
+    }
+  }
+});
+```
+
+- [ ] **Step 5: 核对 aria 与 reduced-motion**
+
+- `agentTrigger` 是 `<div>` → 必须显式 `role="button"`（T1 已含）；两个技能 chip 是 `<button>` → `role="button"` 已隐式，**不重复标注**。
+- 两个新菜单 `role="listbox"` + `aria-label`（T1/T2 已含）；候选项 `role="option"` + `aria-selected`（由 `paintMenuNav` 运行时写入）。
+- 确认 T1/T2 的 `@media (prefers-reduced-motion:reduce)` 覆盖了 `.agent-trigger` / `.skill-chip` / `.agent-menu` / `.skill-menu`。
+
+- [ ] **Step 6: playwright-cli 验证（键盘全流程 + 互斥 + 焦点）**
+
+```
+playwright-cli open http://localhost/chat.html   # 需登录
+# ① Tab 到智能体胶囊 → Enter 开（首项「默认」高亮）→ ↓ ↓ → Enter 选中 → 胶囊文案变化
+# ② Enter 再开 → Esc → 菜单关闭且【焦点回到胶囊】（eval 断言 document.activeElement.id）
+# ③ 打开智能体菜单后点引用抽屉 → 智能体菜单自动关闭（互斥）
+# ④ 打开 KB 菜单后点智能体胶囊 → KB 菜单自动关闭；反向同理
+# ⑤ 键盘走一遍技能 chip（new 与 history 各一次），确认高亮与选中正确、无 id 冲突
+# ⑥ 系统开启"减弱动态效果"或模拟 prefers-reduced-motion → 无过渡动画
+playwright-cli console   # 断言无新增 error
+```
+
+- [ ] **Step 7: 提交**
 
 ```bash
 git add deploy/nginx/html/chat.html
-git commit -m "feat(ui): 两个选择器的无障碍与面板互斥单开"
+git commit -m "feat(ui): 两个选择器的无障碍（键盘 + aria-activedescendant + 焦点归还）与浮层互斥单开"
 ```
 
 ---
@@ -422,11 +828,13 @@ git commit -m "docs(design): 同步 chat-agent-skill-selector 规格与 MASTER�
 | 6.6 无障碍与互斥 | T5 |
 | 6.7 同步 MASTER/规格 + playwright 验证 | T6 |
 
-**2. Placeholder scan**：T1/T2/T4 的 CSS/HTML/JS 已给出可直接落地的代码块；T3/T5 给出规则 + 落点 + 验证方式（**未逐行贴码**——`/` 补全的键盘状态机与无障碍的 `aria-activedescendant` 细节需执行时按规格 §无障碍 补全）；T6 为文档与验证步骤。**执行到 T3/T5 前须先补齐代码块**（与 Plan 2/Plan 3 相同处理）。
+**2. Placeholder scan**：**T1–T5 全部满配**（T1/T2/T4 给出可直接落地的 CSS/HTML/JS；T3 给出完整补全状态机与既有监听的改造前后对比；T5 给出通用导航/互斥辅助函数、两个触发钮的绑定、Esc 监听改造与 aria 核对清单）。T6 是文档同步 + playwright 端到端验证（非代码任务，已给出逐条验证项与提交清单）。已知的**刻意留白**仅一处：T4 的 `get_session_agent` 读取方式与 Plan 3 一致（见 Plan 3 T3 的二选一），前端不涉及。
 
-**3. Type consistency**：`state.agent`（选择器值，T1 定 → T4 消费）/ `state.boundAgent`（会话绑定值，T4 定）/ `state.skills`（T2 定 → T3 消费）/ `state.skill`（T2 定）/ `selectAgent(name)`（T1）/ `selectSkill(name)` + `insertSkillPrefix(name)`（T2）/ `onInputSlash(input)` + `applySlash()`（T3）/ `paintSkillChip()`（T2 定 → T4 复用）/ `paintHeaderAgent(name)`（T4）。命名已核对一致。
+**3. Type consistency**：`state.agent`（选择器值，T1 定 → T4 消费）/ `state.boundAgent`（会话绑定值，T4 定）/ `state.skills`（T2 定 → T3 消费）/ `state.skill`（T2 定）/ `selectAgent(name)`（T1）/ `renderAgentMenu()` + `openAgentMenu()` + `closeAgentMenu()`（T1 定 → T5 消费）/ `renderSkillMenu(idPrefix)` + `openSkillMenu(idPrefix)` + `closeSkillMenu()` + `selectSkill(name)` + `insertSkillPrefix(name)` + `paintSkillChip()`（T2 定 → T4/T5 消费）/ `slashState` + `slashMatches(frag)` + `renderSlashMenu()` + `applySlash(name)` + `onInputSlash(input)` + `handleSlashKeydown(e)`（T3 定）/ `closeTransientOverlays()` + `menuNav` + `menuOptions(menu)` + `paintMenuNav(kind, triggerId, menuId, idPrefix)` + `handleMenuKeydown(kind, triggerId, menuId, idPrefix, e)`（T5 定）/ `paintHeaderAgent(name)`（T4 定）。DOM id：`agentTrigger`/`agentMenu`/`agentList`/`agentLabel`（T1）、`newSkillChip`/`newSkillMenu`/`newSkillList`/`historySkillChip`/`historySkillMenu`/`historySkillList`（T2）、`newSlashMenu`/`historySlashMenu`（T3）；option id 前缀 `agent` / `newSkill` / `historySkill`。命名与 id 已核对一致。
 
 **4. 依赖与前置**
 - **强前置（Plan 3）**：T1 依赖 `GET /api/agents`（Plan 3 T9）；T2/T3 依赖 `GET /api/skills`（Plan 3 T9）；T4 依赖请求体 `agent` 字段（Plan 3 T3）与 `agent_used` 事件（Plan 3 T3）、`sessions/list` 的 `agent`（Plan 3 T1）。**若接口未就绪，T1/T2 会静默降级为"仅默认项/仅不使用技能"**——因此 **Plan 4 必须在 Plan 3 之后执行**。
 - **执行方式**：每个任务的实现**先调用 `frontend-design` skill**（规格为唯一视觉依据、mockup 仅作参考），改完用 `playwright-cli` 对照设计稿验证。
-- **不在本计划内**：`login.html` / `index.html` 的改动；后端任何改动。
+- **已知并接受的延后（§5.14，与 Plan 3 同一决定）**：生产 `agents/`/`skills/` 未挂载未 COPY。**本轮只在开发环境跑通**（dev override 已挂两个目录）；上生产前必须补 prod 挂载或 Dockerfile COPY —— 具体见 Plan 3 Self-Review §4，本计划不重复。
+- **"开发环境跑通"的验收标准**：见 Plan 3 Self-Review §4 的 6 条；其中第 5（chip 插入 + `/` 补全）、第 6（常规轮回归）由本计划的 T6 负责走完，第 1/2/3/4 条跨 Plan 3+4。
+- **不在本计划内**：`login.html` / `index.html` 的改动；后端任何改动；生产部署改动。

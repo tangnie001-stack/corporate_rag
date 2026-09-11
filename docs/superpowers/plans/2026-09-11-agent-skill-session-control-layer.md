@@ -1906,7 +1906,7 @@ git commit -m "docs(session-agent): 收口契约/术语/结构/调研与 §5.11 
 | 5.11 测试 | 各任务内嵌 + T10 Step 4 清单核对表 | 满配（清单逐条映射到具体用例） |
 | 5.12 直出轮交付/落库 | T6 | 满配（含生产链端到端测试要求） |
 | 5.13 直出轮重跑消费指引 | T6 Step 3 | 满配 |
-| 5.14 生产 `agents/`/`skills/` 挂载与 COPY | **未覆盖** | ⚠️ 见下 |
+| 5.14 生产 `agents/`/`skills/` 挂载与 COPY | **移出（已接受的延后）** | 见 4. 未覆盖项 |
 | 4.6 确认门 | T7 | 满配（`detect_confirm_request` 3 条 + `ask_confirm_question` 3 条 + 执行契约 2 条测试，含完整实现） |
 | 4.8 预设预绑定预加载 | T8 | 满配 |
 | 7.1–7.7 文档同步 | T10 | 满配（逐份文档的落地清单） |
@@ -1917,7 +1917,14 @@ git commit -m "docs(session-agent): 收口契约/术语/结构/调研与 §5.11 
 
 **3. Type consistency**：`PrefixParse(kind, skill_name, task, record)`（T2 定 → T5 消费）；`parse_prefix(text, known_names, registry)` / `clean_prefix(text, known_names)`（T2 定 → T5 消费）；`bind_session_agent(session_id, agent) -> bool`（T1 定 → T3 消费）；`_resolve_session_agent(session_id, requested, bound="")`（T3 定）；`get_base_system_prompt()` / `build_system_prompt(persona, kb_bound, has_skills, prompt_manager) -> list[SystemMessage]`（T4 定 → T5/T8 消费）；`RequestContext.known_skill_names: set[str]`（T5 定 → `agent_node`/`query_router` 消费）；`AgentState.injected_system: str`（T5 定 → T8 复用）；`SSEAgentUsedEvent(agent, type, seq)`（T3 定）。命名已核对一致。
 
-**4. 阻塞与前置 / 未覆盖项**
-- **5.14（生产部署缺口）未纳入本计划**：`Dockerfile` 只 `COPY src/ scripts/ deploy/`、`docker-compose.prod.yml` 未挂 `skills/`/`agents/`。它是 Plan 1 起的既有问题，且改生产部署属"共享基础设施"决策——**建议单列一个部署小任务或在 Plan 4 一并处理**，本计划不擅自改生产 compose。
+**4. 阻塞与前置 / 已知并接受的延后**
+- **5.14（生产部署缺口）—— 已接受的延后，不是遗漏**：`Dockerfile` 只 `COPY src/ scripts/ deploy/`，`docker-compose.prod.yml` 只挂 `./skills`、**没有** `agents/` → 生产环境 `_resolve_executor` 恒 `None`、会话智能体能力静默降级。**本轮决定：先在开发环境跑通，不动生产部署**（开发侧 `docker-compose.override.yml` 已挂 `agents/` + `skills/`）。**上生产前必须补**：① `docker-compose.prod.yml` 的 app volumes 增加 `agents/` 与 `skills/` 挂载；② 或 `Dockerfile` 增加 `COPY skills/ agents/`。**触发条件**：任何一个部署包发布前。**若判断有误**：生产上线后「会话智能体」整条主线零效果，且日志里只会看到执行者选择静默降级。
+- **"开发环境跑通"的验收标准（6 条，Plan 3 + Plan 4 全部完成后逐条走）**：
+  1. 会话绑定智能体后，顶栏回显该智能体，且流式请求体带 `agent`（用 `playwright-cli requests` 核对）；
+  2. 未选智能体时，system 段与改动前**逐字不变**（`tests/rag/test_prompt_layers.py` 的快照守卫 + 人工抽看日志）；
+  3. `/財務分析…` 这类的 **inline** 技能：主 agent 单轮（1 次 LLM 调用）且方法论生效；
+  4. `/finance-analyst …` 这类的 **fork** 技能：主 agent **0 轮 LLM**、回答**可见且落库**（`conversation_history.assistant` 非空）、`citations` 非空；
+  5. 技能 chip 插入 `/name ` 与输入框 `/` 补全都生效（Enter 不误发）；
+  6. 常规轮（不选智能体、不选技能）回归通过：流式 token / citation / done 正常，无新增 console error。
 - T5 依赖 T2/T3/T4 全部就绪（顺序：T1 → T2 → T3 → T4 → T5 → T6 → T7/T8 → T9 → T10）。
 - T7（确认门）与 T8（预加载）彼此独立，可换序。

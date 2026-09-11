@@ -74,7 +74,7 @@
 
 | 项 | 规格 |
 |----|------|
-| 位置 | `composer-bottom` 左侧，「深度思考」chip 的**右侧**，与左侧组 `gap: 6px` |
+| 位置 | `composer-bottom` 左侧，「深度思考」chip 的**右侧**，与左侧组 `gap: 10px`（沿用 `.composer-bottom` 既有间距，不新增容器） |
 | 形态 | 紧凑 chip：手册图标（Lucide `book-open`，13px）+ 文案 + 下拉箭头（10px） |
 | 样式 | 与 `.thinking-chip` **完全一致**：高 28px、padding 0 12px、圆角 14px、透明底、12px 字重 500、色 `--text-secondary`；hover 底变 `--bg` |
 | 空闲态 | 文案 **「技能」** |
