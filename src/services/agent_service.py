@@ -26,6 +26,9 @@ from src.agents.graph.state import (
     LangGraphNode,
 )
 from src.agents.graph.workflow import build_graph
+from src.agents.skills.models import SkillContext
+from src.agents.skills.prefix import parse_prefix
+from src.agents.skills.rendering import render_skill_body
 from src.chat.manager import ChatManager
 from src.chat.streaming import (
     StreamingRunManager,
@@ -460,6 +463,7 @@ async def _run_generation(
     graph: CompiledStateGraph | None = None,
     partial_holder: dict | None = None,
     abort_signal: asyncio.Event | None = None,
+    direct_skill: str = "",
 ) -> str:
     """后台生成任务：迭代图事件转换为带 seq 事件写入缓冲，返回完整回答。
 
@@ -492,6 +496,8 @@ async def _run_generation(
             亦持续可见），finally 写 model_name（capture.model_used）
         abort_signal: 可选的请求级中止信号（cancel 端点置位）；置位后本任务
             在循环内尽快抛 CancelledError 中断生成，交由调用方收尾落库
+        direct_skill: 本轮命令行直出的 fork skill 名（默认空=常规轮）；由
+            stream_chat 解析 `/xxx` 后经 launch_context 传入，写进初始 state
 
     Returns:
         完整回答（全部 token 累积结果）
@@ -503,7 +509,7 @@ async def _run_generation(
     if graph is None:
         raise ValueError("_run_generation 需显式传 graph（默认图由调用方注入）")
     initial_state = AgentState.make_initial_state(
-        session_id, kb_id, query, history, deep_thinking
+        session_id, kb_id, query, history, deep_thinking, direct_skill
     )
     capture = _StreamCapture()
     full_answer = ""
@@ -662,6 +668,9 @@ class AgentService:
             )
 
         self._preset_registry = preset_registry
+        # skill_registry 提升到实例属性：stream_chat 解析 `/xxx` 前缀需读取
+        # user_visible()/model_visible()；skills 目录缺失时保持 None（分派降级）
+        self._skill_registry = skill_registry
 
         skill_direct_node = None
         if skill_registry is not None and skill_executor is not None:
@@ -744,6 +753,51 @@ class AgentService:
         )
         ctx.agent = effective_agent
         launch_context["agent"] = effective_agent
+        # `/xxx` 前缀分派：只认 user_visible() 的名字（user-invocable:false 禁止
+        # 用户调用）。skills 目录缺失时注册表为 None，退化为无技能可解析。
+        if self._skill_registry is not None:
+            known = {r.name for r in self._skill_registry.user_visible()}
+            has_skills = bool(self._skill_registry.model_visible())
+        else:
+            known = set()
+            has_skills = False
+        ctx.known_skill_names = known
+        ctx.has_skills = has_skills
+        # persona：T4 的 build_system_prompt 人设层来源（graph 层拿不到 registry，
+        # 故在服务层解析后经 RequestContext 传递）
+        session_preset = None
+        if self._preset_registry is not None and effective_agent:
+            session_preset = self._preset_registry.get(effective_agent)
+        if session_preset is not None:
+            ctx.persona = session_preset.system_prompt
+        else:
+            ctx.persona = ""
+
+        parsed = parse_prefix(query, known, self._skill_registry)
+        direct_skill = ""
+        effective_query = query
+        if parsed.kind == "known":
+            record = parsed.record
+            if record is not None and record.context == SkillContext.INLINE:
+                # inline：渲染正文持久化注入，本轮即追加进 history，主 agent 单轮
+                injected_text = render_skill_body(
+                    record.inline_prompt or "", parsed.task
+                )
+                entry = await self._inject_skill_message(
+                    session_id, kb_id, injected_text
+                )
+                history = history + [entry]
+                effective_query = parsed.task
+            else:
+                direct_skill = parsed.skill_name
+                effective_query = parsed.task
+        elif parsed.kind == "unknown":
+            # 未知前缀复用 skill_direct 的 fail-open 通道输出"不存在 + 可用列表"
+            direct_skill = parsed.skill_name
+            effective_query = parsed.task
+        launch_context["direct_skill"] = direct_skill
+        launch_context["history"] = history
+        launch_context["query"] = effective_query
         # 主 POST 订阅不按 180s 空闲收流（长静默由任务生命周期收口，含 ask_user
         # 等待、fork 长跑等合法静默）；resume 端点（sessions/events）保留空闲兜底
         return _subscribe_events(

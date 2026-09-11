@@ -55,7 +55,9 @@ class AgentState:
     timings: dict = field(default_factory=dict)  # 各节点耗时统计
 
     @classmethod
-    def make_initial_state(cls, session_id, kb_id, query, history, deep_thinking=False):
+    def make_initial_state(
+        cls, session_id, kb_id, query, history, deep_thinking=False, direct_skill=""
+    ):
         """创建图初始状态，只设输入字段，中间态/输出由各节点填充。
 
         Args:
@@ -64,6 +66,7 @@ class AgentState:
             query: 用户查询文本
             history: 对话历史列表
             deep_thinking: 深度思考开关（默认 False），传给 agent LLM enable_thinking
+            direct_skill: 本轮命令行直出的 fork skill 名（默认空=常规轮）
         """
         return cls(
             session_id=session_id,
@@ -71,6 +74,7 @@ class AgentState:
             query=query,
             _history=history,
             deep_thinking=deep_thinking,
+            direct_skill=direct_skill,
         )
 
 

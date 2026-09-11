@@ -43,7 +43,24 @@ def make_skill_direct_node(skill_registry, executor):
             }
         skill_registry.reload_if_changed()
         record = skill_registry.get(state.direct_skill)
-        if record is None or record.context != SkillContext.FORK:
+        if record is None:
+            # 查不到（含 user-invocable:false 被拒后仍走 unknown 通道进来的名字）：
+            # 显式告知"不存在 + 可用列表"，与"非 FORK 不可直出"分开成两条文案
+            names = [r.name for r in skill_registry.user_visible()]
+            if names:
+                available = "、".join(names)
+            else:
+                available = "（无）"
+            core_logging.log_event(
+                Event.SKILL_DIRECT_SKIP, skill=state.direct_skill, reason="not_found"
+            )
+            return {
+                "answer": SSEInteractionTexts.UNKNOWN_SKILL_PREFIX.format(
+                    skill=state.direct_skill, available=available
+                ),
+                "_needs_regenerate": False,
+            }
+        if record.context != SkillContext.FORK:
             core_logging.log_event(
                 Event.SKILL_DIRECT_SKIP, skill=state.direct_skill, reason="not_fork"
             )

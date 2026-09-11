@@ -41,6 +41,9 @@ class _FakeRegistry:
             return self._record
         return None
 
+    def user_visible(self):
+        return [self._record]
+
 
 class _FakeExecutor:
     """替身：在子池写 2 条材料并返回带 [1][2] 的答案。"""
@@ -186,7 +189,9 @@ async def test_unknown_skill_falls_open():
     finally:
         current_request_ctx.reset(token)
 
-    assert final["answer"] == SSEInteractionTexts.SKILL_DIRECT_UNAVAILABLE
+    assert final["answer"] == SSEInteractionTexts.UNKNOWN_SKILL_PREFIX.format(
+        skill="no-such-skill", available="finance-analyst"
+    )
     assert final["_needs_regenerate"] is False
     assert final["citations"] == []
 

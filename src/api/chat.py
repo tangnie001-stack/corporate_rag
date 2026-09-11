@@ -338,6 +338,7 @@ async def _stream_rag_response(
             graph=launch_ctx["graph"],
             partial_holder=partial_holder,
             abort_signal=abort_signal,
+            direct_skill=launch_ctx["direct_skill"],
         )
 
     trace_id = current_trace_id.get() or ""

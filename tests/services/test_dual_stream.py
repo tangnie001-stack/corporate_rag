@@ -349,6 +349,8 @@ def _make_service() -> tuple[AgentService, AsyncMock]:
     service._chat_manager = chat_manager
     service._prompt_manager = Mock()
     service._tracer = Mock()
+    service._preset_registry = None
+    service._skill_registry = None
     return service, chat_manager
 
 
@@ -450,6 +452,8 @@ class TestStreamChatWrapper:
 
         svc._graph = Mock()
         svc._graph.astream_events = empty_astream
+        svc._preset_registry = None
+        svc._skill_registry = None
 
         agen, launch_ctx = await svc.stream_chat(
             "kb1", "session-order", "营收多少", False

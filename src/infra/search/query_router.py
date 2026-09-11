@@ -8,7 +8,9 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 from loguru import logger
 
+from src.agents.skills.prefix import clean_prefix
 from src.infra.llm.prompt_manager import PromptManager
+from src.infra.llm.request_context import current_request_ctx
 from src.infra.search.complexity_scorer import score_complexity
 from src.infra.search.entity_extractor import EntityExtractor
 
@@ -182,11 +184,16 @@ async def aggregate_kb_entities(kb_ids: list[str] | None) -> KbEntityAggregate:
 
 
 def _format_history(history: list) -> str:
+    ctx = current_request_ctx.get()
+    if ctx is not None:
+        known = ctx.known_skill_names
+    else:
+        known = set()
     lines = []
     for msg in history[-4:]:
         role = "用户" if getattr(msg, "role", "") == "user" else "助手"
         content = getattr(msg, "content", "") or ""
-        lines.append(f"{role}: {content}")
+        lines.append(f"{role}: {clean_prefix(content, known)}")
     return "\n".join(lines)
 
 

@@ -128,6 +128,8 @@ def _make_service() -> tuple[AgentService, AsyncMock]:
     service._chat_manager = chat_manager
     service._prompt_manager = Mock()
     service._tracer = Mock()
+    service._preset_registry = None
+    service._skill_registry = None
     return service, chat_manager
 
 

@@ -77,6 +77,7 @@ async def test_stream_chat_wires_effective_agent():
     registry = MagicMock()
     registry.get = MagicMock(return_value=MagicMock())
     svc._preset_registry = registry
+    svc._skill_registry = None
     svc._graph = MagicMock()
 
     _, launch_ctx = await svc.stream_chat("kb1", "s1", "q", agent="finance-expert")

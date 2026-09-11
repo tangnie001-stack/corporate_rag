@@ -93,10 +93,20 @@ def _initial_messages(state: AgentState, prompt_manager) -> list[BaseMessage]:
             injected.append(HumanMessage(content=msg.content))
         else:
             normal.append(msg)
+    # 读时清洗：对 user/assistant 历史剥掉已注册技能前缀（落库保留原文）；
+    # 其他角色原样保留（build_prompt 会跳过，无需清洗）
+    cleaned_normal: list[ChatMessage] = []
+    for msg in normal:
+        if msg.role in ("user", "assistant"):
+            cleaned_normal.append(
+                ChatMessage(role=msg.role, content=clean_prefix(msg.content, known))
+            )
+        else:
+            cleaned_normal.append(msg)
     messages = build_prompt(
         clean_prefix(state.query, known),
         "",
-        normal,
+        cleaned_normal,
         prompt_manager,
         kb_bound=bool(state.kb_id),
         persona=persona,
