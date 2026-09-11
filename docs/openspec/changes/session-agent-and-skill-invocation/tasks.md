@@ -16,7 +16,7 @@
 - [ ] 3.1 新增 `AgentPreset` 数据模型（name / **display_name** / description / system_prompt / tools / skills / **max_turns** / source_path）—— **v1 不含 `model`**（`src/agents/presets/models.py`）
 - [ ] 3.2 新增 `AgentPresetLoader`：解析 `agents/<name>.md`（frontmatter 用**驼峰**键如 `maxTurns` + 正文 system prompt，fail-open）；**校验 `name`（含缺省文件名）为 ASCII slug**（违反记 warning 并跳过）；`display_name` 缺省 = `name`
 - [ ] 3.3 新增 `AgentPresetRegistry`：按名索引 + 懒重载 + 同名 fail-fast
-- [ ] 3.4 `AgentService` 装配 presets（`agents/` 缺失/空时记 warning 并降级默认）
+- [ ] 3.4 `AgentService` 装配 presets（`agents/` 缺失/空时记 warning 并降级默认）——**由 Plan 2 提前完成**
 - [ ] 3.5 内容迁移：`skills/finance-analyst` 的**人设段** → `agents/finance-expert.md`（参考 `agency-agents` finance 域，仅取身份/使命/规则，中文化裁剪；`display_name: 财务专家`）；原文件**改写为方法论** skill（去掉"你是一名…"）
 - [ ] 3.6 新增测试 `tests/agents/presets/`：加载 / 注册 / 冲突 / 缺省继承 / **非法名称跳过**
 - [ ] 3.7 **不新增 catalog 文件**（design D19）：清单由 registry 派生；`display_name` 归属 frontmatter
@@ -28,12 +28,12 @@
 - [ ] 4.3 执行者选择顺序：skill `agent:` > 会话选定智能体 > **系统默认人设**（`build_system_prompt(persona=None, …)` 组装出的默认 prompt，非新造 general-purpose）
 - [ ] 4.4 简化 `_resolve_fork_llm`：移除 `record.thinking` 优先级与 `no_main_model_name_thinking_fallback`，思考跟随 `ctx.deep_thinking`；子代理最大轮次改取执行者 `maxTurns`（**未声明时复用既有常量 `DELEGATE_DEFAULT_MAX_TURNS`**，`src/config/const.py:89`，不新建常量）
 - [ ] 4.5 打破循环依赖（工具工厂注入 / 延迟构造，勿让 executor 直接持有 `make_rag_tools`）
-- [ ] 4.6 新增**确认门**节点：规则检测子代理返回的"需确认"信号 → 走 `ask_user`（复用澄清链路）→ 答复后重跑子代理（上限 1 次）；无信号直通 verify；被拒/超时/槽被占 → 出结论 + 标注"未经确认"
-- [ ] 4.7 测试：工具隔离不污染主 agent、执行者选择优先级、thinking 移除后行为、**一轮多委派并发不串号**、确认门四个分支、用的是 `create_agent` 而非 `create_react_agent`、**入口分派（命令行 → skill_direct，普通文本 → agent）**、**直出轮 verify 判据来自子代理上下文且护栏不空转**
+- [ ] 4.6 新增**确认门**节点：规则检测子代理返回的"需确认"信号 → 走 `ask_user`（复用澄清链路）→ 答复后重跑子代理（上限 1 次）；无信号直通 verify；被拒/超时/槽被占 → 出结论 + 标注"未经确认"——**移出 Plan 2 → Plan 3**
+- [ ] 4.7 测试：工具隔离不污染主 agent、执行者选择优先级、thinking 移除后行为、**一轮多委派并发不串号**、确认门四个分支、用的是 `create_agent` 而非 `create_react_agent`、**入口分派（命令行 → skill_direct，普通文本 → agent）**、**直出轮 verify 判据来自子代理上下文且护栏不空转**（确认门四个分支的测试随 4.6 进 Plan 3）
 - [ ] 4.8 **预设预绑定 skill 预加载**：会话已绑定预设且声明 `skills:` 时，在该会话**首轮生成前**按 `/xxx` 同一路径注入一次（隐藏消息，不进 system prompt），后续轮次不重复注入
-- [ ] 4.9 **fork 直出的引用池并轨**（design D24）：`/xxx` 触发 fork 直出时，把子代理的 `tool_contexts` 作为本轮 `format` 的引用池（主池此时必为空），使 `citations` 正常产出、不误记 `INVALID_CITATION`；「不计入主编号」的旧约定限定为模型自动委派路径
-- [ ] 4.10 **图入口分派（design D26）**：`AgentState` 新增"直出决策"字段（解析出的 skill 名 + 任务文本）；`workflow.py:86` 的 `set_entry_point("agent")` 改为 `add_conditional_edges(START, route_entry, {...})`，`route_entry` 纯规则判断（无 LLM）
-- [ ] 4.11 **直出节点 + verify 语义适配（design D26）**：新增 `skill_direct` 节点（调用 fork 子代理 → 写 `answer`，并把子代理的 `tool_contexts` 写入 **`AgentState` 新增字段**（同时承载 `temporal_years`）→ 边到 `verify`）；直出轮 `verify_node` 与两条引用护栏的判据**按轮次选择来源**（直出轮取 state 承载的子代理上下文，普通轮仍取主 ctx，**不改写主 ctx**）；`route_verify` 的 `_needs_regenerate` 在直出轮路由回 `skill_direct`（重跑上限 1 次）；**与确认门互斥**：确认门不通过时直接出结论+标注"未经确认"，不再进入 verify 重跑
+- [ ] 4.9 **fork 直出的引用池并轨**（design D24）：`/xxx` 触发 fork 直出时，把子代理的 `tool_contexts` 作为本轮 `format` 的引用池（主池此时必为空），使 `citations` 正常产出、不误记 `INVALID_CITATION`；「不计入主编号」的旧约定限定为模型自动委派路径——**已由 Plan 2 完成**
+- [ ] 4.10 **图入口分派（design D26）**：`AgentState` 新增"直出决策"字段（解析出的 skill 名 + 任务文本）；`workflow.py:86` 的 `set_entry_point("agent")` 改为 `add_conditional_edges(START, route_entry, {...})`，`route_entry` 纯规则判断（无 LLM）——**已由 Plan 2 完成**
+- [ ] 4.11 **直出节点 + verify 语义适配（design D26）**：新增 `skill_direct` 节点（调用 fork 子代理 → 写 `answer`，并把子代理的 `tool_contexts` 写入 **`AgentState` 新增字段**（同时承载 `temporal_years`）→ 边到 `verify`）；材料判据统一由 `AgentState` 承载：`tool_contexts` 复用 + `verify_temporal_years` 新增，流程字段（`web_confirmed`/`verify_ask_count`/`web_guided`）仍读主 ctx（它们在同一次 verify 内被写后读，快照化会改行为）；`route_verify` 的 `_needs_regenerate` 在直出轮路由回 `skill_direct`（重跑上限 1 次）；**与确认门互斥**：确认门不通过时直接出结论+标注"未经确认"，不再进入 verify 重跑——**已由 Plan 2 完成**
 
 ## 5. 调用控制与 `/xxx` 路由
 

@@ -891,6 +891,38 @@ agent（LLM + bind_tools）← entry_point
 
 实体锚点（如文件名/期间）随上下文一并喂给生成模型，帮助对齐事实；生产 prompt 与 RAGAS 评估的 NLI 上下文共用此格式（见 `src/rag/context.py`），评估时保证与线上生成看到完全一致的上下文。
 
+### 5.5 fork 执行层契约
+
+模块见 `src/agents/skills/`（`executor` / `delegate_run` / `fork_tools` / `fork_stream`）与 `src/agents/graph/skill_direct.py`。
+
+#### `SkillExecutor.execute(record, task, run=None) -> str`
+
+| 参数 | 语义 |
+|------|------|
+| `record` | 命中的 `SkillRecord`；`context=inline` 返回渲染后方法论，`context=fork` 跑子代理 |
+| `task` | 主 agent 委托的任务文本；fork 时作子代理初始消息 + `$ARGUMENTS`/`{task}` 占位替换值，inline 时填入 `inline_prompt` 占位 |
+| `run` | 本次 fork 委派运行态；`None` = 用当前主 ctx 不隔离（inline / 无 ctx 路径）；非 `None` = 切到 `run.ctx` 子上下文执行，工具检索与引用编号落子池 |
+
+返回值：inline 为渲染后方法论文本；fork 为子代理聚合纯文本（超 `DELEGATE_RESULT_LIMIT` 截断；idle/total/turn 中断返回超时文案并写 `fork_stop_reason`）。请求取消（`abort_signal` 置位）抛 `asyncio.CancelledError`，由调用方按取消路径收尾。
+
+#### `DelegateRun` 字段（`src/agents/skills/delegate_run.py`，每次调用新建、不共享）
+
+| 字段 | 类型 | 语义 |
+|------|------|------|
+| `delegate_id` | str | 本次委派短 id（事件/看板/日志贯穿） |
+| `skill_name` | str | 被调用 skill 名 |
+| `ctx` | `RequestContext` | 子代理独立上下文（主 `ctx.child()`；隔离引用池与计数） |
+| `stop_reason` | `str \| None` | 停止原因；`None` = 正常完成或未执行，否则取 `DelegateStopReason` 值 |
+| `result_text` | str | 子代理最终文本（含 idle/total/turn 中断文案） |
+
+#### `select_fork_tools(allowed, available, executor_tools=None) -> list`
+
+交集口径：`allowed` 为空 → 零工具；否则先减去禁用集 `FORK_FORBIDDEN_TOOLS`（`ask_user` / `delegate_task`，防交互泄漏与递归），`executor_tools` 非空时再收窄到两者交集；名字对不上的白名单项忽略（不抛，避免笔误打断整次委派）。返回值恒不含禁用集，保持 `available` 原顺序。
+
+#### `make_skill_direct_node(skill_registry, executor)`
+
+入参：`skill_registry`（`SkillRegistry`，懒重载后按名解析 `SkillRecord`）、`executor`（`SkillExecutor`）。返回图节点函数：命中 fork skill 时以独立 `DelegateRun` 跑子代理，把结果写入 `answer`、把本轮材料（引用池 → `tool_contexts`、要求覆盖年份 → `verify_temporal_years`）搬进 `AgentState`，再交 verify/format；不改写主 ctx。配套 `route_entry(state)` 入口分派：`state.direct_skill` 非空 → `skill_direct`，否则 → `agent`。未装配 executor 时用 `unavailable_skill_direct` 兜底。
+
 ---
 
 ## 6. 数据流全貌

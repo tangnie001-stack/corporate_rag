@@ -39,9 +39,9 @@ api/               纯路由层：请求校验 → 调 service → 返回（不�
 services/          业务编排：app_service → kb / document / chat(agent)
   agent_service.py 图生命周期 + 一次生成的主循环（_run_generation）
 agents/            LangGraph agent 循环
-  ├─ graph/        workflow(建图) / state / agent_node / nodes / verify
+  ├─ graph/        workflow(建图) / state / agent_node / nodes / verify / skill_direct(命令行直出节点)
   ├─ tools/        retrieve_kb、ask_user、search_web、task、registry( + readonly 声明表)
-  ├─ skills/       主从委派运行时：loader/registry/executor/delegate_task/models/invocation
+  ├─ skills/       主从委派运行时：loader/registry/executor/delegate_task/models/invocation + fork 执行层 fork_stream/fork_tools/delegate_run
   └─ presets/      智能体预设：models / loader / registry
 rag/               检索与知识库路由：retrieval / context / prompt / stream / temporal
 chat/              对话管理：manager(Redis) / persistence(MySQL) / streaming / task_registry / process_log

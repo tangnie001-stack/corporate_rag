@@ -10,6 +10,20 @@
 
 **规则**：对不可并发安全的共享资源（如 VectorStore 的 ChromaDB 客户端），用 `threading.RLock` 串行化访问（`src/infra/db/vector_store/client.py`）。新增共享客户端时先判断是否线程安全。
 
+### 每请求上下文的活跃状态必须按调用分槽
+
+**现象**：一轮内多个 `delegate_task` 被 `asyncio.gather` 并发调度，若把 `delegate_id` / 停止原因写在共享 `RequestContext` 的单值字段上，多次委派互相覆盖，导致 SSE 增量、任务看板与终态判定串号。
+
+**规则**：每次调用一个独立实例（`DelegateRun`，`src/agents/skills/delegate_run.py`）并由调用方逐层传递；若必须落到请求上下文，落到**该次调用的独立子 ctx**（`RequestContext.child()`），不挂共享单值字段。
+
+## 进程级注册表
+
+### 进程级注册表不得在构造期快照
+
+**现象**：`SkillLoader` 在构造时读取并缓存 `readonly_map()`，而生产环境构造 loader 早于工具注册，快照到的只读表为空 → 双轴调用控制的 fail-safe 永不触发（Plan 1 最终评审发现）。
+
+**规则**：需要进程级事实（工具只读表、注册表等）时，在**解析/使用期**惰性读取当前状态（`src/agents/skills/loader.py` 每次解析调用 `readonly_map()`），不在构造期缓存；构造器只保存可注入的覆盖值。
+
 ## SSE 流式
 
 ### 流事件必须按节点元数据匹配，不用顺序假设
