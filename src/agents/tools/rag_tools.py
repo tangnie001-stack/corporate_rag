@@ -238,12 +238,12 @@ def make_rag_tools(
     from src.agents.tools.registry import ToolRegistry
 
     registry = ToolRegistry()
-    registry.register("retrieve_kb", retrieve_kb)
-    registry.register("ask_user", ask_user)
+    registry.register("retrieve_kb", retrieve_kb, readonly=True)
+    registry.register("ask_user", ask_user, readonly=True)
     if settings.WEB_SEARCH_ENABLED:
         from src.agents.tools.web_tools import search_web
 
-        registry.register("search_web", search_web)
+        registry.register("search_web", search_web, readonly=True)
     if delegate_task is not None:
-        registry.register("delegate_task", delegate_task)
+        registry.register("delegate_task", delegate_task, readonly=True)
     return registry.enabled_tools()

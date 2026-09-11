@@ -8,6 +8,8 @@ fn 用 Any 而非 Callable：LangChain BaseTool 不满足 pyright 对 Callable �
 from dataclasses import dataclass, field
 from typing import Any
 
+from src.agents.tools.readonly import declare_readonly
+
 
 @dataclass
 class ToolEntry:
@@ -16,11 +18,13 @@ class ToolEntry:
     fn: 可调用工具（LangChain tool 或装饰器产物）
     deps: 依赖注入 dict（工具闭包需要的外部依赖）
     enabled: 是否启用（停用不出现在 LLM 可见列表）
+    readonly: 是否只读无外部副作用（skill 双轴默认推导的事实来源，True=只读）
     """
 
     fn: Any
     deps: dict[str, Any] = field(default_factory=dict)
     enabled: bool = True
+    readonly: bool = True
 
 
 class ToolRegistry:
@@ -30,17 +34,30 @@ class ToolRegistry:
         self._entries: dict[str, ToolEntry] = {}
 
     def register(
-        self, name: str, fn: Any, deps: dict | None = None, enabled: bool = True
+        self,
+        name: str,
+        fn: Any,
+        deps: dict | None = None,
+        enabled: bool = True,
+        readonly: bool = True,
     ) -> None:
-        """注册一个工具。
+        """注册一个工具（同时把只读性写入进程级声明表）。
 
         Args:
             name: 工具名（LLM 可见）
             fn: 工具可调用对象
             deps: 依赖注入 dict
             enabled: 初始是否启用
+            readonly: 是否只读无外部副作用（写/改/删/发/外部调用应传 False）
         """
-        self._entries[name] = ToolEntry(fn=fn, deps=deps or {}, enabled=enabled)
+        self._entries[name] = ToolEntry(
+            fn=fn, deps=deps or {}, enabled=enabled, readonly=readonly
+        )
+        declare_readonly(name, readonly)
+
+    def readonly_map(self) -> dict[str, bool]:
+        """返回本注册表内 工具名 -> readonly 映射。"""
+        return {name: entry.readonly for name, entry in self._entries.items()}
 
     def unregister(self, name: str) -> None:
         """注销工具（不存在时静默）。"""

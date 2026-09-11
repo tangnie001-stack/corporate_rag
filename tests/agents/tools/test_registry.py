@@ -42,3 +42,34 @@ def test_unregister_missing_silent():
 def test_set_enabled_missing_silent():
     reg = ToolRegistry()
     reg.set_enabled("nope", False)  # 不存在应静默，不抛异常
+
+
+def test_tool_entry_readonly_defaults_true():
+    """未显式声明时 readonly 默认 True（现有工具均只读）。"""
+    from src.agents.tools.registry import ToolRegistry
+
+    registry = ToolRegistry()
+    registry.register("retrieve_kb", lambda: None)
+
+    assert registry.readonly_map() == {"retrieve_kb": True}
+
+
+def test_tool_entry_readonly_explicit_false():
+    """写类工具显式声明 readonly=False。"""
+    from src.agents.tools.registry import ToolRegistry
+
+    registry = ToolRegistry()
+    registry.register("publish_report", lambda: None, readonly=False)
+
+    assert registry.readonly_map() == {"publish_report": False}
+
+
+def test_register_declares_readonly_into_single_source():
+    """注册时把只读性写入进程级声明表（供 skill 加载侧读取）。"""
+    from src.agents.tools.readonly import readonly_map
+    from src.agents.tools.registry import ToolRegistry
+
+    registry = ToolRegistry()
+    registry.register("publish_report", lambda: None, readonly=False)
+
+    assert readonly_map()["publish_report"] is False
