@@ -2,9 +2,14 @@
 
 交集口径（design D7）：allowed-tools 为空 → 零工具；执行者预设声明 tools 时再收窄
 到两者交集；名字对不上的白名单项忽略（不抛，避免一个笔误打断整次委派）。
+
+返回值恒不含 `FORK_FORBIDDEN_TOOLS`（ask_user / delegate_task）：即使 skill 显式声明，
+子代理也拿不到交互工具（D18）与委派工具（D7，防递归）。
 """
 
 from langchain_core.tools import BaseTool
+
+from src.config.const import FORK_FORBIDDEN_TOOLS
 
 
 def select_fork_tools(
@@ -25,6 +30,10 @@ def select_fork_tools(
     if not allowed:
         return []
     names = set(allowed)
+    # 先减去禁用集：ask_user/delegate_task 永不下发子代理（D18/D7）
+    names -= set(FORK_FORBIDDEN_TOOLS)
+    if not names:
+        return []
     if executor_tools:
         names &= set(executor_tools)
     picked = []

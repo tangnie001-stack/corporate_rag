@@ -102,6 +102,10 @@ DEPRECATED_SKILL_FIELDS = (
 # skill 正文任务占位符：$ARGUMENTS 为当前写法，{task} 为旧写法（保留向后兼容）；
 # 渲染时按序全部替换（见 skills.rendering.render_skill_body）
 SKILL_TASK_PLACEHOLDERS = ("$ARGUMENTS", "{task}")
+# fork 子代理永不可持有的工具名：
+# ask_user —— D18：子代理不直接交互，需要确认时由编排层确认门代为询问；
+# delegate_task —— D7：子代理不再委派，防递归与上下文爆炸。
+FORK_FORBIDDEN_TOOLS = ("ask_user", "delegate_task")
 # 专家分析标记短语：fork 子代理"无源分析观点"由 4.1 引导主 agent 措辞（design D9），
 # kb_citation_guardrail 据此豁免（防纯分析型 fork 答案被误触发补标 regen，M7）
 EXPERT_ANALYSIS_MARKER = "基于领域经验的分析"
