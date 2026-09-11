@@ -242,6 +242,7 @@ fork 子代理**不持有 `ask_user`**（对齐主流：claude-code 默认从子
 **否决"子代理直接跨轮等用户"**：会重演 langgraph#6064（新用户消息按默认路由 → 子代理上下文丢失、从头开始），并撞 fork idle 超时（等待用户=静默=被当 idle 杀）。
 **依据**：claude-code `Stop`/`SubagentStop` hook 与 deepseek-harness `agent/turn-stopping` + `steer()` 都是同一模式——**校验/强制继续在编排层，不在模型轮**；且 deepseek 注释明示 `SubagentStop only observes`（子代理停止边界只观察，强制逻辑在父层）。
 **本项目的原生等价物**：`verify` 图节点 = `turn-stopping`、`_needs_regenerate` = `steer`——**我们不需要新机制，图框架自带**。
+**与 verify 重跑的预算互斥**：确认门判定"不通过"时直接出结论并标注"未经确认"，**不再进入 verify 重跑**；只有确认门放行才由 verify 决定是否重跑一次（见 D26 ④）。
 
 ### D19. 能力清单：由 registry 派生，不设 catalog 文件
 
@@ -296,7 +297,15 @@ START ──route_entry──┬─ "agent"         （常规轮：opts/普通�
 
 **② 直出轮的 verify 判据来源**：`verify_node` 与两条引用护栏当前都读**主请求上下文**（`ctx.temporal_years` / `ctx.tool_contexts`），直出轮主 ctx 必然为空 → 年份完整性校验与引用护栏**静默跳过**。直出轮 SHALL 改用**子代理上下文**作为判据来源（`temporal_years` / `tool_contexts`），即"本轮材料来自谁，就用谁的上下文校验"。
 
+**②-b 判据的载体（关键实现点）**：子代理用**独立** RequestContext，`verify_node` 读的是 `current_request_ctx.get()`（主 ctx），因此必须显式搬运。载体定为 **`AgentState` 新增字段**（承载直出轮的 `tool_contexts` 与 `temporal_years`），`verify` 按"本轮是否直出"**选择判据来源**。
+- 否决"把子代理字段写回主 ctx"：会让 D7 的"独立 ctx 不污染主 agent"在校验层破功，且污染后续 `format` 的来源判断。
+- 否决"仅靠 state 替换 ctx 读取"：非直出轮会把判据来源也改成 state，扩大改动面。
+- 该字段同时是 `route_verify` 判断"本轮是否直出轮"的依据（有直出上下文 ⇒ 回 `skill_direct`）。
+
 **③ 直出轮的重生成目标**：`route_verify` 的 `_needs_regenerate=True` 现路由回 `"agent"`（主 agent）；直出轮的 SHALL 路由回 `"skill_direct"`（重跑子代理，上限 1 次，见 D22）。
+
+**④ 重跑预算互斥（消歧）**：D18 的确认门与 D22/D26 的 verify 重跑**不叠加**——确认门判定"不通过"（用户拒绝 / 超时 / 澄清槽被占）时 SHALL **直接出结论并标注"未经确认"，不再进入 verify 重跑**；只有确认门放行（或本轮无需确认）时才由 `verify` 决定是否重跑一次。故"每轮最多重跑 1 次"在两条规则下都成立，**不需要额外计数器**。
+**理由**：两条路径的语义不同（一条缺"授权"、一条缺"质量"），叠加会让最坏情况变成 2 次重跑，与两处文案各自写的"1 次"自相矛盾，且难以测试与解释。
 
 **理由**：D22 的用户价值（"我知道要谁来干"→ 不浪费一次主 agent LLM）只有靠入口分派才成立；而"直出省了一轮 LLM"必然意味着"主 ctx 没有材料"，所以校验与重生成的判据必须跟着材料走，否则整套 verify/引用护栏在直出轮退化为空转——这正是 D24 在 `format` 层已修的同一个根因，本决策把它补齐到 verify 层。
 
@@ -305,7 +314,8 @@ START ──route_entry──┬─ "agent"         （常规轮：opts/普通�
 - **分界**：内容/配置类 → fail-open（warn + 降级）；安全/权限类 → fail-fast（拒绝）
 - **子代理执行失败**：沿用现有 `DelegateStopReason` 词表（`idle`/`total`/`turn`/`cancelled`/`failed`）
 - **agent（全部 fail-open，无 400）**：未知 → 忽略 + 降级系统默认 prompt + warn；已绑定且传入不同 → **忽略传入值、按已绑定值继续**（不阻断）+ warning（见 D1）；已绑定且传入为空 → 静默沿用；**预设被删除/改名后重开历史会话** → registry 查不到该名：顶栏灰显原始名、生成用系统默认 prompt、记 warn（不给 500，也不清空会话）；preset 文件损坏 → 跳过 + warn；同名冲突 → fail-fast（配置错误，非运行时）
-- **生效值回传（补观测性）**：流事件携带 `agent_used`（与 `model_used` 同层，"本轮实际用了什么"），前端据此纠正顶栏显示。理由：不一致被静默忽略时，调用方无从得知——日志只对运维可见
+- **生效值回传（补观测性）**：流事件携带 `agent_used`（与 `model_used` 同层），**语义 = 本会话的绑定智能体名**（空 = 未绑定）。前端据此纠正顶栏显示。理由：不一致被静默忽略时，调用方无从得知——日志只对运维可见
+  - **不含 fork 执行者**：会话绑定「财务专家」而某 skill 声明 `agent: legal-expert` 时，`agent_used` 仍是 `finance-expert`——它服务的是**会话级显示纠正**；若把消息级执行者塞进来，前端顶栏会显示成 `legal-expert`，反而制造新不一致。v1 **不做** `executor_used`（无消费方，YAGNI）；将来若要在气泡里标注"本轮由谁执行"，另加字段
 - **确认回路**：用户拒绝/超时/澄清槽被占 → **基于现有信息出结论 + 显式标注"未经确认"**（比"啥也不给"更有用，且标注保证诚实）
 - **重跑子代理上限 1 次**（对齐 `MAX_VERIFY_REGENERATIONS` 思路：一次足够，再多是模型不配合）
 - **并发**：多委派 `delegate_id` 分槽；多委派同时请求确认 → 沿用现有 `pending_asks` 单槽保护（第二个按"未确认"处理，不排队不覆盖）
@@ -438,4 +448,4 @@ START ──route_entry──┬─ "agent"         （常规轮：opts/普通�
 - **alembic 迁移链分叉**：两处 `<script_location>` 目录 + 手工 SQL 三种机制并存，`alembic.ini` 指向根目录（详见 Risks）→ 已登记为独立遗留问题（`requirements_pool.md`）
 - **`maxTurns` 的系统默认值**：**复用既有常量 `DELEGATE_DEFAULT_MAX_TURNS`**（`src/config/const.py:89`，`executor.py:127` 已在用），**不新建**第二个常量——避免同一语义两处定义；若嫌名字不贴切只做重命名，不新增
 
-（已结案：v1 `tools` 隔离深度 → 仅约束 fork 子代理，见 D3/D7；中途换智能体 → 绑定后以绑定值为准、不一致忽略并 warning（不阻断），见 D1；`/` 的中文自然度 → 由技能 chip 下拉提供按钮式入口，见 D21；`/xxx` 执行形态与未知 skill 判定 → 见 D22；两入口共用一条通道 → 见 D23；清单是否用 catalog → 取消 catalog、由 registry 派生，见 D19；`agent_used` 载体 → 流事件（与 `model_used` 同层），见 D20；直出路径的图入口与 verify 语义 → 见 D26；`maxTurns` 默认值 → 复用 `DELEGATE_DEFAULT_MAX_TURNS`）
+（已结案：v1 `tools` 隔离深度 → 仅约束 fork 子代理，见 D3/D7；中途换智能体 → 绑定后以绑定值为准、不一致忽略并 warning（不阻断），见 D1；`/` 的中文自然度 → 由技能 chip 下拉提供按钮式入口，见 D21；`/xxx` 执行形态与未知 skill 判定 → 见 D22；两入口共用一条通道 → 见 D23；清单是否用 catalog → 取消 catalog、由 registry 派生，见 D19；`agent_used` 载体 → 流事件、**语义 = 会话绑定值**（不含 fork 执行者），见 D20；直出路径的图入口与 verify 语义 → 见 D26（含判据载体 = `AgentState` 字段、重跑预算与确认门互斥）；`maxTurns` 默认值 → 复用 `DELEGATE_DEFAULT_MAX_TURNS`）

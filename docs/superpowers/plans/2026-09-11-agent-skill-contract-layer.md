@@ -199,7 +199,7 @@ git commit -m "refactor(skills): SkillRecord 删 thinking/max_iterations、agent
 **Interfaces:**
 - Consumes: Task 1 的 `SkillRecord`（`fork_body` / `agent` / `allowed_tools: list[str]`）
 - Produces:
-  - `src/config/const.py`: `SKILL_NAME_PATTERN: re.Pattern[str]`（`^[A-Za-z0-9][A-Za-z0-9_-]*$`）
+  - `src/config/const.py`: `CAPABILITY_NAME_PATTERN: re.Pattern[str]`（`^[A-Za-z0-9][A-Za-z0-9_-]*$`）
   - `SkillLoader(skills_root: Path, tool_readonly: dict[str, bool] | None = None)`
   - `SkillLoader.load_all() -> list[SkillRecord]`（名称非法 / 解析失败 → 记 warning 并跳过）
 
@@ -329,7 +329,7 @@ Expected: FAIL —— `allowed_tools == ["retrieve_kb", "search_web"]` 失败（
 ```python
 # skill / agent preset 名允许的字符集（ASCII slug）：/xxx 命令天然是 ASCII 惯例，
 # 非 ASCII 名会让 `/财报分析` 落进"非命令形态"分支被静默当普通文本（design D15）
-SKILL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+CAPABILITY_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 DEPRECATED_SKILL_FIELDS = (
     "thinking",
     "max-iterations",
@@ -347,7 +347,7 @@ SKILL.md 结构：YAML frontmatter（--- 包裹）+ 正文。frontmatter 字段�
 name/description/context/model/allowed-tools/agent/user-invocable/disable-model-invocation。
 解析规则：
 - name 缺省用目录名；description 缺省用正文首段
-- name 必须是 ASCII slug（SKILL_NAME_PATTERN），否则记 warning 并跳过该 skill
+- name 必须是 ASCII slug（CAPABILITY_NAME_PATTERN），否则记 warning 并跳过该 skill
 - context 非法值回落 inline 并记 warning（fail-open，不阻塞加载）
 - allowed-tools 用逗号分隔字符串书写，内部转 list
 - 正文按 context 存 inline_prompt（inline）或 fork_body（fork）
@@ -361,7 +361,7 @@ from pathlib import Path
 import yaml
 
 from src.agents.skills.models import SkillContext, SkillRecord
-from src.config.const import DEPRECATED_SKILL_FIELDS, SKILL_NAME_PATTERN
+from src.config.const import DEPRECATED_SKILL_FIELDS, CAPABILITY_NAME_PATTERN
 
 
 class SkillLoader:
@@ -441,7 +441,7 @@ class SkillLoader:
         name = meta.get("name")
         if not isinstance(name, str) or not name:
             name = fallback_name
-        if not SKILL_NAME_PATTERN.match(name):
+        if not CAPABILITY_NAME_PATTERN.match(name):
             raise ValueError(
                 f"名称非法（仅允许 ASCII slug：字母数字/下划线/连字符，且不以连字符开头）: {name!r}"
             )
@@ -984,6 +984,8 @@ def derive_invocation_flags(
 
 并在文件头 import 加：`from src.agents.skills.invocation import derive_invocation_flags`。
 
+同时**删除 Task 2 留下的 `_resolve_bool` 方法**：双轴字段改由 `_resolve_invocation_flags` 处理后，它已无任何调用方（`grep -n "_resolve_bool" src/agents/skills/loader.py` 应只剩定义外的零处引用 → 删掉定义）。理由：留一个只服务已被替换逻辑的私有方法会误导后续读者以为它仍在校验双轴。
+
 - [ ] **Step 5: 装配点无需改动（loader 缺省读进程级声明表）**
 
 `SkillLoader.__init__` 中，`tool_readonly=None` 时读 Task 3 的单一来源：
@@ -1149,7 +1151,7 @@ git commit -m "feat(skills): 注册表提供 user_visible/model_visible 双候�
 - Test: `tests/agents/presets/test_preset_loader.py`
 
 **Interfaces:**
-- Consumes: Task 2 的 `src/config/const.py: SKILL_NAME_PATTERN`
+- Consumes: Task 2 的 `src/config/const.py: CAPABILITY_NAME_PATTERN`
 - Produces:
   - `AgentPreset(name, display_name, description, system_prompt, tools, skills, max_turns, source_path)`
   - `AgentPresetLoader(agents_root: Path).load_all() -> list[AgentPreset]`（fail-open；名称非法/同名由注册表 fail-fast）
@@ -1298,7 +1300,7 @@ from pathlib import Path
 import yaml
 
 from src.agents.presets.models import AgentPreset
-from src.config.const import SKILL_NAME_PATTERN
+from src.config.const import CAPABILITY_NAME_PATTERN
 
 
 class AgentPresetLoader:
@@ -1362,9 +1364,9 @@ class AgentPresetLoader:
         name = meta.get("name")
         if not isinstance(name, str) or not name:
             name = fallback_name
-        if not SKILL_NAME_PATTERN.match(name):
+        if not CAPABILITY_NAME_PATTERN.match(name):
             raise ValueError(f"名称非法（仅允许 ASCII slug）: {name!r}")
-        if not SKILL_NAME_PATTERN.match(fallback_name):
+        if not CAPABILITY_NAME_PATTERN.match(fallback_name):
             raise ValueError(f"文件名非法（仅允许 ASCII slug）: {fallback_name!r}")
         return name
 
@@ -1683,7 +1685,6 @@ skills: finance-qa
 name: finance-analyst
 description: 财务深度分析方法论（何时使用：需要多步建模、财务比率推算、趋势解读等深度分析；材料须由主 agent 预检索一并传入 task）
 context: fork
-allowed-tools: retrieve_kb
 ---
 
 按以下方法论完成财务深度分析：
@@ -1695,6 +1696,8 @@ allowed-tools: retrieve_kb
 
 任务：$ARGUMENTS
 ```
+
+> **为什么本任务不加 `allowed-tools` / `agent:`**：fork 子代理目前恒为零工具（`executor` 传 `tools=[]`），工具放开与 `create_agent` 替换属 **Plan 2**。此刻声明 `allowed-tools: retrieve_kb` 会形成"声明无效"的中间态，使本任务的验收标准无法断言其生效。等 Plan 2 落地时一并补上。
 
 - [ ] **Step 5: 清理 `finance-qa`**
 
@@ -1798,7 +1801,7 @@ git commit -m "chore: 契约层收口——字段改名遗留清理、日志与�
 
 **2. Placeholder scan**：已逐条检查，无 TBD / "类似 Task N" / "加适当的错误处理" 类占位；每个代码步骤都给了可直接粘贴的实现或测试。
 
-**3. Type consistency**：`fork_body`（Task 1 定义 → Task 2 写入 → Task 8 断言）、`derive_invocation_flags(allowed_tools, tool_readonly) -> tuple[bool, bool]`（Task 4 定义 → Task 4 loader 调用）、`readonly_map() -> dict[str, bool]`（Task 3 定义 → Task 4 消费）、`AgentPreset` 字段名（Task 6 定义 → Task 7/8 消费）、`SKILL_NAME_PATTERN`（Task 2 定义 → Task 6 复用）均已核对一致。
+**3. Type consistency**：`fork_body`（Task 1 定义 → Task 2 写入 → Task 8 断言）、`derive_invocation_flags(allowed_tools, tool_readonly) -> tuple[bool, bool]`（Task 4 定义 → Task 4 loader 调用）、`readonly_map() -> dict[str, bool]`（Task 3 定义 → Task 4 消费）、`AgentPreset` 字段名（Task 6 定义 → Task 7/8 消费）、`CAPABILITY_NAME_PATTERN`（Task 2 定义 → Task 6 复用）均已核对一致。
 
 **4. 已知待决（阻塞 Plan 2/3，不在本计划范围）**：P1 图入口分派、P2 直出路径 verify 三处依赖 → **已在 change 落为 design D26 + tasks 4.10/4.11 + agent-service spec 4 个 Scenario**；P4 已改为复用 `DELEGATE_DEFAULT_MAX_TURNS`（tasks 4.4/5.11 已修）。Plan 2 可据此开工。
 
@@ -1812,6 +1815,10 @@ git commit -m "chore: 契约层收口——字段改名遗留清理、日志与�
 | **R4** | 进程级只读表使 loader 行为依赖**测试执行顺序**（同会话其它用例注册了工具会改结果） | 计划内单测一律**显式注入** `tool_readonly`（含 `{}` 表示"表未就绪"），并在 Task 4 加单测约定说明 |
 | **R5** | `_warn_deprecated_fields` 被塞在 `_resolve_name` 里（解析名称的方法顺带发字段告警，职责混淆） | 移到 `_parse` 顶部单独调用 |
 | **R6** | Task 5 的 Files 里写了"改 `delegate_task.py`"，但过滤逻辑收在 `to_tool_description` 内即可，该文件**无需改动**（过度改动的假任务） | Files 收窄为 `registry.py`，并注明理由 |
-| **R7** | `delegate_task` 的工具 description 在 `make_delegate_task`（图构建期）一次性生成，`reload_if_changed()` 只刷新注册表、**不刷新已生成的 description** → 新增 skill 在重启前不会出现在模型可用列表里，而新的 `GET /api/skills` 会立即可见（两者不一致） | 本计划不做（属既有行为）；在 `capability-catalog` spec 的"无需重启生效"上加限定语，或在 Plan 3 一并评估"每次调用重建 description"。**已知会接受该不一致** |
+| **R7** | `delegate_task` 的工具 description 在 `make_delegate_task`（图构建期）一次性生成，`reload_if_changed()` 只刷新注册表、**不刷新已生成的 description** → 新增 skill 在重启前不会出现在模型可用列表里，而新的 `GET /api/skills` 会立即可见（两者不一致） | 本计划不做（属既有行为）；在 `capability-catalog` spec 的"无需重启生效"上加限定语。**已知会接受该不一致** |
+| **R8** | Task 4 把双轴字段改由 `_resolve_invocation_flags` 处理后，Task 2 定义的 `_resolve_bool` **再无调用方**（死方法残留进 master） | Task 4 Step 4 增加"删除 `_resolve_bool`"步骤与自查命令 |
+| **R9** | tasks 第 8 节文件顺序为 8.1…8.8 → **8.12** → 8.9 → 8.10 → 8.11（上轮插入位置不当），执行者按号定位会错位 | 已重排为 8.1…8.12 顺序 |
+| **R10** | Plan 1 Task 8 给 `finance-analyst` 加了 `allowed-tools: retrieve_kb`，但**工具放开属 Plan 2** → Plan 1 单独落地后该声明无效，形成"声明与行为不一致"的中间态，且本任务无法断言其生效 | Task 8 移除 `allowed-tools`（只保留 `context: fork` + 正文改写），留待 Plan 2 补 |
+| **R11** | `SKILL_NAME_PATTERN` 同时被 agent preset 复用（Task 6），名字与用途不符 | 重命名为 `CAPABILITY_NAME_PATTERN`（Task 2/6 与 const 一致改名） |
 
 > R1 是**必须修**的一条：不修则 Plan 1 落地后 `finance-analyst`（Task 8 给它加了 `allowed-tools: retrieve_kb`）会在工具表尚未就绪的加载窗口里被锁掉模型自动调用，且只留一条 warning，问题极难定位。

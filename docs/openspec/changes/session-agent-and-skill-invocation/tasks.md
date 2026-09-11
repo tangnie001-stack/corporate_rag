@@ -33,7 +33,7 @@
 - [ ] 4.8 **预设预绑定 skill 预加载**：会话已绑定预设且声明 `skills:` 时，在该会话**首轮生成前**按 `/xxx` 同一路径注入一次（隐藏消息，不进 system prompt），后续轮次不重复注入
 - [ ] 4.9 **fork 直出的引用池并轨**（design D24）：`/xxx` 触发 fork 直出时，把子代理的 `tool_contexts` 作为本轮 `format` 的引用池（主池此时必为空），使 `citations` 正常产出、不误记 `INVALID_CITATION`；「不计入主编号」的旧约定限定为模型自动委派路径
 - [ ] 4.10 **图入口分派（design D26）**：`AgentState` 新增"直出决策"字段（解析出的 skill 名 + 任务文本）；`workflow.py:86` 的 `set_entry_point("agent")` 改为 `add_conditional_edges(START, route_entry, {...})`，`route_entry` 纯规则判断（无 LLM）
-- [ ] 4.11 **直出节点 + verify 语义适配（design D26）**：新增 `skill_direct` 节点（调用 fork 子代理 → 写 `answer` 与 `tool_contexts`=子代理池 → 边到 `verify`）；直出轮 `verify_node` 与两条引用护栏的判据改用**子代理上下文**（`temporal_years` / `tool_contexts`）；`route_verify` 的 `_needs_regenerate` 在直出轮路由回 `skill_direct`（重跑子代理上限 1 次）
+- [ ] 4.11 **直出节点 + verify 语义适配（design D26）**：新增 `skill_direct` 节点（调用 fork 子代理 → 写 `answer`，并把子代理的 `tool_contexts` 写入 **`AgentState` 新增字段**（同时承载 `temporal_years`）→ 边到 `verify`）；直出轮 `verify_node` 与两条引用护栏的判据**按轮次选择来源**（直出轮取 state 承载的子代理上下文，普通轮仍取主 ctx，**不改写主 ctx**）；`route_verify` 的 `_needs_regenerate` 在直出轮路由回 `skill_direct`（重跑上限 1 次）；**与确认门互斥**：确认门不通过时直接出结论+标注"未经确认"，不再进入 verify 重跑
 
 ## 5. 调用控制与 `/xxx` 路由
 
@@ -48,7 +48,7 @@
   - [ ] 5.7.2 `ChatRepo`：`create_session` 带 agent；`get_sessions` SELECT 加 agent；新增 `bind_session_agent`（`UPDATE … SET agent=:v WHERE id=:sid AND agent=''`，只写一次）
   - [ ] 5.7.3 `PersistenceService.save_session` / `ChatManager.save_session_async` 透传 agent
   - [ ] 5.7.4 `SessionItem` 加 `agent`；**`sessions/list` 返回该字段**（前端回显 + 每轮携带的数据源）；**`sessions/messages` 保持 `data` 为数组不变**（不改其契约）
-- [ ] 5.8 **会话智能体绑定与沿用（bind-once，无 400）**：服务层 `resolve_session_agent(session_id, requested)`——校验只查注册表；未绑定 + 合法 → `bind_session_agent` 固化；已绑定 → 一律用绑定值（传入空＝静默沿用；传入非空且不同＝**忽略 + warning**，不拒绝）；传入未注册 → 忽略 + warning；绑定校验与写入**在 `StreamingResponse` 之前**完成；**`agent_used` 走流事件回传**（与 `model_used` 同层）；已删除预设的历史会话 → 降级默认 prompt + warn
+- [ ] 5.8 **会话智能体绑定与沿用（bind-once，无 400）**：服务层 `resolve_session_agent(session_id, requested)`——校验只查注册表；未绑定 + 合法 → `bind_session_agent` 固化；已绑定 → 一律用绑定值（传入空＝静默沿用；传入非空且不同＝**忽略 + warning**，不拒绝）；传入未注册 → 忽略 + warning；绑定校验与写入**在 `StreamingResponse` 之前**完成；**`agent_used` 走流事件回传**（与 `model_used` 同层；**语义 = 本会话绑定智能体名**，不含 fork 执行者）；已删除预设的历史会话 → 降级默认 prompt + warn
 - [ ] 5.9 **system prompt 三层组装**：`PromptManager` 拆出 `get_base_system_prompt()`（不含系统追加段）；新增 `build_system_prompt(persona, kb_bound, has_skills)`（`src/rag/prompt.py`）——①人设层（preset 正文 / `get_base_system_prompt()`）+ ②环境约束层（引用指令 + 委派引导 + 检索纪律 + `KB_UNBOUND_SYSTEM_PROMPT` + 日期，**顺序与现状一致**）；`build_prompt` 与 `build_simple_prompt` **两个调用点**都改走它；**保证未选 agent 时 system 段端到端逐字不变**
 - [ ] 5.10 **能力清单服务 + 接口**（design D19：**不引入 catalog 文件，由 registry 派生**）：`src/services/capability_service.py`（取 registry 的 `user_visible()` / 全部可加载预设；随懒重载自动更新，无独立缓存层）；`src/api/capabilities.py`（`GET /api/skills` / `GET /api/agents`，经 service 不直接读文件/扫描目录）；**响应走统一信封**（`data.skills` / `data.agents`）；skills 服务端过滤 `user-invocable: false`；读取失败返回空列表 + warn（不 500）
 - [ ] 5.11 测试：前缀路由 / **前缀清洗（当前轮与历史都不含 `/name`，落库仍为原文）** / **`/xxx` inline 单轮与 fork 直出（断言主 agent 0 LLM 轮 + citations 非空 + 无 `INVALID_CITATION`）** / 注入后持续生效 / 双轴过滤 / **绑定四态（首轮绑定、沿用、忽略+warn、未注册降级）** / 老会话 `bind-if-empty` 可绑定 / `agent_used` 流事件 / **未选 agent 时 system 段快照逐字一致** / 两接口信封结构 + 服务端过滤 + 失败降级 / **非法名称跳过** / `sessions/messages` 契约不变（`data` 仍为数组）
@@ -88,7 +88,7 @@
 - [ ] 8.6 **两个 compose 文件**都补 `agents/` volume 挂载（同 `skills/`）：`docker-compose.override.yml`（dev）+ `docker-compose.prod.yml`
 - [ ] 8.7 清理死代码：`src/api/chat.py` 的 `get_query_biased_snippet` / `_build_highlighted_snippet` 及随之不再需要的 `jieba` import（两者无任何调用方；归档计划 `2026-07-23-rag-orchestration-phase2` 曾记录应删除但未删）
 - [ ] 8.8 手工 E2E：会话**绑定 KB 且选定智能体** → 答案仍带 `[n]` 引用（验证环境约束层未被 preset 覆盖）
-- [ ] 8.12 手工 E2E：会话绑定 KB + 选定智能体，用 `/xxx` 调一个 `context: fork` skill → 答案的 `[n]` 有来源横条、抽屉可打开（验证 D24 引用池并轨）；日志无 `invalid_citation`
 - [ ] 8.9 手工 E2E：子代理中途请求确认 → 弹澄清卡 → 答复 → **继续完成**（不从头上重来）
 - [ ] 8.10 手工验证 `scripts/migrations/<date>-add-session-agent.sql` 可重复执行/幂等说明（列已存在时的处理）；**上线前已存在的会话**首次携带 agent 能成功绑定（`bind-if-empty`）
 - [ ] 8.11 手工 E2E：绑定后请求携带不同 agent（或直连 API 传错）→ 本轮仍按绑定值生成、**不报错**，日志出现 `agent mismatch ignored` warning，前端标识被 `agent_used` 纠正
+- [ ] 8.12 手工 E2E：会话绑定 KB + 选定智能体，用 `/xxx` 调一个 `context: fork` skill → 答案的 `[n]` 有来源横条、抽屉可打开（验证 D24 引用池并轨）；日志无 `invalid_citation`
