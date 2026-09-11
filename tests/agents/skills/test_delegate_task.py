@@ -142,7 +142,7 @@ async def test_fork_auto_registers_execution_and_terminal():
         token = current_request_ctx.set(ctx)
         try:
             with patch(
-                "src.agents.skills.executor.create_react_agent", return_value=fake_sub
+                "src.agents.skills.executor.create_agent", return_value=fake_sub
             ):
                 await tool.ainvoke({"task": "分析", "skill": "finance-analyst"})
         finally:
@@ -175,9 +175,7 @@ async def test_fork_hit_pushes_delegate_start_end_with_id():
     ctx = RequestContext(session_id="s1")
     token = current_request_ctx.set(ctx)
     try:
-        with patch(
-            "src.agents.skills.executor.create_react_agent", return_value=fake_sub
-        ):
+        with patch("src.agents.skills.executor.create_agent", return_value=fake_sub):
             out = await tool.ainvoke({"task": "分析年报", "skill": "finance-analyst"})
     finally:
         current_request_ctx.reset(token)
@@ -218,7 +216,7 @@ async def test_fork_interrupted_end_carries_reason():
     try:
         with (
             patch(
-                "src.agents.skills.executor.create_react_agent",
+                "src.agents.skills.executor.create_agent",
                 return_value=MagicMock(astream_events=_slow),
             ),
             patch.object(exec_mod.settings, "DELEGATE_MAX_IDLE_S", 0.1),
@@ -252,9 +250,7 @@ async def test_cancel_during_fork_propagates_cancelled_with_end_reason():
             )
         )
         with (
-            patch(
-                "src.agents.skills.executor.create_react_agent", return_value=fake_sub
-            ),
+            patch("src.agents.skills.executor.create_agent", return_value=fake_sub),
             pytest.raises(asyncio.CancelledError),
         ):
             await tool.ainvoke({"task": "t", "skill": "finance-analyst"})
@@ -303,7 +299,7 @@ async def test_cancel_mid_wait_abort_race_during_fork():
     try:
         with (
             patch(
-                "src.agents.skills.executor.create_react_agent",
+                "src.agents.skills.executor.create_agent",
                 return_value=MagicMock(astream_events=_slow),
             ),
             # 放大空闲阈值，防止 idle 在 abort 前抢先中断（本用例只测 abort 竞速路径）

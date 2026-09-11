@@ -66,9 +66,16 @@ def _agen(*items):
 
 
 def _fake_sub_agent(*items):
-    """astream_events 版 fake sub-agent（替换旧 fake_sub.ainvoke mock）。"""
+    """astream_events 版 fake sub-agent（记录初始输入供断言）。"""
     fake = MagicMock()
-    fake.astream_events = lambda *a, **k: _agen(*items)
+    captured: dict = {}
+
+    def _astream_events(inputs, *a, **k):
+        captured["inputs"] = inputs
+        return _agen(*items)
+
+    fake.astream_events = _astream_events
+    fake.captured = captured
     return fake
 
 
@@ -131,12 +138,12 @@ async def test_fork_body_renders_arguments_placeholder():
         _event("on_chat_model_stream", chunk=AIMessageChunk(content="分析结果")),
         _event("on_chat_model_end", output=AIMessage(content="分析结果")),
     )
-    with patch(
-        "src.agents.skills.executor.create_react_agent", return_value=fake_sub
-    ) as mock_create:
+    with patch("src.agents.skills.executor.create_agent", return_value=fake_sub):
         await exe.execute(rec, task="分析年报")
 
-    assert mock_create.call_args.kwargs["prompt"] == "按方法论分析。\n\n任务：分析年报"
+    # skill 正文改作初始 user message：$ARGUMENTS 已渲染为任务文本
+    msg = fake_sub.captured["inputs"]["messages"][0]
+    assert msg.content == "按方法论分析。\n\n任务：分析年报"
 
 
 @pytest.mark.asyncio
@@ -157,14 +164,16 @@ async def test_fork_reuses_main_llm_when_model_empty():
         _event("on_chat_model_end", output=AIMessage(content="分析结果：营收下降 20%")),
     )
     with patch(
-        "src.agents.skills.executor.create_react_agent", return_value=fake_sub
+        "src.agents.skills.executor.create_agent", return_value=fake_sub
     ) as mock_create:
         out = await exe.execute(rec, task="分析年报")
 
     args, kwargs = mock_create.call_args
     assert kwargs["tools"] == []
-    assert kwargs["prompt"] == "你是财务建模专家"
     assert args[0] is main_llm  # 无 ctx 且未声明 model → 复用主实例
+    # 正文无占位符 → 追加默认任务段后作初始 user message
+    msg = fake_sub.captured["inputs"]["messages"][0]
+    assert msg.content == "你是财务建模专家\n任务：分析年报"
     assert "分析结果" in out
 
 
@@ -180,7 +189,7 @@ async def test_fork_model_override_builds_new_llm():
 
     with (
         patch(
-            "src.agents.skills.executor.create_react_agent", return_value=fake_sub
+            "src.agents.skills.executor.create_agent", return_value=fake_sub
         ) as mock_create,
         patch(
             "src.agents.skills.executor.get_llm", return_value=fake_llm
@@ -215,9 +224,7 @@ async def test_fork_thinking_follows_ctx_deep_thinking_true():
     token = current_request_ctx.set(ctx)
     try:
         with (
-            patch(
-                "src.agents.skills.executor.create_react_agent", return_value=fake_sub
-            ),
+            patch("src.agents.skills.executor.create_agent", return_value=fake_sub),
             patch(
                 "src.agents.skills.executor.get_llm", return_value=fake_llm
             ) as mock_get_llm,
@@ -252,9 +259,7 @@ async def test_fork_thinking_follows_ctx_deep_thinking_false():
     token = current_request_ctx.set(ctx)
     try:
         with (
-            patch(
-                "src.agents.skills.executor.create_react_agent", return_value=fake_sub
-            ),
+            patch("src.agents.skills.executor.create_agent", return_value=fake_sub),
             patch(
                 "src.agents.skills.executor.get_llm", return_value=fake_llm
             ) as mock_get_llm,
@@ -284,7 +289,7 @@ async def test_fork_thinking_none_without_ctx_reuses_main_llm():
     )
     with (
         patch(
-            "src.agents.skills.executor.create_react_agent", return_value=fake_sub
+            "src.agents.skills.executor.create_agent", return_value=fake_sub
         ) as mock_create,
         patch("src.agents.skills.executor.get_llm") as mock_get_llm,
     ):
@@ -318,7 +323,7 @@ async def test_fork_total_timeout_interrupts_with_reason():
     token = current_request_ctx.set(ctx)
     try:
         with (
-            patch("src.agents.skills.executor.create_react_agent", return_value=fake),
+            patch("src.agents.skills.executor.create_agent", return_value=fake),
             patch.object(exec_mod.settings, "DELEGATE_TOTAL_TIMEOUT_S", 0.05),
         ):
             exe = SkillExecutor(main_llm=MagicMock())
@@ -348,7 +353,7 @@ async def test_fork_idle_timeout_interrupts():
     token = current_request_ctx.set(ctx)
     try:
         with (
-            patch("src.agents.skills.executor.create_react_agent", return_value=fake),
+            patch("src.agents.skills.executor.create_agent", return_value=fake),
             patch.object(exec_mod.settings, "DELEGATE_MAX_IDLE_S", 0.1),
         ):
             exe = SkillExecutor(main_llm=MagicMock())
@@ -375,9 +380,7 @@ async def test_fork_turn_limit_interrupts():
     ctx = RequestContext(session_id="s1")
     token = current_request_ctx.set(ctx)
     try:
-        with patch(
-            "src.agents.skills.executor.create_react_agent", return_value=fake_sub
-        ):
+        with patch("src.agents.skills.executor.create_agent", return_value=fake_sub):
             exe = SkillExecutor(main_llm=MagicMock())
             rec = _record(
                 context=SkillContext.FORK,
@@ -402,9 +405,7 @@ async def test_fork_cancel_aborts_with_cancelled():
             _event("on_chat_model_stream", chunk=AIMessageChunk(content="a")),
             _event("on_chat_model_stream", chunk=AIMessageChunk(content="b")),
         )
-        with patch(
-            "src.agents.skills.executor.create_react_agent", return_value=fake_sub
-        ):
+        with patch("src.agents.skills.executor.create_agent", return_value=fake_sub):
             exe = SkillExecutor(main_llm=MagicMock())
             rec = _record(
                 context=SkillContext.FORK, fork_body="人格", inline_prompt=None
@@ -443,9 +444,7 @@ async def test_fork_pushes_delegate_delta_events():
     ctx.delegate_id = "abc123"
     token = current_request_ctx.set(ctx)
     try:
-        with patch(
-            "src.agents.skills.executor.create_react_agent", return_value=fake_sub
-        ):
+        with patch("src.agents.skills.executor.create_agent", return_value=fake_sub):
             exe = SkillExecutor(main_llm=MagicMock())
             rec = _record(
                 context=SkillContext.FORK, fork_body="人格", inline_prompt=None
@@ -469,7 +468,7 @@ async def test_fork_result_truncated():
         _event("on_chat_model_stream", chunk=AIMessageChunk(content=long_text)),
         _event("on_chat_model_end", output=AIMessage(content=long_text)),
     )
-    with patch("src.agents.skills.executor.create_react_agent", return_value=fake_sub):
+    with patch("src.agents.skills.executor.create_agent", return_value=fake_sub):
         exe = SkillExecutor(main_llm=MagicMock())
         rec = _record(context=SkillContext.FORK, fork_body="人格", inline_prompt=None)
         out = await exe.execute(rec, task="分析")
@@ -552,7 +551,7 @@ class _ScenarioChatModel(BaseChatModel):
 
 
 def _make_fork_delegate_tool(model: BaseChatModel):
-    """构造走真实 fork 路径的 delegate_task 工具（SkillExecutor 不 mock create_react_agent）。"""
+    """构造走真实 fork 路径的 delegate_task 工具（SkillExecutor 不 mock create_agent）。"""
 
     @tool("delegate_task")
     async def delegate_task(task: str, skill: str) -> str:
@@ -604,7 +603,7 @@ async def test_fork_subagent_events_do_not_leak_to_outer_stream():
     """fork 子代理 LLM 事件不泄漏进外层流（Critical 回归）。
 
     真实路径：外层图 agent 节点流式调模型 → ToolNode 执行 delegate_task →
-    SkillExecutor._run_fork → 真实 create_react_agent 子代理调同一 LLM。修复前
+    SkillExecutor._run_fork → 真实 create_agent 子代理调同一 LLM。修复前
     子代理 on_chat_model_stream 经 var_child_runnable_config 传播到外层
     astream_events（metadata.langgraph_node == "agent"），token 带 _FORK_ANSWER
     内容泄漏进 SSE 并污染累积的 full_answer。
@@ -702,7 +701,7 @@ async def test_fork_with_llm_lacking_model_name_does_not_crash():
 
     with (
         patch(
-            "src.agents.skills.executor.create_react_agent", return_value=fake_sub
+            "src.agents.skills.executor.create_agent", return_value=fake_sub
         ) as mock_create,
         patch("src.agents.skills.executor.get_llm") as mock_get_llm,
     ):

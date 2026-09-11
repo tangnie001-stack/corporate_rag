@@ -60,14 +60,14 @@
 | 术语 | 一句话 | 本项目对应 | 常见错误 |
 |------|------|------|---------|
 | `agent`（智能体） | **执行主体**：LLM + 循环 + 工具 + 上下文，自己判断、多轮干活 | 主 agent = `src/agents/graph/` 的 LangGraph 循环 | ❌ 与 skill / tool 混为一谈 |
-| `subagent`（子代理） | 由主 agent 派生的另一个 agent | 仅 fork skill 执行时由 `create_react_agent` **运行时生成** | ❌ 说成"skill 在跑"——跑的是 agent |
+| `subagent`（子代理） | 由主 agent 派生的另一个 agent | 仅 fork skill 执行时由 `create_agent` **运行时生成** | ❌ 说成"skill 在跑"——跑的是 agent |
 | `skill`（技能） | **静态说明书**（"这类事怎么做"），内容/配置，自己不会执行 | `skills/<name>/SKILL.md`（定义见「技能委派」） | ❌ 当成执行主体 |
 | `tool`（工具） | agent 可调用的**函数**（"做什么"） | retrieve_kb / search_web / ask_user / delegate_task | ❌ 与 skill 混（做什么 vs 怎么做） |
 | `/xxx`（斜杠命令） | 用户**触发方式**，不是一类能力（像"叫电梯的按钮"） | 待实现（见 change `skill-invocation-alignment`） | ❌ 当成 skill 本身 |
 
 **关系**：agent 拿着 skill（说明书）调用 tool（工具）干活。skill 是静态文本，离开 agent 无意义；tool 是动作，skill 是方法。
 
-**关键坑：fork skill 会"长出"一个 agent**——`skills/finance-analyst/SKILL.md` 是 **skill**（静态文件），被执行时 `SkillExecutor` 用其正文作 system prompt 经 `create_react_agent` 生成一个 **subagent**（执行体）。同一名字，文件是 skill、跑起来的是 agent，skill 正文即该 agent 的人设 prompt；inline skill 不生成新 agent（正文注入主 agent）。
+**关键坑：fork skill 会"长出"一个 agent**——`skills/finance-analyst/SKILL.md` 是 **skill**（静态文件），被执行时 `SkillExecutor` 以执行者人设作 system prompt、skill 正文（任务已注入）作初始 user message，经 `create_agent` 生成一个 **subagent**（执行体）。同一名字，文件是 skill、跑起来的是 agent；inline skill 不生成新 agent（正文注入主 agent）。
 
 **参考项目辨析**：`github/agency-agents` 的 319 个 `.md` 是 **agent 人设定义**（frontmatter：name/description/color/emoji/vibe/tools），**不是 skill**；其 `scripts/convert.sh` 生成 SKILL.md 时只保留 `name` + `description`（标准最小集）。
 

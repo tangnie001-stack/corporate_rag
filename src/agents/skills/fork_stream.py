@@ -78,15 +78,19 @@ def _resolve_stream_ctx(run: DelegateRun | None) -> tuple[RequestContext | None,
 
 
 async def consume_fork_events(
-    sub_agent, run: DelegateRun | None, task: str, skill_name: str, max_turns: int
+    sub_agent,
+    run: DelegateRun | None,
+    user_content: str,
+    skill_name: str,
+    max_turns: int,
 ) -> str:
     """迭代子代理 astream_events(v2)：聚合正文/思考、防失控、转发 delegate delta。
 
     Args:
-        sub_agent: create_react_agent 返回的子代理（astream_events 事件源）
+        sub_agent: create_agent 返回的子代理（astream_events 事件源）
         run: 本次委派运行态；None 时读当前请求上下文（生产 delegate_task 的两参
             路径），非 None 时读 run.ctx 子上下文
-        task: 子代理初始任务文本
+        user_content: 子代理初始 user message（skill 正文，任务已注入）
         skill_name: 投递 delegate 增量时附带的 skill 标签。用形参而非
             run.skill_name：生产 delegate_task 仍走 run=None 路径，从 run 取会丢
             标签；同时避免本模块与 SkillRecord 结构耦合
@@ -108,7 +112,7 @@ async def consume_fork_events(
 
     config = {"tags": ["delegate"], "metadata": {"scope": "delegate"}}
     agen = sub_agent.astream_events(
-        {"messages": [HumanMessage(content=task)]},
+        {"messages": [HumanMessage(content=user_content)]},
         config=config,
         version="v2",
     )

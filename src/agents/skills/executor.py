@@ -1,14 +1,14 @@
 """SkillExecutor — inline 指令注入 / fork 子代理执行。
 
 - inline：返回 skill 正文（render 后的方法论），主 agent 自己执行（不产生子代理）。
-- fork：create_react_agent(llm, tools=白名单筛选结果, prompt=fork_body) 生成独立
-  子代理，初始消息 = task，返回纯文本（不带 [n]）。未声明 allowed-tools 时零工具
-  = 防递归硬保证。执行期把 current_request_ctx 切到子上下文（run.ctx）：工具检索
-  与引用编号落子池，不污染主 agent 引用池（design D7/D8/D9/R3）。
+- fork：create_agent(model, tools=白名单筛选结果, system_prompt=执行者人设) 生成独立
+  子代理；初始 user message = skill 正文（task 已注入），返回纯文本（不带 [n]）。
+  未声明 allowed-tools 时零工具 = 防递归硬保证。执行期把 current_request_ctx 切到
+  子上下文（run.ctx）：工具检索与引用编号落子池，不污染主 agent 引用池（design D7/D8/D9/R3）。
 
 可观测性（design D11）：fork 子代理复用主 agent 的 llm 实例（或 get_llm 新建实例）——
 与主 agent **同级观测**（同一实例自带 callbacks；Langfuse 是否捕获取决于网关层，应用层
-不新增 Langfuse 工作，见 design Risks「create_react_agent 观测缺口」）。子代理事件消费
+不新增 Langfuse 工作，见 design Risks「create_agent 观测缺口」）。子代理事件消费
 实现见 fork_stream.consume_fork_events（本模块只保留装配与控制流）。
 
 模型/思考（spec delegate-execution-controls）：skill 声明 model → get_llm(model=...)
@@ -28,11 +28,10 @@ CancelledError 由主任务按取消路径收尾。
 """
 
 import asyncio
-import dataclasses
 from collections.abc import Callable
 
+from langchain.agents import create_agent
 from langchain_core.runnables.config import var_child_runnable_config
-from langgraph.prebuilt import create_react_agent
 
 from src.agents.skills.delegate_run import DelegateRun
 from src.agents.skills.fork_stream import consume_fork_events
@@ -43,9 +42,11 @@ from src.config import settings
 from src.config.const import (
     DELEGATE_DEFAULT_MAX_TURNS,
     DELEGATE_RESULT_LIMIT,
+    SKILL_TASK_PLACEHOLDERS,
     DelegateStopReason,
     SSEInteractionTexts,
 )
+from src.config.prompts import FORK_DEFAULT_EXECUTOR_PROMPT, FORK_TASK_APPEND_TMPL
 from src.infra.llm.request_context import current_request_ctx
 from src.models import get_llm  # 模块级 import：测试需 patch executor.get_llm
 
@@ -106,6 +107,29 @@ class SkillExecutor:
         """
         return render_skill_body(record.inline_prompt or "", task)
 
+    def _render_fork_task(self, record: SkillRecord, task: str) -> str:
+        """渲染 fork 子代理的初始 user message（skill 正文，任务已注入）。
+
+        fork 正文声明了任务占位符（SKILL_TASK_PLACEHOLDERS 任一成员）时直接渲染；
+        未声明时在正文末尾追加默认任务段，保证子代理始终拿到任务文本。
+
+        Args:
+            record: fork SkillRecord（读 fork_body）
+            task: 主 agent 委托的任务文本
+
+        Returns:
+            渲染后的正文，作为子代理初始 HumanMessage 内容
+        """
+        body = record.fork_body or ""
+        declared = False
+        for placeholder in SKILL_TASK_PLACEHOLDERS:
+            if placeholder in body:
+                declared = True
+                break
+        if not declared:
+            body = body + "\n" + FORK_TASK_APPEND_TMPL.format(task=task)
+        return render_skill_body(body, task)
+
     async def _run_fork(
         self, record: SkillRecord, task: str, run: DelegateRun | None = None
     ) -> str:
@@ -113,7 +137,7 @@ class SkillExecutor:
 
         Args:
             record: fork SkillRecord
-            task: 任务描述（子代理初始 HumanMessage）
+            task: 任务描述（渲染进 skill 正文，作子代理初始 HumanMessage）
             run: 本次委派运行态；None 时用当前主 ctx（不隔离），非 None 时切到
                 run.ctx 子上下文执行，工具检索写入子引用池
 
@@ -134,18 +158,12 @@ class SkillExecutor:
             child_ctx = run.ctx
         else:
             child_ctx = current_request_ctx.get()
-        fork_body = record.fork_body
-        if fork_body is not None:
-            # fork_body 作子代理 prompt：渲染任务占位符（$ARGUMENTS/{task}）。用副本
-            # 承载，避免改写 registry 缓存的 SkillRecord（并发委派共享该对象）
-            record = dataclasses.replace(
-                record, fork_body=render_skill_body(fork_body, task)
-            )
+        user_content = self._render_fork_task(record, task)
         sub_agent = self._build_sub_agent(record, preset=None)
         max_turns = DELEGATE_DEFAULT_MAX_TURNS
         total_timeout = self._fork_total_timeout(child_ctx)
         # 隔离子代理回调传播：不 reset 会经 var_child_runnable_config 把外层
-        # callback handler 传进 create_react_agent，子代理 LLM 事件泄漏到外层
+        # callback handler 传进 create_agent，子代理 LLM 事件泄漏到外层
         # graph.astream_events（SSE token 污染 + full_answer 累积子代理原文）。
         # reset 后子代理事件只走其自身 handler，由本方法显式接入（scope=delegate）。
         token = var_child_runnable_config.set(None)
@@ -155,7 +173,9 @@ class SkillExecutor:
         try:
             try:
                 text = await asyncio.wait_for(
-                    consume_fork_events(sub_agent, run, task, record.name, max_turns),
+                    consume_fork_events(
+                        sub_agent, run, user_content, record.name, max_turns
+                    ),
                     timeout=total_timeout,
                 )
             except TimeoutError:
@@ -182,20 +202,40 @@ class SkillExecutor:
             var_child_runnable_config.reset(token)
 
     def _build_sub_agent(self, record: SkillRecord, preset):
-        """构建 fork 子代理（工具经 _fork_tools 按白名单筛选 + fork_body 作 prompt）。
+        """构建 fork 子代理：system=执行者人设、user=skill 正文、tools=交集。
+
+        初始 user message（skill 正文 + 任务）由 _run_fork 渲染后经
+        consume_fork_events 传入；本方法只负责装配人设、工具交集与 middleware。
 
         Args:
-            record: fork SkillRecord（fork_body 已渲染任务占位符）
-            preset: 执行者预设（Task 5 接入人设；本任务恒为 None）
+            record: fork SkillRecord
+            preset: 执行者 AgentPreset（None → 系统默认人设）
 
         Returns:
-            create_react_agent 返回的子代理
+            create_agent 编译产物（astream_events 事件源）
         """
-        return create_react_agent(
+        return create_agent(
             self._resolve_fork_llm(record),
             tools=self._fork_tools(record, preset),
-            prompt=record.fork_body,
+            system_prompt=self._executor_system_prompt(preset),
+            middleware=[],
         )
+
+    def _executor_system_prompt(self, preset) -> str:
+        """解析 fork 子代理的 system prompt（执行者人设）。
+
+        Args:
+            preset: 执行者 AgentPreset；None 表示未选执行者预设
+
+        Returns:
+            preset 非空且 system_prompt 非空时返回其人设，否则返回系统默认
+            FORK_DEFAULT_EXECUTOR_PROMPT。本层不构造 PromptManager、不拉 Langfuse。
+        """
+        if preset is not None:
+            prompt = preset.system_prompt
+            if prompt:
+                return prompt
+        return FORK_DEFAULT_EXECUTOR_PROMPT
 
     def _fork_tools(self, record: SkillRecord, preset):
         """按 allowed-tools ∩ 执行者 tools 选子代理工具（无 provider 时为零工具）。"""

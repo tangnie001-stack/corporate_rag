@@ -287,3 +287,19 @@ VERIFY_KB_CITATION_GUIDANCE_PROMPT: str = (
     "{marker}，请在引用来源的对应句末补上 [n] 编号"
     "（编号须与检索返回的来源列表一致）后重新回答。"
 )
+
+
+# ====== delegate fork 执行者（子代理装配） ======
+
+# fork skill 正文未声明任务占位符（const.SKILL_TASK_PLACEHOLDERS）时的追加段：
+# 把主 agent 委托的任务文本拼到正文末尾，保证子代理始终拿到任务。占位符 {task}
+# 为 str.format 字段，渲染后即为任务原文（不再二次替换）。
+FORK_TASK_APPEND_TMPL: str = "任务：{task}"
+
+# fork 执行者预设缺省时的系统人设（create_agent 的 system_prompt）。skill 正文承载
+# "按哪本手册干"（初始 user message），本常量承载"谁在干活"的默认身份。Plan 3 会与
+# prompt 组装器对齐（build_system_prompt(persona=...) 的产物）。
+FORK_DEFAULT_EXECUTOR_PROMPT: str = (
+    "你是一个企业知识库智能助手，作为委派子代理执行被指派的具体任务。"
+    "只依据任务给出的材料与方法论作答，不得编造；输出结构化分析文本，不标注引用编号 [n]。"
+)
