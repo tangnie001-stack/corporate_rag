@@ -17,16 +17,7 @@
 #### Scenario: 绑定 KB 分派
 
 - **WHEN** 会话绑定知识库（`kb_id` 非空）
-- **THEN** verify 执行 KB 管道（完整性 → KB 溯源护栏 → 忠实度），不执行纯对话管道
-
-### Requirement: 忠实度校验
-
-忠实度 judge SHALL 仅在绑定 KB 管道（态 B）的最终答案运行；纯对话（态 A）不运行 judge。
-
-#### Scenario: 纯对话不跑 judge
-
-- **WHEN** 会话未绑定知识库，agent 纯对话生成答案
-- **THEN** verify 不调用 judge，答案直接进入引用格式化
+- **THEN** verify 执行 KB 管道（完整性 → KB 溯源护栏），不执行纯对话管道
 
 ### Requirement: 修订终止条件
 

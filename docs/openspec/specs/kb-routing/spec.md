@@ -2,45 +2,26 @@
 
 ## Purpose
 TBD - created by archiving change kb-routing-and-litellm-gateway. Update Purpose after archive.
-
 ## Requirements
-
 ### Requirement: 语义路由匹配知识库
 
-当用户选择"所有知识库"时，系统 SHALL 先通过语义路由计算用户问题与每个知识库的语义相似度，选择最相关的知识库进行检索。
+跨库"所有知识库"语义路由 SHALL 废弃：会话绑定单一 KB（`kb_id`），`kb_id` 为空表示未绑定（不检索，纯对话）。系统 SHALL 不再对用户查询做知识库语义匹配，KB 解析 SHALL 下沉到 `retrieve_kb` 工具内部，直接读会话 `state.kb_id`。
 
-#### Scenario: 语义路由成功匹配
-- **WHEN** 用户选择"所有知识库"并发送查询
-- **THEN** 系统计算查询与每个 KB 的 name+description 的嵌入相似度
-- **THEN** 相似度阈值（默认 0.82）以上的 top-2 KB 被选中
-- **THEN** 只在选中的 KB 中执行检索
+#### Scenario: 绑定 KB 直接检索
 
-#### Scenario: 语义路由低置信度（LLM 兜底）
-- **WHEN** 语义路由的最高相似度低于阈值
-- **THEN** 系统使用 LLM 对查询进行分类，从 KB 列表中选择最相关的 KB
-- **THEN** 最多选 2 个 KB 进行检索
+- **WHEN** 会话绑定 `kb_id=kb_a`
+- **THEN** retrieve_kb 直接在 kb_a 的 collection 检索，不做语义路由
 
-#### Scenario: 路由完全未命中
-- **WHEN** 语义路由和 LLM 兜底都无法确定相关 KB
-- **THEN** 系统降级为全量检索所有知识库
+#### Scenario: 未绑定 KB 不检索
 
-#### Scenario: 非"所有知识库"模式
-- **WHEN** 用户指定了具体的 kb_id
-- **THEN** 路由逻辑跳过，直接检索指定 KB
+- **WHEN** 会话未绑定 KB（`kb_id` 为空）
+- **THEN** retrieve_kb 返回空结果，不触发任何知识库路由
 
 ### Requirement: 路由结果传递给检索节点
 
-路由节点 SHALL 将选中的 kb_id 列表写入 AgentState，retrieve_node 据此执行限定检索。
+系统 SHALL 不再存在独立的路由节点：`kb_router` 图节点 SHALL 被移除，图的入口直接为 agent 节点；`AgentState._resolved_kb_ids` 字段 SHALL 退役，检索目标直接从 `state.kb_id` 读取。
 
-#### Scenario: 路由结果生效
-- **WHEN** kb_router_node 选中了 kb_ids = ["id_a", "id_b"]
-- **THEN** retrieve_node 只在 id_a 和 id_b 对应的 collection 中执行检索
-- **THEN** 不搜索其他知识库
+#### Scenario: 图入口直连 agent
 
-### Requirement: 路由索引构建
-
-系统 SHALL 使用 KB 的 name 和 description 字段构建路由依据，description 为空时只使用 name。
-
-#### Scenario: KB 信息不全
-- **WHEN** 某个 KB 的 description 为空
-- **THEN** 路由仅使用该 KB 的 name 进行相似度计算
+- **WHEN** 编译 agent 图
+- **THEN** 图不含 kb_router 节点，入口节点为 agent

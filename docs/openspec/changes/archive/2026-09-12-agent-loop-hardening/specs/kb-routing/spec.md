@@ -27,14 +27,6 @@
 
 ## REMOVED Requirements
 
-### Requirement: 语义路由低置信度（LLM 兜底）
-
-移除按查询对 KB 列表做 LLM 分类兜底的能力——跨库路由已废弃，不存在多 KB 候选选择场景。
-
-### Requirement: 路由完全未命中降级全量检索
-
-移除语义路由未命中时降级为全量检索所有知识库的路径——`kb_id` 为空即不检索，不存在"搜索全部 KB"语义。
-
 ### Requirement: 路由索引构建
 
 移除基于 KB name/description 构建路由索引的路径——无语义路由即无需路由索引。
