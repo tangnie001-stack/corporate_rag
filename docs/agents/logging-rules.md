@@ -33,12 +33,37 @@
 - debug — 诊断细节默认关；info — 正常里程碑；warning — 降级可恢复（禁"正常但少见"）；
   error — 单点失败已处理；exception — 透传带 traceback
 - 事件级别由 EventSpec.level 登记，helper 路由；exception 直调不建 spec
+- 噪声控制用**调用点守卫「不记」**，不用 debug 降级：`EventSpec.level` 只允许
+  `info/warning/error` 且调用点不能逐次降级，故高频或无信息量的轮次直接不调 helper
+  （非 debug）。当前守卫：`agent resolved` 在请求与绑定都为空时不记、`skill dispatch`
+  在 `kind=plain` 时不记。
 
 ## trace_id / session_id
 由 `src/core/logging.py` patcher 自动注入日志行第 3/4 段，业务不手写。
 
 ## 事件全集
 以 `src/core/log_events.py` 的 `Event` 枚举 + `EVENT_SPECS` 为准，本文件不抄录（防双维护）。
+
+## 来源与 prompt 观测事件
+
+每轮来源与 prompt 组装的观测事件。字段明细以 `src/core/log_event_specs.py` 的 `EVENT_SPECS`
+为准（本文件不抄录），此处只登记事件/前缀/级别与非代码可读的值域：
+
+- `agent resolved`（session / info）——每轮生效智能体与解析来源；`source` 取 bound
+  （沿用绑定）/ new_bound（首次绑定）/ ignored（请求与会话绑定不一致，已忽略）/
+  unregistered（请求名未注册，降级为空）/ none
+- `prompt assembled`（llm / info）——system prompt 组成；`persona_source` 取 preset
+  （会话预设人设）/ base（系统默认人设）
+- `prompt messages`（agent / info）——首轮组装的消息三段条数（system / 注入 / 历史）
+- `skill injected`（session / info）——技能正文成功注入；`mode` 取 inline（命令触发）/
+  preload（预设预绑定首轮预加载），`source` 取 command / preset
+- `skill dispatch`（session / info）——命令形态分派；`kind` 取 plain（普通文本，不记）/
+  known（命中技能）/ unknown（未注册命令）
+- `model turn` 扩 `temperature` / `temp_source`（explicit 逐轮直传档 / default 模型构造档）/
+  `kb_bound`，不新增事件
+
+**不再扩 `iteration done`**：其「消息数拆分」意图已由 `prompt messages` 在组装点承载，
+不重复记录同一事实（避免后人再提）。
 
 ## 已知例外
 - `retrieval_signal:` 为 P1 Change 2 既有契约保留前缀，检索域聚合需

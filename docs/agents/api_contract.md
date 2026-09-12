@@ -309,7 +309,7 @@ data: {}
 
 | 事件 | 触发条件 | 说明 |
 |------|---------|------|
-| `status` | agent 循环按事件类型接线 | stage 取值：`agent`（on_chat_model_start "正在思考..."）、`retrieve`（on_tool_start/end "正在检索相关文档..." / "检索完成，正在分析..."）、`web_search`（on_tool_start/end "正在联网搜索..." / "联网搜索完成，正在分析..."，KB 不达标时走 search_web 兜底才出现） |
+| `status` | agent 循环按事件类型接线 | stage 取值：`agent`（on_chat_model_start "正在思考..."）、`retrieve`（on_tool_start/end "正在检索相关文档..." / "检索完成，正在分析..."）、`web_search`（on_tool_start/end "正在联网搜索..." / "联网搜索完成，正在分析..."，KB 不达标时走 search_web 兜底才出现）、`turn_agent` / `turn_skill`（每轮来源声明，见下文「status.stage 来源声明」） |
 | `token` | LLM 生成中 | LLM 生成文本片段，前端逐段追加 |
 | **`reasoning`** | **agent 节点 LLM 流式输出思考增量（enable_thinking=true 且模型返回 reasoning_content，经 ChatQwenWithReasoning 提取）** | **思考过程增量（data: {"delta": "..."}），前端累积渲染 Think 折叠行；每轮 LLM 调用一个，默认收起；收到正文 token/状态/ask_user/abstention/done 时定型** |
 | **`delegate`** | **delegate_task 委派 fork skill 时产生（inline 命中不推）** | **fork 子代理过程事件：`action=start`（开始）\| `delta`（过程增量，`kind=thinking`\|`content`、`delta`=增量文本）\| `end`（结束，`ok` 区分完成/中断）。前端按 delegate_id 分节渲染"分析过程"折叠区，增量不进主 token 流/full_answer（详见「delegate 事件详情」）** |
@@ -336,6 +336,27 @@ SSECitationEvent payload 与落库 sources 的新增字段 `tier: int | null`：
 | null | （无徽标） | 存量消息或未定档 |
 
 **标签文案以 `src/config/const.py SOURCE_TIER_LABELS` 为唯一权威，本表与前端 `chat.html TIER_LABELS` 为照抄副本；改动动线：const.py → api_contract.md → chat.html 三步走完才算改完。**徽标仅渲染在引用抽屉条目，引用横条保持既有形态（见 chat-harness-ui spec）。
+
+##### `status.stage` 来源声明：`turn_agent` / `turn_skill`
+
+每轮进入图事件循环前，先回传一次 `agent_used`，再按条件推送两条来源声明 `status` 事件
+（`stage` 取 `turn_agent` / `turn_skill`）。顺序为「`agent_used` → `turn_agent` →
+`turn_skill` → 首个节点状态行」，且**先于同轮的澄清（`ask_user`）与委派（`delegate`）事件**
+——声明写入须早于 clarify drain 任务启动，否则并发 drain 会把澄清/委派事件插到前面。
+两条声明同写两个 sink：manager 缓冲（实时 SSE）与 `capture.events_log`（随 `process` 持久化、
+历史回放原样带出）。
+
+| stage | 文案模板 | 产出条件 |
+|-------|---------|---------|
+| `turn_agent` | `当前使用了 {agent}`（`{agent}` = 预设展示名 `display_name`，缺失回落 `name`） | 本轮解析出生效智能体（`agent_display_name` 非空）；未绑定智能体则无此条 |
+| `turn_skill` | inline / preload：`成功加载 skills：{顿号连接的名单}`；fork：`使用技能：/{skill}（子代理执行）` | 本轮有技能动作且名单非空；本轮无技能动作或 `/xxx` 命令失败（未注册）则无此条 |
+
+- 每轮**至多各一条**；条件不满足即不产出，**不得输出空行**（预加载正文为空时不置 preload，
+  不声明「成功加载 skills」而名单为空）。
+- 语义：声明表达**本轮触发**（意图）；结果（fork 中断/降级、失败原因）由既有通道呈现，
+  **声明不撤回、不改写**。
+- **文案不是结构化真源**：消费端取生效智能体必须用 `agent_used`，**不得**解析来源声明文本；
+  前端顶栏继续走 `agent_used`（评审约束）。
 
 #### 2.3.2 `POST /api/chat/clarify-answer → 200 | 404`
 
@@ -499,7 +520,7 @@ Success:
 
 `process` 字段（assistant 消息）：持久化的过程轨迹对象，`{"format_version": 1, "events": [{"seq", "type", "payload"}, ...]}`，seq 从 1 递增；前端历史回放据此重建过程容器，回答正文由 `content` 列承载、不重复入列。事件 `type` 实际枚举：`status` / `reasoning` / `preamble` / `delegate` / `ask_user`——`token` 帧不直接入列，正文前的旁白段固化为 `preamble`（见 glossary.md「旁白」），末轮 answer 正文 token 与 `model_info` / `abstention` / `done` / `error` / `citation` 五类排除（分别由 content / 既有列承载）。存量消息为 `null`；脏数据（非法 JSON / 非 dict）降级为 `null` 不阻断消息返回。
 
-`model_name` 字段（assistant 消息）：实际回答模型名，与 SSE `model_info` 事件同源；存量消息为 `null`。
+`model_name` 字段（assistant 消息）：实际回答模型名，与 SSE `model_info` 事件同源；存量消息为 `null`。前端历史回放据此重建模型标注，为空/缺失时不渲染。
 
 404:
 ```json

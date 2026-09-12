@@ -23,6 +23,11 @@
 `ask_user`，纯拒答时含 `abstention`，deep_thinking 时含 `reasoning`，delegate 委派 fork
 时穿插 `delegate` 过程事件 start/增量/end）
 
+每轮来源声明先于同轮澄清与委派：进入图事件循环前先回传一次 `agent_used`，再按条件推
+`status`（`turn_agent` / `turn_skill`），顺序为 `agent_used` → `turn_agent` → `turn_skill`
+→ 首个节点状态行，且先于同轮 `ask_user` / `delegate`；契约与文案见 api_contract.md
+「`status.stage` 来源声明」。
+
 用户问答在入口按 `kb_id` 是否为空分裂为两条实质不同的链路：**链路 2a（绑 KB 问答链，
 RAG 检索 + 验证）** 与 **链路 2b（未绑 KB 纯对话链，联网兜底）**。`kb_id` 由前端绑定，
 `chat_stream` 透传给 `agent_service.stream_chat`，后者写 `ctx.kb_bound = bool(kb_id)`
@@ -32,7 +37,10 @@ workflow.py:37-87）上的四处分叉：
 
 1. **prompt**：未绑 KB 时在系统指令后追加 `KB_UNBOUND_SYSTEM_PROMPT`，禁止调用检索
    （src/agents/graph/agent_node.py:68-74 以 `kb_bound=bool(state.kb_id)` 调
-   `build_prompt`；src/rag/prompt.py:42-43 注入）
+   `build_prompt`；src/rag/prompt.py:42-43 注入）。组装点为
+   `agent_node._initial_messages` → `build_prompt` → `build_system_prompt`
+   （system 段 persona/条件注入 → 技能注入消息 → 历史），组装点记 `prompt messages`
+   日志（见 logging-rules.md「来源与 prompt 观测事件」）
 2. **retrieve_kb 内部**：`kb_id` 为空直接返回空结果，不检索（rag_tools.py:127-130 硬保证）
 3. **verify 节点**：按 `state.kb_id` 分派态 A / 态 B 两套校验链（verify/node.py:35-84）
 4. **SSE 状态事件**：检索阶段与联网阶段文案不同（agent_service.py `_convert_event`）
