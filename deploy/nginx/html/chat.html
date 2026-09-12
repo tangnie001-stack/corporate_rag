@@ -1085,6 +1085,9 @@ function paintHeaderAgent(name) {
 
 // 从会话列表缓存同步当前会话的 KB / 智能体绑定与顶栏
 function syncHeaderFromSession() {
+  // 恢复会话时先复位新会话选择器：请求体取 boundAgent || state.agent，
+  // 若不复位，切到未绑定会话会沿用上一会话残留的选择器值（跨会话泄漏智能体）
+  selectAgent('');
   const info = sessionMap[state.sessionId];
   if (info) {
     state.kbId = info.kb_id || '';
