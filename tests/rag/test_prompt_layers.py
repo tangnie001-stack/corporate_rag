@@ -105,3 +105,57 @@ def test_get_base_system_prompt_excludes_env_appends():
     base = pm.get_base_system_prompt()
     assert base
     assert "今天是" not in base
+
+
+def test_prompt_assembled_logged_with_injection_facts(monkeypatch):
+    """build_system_prompt 记录人设来源与条件注入事实（design D11 #3/D15）。"""
+    from src.core.log_events import Event
+
+    calls: list[dict] = []
+
+    def fake_log_event(event, **fields):
+        calls.append({"event": event, **fields})
+
+    monkeypatch.setattr("src.rag.prompt.core_logging.log_event", fake_log_event)
+    pm = _pm(base="基础段正文")
+
+    build_system_prompt(
+        persona="你是财务专家。",
+        kb_bound=True,
+        has_skills=True,
+        prompt_manager=pm,
+    )
+
+    assembled = [c for c in calls if c["event"] is Event.PROMPT_ASSEMBLED]
+    assert len(assembled) == 1
+    payload = assembled[0]
+    assert payload["persona_source"] == "preset"
+    assert payload["kb_bound"] is True
+    assert payload["has_skills"] is True
+    assert payload["discipline_injected"] is True
+    assert payload["delegate_injected"] is True
+    assert payload["system_msgs"] == 1
+
+
+def test_prompt_assembled_reports_base_persona_and_no_discipline(monkeypatch):
+    """未选 agent（persona 为空）→ 人设来源 base、检索纪律不注入。
+
+    用最小替身（基础段不含委派引导）验证"persona 为空时委派段恒追加（缺则补）"：
+    真实 PromptManager 基础段已内嵌委派引导，守卫命中 → delegate_injected 为 False。
+    """
+    from src.core.log_events import Event
+
+    calls: list[dict] = []
+
+    def fake_log_event(event, **fields):
+        calls.append({"event": event, **fields})
+
+    monkeypatch.setattr("src.rag.prompt.core_logging.log_event", fake_log_event)
+    pm = _pm(base="基础段正文")
+
+    build_system_prompt(persona="", kb_bound=True, has_skills=False, prompt_manager=pm)
+
+    payload = next(c for c in calls if c["event"] is Event.PROMPT_ASSEMBLED)
+    assert payload["persona_source"] == "base"
+    assert payload["discipline_injected"] is False
+    assert payload["delegate_injected"] is True

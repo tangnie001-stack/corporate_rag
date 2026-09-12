@@ -883,6 +883,17 @@ class AgentService:
         else:
             ctx.persona = ""
             ctx.agent_display_name = ""
+        # [session] 生效智能体与解析来源（design D11 #2）：请求与绑定都为空时不记，
+        # 避免每轮噪声（log_event 级别由 EventSpec 固定，不能逐次降级为 debug）
+        if agent or bound_raw:
+            core_logging.log_event(
+                Event.AGENT_RESOLVED,
+                requested=agent,
+                bound=bound_raw,
+                effective=effective_agent,
+                source=resolution.source,
+                persona_applied=bool(ctx.persona),
+            )
 
         parsed = parse_prefix(query, known, self._skill_registry)
         direct_skill = ""
@@ -903,6 +914,14 @@ class AgentService:
                 effective_query = parsed.task
                 skill_action = "inline"
                 loaded_skills = [record.name]
+                # [session] 技能正文注入事实（design D11 #5）：inline 命令触发
+                core_logging.log_event(
+                    Event.SKILL_INJECTED,
+                    skill=record.name,
+                    mode="inline",
+                    chars=len(injected_text),
+                    source="command",
+                )
             else:
                 direct_skill = parsed.skill_name
                 effective_query = parsed.task
@@ -912,6 +931,19 @@ class AgentService:
             direct_skill = parsed.skill_name
             effective_query = parsed.task
             skill_action = "unknown"
+        # [session] 命令形态分派结果（design D11 #6）：普通文本轮不记（每轮噪声）
+        if parsed.kind != "plain":
+            record_ctx = parsed.record
+            context = "none"
+            if record_ctx is not None:
+                context = record_ctx.context
+            core_logging.log_event(
+                Event.SKILL_DISPATCH,
+                kind=parsed.kind,
+                skill=parsed.skill_name,
+                context=context,
+                direct_skill=direct_skill,
+            )
         launch_context["direct_skill"] = direct_skill
         launch_context["history"] = history
         launch_context["query"] = effective_query
@@ -930,6 +962,15 @@ class AgentService:
                 launch_context["history"] = history
                 skill_action = "preload"
                 loaded_skills = preload_names
+                # [session] 技能正文注入事实（design D11 #5）：预设首轮预加载；
+                # 多技能时 skill 取顿号连接名列表
+                core_logging.log_event(
+                    Event.SKILL_INJECTED,
+                    skill="、".join(preload_names),
+                    mode="preload",
+                    chars=len(preload_text),
+                    source="preset",
+                )
         ctx.skill_action = skill_action
         ctx.loaded_skills = loaded_skills
         # 主 POST 订阅不按 180s 空闲收流（长静默由任务生命周期收口，含 ask_user

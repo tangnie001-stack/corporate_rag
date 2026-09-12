@@ -119,6 +119,14 @@ def _initial_messages(state: AgentState, prompt_manager) -> list[BaseMessage]:
             if isinstance(m, SystemMessage):
                 insert_at = i + 1
         messages[insert_at:insert_at] = injected
+    # 首轮消息构成（design D11 #4）：system 段由 build_system_prompt 产出，注入段
+    # 来自 SKILL_INJECTION_PREFIX 抽取，history 段为清洗后的普通历史（不含当前 query）
+    core_logging.log_event(
+        Event.PROMPT_MESSAGES,
+        system_msgs=sum(1 for m in messages if isinstance(m, SystemMessage)),
+        injected_msgs=len(injected),
+        history_msgs=len(cleaned_normal),
+    )
     return messages
 
 
@@ -153,18 +161,23 @@ def make_agent_model_node(llm, tools, prompt_manager) -> Callable:
         turn_start = time.monotonic()
         # 采样温度分档（chat-temperature-policy）：未绑 KB → 非 KB 档（默认 0.6）；
         # 绑 KB → 不传 temperature，沿用模型构造温度 LLM_TEMPERATURE（默认 0.1），
-        # 同请求档位恒定（kb_id 首轮即固定）
+        # 同请求档位恒定（kb_id 首轮即固定）。temperature 为单一真源：同一变量既
+        # 用于 LLM 调用也用于日志（design D11 #1）
         chunks = []
         if state.kb_id:
+            temperature = settings.LLM_TEMPERATURE
+            temp_source = "default"
             async for chunk in model.astream(
                 messages, extra_body={"enable_thinking": state.deep_thinking}
             ):
                 chunks.append(chunk)
         else:
+            temperature = settings.NON_KB_MAIN_TEMPERATURE
+            temp_source = "explicit"
             async for chunk in model.astream(
                 messages,
                 extra_body={"enable_thinking": state.deep_thinking},
-                temperature=settings.NON_KB_MAIN_TEMPERATURE,
+                temperature=temperature,
             ):
                 chunks.append(chunk)
         result = chunks[0]
@@ -200,6 +213,9 @@ def make_agent_model_node(llm, tools, prompt_manager) -> Callable:
             fallback=False,
             latency_ms=int((time.monotonic() - turn_start) * 1000),
             iteration=iteration,
+            temperature=temperature,
+            temp_source=temp_source,
+            kb_bound=bool(state.kb_id),
         )
         delegate_used = any(
             call.get("name") == "delegate_task"

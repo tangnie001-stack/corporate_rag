@@ -8,6 +8,8 @@ from src.config.prompts import (
     KB_BOUND_RETRIEVAL_DISCIPLINE,
     KB_UNBOUND_SYSTEM_PROMPT,
 )
+from src.core import logging as core_logging
+from src.core.log_events import Event
 from src.infra.llm.chat_message import ChatMessage
 from src.infra.llm.prompt_manager import PromptManager, _with_current_date
 from src.rag.context import RAGContext
@@ -45,20 +47,36 @@ def build_system_prompt(
     """
     if persona:
         base = persona
+        persona_source = "preset"
     else:
         base = prompt_manager.get_base_system_prompt()
+        persona_source = "base"
     # 环境约束层·检索纪律：仅当绑定 KB 且选定 agent（persona 非空）时注入。
     # persona 为空时人设层即 FINANCIAL_SYSTEM_PROMPT，其处理流程 2–9 已含"先检索后作答"，
     # 无条件注入会破坏"默认行为逐字不变（端到端快照）"需求。
+    discipline_injected = False
     if kb_bound and persona and KB_BOUND_RETRIEVAL_DISCIPLINE not in base:
         base += KB_BOUND_RETRIEVAL_DISCIPLINE
+        discipline_injected = True
     if INLINE_CITATION_INSTRUCTION not in base:
         base += INLINE_CITATION_INSTRUCTION
+    delegate_injected = False
     if (has_skills or not persona) and DELEGATE_GUIDANCE_SECTION not in base:
         base += DELEGATE_GUIDANCE_SECTION
+        delegate_injected = True
     messages: list[SystemMessage] = [SystemMessage(content=_with_current_date(base))]
     if not kb_bound:
         messages.append(SystemMessage(content=KB_UNBOUND_SYSTEM_PROMPT))
+    # system prompt 组成事实（design D11 #3/D15）：人设来源 + 条件注入命中 + system 段数
+    core_logging.log_event(
+        Event.PROMPT_ASSEMBLED,
+        persona_source=persona_source,
+        kb_bound=kb_bound,
+        has_skills=has_skills,
+        discipline_injected=discipline_injected,
+        delegate_injected=delegate_injected,
+        system_msgs=len(messages),
+    )
     return messages
 
 

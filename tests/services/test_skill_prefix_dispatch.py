@@ -45,6 +45,7 @@ def _make_service(
     *,
     bound_agent: str = "",
     preset_system_prompt: str | None = None,
+    preset_skills: list[str] | None = None,
 ) -> tuple[AgentService, AsyncMock]:
     """构造只带分派所需依赖的 AgentService（跳过重型 __init__）。
 
@@ -73,6 +74,7 @@ def _make_service(
     if preset_system_prompt is not None:
         preset = MagicMock()
         preset.system_prompt = preset_system_prompt
+        preset.skills = preset_skills if preset_skills is not None else []
         preset_registry.get.return_value = preset
     else:
         preset_registry.get.return_value = None
@@ -173,3 +175,120 @@ async def test_ctx_persona_empty_without_preset():
     ctx = launch_ctx["ctx"]
     assert ctx.persona == ""
     assert ctx.has_skills is True
+
+
+def _capture_events(monkeypatch) -> list[dict]:
+    """拦截服务层 log_event，把事件与字段收进列表（日志走 loguru，不能用 caplog）。"""
+    calls: list[dict] = []
+
+    def fake_log_event(event, **fields):
+        calls.append({"event": event, **fields})
+
+    monkeypatch.setattr(
+        "src.services.agent_service.core_logging.log_event", fake_log_event
+    )
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_agent_resolved_logged_when_bound(monkeypatch):
+    """已绑定会话智能体：记一条 agent resolved，来源于沿用且人设已应用。"""
+    from src.core.log_events import Event
+
+    calls = _capture_events(monkeypatch)
+    svc, _ = _make_service(
+        [_fork()], bound_agent="finance-expert", preset_system_prompt="我是财务专家"
+    )
+    await svc.stream_chat("kb1", "s1", "你好")
+
+    resolved = [c for c in calls if c["event"] is Event.AGENT_RESOLVED]
+    assert len(resolved) == 1
+    payload = resolved[0]
+    assert payload["requested"] == ""
+    assert payload["bound"] == "finance-expert"
+    assert payload["effective"] == "finance-expert"
+    assert payload["source"] == "bound"
+    assert payload["persona_applied"] is True
+
+
+@pytest.mark.asyncio
+async def test_agent_resolved_not_logged_when_both_empty(monkeypatch):
+    """请求与绑定皆空 → 不记 agent resolved（避免每轮噪声，调用点守卫）。"""
+    from src.core.log_events import Event
+
+    calls = _capture_events(monkeypatch)
+    svc, _ = _make_service([_fork()])
+    await svc.stream_chat("kb1", "s1", "你好")
+
+    assert [c for c in calls if c["event"] is Event.AGENT_RESOLVED] == []
+
+
+@pytest.mark.asyncio
+async def test_skill_dispatch_logged_for_known(monkeypatch):
+    """命中 `/xxx` 命令 → 记一条 skill dispatch，kind=known 且直出技能名一致。"""
+    from src.core.log_events import Event
+
+    calls = _capture_events(monkeypatch)
+    svc, _ = _make_service([_fork()])
+    await svc.stream_chat("kb1", "s1", "/finance-analyst 腾讯2024")
+
+    dispatch = [c for c in calls if c["event"] is Event.SKILL_DISPATCH]
+    assert len(dispatch) == 1
+    payload = dispatch[0]
+    assert payload["kind"] == "known"
+    assert payload["skill"] == "finance-analyst"
+    assert payload["context"] == "fork"
+    assert payload["direct_skill"] == "finance-analyst"
+
+
+@pytest.mark.asyncio
+async def test_skill_dispatch_not_logged_for_plain(monkeypatch):
+    """普通文本轮（kind=plain）→ 不记 skill dispatch（避免每轮噪声）。"""
+    from src.core.log_events import Event
+
+    calls = _capture_events(monkeypatch)
+    svc, _ = _make_service([_fork()])
+    await svc.stream_chat("kb1", "s1", "帮我分析腾讯")
+
+    assert [c for c in calls if c["event"] is Event.SKILL_DISPATCH] == []
+
+
+@pytest.mark.asyncio
+async def test_skill_injected_logged_for_inline_command(monkeypatch):
+    """inline 命令注入 → 记一条 skill injected，mode=inline、source=command。"""
+    from src.core.log_events import Event
+
+    calls = _capture_events(monkeypatch)
+    svc, _ = _make_service([_inline()])
+    await svc.stream_chat("kb1", "s1", "/finance-qa 毛利率怎么算")
+
+    injected = [c for c in calls if c["event"] is Event.SKILL_INJECTED]
+    assert len(injected) == 1
+    payload = injected[0]
+    assert payload["skill"] == "finance-qa"
+    assert payload["mode"] == "inline"
+    assert payload["source"] == "command"
+    assert payload["chars"] > 0
+
+
+@pytest.mark.asyncio
+async def test_skill_injected_logged_for_preset_preload(monkeypatch):
+    """首轮预设预加载 → 记一条 skill injected，mode=preload、source=preset。"""
+    from src.core.log_events import Event
+
+    calls = _capture_events(monkeypatch)
+    svc, _ = _make_service(
+        [_inline("a")],
+        bound_agent="finance-expert",
+        preset_system_prompt="",
+        preset_skills=["a"],
+    )
+    await svc.stream_chat("kb1", "s1", "帮我分析", agent="")
+
+    injected = [c for c in calls if c["event"] is Event.SKILL_INJECTED]
+    assert len(injected) == 1
+    payload = injected[0]
+    assert payload["skill"] == "a"
+    assert payload["mode"] == "preload"
+    assert payload["source"] == "preset"
+    assert payload["chars"] > 0

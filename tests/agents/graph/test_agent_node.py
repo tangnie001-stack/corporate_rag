@@ -48,6 +48,26 @@ class StubPromptManager:
         return f"user template: {query}"
 
 
+def _make_state(query: str, kb_id: str = "", history=None) -> AgentState:
+    """构造最小图初始状态（测试用）。"""
+    if history is None:
+        history = []
+    return AgentState.make_initial_state("s1", kb_id, query, history)
+
+
+def _make_prompt_manager() -> StubPromptManager:
+    """构造最小 PromptManager 替身（测试用）。"""
+    return StubPromptManager()
+
+
+async def _run_one_turn(kb_id: str) -> dict:
+    """执行一次 model 节点调用（最小依赖替身），返回节点输出。"""
+    llm = MockChatModel(AIMessage(content="ok"))
+    node = make_agent_model_node(llm, [], _make_prompt_manager())
+    state = _make_state(query="q", kb_id=kb_id)
+    return await node(state)
+
+
 @pytest.mark.asyncio
 async def test_finalize_extracts_answer_and_contexts():
     """finalize 应提取末次消息文本为 answer，并把 tool_contexts 读入 state。"""
@@ -384,3 +404,71 @@ async def test_agent_model_temperature_same_tier_across_turns():
     await node(state)
     await node(state)
     assert captured == [captured[0], captured[0]]
+
+
+@pytest.mark.asyncio
+async def test_model_turn_logs_temperature_and_source(monkeypatch):
+    """未绑 KB → 显式传非 KB 档；绑 KB → 沿用构造默认（design D11 #1）。"""
+    from src.config import settings
+
+    calls: list[dict] = []
+
+    def fake_log_event(event, **fields):
+        calls.append({"event": event, **fields})
+
+    monkeypatch.setattr(
+        "src.agents.graph.agent_node.core_logging.log_event", fake_log_event
+    )
+
+    # 未绑 KB（state.kb_id == ""）
+    await _run_one_turn(kb_id="")
+    model_turn = [c for c in calls if c["event"].value == "model turn"][-1]
+    assert model_turn["temperature"] == settings.NON_KB_MAIN_TEMPERATURE
+    assert model_turn["temp_source"] == "explicit"
+    assert model_turn["kb_bound"] is False
+
+    calls.clear()
+    # 绑 KB
+    await _run_one_turn(kb_id="kb1")
+    model_turn = [c for c in calls if c["event"].value == "model turn"][-1]
+    assert model_turn["temperature"] == settings.LLM_TEMPERATURE
+    assert model_turn["temp_source"] == "default"
+    assert model_turn["kb_bound"] is True
+
+
+def test_prompt_messages_counts_three_segments(monkeypatch):
+    """首轮组装后记录 system / 注入 / 历史三段条数（design D11 #4）。"""
+    from src.agents.graph.agent_node import _initial_messages
+    from src.config.const import SKILL_INJECTION_PREFIX
+    from src.core.log_events import Event
+    from src.infra.llm.chat_message import ChatMessage
+    from src.infra.llm.request_context import RequestContext, current_request_ctx
+
+    calls: list[dict] = []
+
+    def fake_log_event(event, **fields):
+        calls.append({"event": event, **fields})
+
+    monkeypatch.setattr(
+        "src.agents.graph.agent_node.core_logging.log_event", fake_log_event
+    )
+    ctx = RequestContext(session_id="s1")
+    current_request_ctx.set(ctx)
+    try:
+        state = _make_state(
+            query="营收多少",
+            kb_id="",
+            history=[
+                ChatMessage(role="user", content="你好"),
+                ChatMessage(role="assistant", content="你好"),
+                ChatMessage(role="user", content=f"{SKILL_INJECTION_PREFIX}\n方法论"),
+            ],
+        )
+        _initial_messages(state, _make_prompt_manager())
+    finally:
+        current_request_ctx.set(None)
+
+    payload = next(c for c in calls if c["event"] is Event.PROMPT_MESSAGES)
+    assert payload["injected_msgs"] == 1
+    assert payload["history_msgs"] == 2
+    assert payload["system_msgs"] >= 1
