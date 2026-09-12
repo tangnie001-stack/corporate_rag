@@ -238,6 +238,17 @@
   .skill-menu.open{display:block}
   .agent-menu-empty{padding:10px 14px;font-size:12px;color:var(--text-muted)}
 
+  /* 输入框行首 / 命令补全：外观沿用技能菜单，改为向下弹出（包裹 textarea 的 .input-wrap 提供定位锚点） */
+  .input-wrap{position:relative;display:block}
+  .slash-menu{position:absolute;top:calc(100% + 6px);left:0;min-width:300px;max-width:100%;max-height:320px;overflow-y:auto;background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-lg);z-index:30;display:none}
+  .slash-menu.open{display:block}
+  .slash-item{display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer}
+  .slash-item:hover,.slash-item.active{background:var(--bg)}
+  .slash-item-name{font-size:13px;color:var(--text);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .slash-item-desc{flex:1;min-width:0;font-size:12px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .slash-empty{padding:10px 14px;font-size:12px;color:var(--text-muted)}
+  @media (prefers-reduced-motion:reduce){.slash-menu{transition:none}}
+
   /* 输入框（deepseek 圆角卡片） */
   .composer {
     width: 100%; max-width: 720px; margin: 0 auto;
@@ -786,7 +797,10 @@
 
       <div class="composer">
         <div id="newComposerContainer" class="composer-container"></div>
-        <textarea id="newInput" class="composer-input" placeholder="描述你想查询的内容，例如「腾讯这几年的业绩怎么样」"></textarea>
+        <div class="input-wrap">
+          <textarea id="newInput" class="composer-input" placeholder="描述你想查询的内容，例如「腾讯这几年的业绩怎么样」"></textarea>
+          <div class="slash-menu" id="newSlashMenu" role="listbox" aria-label="技能候选"></div>
+        </div>
         <div class="composer-bottom">
           <button type="button" id="newThinking" class="thinking-chip" aria-pressed="false" title="开启后模型先思考再回答，更准确但响应更慢">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 1 1 7.072 0l-.548.547A3.374 3.374 0 0 0 14 18.469V19a2 2 0 1 1-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
@@ -842,7 +856,10 @@
       <div class="composer-wrap">
         <div class="composer">
           <div id="historyComposerContainer" class="composer-container"></div>
-          <textarea id="historyInput" class="composer-input" placeholder="描述你想查询的内容…"></textarea>
+          <div class="input-wrap">
+            <textarea id="historyInput" class="composer-input" placeholder="描述你想查询的内容…"></textarea>
+            <div class="slash-menu" id="historySlashMenu" role="listbox" aria-label="技能候选"></div>
+          </div>
           <div class="composer-bottom">
             <button type="button" id="historyThinking" class="thinking-chip" aria-pressed="false" title="开启后模型先思考再回答，更准确但响应更慢">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 1 1 7.072 0l-.548.547A3.374 3.374 0 0 0 14 18.469V19a2 2 0 1 1-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
@@ -957,10 +974,10 @@ const errorMessage = $('errorMessage');
 // ── 双输入框（新对话页 / 历史对话页），只操作当前激活页面的 composer ──
 const _origPlaceholder = { new: '', history: '' };
 function composerNew() {
-  return { input: $('newInput'), sendBtn: $('newSendBtn'), stopBtn: $('newStopBtn'), container: $('newComposerContainer'), thinking: $('newThinking') };
+  return { input: $('newInput'), sendBtn: $('newSendBtn'), stopBtn: $('newStopBtn'), container: $('newComposerContainer'), thinking: $('newThinking'), slashMenu: $('newSlashMenu'), idPrefix: 'new' };
 }
 function composerHistory() {
-  return { input: $('historyInput'), sendBtn: $('historySendBtn'), stopBtn: $('historyStopBtn'), container: $('historyComposerContainer'), thinking: $('historyThinking') };
+  return { input: $('historyInput'), sendBtn: $('historySendBtn'), stopBtn: $('historyStopBtn'), container: $('historyComposerContainer'), thinking: $('historyThinking'), slashMenu: $('historySlashMenu'), idPrefix: 'history' };
 }
 function activeComposer() {
   return $('page-new').classList.contains('active') ? composerNew() : composerHistory();
@@ -2511,12 +2528,14 @@ function initComposerEvents(c) {
     c.stopBtn.addEventListener('click', stopGeneration);
   }
   c.input.addEventListener('keydown', (e) => {
+    if (handleSlashKeydown(e)) return;           // 补全优先消费按键
     if (e.key === 'Enter') {
       e.preventDefault();
       sendMessage();
     }
   });
   c.input.addEventListener('input', function () {
+    onInputSlash(c.input);                       // 行首 / 补全
     c.sendBtn.disabled = this.value.trim().length === 0;
   });
 }
@@ -2739,6 +2758,111 @@ function paintSkillChip(){
     chip.classList.toggle('active', !!state.skill);
     chip.querySelector('span').textContent = label;
   });
+}
+
+// ── 输入框行首 / 命令补全（与技能 chip 共用 state.skills）──
+let slashState = { open:false, frag:'', matches:[], active:0 };
+const SLASH_FRAG_RE = /^\/([A-Za-z0-9_-]*)$/;   // 与后端 prefix.PREFIX_PATTERN 字符集同源
+
+// 候选：排除「不使用技能」首项（name 为空），按 name 前缀匹配后字典序排序
+function slashMatches(frag){
+  return state.skills
+    .filter(function(s){ return !!s.name && s.name.indexOf(frag) === 0; })
+    .sort(function(a,b){ return a.name.localeCompare(b.name); });
+}
+
+function renderSlashMenu(){
+  const c = activeComposer();
+  const box = c.slashMenu;
+  if(!box) return;
+  if(!slashState.open){ box.classList.remove('open'); return; }
+  if(slashState.matches.length === 0){
+    box.innerHTML = '<div class="slash-empty">没有匹配的技能</div>';
+    box.classList.add('open');
+    c.input.removeAttribute('aria-activedescendant');
+    return;
+  }
+  box.innerHTML = slashState.matches.map(function(s, i){
+    const on = (i === slashState.active);
+    return '<div class="slash-item' + (on ? ' active' : '') + '" id="' + c.idPrefix + 'SlashOpt' + i + '"'
+      + ' role="option" aria-selected="' + (on ? 'true' : 'false') + '" data-name="' + escapeHtml(s.name) + '">'
+      + '<span class="slash-item-name">/' + escapeHtml(s.name) + '</span>'
+      + (s.description ? '<span class="slash-item-desc">' + escapeHtml(s.description) + '</span>' : '')
+      + '</div>';
+  }).join('');
+  box.classList.add('open');
+  // 焦点留在输入框，用 aria-activedescendant 播报高亮项
+  c.input.setAttribute('aria-activedescendant', c.idPrefix + 'SlashOpt' + slashState.active);
+  Array.prototype.forEach.call(box.querySelectorAll('.slash-item'), function(el){
+    el.addEventListener('mousedown', function(ev){
+      ev.preventDefault();                       // 保焦点，避免 textarea 失焦
+      applySlash(el.getAttribute('data-name'));
+    });
+  });
+}
+
+function onInputSlash(input){
+  const m = SLASH_FRAG_RE.exec(input.value || '');
+  if(!m){
+    slashState.open = false;
+    slashState.matches = [];
+    renderSlashMenu();
+    return;
+  }
+  slashState.open = true;
+  slashState.frag = m[1];
+  slashState.matches = slashMatches(slashState.frag);
+  slashState.active = 0;
+  renderSlashMenu();
+}
+
+// 插入选中技能：行首 /frag → /name␣（保留其余文本），光标置于名称之后
+function applySlash(name){
+  const c = activeComposer();
+  const rest = (c.input.value || '').slice(slashState.frag.length + 1);  // +1 = 前导 '/'
+  const prefix = '/' + name + ' ';
+  c.input.value = prefix + rest;
+  c.input.focus();
+  c.input.setSelectionRange(prefix.length, prefix.length);
+  c.input.dispatchEvent(new Event('input'));
+  slashState.open = false;
+  slashState.matches = [];
+  renderSlashMenu();
+}
+
+// 键盘：返回 true = 已消费（调用方不得再走发送逻辑）
+function handleSlashKeydown(e){
+  if(!slashState.open) return false;
+  if(e.key === 'Escape'){
+    e.preventDefault();
+    slashState.open = false;
+    renderSlashMenu();
+    return true;
+  }
+  if(e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+    e.preventDefault();
+    if(slashState.matches.length){
+      if(e.key === 'ArrowDown' && slashState.active < slashState.matches.length - 1){
+        slashState.active += 1;
+      }
+      if(e.key === 'ArrowUp' && slashState.active > 0){
+        slashState.active -= 1;
+      }
+      renderSlashMenu();
+    }
+    return true;
+  }
+  if(e.key === 'Enter'){
+    e.preventDefault();
+    if(slashState.matches.length === 0){
+      slashState.open = false;                   // 无匹配：关菜单且不发送
+      renderSlashMenu();
+      return true;
+    }
+    applySlash(slashState.matches[slashState.active].name);
+    return true;
+  }
+  return false;
 }
 
 // 单选勾选：点 A 取消 B；再点当前项取消勾选
@@ -3127,6 +3251,7 @@ function newSession() {
   resetKbSelector();
   selectAgent(''); // 新会话回到「默认」智能体
   state.skill = ''; // 新会话清空消息级技能
+  slashState.open = false; // 行首 / 补全菜单复位
   paintSkillChip();
   updateHeader('', '');
   showNewPage();
