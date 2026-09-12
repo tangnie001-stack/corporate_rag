@@ -15,6 +15,7 @@ from src.agents.graph.state import (
     LangGraphKey,
     LangGraphNode,
 )
+from src.agents.skills.models import SkillContext
 from src.config import TOP_K_RERANK
 from src.config.const import SSEInteractionTexts
 from src.rag.context import RAGContext
@@ -1269,3 +1270,63 @@ class TestResolveSessionAgentSource:
         chat_manager.bind_session_agent_async.assert_awaited_once_with(
             "s1", "finance-expert"
         )
+
+
+class TestTurnProvenanceContext:
+    """stream_chat 写入本轮来源承载字段（design D12/D13）。"""
+
+    @pytest.mark.asyncio
+    async def test_no_skill_round_keeps_none(self):
+        service, _ = _make_service()
+        service._graph = Mock()
+        _agen, launch = await service.stream_chat("", "s-none", "营收多少")
+        ctx = launch["ctx"]
+        assert ctx.skill_action == "none"
+        assert ctx.loaded_skills == []
+        assert ctx.agent_display_name == ""
+
+    @pytest.mark.asyncio
+    async def test_unknown_prefix_marks_unknown(self):
+        service, _ = _make_service()
+        service._graph = Mock()
+        service._skill_registry = Mock()
+        service._skill_registry.user_visible = Mock(return_value=[])
+        service._skill_registry.model_visible = Mock(return_value=[])
+        _agen, launch = await service.stream_chat("", "s-unknown", "/ghost 任务")
+        ctx = launch["ctx"]
+        assert ctx.skill_action == "unknown"
+        assert ctx.loaded_skills == []
+
+    @pytest.mark.asyncio
+    async def test_inline_prefix_marks_inline_with_canonical_name(self):
+        service, _ = _make_service()
+        service._graph = Mock()
+        record = Mock()
+        record.name = "finance-qa"
+        record.context = SkillContext.INLINE
+        record.inline_prompt = "方法论"
+        service._skill_registry = Mock()
+        service._skill_registry.user_visible = Mock(return_value=[record])
+        service._skill_registry.model_visible = Mock(return_value=[record])
+        # parse_prefix 命中后经 registry.get(name) 取回记录，须显式返回同一 record
+        service._skill_registry.get = Mock(return_value=record)
+        _agen, launch = await service.stream_chat("", "s-inline", "/finance-qa 任务")
+        ctx = launch["ctx"]
+        assert ctx.skill_action == "inline"
+        assert ctx.loaded_skills == ["finance-qa"]
+
+    @pytest.mark.asyncio
+    async def test_agent_display_name_comes_from_preset(self):
+        service, _ = _make_service()
+        service._graph = Mock()
+        preset = Mock()
+        preset.display_name = "财务专家"
+        preset.system_prompt = "你是财务专家"
+        preset.skills = []  # 无预加载技能，避免首轮预加载路径迭代 Mock
+        service._preset_registry = Mock()
+        service._preset_registry.get = Mock(return_value=preset)
+        _agen, launch = await service.stream_chat(
+            "", "s-agent", "营收多少", agent="finance-expert"
+        )
+        ctx = launch["ctx"]
+        assert ctx.agent_display_name == "财务专家"

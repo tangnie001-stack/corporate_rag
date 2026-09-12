@@ -850,12 +850,16 @@ class AgentService:
             session_preset = self._preset_registry.get(effective_agent)
         if session_preset is not None:
             ctx.persona = session_preset.system_prompt
+            ctx.agent_display_name = session_preset.display_name or session_preset.name
         else:
             ctx.persona = ""
+            ctx.agent_display_name = ""
 
         parsed = parse_prefix(query, known, self._skill_registry)
         direct_skill = ""
         effective_query = query
+        skill_action = "none"
+        loaded_skills: list[str] = []
         if parsed.kind == "known":
             record = parsed.record
             if record is not None and record.context == SkillContext.INLINE:
@@ -868,20 +872,25 @@ class AgentService:
                 )
                 history = history + [entry]
                 effective_query = parsed.task
+                skill_action = "inline"
+                loaded_skills = [record.name]
             else:
                 direct_skill = parsed.skill_name
                 effective_query = parsed.task
+                skill_action = "fork"
         elif parsed.kind == "unknown":
             # 未知前缀复用 skill_direct 的 fail-open 通道输出"不存在 + 可用列表"
             direct_skill = parsed.skill_name
             effective_query = parsed.task
+            skill_action = "unknown"
         launch_context["direct_skill"] = direct_skill
         launch_context["history"] = history
         launch_context["query"] = effective_query
         # 预设预绑定 skill 预加载：与 `/xxx` 走同一条持久化隐藏消息通道（T5b），
         # 仅首轮（history 空）且本轮无显式 `/xxx`（direct_skill == ""）时注入一次。
+        # 仅正文非空才置 preload，避免声明「成功加载 skills：」而名单为空
         if direct_skill == "":
-            preload_text, _preload_names = self._preload_if_first_round(
+            preload_text, preload_names = self._preload_if_first_round(
                 effective_agent, history
             )
             if preload_text:
@@ -890,6 +899,10 @@ class AgentService:
                 )
                 history = history + [preload_entry]
                 launch_context["history"] = history
+                skill_action = "preload"
+                loaded_skills = preload_names
+        ctx.skill_action = skill_action
+        ctx.loaded_skills = loaded_skills
         # 主 POST 订阅不按 180s 空闲收流（长静默由任务生命周期收口，含 ask_user
         # 等待、fork 长跑等合法静默）；resume 端点（sessions/events）保留空闲兜底
         return _subscribe_events(

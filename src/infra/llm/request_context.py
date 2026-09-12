@@ -61,6 +61,11 @@ class RequestContext:
     known_skill_names: set[str] = field(
         default_factory=set
     )  # 可 `user_visible()` 调用的技能名集合（来源：Plan 3 T5 写入；范围：请求内只读；用途：clean_prefix 读时清洗的历史/当前轮名单）
+    agent_display_name: str = ""  # 生效智能体的展示名（来源：Plan 3 会话预设 display_name，缺失回落 name）；范围：请求内只读；用途：SSE 来源声明文案
+    loaded_skills: list[str] = field(
+        default_factory=list
+    )  # 本轮成功加载的技能名（来源：inline 命中记录规范名 / 首轮预加载回传名单；范围：本轮；用途：SSE 技能声明一条列全；fork/unknown/none 留空）
+    skill_action: str = "none"  # 本轮技能动作模式（none|inline|preload|fork|unknown；来源：stream_chat 依 parse_prefix 三态与 record.context 判定）；范围：请求内只读；用途：决定是否发技能声明与发哪条文案
     delegate_id: str = ""  # 当前活跃委派 id（来源：delegate_task fork 分支生成短 uuid；范围：单次委派期间有效；用途：delegate start/增量/end 事件与日志贯穿标识；无活跃委派为空串）
     fork_stop_reason: str | None = (
         None  # 最近一次 fork 停止原因（来源：executor 中断时写入 DelegateStopReason 值；范围：委派期间有效；用途：delegate_task 终态区分 normal 与中断、task 注册表终态；None=正常完成或未执行）
