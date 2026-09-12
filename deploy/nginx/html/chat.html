@@ -216,7 +216,7 @@
   .agent-menu.open{display:block}
   .agent-menu-title{padding:10px 14px 6px;font-size:11px;color:var(--text-muted);letter-spacing:.08em}
   .agent-item{display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer}
-  .agent-item:hover{background:var(--bg)}
+  .agent-item:hover,.agent-item.active{background:var(--bg)}
   .agent-item-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
   .agent-item-name{font-size:13px;color:var(--text)}
   .agent-item-desc{font-size:12px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -1514,6 +1514,7 @@ function attachHistoryCitations(host, rawSources) {
 }
 
 function openCiteDrawer(citations, focusNum) {
+  closeTransientOverlays(); // T5: 打开强浮层前先关全部瞬时浮层
   closeTaskBoard(); // 与任务/进度面板互斥单开（task-board change）
   const list = document.getElementById('drawerList');
   if (!list) return;
@@ -1637,6 +1638,7 @@ function renderTaskBoard() {
 }
 
 function openTaskBoard() {
+  closeTransientOverlays();     // T5: 打开强浮层前先关全部瞬时浮层
   taskBoard.open = true;
   closeCiteDrawer();            // 与引用抽屉互斥单开
   const p = $('taskPanel');
@@ -2627,6 +2629,7 @@ function renderKbMenu() {
 }
 
 function openKbMenu() {
+  closeTransientOverlays(); // T5: 与智能体/技能菜单互斥单开（反向同理）
   const menu = $('kbMenu');
   menu.classList.add('open');
   $('kbTrigger').setAttribute('aria-expanded', 'true');
@@ -2682,7 +2685,12 @@ function selectAgent(name){
   closeAgentMenu();
 }
 
-function openAgentMenu(){ $('agentMenu').classList.add('open'); $('agentTrigger').setAttribute('aria-expanded','true'); }
+function openAgentMenu(){
+  closeTransientOverlays();                                            // T5: 打开前先关其余瞬时浮层（互斥单开）
+  $('agentMenu').classList.add('open');
+  $('agentTrigger').setAttribute('aria-expanded','true');
+  paintMenuNav('agent', 'agentTrigger', 'agentMenu', 'agent');         // T5: 键盘打开时高亮首项并写 aria-activedescendant
+}
 function closeAgentMenu(){ $('agentMenu').classList.remove('open'); $('agentTrigger').setAttribute('aria-expanded','false'); }
 
 // ── 技能选择器（消息级：菜单向上弹出，选中向活动输入框行首插入 /name ） ──
@@ -2767,10 +2775,11 @@ function renderSkillMenu(idPrefix){
 
 // 开合与 chip 状态：idPrefix ∈ {'newSkill','historySkill'}（两个 chip 共用同一份 state.skill）
 function openSkillMenu(idPrefix){
-  // T5: 统一互斥由 closeTransientOverlays() 收口
+  closeTransientOverlays();                                            // T5: 打开前先关其余瞬时浮层（互斥单开）
   $(idPrefix + 'Menu').classList.add('open');
   $(idPrefix === 'newSkill' ? 'newSkillChip' : 'historySkillChip').setAttribute('aria-expanded', 'true');
   renderSkillMenu(idPrefix);
+  paintMenuNav('skill', idPrefix + 'Chip', idPrefix + 'Menu', idPrefix); // T5: 键盘打开时高亮首项并写 aria-activedescendant
 }
 function closeSkillMenu(){
   ['newSkillMenu', 'historySkillMenu'].forEach(function(id){
@@ -2948,6 +2957,85 @@ $('kbList').addEventListener('click', (e) => {
   e.stopPropagation();
   pickKb(item.dataset.kbId, item.dataset.kbName);
 });
+// ===== 无障碍与互斥（T5）：两个新菜单的通用键盘导航 + 瞬时浮层互斥 =====
+const menuNav = { agent:{ active:-1 }, skill:{ active:-1 } };
+
+// 统一关闭"瞬时浮层"：KB 菜单 / 智能体菜单 / 技能菜单 / 用户下拉。
+// 不含引用抽屉与任务面板（"强浮层"，由 closeAllDrawers 管）。
+function closeTransientOverlays(){
+  closeKbMenu();
+  closeAgentMenu();
+  closeSkillMenu();
+  const dd = document.getElementById('userDropdown');
+  if(dd){ dd.classList.remove('show'); }
+}
+
+function menuOptions(menu){
+  return Array.prototype.slice.call(menu.querySelectorAll('[role="option"]'));
+}
+
+// 候选 id + 高亮态（class / aria-selected / 触发钮的 aria-activedescendant 三处同步）
+function paintMenuNav(kind, triggerId, menuId, idPrefix){
+  const menu = $(menuId);
+  const trigger = $(triggerId);
+  if(!menu || !trigger) return;
+  const items = menuOptions(menu);
+  const active = menuNav[kind].active;
+  items.forEach(function(el, i){
+    const on = (i === active);
+    el.id = idPrefix + 'Opt' + i;
+    el.classList.toggle('active', on);
+    el.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+  if(active >= 0 && items[active]){
+    trigger.setAttribute('aria-activedescendant', items[active].id);
+  }else{
+    trigger.removeAttribute('aria-activedescendant');
+  }
+}
+
+// 通用键盘处理：返回 true = 已消费该按键
+function handleMenuKeydown(kind, triggerId, menuId, idPrefix, e){
+  const menu = $(menuId);
+  if(!menu || !menu.classList.contains('open')) return false;
+  const items = menuOptions(menu);
+  if(e.key === 'Escape'){
+    e.preventDefault();
+    menuNav[kind].active = -1;
+    if(kind === 'agent'){ closeAgentMenu(); } else { closeSkillMenu(); }
+    $(triggerId).focus();                       // 关闭后焦点归还触发钮（规格 L122）
+    return true;
+  }
+  if(e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+    e.preventDefault();
+    if(items.length){
+      if(e.key === 'ArrowDown' && menuNav[kind].active < items.length - 1){
+        menuNav[kind].active += 1;
+      }
+      if(e.key === 'ArrowUp' && menuNav[kind].active > 0){
+        menuNav[kind].active -= 1;
+      }
+      paintMenuNav(kind, triggerId, menuId, idPrefix);
+    }
+    return true;
+  }
+  if(e.key === 'Enter' || e.key === ' '){
+    e.preventDefault();
+    const active = menuNav[kind].active;
+    if(active >= 0 && items[active]){
+      const name = items[active].getAttribute('data-name') || '';
+      if(kind === 'agent'){ selectAgent(name); } else { selectSkill(name); }
+    }else if(kind === 'agent'){
+      closeAgentMenu();
+    }else{
+      closeSkillMenu();
+    }
+    $(triggerId).focus();
+    return true;
+  }
+  return false;
+}
+
 const agentTrigger = $('agentTrigger');
 agentTrigger.addEventListener('click', (e) => {
   e.stopPropagation();
@@ -2959,9 +3047,11 @@ agentTrigger.addEventListener('click', (e) => {
   }
 });
 agentTrigger.addEventListener('keydown', (e) => {
+  if (handleMenuKeydown('agent', 'agentTrigger', 'agentMenu', 'agent', e)) return;
   if (e.key === 'Enter' || e.key === ' ') {
     e.preventDefault();
-    agentTrigger.click();
+    menuNav.agent.active = 0;                 // 键盘打开默认高亮首项（「默认」）
+    openAgentMenu();
   }
 });
 // 技能 chip 开合（两个 composer 各一枚，共用 state.skill；T5 补键盘导航）
@@ -2973,6 +3063,14 @@ function wireSkillChip(idPrefix){
     if (menu.classList.contains('open')) {
       closeSkillMenu();
     } else {
+      openSkillMenu(idPrefix);
+    }
+  });
+  chip.addEventListener('keydown', (e) => {
+    if (handleMenuKeydown('skill', idPrefix + 'Chip', idPrefix + 'Menu', idPrefix, e)) return;
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      menuNav.skill.active = 0;               // 键盘打开默认高亮首项
       openSkillMenu(idPrefix);
     }
   });
@@ -3363,9 +3461,25 @@ function toggleUserDropdown(e) {
   }
 }
 
-// Esc 关闭引用抽屉 / 任务/进度面板（task-board 复用既有 keydown，不重复注册监听）
+// Esc 关闭瞬时浮层 / 引用抽屉 / 任务面板（task-board 复用既有 keydown，不重复注册监听）
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
+    // 优先级：瞬时浮层（新菜单）→ 强浮层（引用抽屉 / 任务面板）
+    if ($('agentMenu') && $('agentMenu').classList.contains('open')) {
+      closeAgentMenu();
+      $('agentTrigger').focus();
+      return;
+    }
+    if ($('newSkillMenu') && $('newSkillMenu').classList.contains('open')) {
+      closeSkillMenu();
+      $('newSkillChip').focus();
+      return;
+    }
+    if ($('historySkillMenu') && $('historySkillMenu').classList.contains('open')) {
+      closeSkillMenu();
+      $('historySkillChip').focus();
+      return;
+    }
     const drawer = document.getElementById('citeDrawer');
     if (drawer && drawer.classList.contains('open')) {
       closeCiteDrawer();
