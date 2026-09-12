@@ -89,6 +89,9 @@ EVENT_SPECS: dict[str, EventSpec] = {
             "fallback",
             "latency_ms",
             "iteration",
+            "temperature",
+            "temp_source",
+            "kb_bound",
         ),
     ),
     "graph compiled": EventSpec("graph compiled", "agent", "info"),
@@ -331,5 +334,49 @@ EVENT_SPECS: dict[str, EventSpec] = {
     ),
     "fork confirm unconfirmed": EventSpec(
         "fork confirm unconfirmed", "agent", "warning", ("session_id", "reason")
+    ),
+    # [session/llm/agent] 每轮来源与 prompt 观测（turn-provenance-observability）
+    "agent resolved": EventSpec(
+        "agent resolved",
+        "session",
+        "info",
+        (
+            "requested",
+            "bound",
+            "effective",
+            "source",
+            "persona_applied",
+        ),
+    ),
+    "prompt assembled": EventSpec(
+        "prompt assembled",
+        "llm",
+        "info",
+        (
+            "persona_source",
+            "kb_bound",
+            "has_skills",
+            "discipline_injected",
+            "delegate_injected",
+            "system_msgs",
+        ),
+    ),
+    "prompt messages": EventSpec(
+        "prompt messages",
+        "agent",
+        "info",
+        ("system_msgs", "injected_msgs", "history_msgs"),
+    ),
+    "skill injected": EventSpec(
+        "skill injected",
+        "session",
+        "info",
+        ("skill", "mode", "chars", "source"),
+    ),
+    "skill dispatch": EventSpec(
+        "skill dispatch",
+        "session",
+        "info",
+        ("kind", "skill", "context", "direct_skill"),
     ),
 }

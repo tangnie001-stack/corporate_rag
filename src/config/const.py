@@ -207,6 +207,14 @@ class SSEInteractionTexts:
     # on_tool_start/on_tool_end（retrieve_kb）对应 stage：检索中/完成
     STAGE_RETRIEVE: str = "retrieve"
 
+    # ── 每轮来源声明 stage（turn-provenance）──
+    # 本轮生效智能体声明专用 stage：不得复用 retrieve/web_search（前端
+    # renderStatusTag 对这两者会触发"待定正文归为旁白"重分类）
+    STAGE_TURN_AGENT: str = "turn_agent"
+
+    # 本轮技能动作声明专用 stage：同上约束
+    STAGE_TURN_SKILL: str = "turn_skill"
+
     # ── Agent 状态事件文案 ──
     # on_chat_model_start（agent 节点）→ SSEStatusEvent(STAGE_AGENT)：模型开始思考
     AGENT_STATUS_THINKING: str = "正在思考..."
@@ -276,6 +284,14 @@ class SSEInteractionTexts:
     SKILL_DIRECT_UNAVAILABLE: str = "该技能不可直接执行，请去掉前缀后重试。"
     # 直出节点请求上下文不可用文案（current_request_ctx 未设置；用户可见兜底，纯中文）
     SKILL_DIRECT_CTX_UNAVAILABLE: str = "请求上下文不可用"
+
+    # ── 每轮来源声明文案（turn-provenance）──
+    # 生效智能体声明：{agent}=预设展示名（display_name，缺失回落 name）
+    AGENT_IN_USE_TMPL: str = "当前使用了 {agent}"
+    # 本轮技能声明：{skills}=成功解析的技能名列表（顿号连接；与 UNKNOWN_SKILL_PREFIX 同标点）
+    SKILLS_LOADED_TMPL: str = "成功加载 skills：{skills}"
+    # fork 轮技能声明：{skill}=fork 技能名（fork 不注入上下文，故称"使用"而非"加载"）
+    SKILL_IN_USE_TMPL: str = "使用技能：/{skill}（子代理执行）"
 
     # ── 直出轮确认门文案 ──
     # 确认被拒/超时/槽被占时拼在答案尾部的"未经确认"标注（用户可见）

@@ -44,3 +44,28 @@ def test_registry_import_validation_detects_drift():
     # 直接测校验函数（避免真的改类）
     with pytest.raises(AssertionError):
         le._validate_registry(events={"a"}, specs={})
+
+
+def test_turn_provenance_events_registered():
+    """来源与观测事件两处同名登记，且前缀/级别合法（design D11）。"""
+    expected = {
+        "agent resolved": ("session", "info"),
+        "prompt assembled": ("llm", "info"),
+        "prompt messages": ("agent", "info"),
+        "skill injected": ("session", "info"),
+        "skill dispatch": ("session", "info"),
+    }
+    for name, (prefix, level) in expected.items():
+        member = le.Event(name)
+        assert member.value == name
+        spec = le.EVENT_SPECS[name]
+        assert spec.prefix == prefix
+        assert spec.level == level
+
+
+def test_model_turn_spec_includes_temperature_fields():
+    """model turn 扩 temperature / temp_source / kb_bound（design D11 #1）。"""
+    fields = le.EVENT_SPECS["model turn"].fields
+    assert "temperature" in fields
+    assert "temp_source" in fields
+    assert "kb_bound" in fields

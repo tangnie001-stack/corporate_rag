@@ -188,6 +188,17 @@ class Event(str, Enum):
     FORK_CONFIRM_ASKED = "fork confirm asked"
     FORK_CONFIRM_UNCONFIRMED = "fork confirm unconfirmed"
 
+    # [session] 本轮生效智能体与来源（turn-provenance；两者全空时不记）
+    AGENT_RESOLVED = "agent resolved"
+    # [llm] system prompt 组成（人设来源、条件注入、system 段数）
+    PROMPT_ASSEMBLED = "prompt assembled"
+    # [agent] 首轮组装的消息构成（system / 注入 / 历史三段条数）
+    PROMPT_MESSAGES = "prompt messages"
+    # [session] 技能正文成功注入（inline 命令触发 / 首轮预设预加载）
+    SKILL_INJECTED = "skill injected"
+    # [session] 命令形态分派结果（kind=plain 不记，避免每轮噪声）
+    SKILL_DISPATCH = "skill dispatch"
+
 
 @dataclass(frozen=True)
 class ReplayEvent:
