@@ -1513,6 +1513,18 @@ function attachHistoryCitations(host, rawSources) {
   scrollToBottom();
 }
 
+// 历史回放：用既有 model_name 列重建模型标注（design D16）。
+// model_info 帧不入 process，故回放只能读列；is_fallback 未持久化，
+// 回放不重建 fallback 标记（已知限制）。空/缺失（存量消息）直接跳过，
+// 不补占位行——与来源声明的"缺则不渲染"口径一致。
+function attachHistoryModelNote(row, modelName) {
+  if (!row || !modelName) return;
+  const div = document.createElement('div');
+  div.className = 'model-note';
+  div.innerHTML = `由 <b>${escapeHtml(modelName)}</b> 回答`;
+  row.insertAdjacentElement('afterend', div);
+}
+
 function openCiteDrawer(citations, focusNum) {
   closeTransientOverlays(); // T5: 打开强浮层前先关全部瞬时浮层
   closeTaskBoard(); // 与任务/进度面板互斥单开（task-board change）
@@ -3355,6 +3367,8 @@ async function loadSessionMessages(sessionId) {
         // 历史回放重建引用：sources 由后端反序列化为数组（结构化 dict / 旧扁平串），
         // 渲染横条并可展开抽屉（含 snippet）；刷新/切换会话后引用不丢失
         attachHistoryCitations(lastAiRow(), m.sources);
+        // 历史回放重建模型标注：从既有 model_name 列还原「由 X 回答」，位置与引用栏同级
+        attachHistoryModelNote(lastAiRow(), m.model_name);
       }
     });
     return messages.length;
