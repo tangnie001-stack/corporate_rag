@@ -226,6 +226,18 @@
   .agent-menu-foot{padding:8px 14px;border-top:1px solid var(--border);font-size:11px;color:var(--text-muted)}
   @media (prefers-reduced-motion:reduce){.agent-trigger{transition:none}}
 
+  /* ★ 技能选择器（消息级）：与 .thinking-chip 同构，位于深度思考 chip 右侧；菜单向上弹出 */
+  .skill-select { position: relative; }
+  .skill-chip{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 12px;border:1px solid transparent;border-radius:14px;background:transparent;color:var(--text-secondary);font-size:12px;font-weight:500;font-family:var(--font-body);flex-shrink:0;cursor:pointer;transition:background 150ms,color 150ms,border-color 150ms}
+  .skill-chip:hover{background:var(--bg)}
+  .skill-chip.active{background:var(--primary-light);border-color:var(--primary);color:var(--primary)}
+  .skill-chip:focus-visible{box-shadow:0 0 0 3px rgba(59,130,246,0.3);outline:none}
+  .skill-chip svg{width:13px;height:13px}
+  .skill-chip .chevron{width:10px;height:10px;opacity:.6}
+  .skill-menu{position:absolute;bottom:calc(100% + 8px);left:0;min-width:300px;max-height:320px;overflow-y:auto;background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-lg);z-index:30;display:none}
+  .skill-menu.open{display:block}
+  .agent-menu-empty{padding:10px 14px;font-size:12px;color:var(--text-muted)}
+
   /* 输入框（deepseek 圆角卡片） */
   .composer {
     width: 100%; max-width: 720px; margin: 0 auto;
@@ -780,6 +792,18 @@
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 1 1 7.072 0l-.548.547A3.374 3.374 0 0 0 14 18.469V19a2 2 0 1 1-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
             <span>深度思考</span>
           </button>
+          <div class="skill-select">
+            <button type="button" id="newSkillChip" class="skill-chip" aria-haspopup="listbox" aria-expanded="false" title="选择技能：插入 /技能名 后发送，本会话持续生效">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 5h7a4 4 0 0 1 4 4v10"/><path d="M21 5h-7a4 4 0 0 0-4 4v10"/></svg>
+              <span id="newSkillLabel">技能</span>
+              <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+            </button>
+            <div class="skill-menu" id="newSkillMenu" role="listbox" aria-label="选择技能">
+              <div class="agent-menu-title">选择技能</div>
+              <div id="newSkillList"></div>
+              <div class="agent-menu-foot">插入 /名称 后发送，本会话持续生效</div>
+            </div>
+          </div>
           <div class="composer-actions">
             <button class="send-btn" id="newSendBtn" disabled title="发送">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
@@ -824,6 +848,18 @@
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 1 1 7.072 0l-.548.547A3.374 3.374 0 0 0 14 18.469V19a2 2 0 1 1-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
               <span>深度思考</span>
             </button>
+            <div class="skill-select">
+              <button type="button" id="historySkillChip" class="skill-chip" aria-haspopup="listbox" aria-expanded="false" title="选择技能：插入 /技能名 后发送，本会话持续生效">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 5h7a4 4 0 0 1 4 4v10"/><path d="M21 5h-7a4 4 0 0 0-4 4v10"/></svg>
+                <span id="historySkillLabel">技能</span>
+                <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+              </button>
+              <div class="skill-menu" id="historySkillMenu" role="listbox" aria-label="选择技能">
+                <div class="agent-menu-title">选择技能</div>
+                <div id="historySkillList"></div>
+                <div class="agent-menu-foot">插入 /名称 后发送，本会话持续生效</div>
+              </div>
+            </div>
             <div class="composer-actions">
               <button class="send-btn" id="historySendBtn" disabled title="发送">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
@@ -886,6 +922,8 @@ const state = {
   kbName: '',      // 会话绑定的知识库名称（顶栏展示用）
   agent: '',       // 本会话绑定的智能体预设名（'' = 默认/未绑定）
   agents: [],      // GET /api/agents 的候选（含前端合成的「默认」项）
+  skill: '',       // 消息级技能名（'' = 不使用技能；选中后本会话持续生效）
+  skills: [],      // GET /api/skills 的候选（含前端合成的「不使用技能」项）
   abortController: null,
   lastSeq: 0,      // 最近收到的 SSE 帧序列号（断线续接 after_seq 基准，新轮生成归零）
   traceId: '',     // 最近一次完成的 SSE 流的 trace_id（done 事件记录，反馈时回传）
@@ -2596,6 +2634,101 @@ function selectAgent(name){
 function openAgentMenu(){ $('agentMenu').classList.add('open'); $('agentTrigger').setAttribute('aria-expanded','true'); }
 function closeAgentMenu(){ $('agentMenu').classList.remove('open'); $('agentTrigger').setAttribute('aria-expanded','false'); }
 
+// ── 技能选择器（消息级：菜单向上弹出，选中向活动输入框行首插入 /name ） ──
+// 加载技能候选：首项为前端合成的「不使用技能」（value=''），失败静默降级为仅该项
+async function loadSkills(){
+  const fallback = [{ name:'', description:'不使用技能' }];
+  try{
+    const resp = await fetch('/api/skills', { headers:{ 'X-Trace-ID': generateTraceId() } });
+    const body = await resp.json();
+    const list = (body && body.data && Array.isArray(body.data.skills)) ? body.data.skills : [];
+    state.skills = fallback.concat(list);
+  }catch(e){ state.skills = fallback; }
+  renderSkillMenu('newSkill');
+  renderSkillMenu('historySkill');
+}
+
+// 向活动输入框行首插入 `/name `（已有内容时插入到最前并补一个空格，光标置于名称之后）
+function insertSkillPrefix(name){
+  const c = activeComposer();
+  const input = c.input;
+  const text = input.value || '';
+  const prefix = '/' + name + ' ';
+  if(text.length === 0){
+    input.value = prefix;
+  }else if(text.charAt(0) === '/'){
+    input.value = prefix + text.replace(/^\S+\s*/, '');
+  }else{
+    input.value = prefix + text;
+  }
+  input.focus();
+  input.setSelectionRange(prefix.length, prefix.length);
+  input.dispatchEvent(new Event('input'));
+}
+
+// 选中技能：单选、更新 chip 文案与选中态、向输入框插入前缀
+function selectSkill(name){
+  state.skill = name || '';
+  paintSkillChip();
+  renderSkillMenu('newSkill');
+  renderSkillMenu('historySkill');
+  closeSkillMenu();
+  if(state.skill){ insertSkillPrefix(state.skill); }
+}
+
+// 渲染技能菜单：首项「不使用技能」+ 真实技能；候选项带 data-name 供键盘选中
+// （option 的 id 与 aria-activedescendant 由 T5 的 paintMenuNav 运行时写入，此处不写 id）
+function renderSkillMenu(idPrefix){
+  const box = $(idPrefix + 'List');
+  if(!box) return;
+  const hasReal = state.skills.some(function(s){ return !!s.name; });
+  const current = state.skill || '';
+  box.innerHTML = state.skills.map(function(s){
+    const selected = (s.name === current);
+    const label = s.name ? ('/' + s.name) : '不使用技能';
+    const desc = s.name ? (s.description || '') : '';
+    return '<div class="agent-item" role="option" tabindex="-1" aria-selected="' + (selected ? 'true' : 'false') + '" data-name="' + escapeHtml(s.name) + '">'
+      + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><path d="M3 5h7a4 4 0 0 1 4 4v10"/><path d="M21 5h-7a4 4 0 0 0-4 4v10"/></svg>'
+      + '<span class="agent-item-info"><span class="agent-item-name">' + escapeHtml(label) + '</span>'
+      + (desc ? '<span class="agent-item-desc">' + escapeHtml(desc) + '</span>' : '') + '</span>'
+      + '<span class="check">' + (selected ? '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg>' : '') + '</span>'
+      + '</div>';
+  }).join('') + (hasReal ? '' : '<div class="agent-menu-empty">暂无可调用技能</div>');
+  Array.prototype.forEach.call(box.querySelectorAll('.agent-item'), function(el){
+    el.addEventListener('mousedown', function(ev){
+      ev.preventDefault();                       // 保焦点，避免输入框失焦
+      selectSkill(el.getAttribute('data-name'));
+    });
+  });
+}
+
+// 开合与 chip 状态：idPrefix ∈ {'newSkill','historySkill'}（两个 chip 共用同一份 state.skill）
+function openSkillMenu(idPrefix){
+  // T5: 统一互斥由 closeTransientOverlays() 收口
+  $(idPrefix + 'Menu').classList.add('open');
+  $(idPrefix === 'newSkill' ? 'newSkillChip' : 'historySkillChip').setAttribute('aria-expanded', 'true');
+  renderSkillMenu(idPrefix);
+}
+function closeSkillMenu(){
+  ['newSkillMenu', 'historySkillMenu'].forEach(function(id){
+    const menu = $(id);
+    if(menu){ menu.classList.remove('open'); }
+  });
+  $('newSkillChip').setAttribute('aria-expanded', 'false');
+  $('historySkillChip').setAttribute('aria-expanded', 'false');
+}
+
+// chip 文案与选中态（两个 chip 同步显示同一 state.skill）
+function paintSkillChip(){
+  const label = state.skill ? ('技能 · ' + state.skill) : '技能';
+  ['newSkillChip', 'historySkillChip'].forEach(function(id){
+    const chip = $(id);
+    if(!chip) return;
+    chip.classList.toggle('active', !!state.skill);
+    chip.querySelector('span').textContent = label;
+  });
+}
+
 // 单选勾选：点 A 取消 B；再点当前项取消勾选
 function pickKb(kbId, kbName) {
   if (state.kbId === kbId) {
@@ -2663,6 +2796,21 @@ agentTrigger.addEventListener('keydown', (e) => {
     agentTrigger.click();
   }
 });
+// 技能 chip 开合（两个 composer 各一枚，共用 state.skill；T5 补键盘导航）
+function wireSkillChip(idPrefix){
+  const chip = $(idPrefix + 'Chip');
+  chip.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const menu = $(idPrefix + 'Menu');
+    if (menu.classList.contains('open')) {
+      closeSkillMenu();
+    } else {
+      openSkillMenu(idPrefix);
+    }
+  });
+}
+wireSkillChip('newSkill');
+wireSkillChip('historySkill');
 document.addEventListener('click', (e) => {
   const menu = $('kbMenu');
   if (menu && menu.classList.contains('open') &&
@@ -2673,6 +2821,16 @@ document.addEventListener('click', (e) => {
   if (agentMenu && agentMenu.classList.contains('open') &&
       !agentMenu.contains(e.target) && !agentTrigger.contains(e.target)) {
     closeAgentMenu();
+  }
+  const newSkillMenu = $('newSkillMenu');
+  if (newSkillMenu && newSkillMenu.classList.contains('open') &&
+      !newSkillMenu.contains(e.target) && !$('newSkillChip').contains(e.target)) {
+    closeSkillMenu();
+  }
+  const historySkillMenu = $('historySkillMenu');
+  if (historySkillMenu && historySkillMenu.classList.contains('open') &&
+      !historySkillMenu.contains(e.target) && !$('historySkillChip').contains(e.target)) {
+    closeSkillMenu();
   }
 });
 
@@ -2956,6 +3114,8 @@ function newSession() {
   localStorage.setItem('rag_session_id', sid);
   resetKbSelector();
   selectAgent(''); // 新会话回到「默认」智能体
+  state.skill = ''; // 新会话清空消息级技能
+  paintSkillChip();
   updateHeader('', '');
   showNewPage();
   loadSessions();
@@ -3103,6 +3263,7 @@ async function handleLogout() {
   // 时回退旧行为（有历史 id 仍尝试恢复），避免列表故障连带丢失会话恢复能力。
   loadKBs();
   loadAgents();
+  loadSkills();
   loadSessions().then((listOk) => {
     const known = listOk ? !!sessionMap[state.sessionId] : hadSavedSession;
     if (!known) {
