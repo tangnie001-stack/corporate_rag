@@ -923,7 +923,7 @@ const state = {
   agent: '',       // 本会话绑定的智能体预设名（'' = 默认/未绑定）
   agents: [],      // GET /api/agents 的候选（含前端合成的「默认」项）
   skill: '',       // 消息级技能名（'' = 不使用技能；选中后本会话持续生效）
-  skills: [],      // GET /api/skills 的候选（含前端合成的「不使用技能」项）
+  skills: [{ name:'', description:'不使用技能' }],  // GET /api/skills 的候选（含前端合成的「不使用技能」项；初始即含首项，菜单在加载完成前打开也有该项）
   abortController: null,
   lastSeq: 0,      // 最近收到的 SSE 帧序列号（断线续接 after_seq 基准，新轮生成归零）
   traceId: '',     // 最近一次完成的 SSE 流的 trace_id（done 事件记录，反馈时回传）
@@ -2666,14 +2666,26 @@ function insertSkillPrefix(name){
   input.dispatchEvent(new Event('input'));
 }
 
-// 选中技能：单选、更新 chip 文案与选中态、向输入框插入前缀
+// 选中技能：单选、更新 chip 文案与选中态；选中真实技能时插入前缀，选「不使用技能」时清除行首前缀
 function selectSkill(name){
   state.skill = name || '';
   paintSkillChip();
   renderSkillMenu('newSkill');
   renderSkillMenu('historySkill');
   closeSkillMenu();
-  if(state.skill){ insertSkillPrefix(state.skill); }
+  if(state.skill){
+    insertSkillPrefix(state.skill);
+  }else{
+    // 清除当前选择：剥掉活动输入框行首的 `/技能名 ` 前缀（与 insertSkillPrefix 同一正则），光标归位
+    const input = activeComposer().input;
+    const text = input.value || '';
+    if(text.charAt(0) === '/'){
+      input.value = text.replace(/^\S+\s*/, '');
+      input.focus();
+      input.setSelectionRange(0, 0);
+      input.dispatchEvent(new Event('input'));
+    }
+  }
 }
 
 // 渲染技能菜单：首项「不使用技能」+ 真实技能；候选项带 data-name 供键盘选中
