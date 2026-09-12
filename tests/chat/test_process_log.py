@@ -73,6 +73,30 @@ class TestBuildProcessEvents:
         assert purified == "今天天气不错"
 
 
+def test_turn_provenance_statuses_survive_exclusion():
+    """回归：来源声明（stage=turn_agent/turn_skill）不被 _EXCLUDED_TYPES 吞掉。
+
+    design D6/Risks —— 若后续改动排除集，此断言必须变红。
+    """
+    events = [
+        {
+            "type": "status",
+            "payload": {"stage": "turn_agent", "message": "当前使用了 财务专家"},
+        },
+        {
+            "type": "status",
+            "payload": {
+                "stage": "turn_skill",
+                "message": "成功加载 skills：finance-qa",
+            },
+        },
+        {"type": "done", "payload": {}},
+    ]
+    result, _purified = build_process_events(events)
+    kept = [e for e in result["events"] if e["type"] == "status"]
+    assert [e["payload"]["stage"] for e in kept] == ["turn_agent", "turn_skill"]
+
+
 class TestSerializeProcess:
     def test_returns_json_and_purified(self):
         process_json, purified = serialize_process(_load_events())

@@ -546,6 +546,35 @@ async def _run_generation(
     # 顶栏；空串=未绑定→系统默认）。须早于首个 graph 事件入缓冲
     agent_event = SSEAgentUsedEvent(agent=ctx.agent)
     manager.add_event(session_id, agent_event.type, agent_event.payload_for_buffer())
+    # 每轮来源声明（design D1/D7）：复用 status，stage 用专用值；两条均写两个
+    # sink（events_log 负责随 process 持久化与历史回放，manager 缓冲负责实时 SSE）。
+    # 必须在创建 clarify drain 任务之前写入，否则并发 drain 会把 ask_user/delegate
+    # 事件插到前面，破坏"来源声明先于澄清与委派"的顺序契约。
+    if ctx.agent_display_name:
+        agent_decl = SSEStatusEvent(
+            stage=SSEInteractionTexts.STAGE_TURN_AGENT,
+            message=SSEInteractionTexts.AGENT_IN_USE_TMPL.format(
+                agent=ctx.agent_display_name
+            ),
+        )
+        _record_event(capture, agent_decl)
+        manager.add_event(session_id, agent_decl.type, agent_decl.payload_for_buffer())
+    if ctx.skill_action in ("inline", "preload") and ctx.loaded_skills:
+        skill_decl = SSEStatusEvent(
+            stage=SSEInteractionTexts.STAGE_TURN_SKILL,
+            message=SSEInteractionTexts.SKILLS_LOADED_TMPL.format(
+                skills="、".join(ctx.loaded_skills)
+            ),
+        )
+        _record_event(capture, skill_decl)
+        manager.add_event(session_id, skill_decl.type, skill_decl.payload_for_buffer())
+    elif ctx.skill_action == "fork" and direct_skill:
+        fork_decl = SSEStatusEvent(
+            stage=SSEInteractionTexts.STAGE_TURN_SKILL,
+            message=SSEInteractionTexts.SKILL_IN_USE_TMPL.format(skill=direct_skill),
+        )
+        _record_event(capture, fork_decl)
+        manager.add_event(session_id, fork_decl.type, fork_decl.payload_for_buffer())
     # 澄清通道与图事件循环并行：ask_user / web_confirm 经 clarify_channel
     # 投递的问题 payload 须转 SSE 写入缓冲，否则前端收不到澄清卡
     drain_task = asyncio.create_task(

@@ -177,6 +177,7 @@ async def _collect_events(
             streaming_manager,
             graph=launch_ctx["graph"],
             partial_holder=partial_holder,
+            direct_skill=launch_ctx.get("direct_skill", ""),
         )
 
     task = asyncio.create_task(
@@ -1330,3 +1331,225 @@ class TestTurnProvenanceContext:
         )
         ctx = launch["ctx"]
         assert ctx.agent_display_name == "财务专家"
+
+
+class TestTurnProvenanceStatus:
+    """每轮开头两条来源声明的文案、顺序与幂等（design D7/D8）。"""
+
+    @staticmethod
+    def _service_with_binding(record=None, preset=None, session_agent=""):
+        """构造带技能/预设绑定的服务；record 同时供 user_visible 与 registry.get。
+
+        session_agent 经返回的 AsyncMock（类型明确）设置，避免对
+        service._chat_manager（声明为 ChatManager）强设 return_value。
+        """
+        service, chat_manager = _make_service()
+        chat_manager.get_session_agent_async.return_value = session_agent
+        if record is not None:
+            service._skill_registry = Mock()
+            service._skill_registry.user_visible = Mock(return_value=[record])
+            service._skill_registry.model_visible = Mock(return_value=[record])
+            # parse_prefix 命中后经 registry.get(name) 取回同一条记录
+            service._skill_registry.get = Mock(return_value=record)
+        if preset is not None:
+            service._preset_registry = Mock()
+            service._preset_registry.get = Mock(return_value=preset)
+        return service
+
+    @pytest.mark.asyncio
+    async def test_agent_and_skill_declarations_precede_node_status(self):
+        """顺序：agent_used → turn_agent → turn_skill → 首个节点状态行。"""
+        record = Mock()
+        record.name = "finance-qa"
+        record.context = SkillContext.INLINE
+        record.inline_prompt = "方法论"
+        preset = Mock()
+        preset.display_name = "财务专家"
+        preset.system_prompt = "你是财务专家"
+        preset.skills = []
+        service = self._service_with_binding(
+            record=record, preset=preset, session_agent="finance-expert"
+        )
+
+        async def fake_astream(*args, **kwargs):
+            yield _chat_model_start_item()
+
+        service._graph = Mock()
+        service._graph.astream_events = fake_astream
+
+        events, _ = await _collect_events(
+            service, "", "session-prov", "/finance-qa 任务"
+        )
+        statuses = [e for e in events if isinstance(e, SSEStatusEvent)]
+        assert [s.stage for s in statuses][:2] == [
+            SSEInteractionTexts.STAGE_TURN_AGENT,
+            SSEInteractionTexts.STAGE_TURN_SKILL,
+        ]
+        assert statuses[0].message == "当前使用了 财务专家"
+        assert statuses[1].message == "成功加载 skills：finance-qa"
+
+    @pytest.mark.asyncio
+    async def test_no_declaration_when_unbound_and_plain(self):
+        """未绑定智能体 + 普通文本 → 不产出任何来源声明。"""
+        service, _ = _make_service()
+
+        async def fake_astream(*args, **kwargs):
+            yield _chat_model_start_item()
+
+        service._graph = Mock()
+        service._graph.astream_events = fake_astream
+
+        events, _ = await _collect_events(service, "", "session-plain", "营收多少")
+        stages = [e.stage for e in events if isinstance(e, SSEStatusEvent)]
+        assert SSEInteractionTexts.STAGE_TURN_AGENT not in stages
+        assert SSEInteractionTexts.STAGE_TURN_SKILL not in stages
+
+    @pytest.mark.asyncio
+    async def test_preload_declares_all_skills_in_one_line(self):
+        """preload 多技能：只 1 条 turn_skill，顿号分隔、按声明顺序（spec R2）。"""
+        service, chat_manager = _make_service()
+        chat_manager.get_session_agent_async.return_value = "finance-expert"
+        preset = Mock()
+        preset.display_name = "财务专家"
+        preset.system_prompt = "你是财务专家"
+        preset.skills = ["a", "b"]
+        service._preset_registry = Mock()
+        service._preset_registry.get = Mock(return_value=preset)
+        record_a = Mock()
+        record_a.name = "a"
+        record_a.inline_prompt = "方法论A"
+        record_b = Mock()
+        record_b.name = "b"
+        record_b.inline_prompt = "方法论B"
+        service._skill_registry = Mock()
+        service._skill_registry.user_visible = Mock(return_value=[])
+        service._skill_registry.model_visible = Mock(return_value=[record_a, record_b])
+        service._skill_registry.get = Mock(
+            side_effect={"a": record_a, "b": record_b}.get
+        )
+
+        async def fake_astream(*args, **kwargs):
+            yield _chat_model_start_item()
+
+        service._graph = Mock()
+        service._graph.astream_events = fake_astream
+
+        events, _ = await _collect_events(service, "", "session-preload", "营收多少")
+        skill_statuses = [
+            e
+            for e in events
+            if isinstance(e, SSEStatusEvent)
+            and e.stage == SSEInteractionTexts.STAGE_TURN_SKILL
+        ]
+        assert len(skill_statuses) == 1
+        assert skill_statuses[0].message == "成功加载 skills：a、b"
+
+    @pytest.mark.asyncio
+    async def test_fork_declaration_uses_subagent_wording(self):
+        """fork 命中：一条 turn_skill，措辞为子代理执行，不得出现"加载"字样。"""
+        record = Mock()
+        record.name = "finance-analyst"
+        record.context = SkillContext.FORK
+        preset = Mock()
+        preset.display_name = "财务专家"
+        preset.system_prompt = "你是财务专家"
+        preset.skills = []
+        service = self._service_with_binding(
+            record=record, preset=preset, session_agent="finance-expert"
+        )
+
+        async def fake_astream(*args, **kwargs):
+            yield _chat_model_start_item()
+
+        service._graph = Mock()
+        service._graph.astream_events = fake_astream
+
+        events, _ = await _collect_events(
+            service, "", "session-fork", "/finance-analyst 任务"
+        )
+        skill_statuses = [
+            e
+            for e in events
+            if isinstance(e, SSEStatusEvent)
+            and e.stage == SSEInteractionTexts.STAGE_TURN_SKILL
+        ]
+        assert len(skill_statuses) == 1
+        assert skill_statuses[0].message == "使用技能：/finance-analyst（子代理执行）"
+        assert "加载" not in skill_statuses[0].message
+
+    @pytest.mark.asyncio
+    async def test_unknown_and_non_user_visible_emit_no_skill_declaration(self):
+        """未注册 /ghost 与 user-invocable:false 技能名 → 该轮不产出 turn_skill。"""
+        cases = (
+            ("session-ghost", "/ghost 任务"),
+            ("session-hidden", "/hidden-skill 任务"),
+        )
+        for session_id, query in cases:
+            service, _ = _make_service()
+            service._skill_registry = Mock()
+            # user_visible 为空：/ghost 未注册；/hidden-skill 存在但不可用户调用
+            service._skill_registry.user_visible = Mock(return_value=[])
+            service._skill_registry.model_visible = Mock(return_value=[Mock()])
+
+            async def fake_astream(*args, **kwargs):
+                yield _chat_model_start_item()
+
+            service._graph = Mock()
+            service._graph.astream_events = fake_astream
+
+            events, _ = await _collect_events(service, "", session_id, query)
+            stages = [e.stage for e in events if isinstance(e, SSEStatusEvent)]
+            assert SSEInteractionTexts.STAGE_TURN_SKILL not in stages
+
+    @pytest.mark.asyncio
+    async def test_declarations_written_to_both_sinks(self):
+        """两条声明同时写入 events_log（随 process 持久化）与 SSE 缓冲（实时）。"""
+        from src.chat.streaming import StreamingRunManager
+        from src.infra.llm.request_context import RequestContext
+        from src.services.agent_service import _run_generation
+
+        mgr = StreamingRunManager()
+
+        async def fake_astream(*args, **kwargs):
+            yield _chat_model_stream_item("你好")
+
+        fake_graph = Mock()
+        fake_graph.astream_events = fake_astream
+        ctx = RequestContext(session_id="s1")
+        ctx.agent = "finance-expert"
+        ctx.agent_display_name = "财务专家"
+        ctx.skill_action = "inline"
+        ctx.loaded_skills = ["finance-qa"]
+        ctx.clarify_channel = asyncio.Queue()
+        # 显式 dict 标注：events_log 值为异构列表，避免被推成 dict[str, str]
+        partial_holder: dict = {"text": ""}
+
+        await _run_generation(
+            "s1",
+            "kb1",
+            "q",
+            [],
+            False,
+            ctx,
+            mgr,
+            graph=fake_graph,
+            partial_holder=partial_holder,
+        )
+
+        buffer_events = mgr.get_events_since("s1", 0)
+        # 顺序契约：agent_used 最前，紧随两条来源声明，再是节点状态
+        assert [et for _, et, _ in buffer_events][:3] == [
+            "agent_used",
+            "status",
+            "status",
+        ]
+        buffer_stages = [
+            payload["stage"] for _, et, payload in buffer_events if et == "status"
+        ]
+        assert buffer_stages == ["turn_agent", "turn_skill"]
+        log_stages = [
+            e["payload"]["stage"]
+            for e in partial_holder["events_log"]
+            if e["type"] == "status"
+        ]
+        assert log_stages == ["turn_agent", "turn_skill"]
