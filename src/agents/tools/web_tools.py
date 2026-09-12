@@ -70,6 +70,14 @@ async def search_web(queries: list[str], top_k: int = 5) -> str:
     ctx.web_count += 1  # 一次多查询调用只占 1 次额度
 
     start = time.monotonic()
+    # 临时取证埋点（systematic-debugging 走 A）：记录工具入口与各阶段边界时刻，
+    # 用于判定"模型轮结束 → 工具真正开始"的间隔与各阶段耗时；定位完成后删除。
+    logger.info(
+        "[retrieval] TIMING web_search_start queries={} web_count={} kb_bound={}",
+        len(queries),
+        ctx.web_count,
+        ctx.kb_bound,
+    )
     results_list = await asyncio.gather(
         *[
             tavily_search(q, top_k=top_k, timeout=settings.TAVILY_TIMEOUT)
@@ -94,6 +102,13 @@ async def search_web(queries: list[str], top_k: int = 5) -> str:
             failed_count,
             len(results_list),
         )
+    # 临时取证埋点：gather 阶段边界（定位完成后删除）
+    logger.info(
+        "[retrieval] TIMING web_search_gather_done elapsed_ms={} ok={} failed={}",
+        int((time.monotonic() - start) * 1000),
+        len(successful_results),
+        failed_count,
+    )
     if not any(successful_results):
         logger.warning(
             "[retrieval] search_web all_failed session_id={} queries={}",

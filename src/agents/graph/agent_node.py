@@ -166,12 +166,17 @@ def make_agent_model_node(llm, tools, prompt_manager) -> Callable:
         # 与日志（显式传参）；绑 KB 时该变量只进日志，astream 不传参、实际取值为模型
         # 构造默认（默认值即 LLM_TEMPERATURE，故上报该常量）
         chunks = []
+        # 临时取证埋点（systematic-debugging 走 A）：记录首个 chunk 到达时刻（TTFB），
+        # 用于区分"服务端排队/首字节慢"与"生成本身长"；定位完成后删除。
+        first_chunk_ms = -1
         if state.kb_id:
             temperature = settings.LLM_TEMPERATURE
             temp_source = "default"
             async for chunk in model.astream(
                 messages, extra_body={"enable_thinking": state.deep_thinking}
             ):
+                if first_chunk_ms < 0:
+                    first_chunk_ms = int((time.monotonic() - turn_start) * 1000)
                 chunks.append(chunk)
         else:
             temperature = settings.NON_KB_MAIN_TEMPERATURE
@@ -181,6 +186,8 @@ def make_agent_model_node(llm, tools, prompt_manager) -> Callable:
                 extra_body={"enable_thinking": state.deep_thinking},
                 temperature=temperature,
             ):
+                if first_chunk_ms < 0:
+                    first_chunk_ms = int((time.monotonic() - turn_start) * 1000)
                 chunks.append(chunk)
         result = chunks[0]
         for chunk in chunks[1:]:
@@ -218,6 +225,14 @@ def make_agent_model_node(llm, tools, prompt_manager) -> Callable:
             temperature=temperature,
             temp_source=temp_source,
             kb_bound=bool(state.kb_id),
+        )
+        # 临时取证埋点（systematic-debugging 走 A）：定位完成后删除
+        core_logging.logger.info(
+            "[agent] TIMING model_turn ttfb_ms={} total_ms={} msgs={} iteration={}",
+            first_chunk_ms,
+            int((time.monotonic() - turn_start) * 1000),
+            len(messages),
+            iteration,
         )
         delegate_used = any(
             call.get("name") == "delegate_task"

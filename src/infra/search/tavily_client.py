@@ -5,6 +5,8 @@
 空列表（熔断语义），由调用方（search_web）决定降级路径。
 """
 
+import time
+
 import httpx
 from loguru import logger
 
@@ -44,6 +46,9 @@ async def tavily_search(
         "max_results": top_k,
         "search_depth": "basic",
     }
+    # 临时取证埋点（systematic-debugging 走 A）：记录单次调用实际耗时与异常类型，
+    # 用于判定 TAVILY_TIMEOUT 是否真的兜住了超时；定位完成后删除。
+    started = time.monotonic()
     try:
         async with _client(timeout, transport) as client:
             resp = await client.post(_SEARCH_URL, json=payload)
@@ -51,7 +56,7 @@ async def tavily_search(
             data = resp.json()
         # 结果解析也在 try 内：data 非 dict（list/str）时 .get 抛 AttributeError
         # 同样走熔断返回空列表，确保"所有异常返回 []"契约不被绕过
-        return [
+        out = [
             {
                 "url": r.get("url", ""),
                 "title": r.get("title", ""),
@@ -61,7 +66,20 @@ async def tavily_search(
             for r in data.get("results", [])
             if r.get("url")
         ]
-    except Exception:  # noqa: BLE001
+        logger.info(
+            "[retrieval] TIMING tavily_search ok elapsed_ms={} results={} q={}",
+            int((time.monotonic() - started) * 1000),
+            len(out),
+            query[:30],
+        )
+        return out
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[retrieval] TIMING tavily_search fail elapsed_ms={} err={} q={}",
+            int((time.monotonic() - started) * 1000),
+            type(exc).__name__,
+            query[:30],
+        )
         logger.exception("tavily_search failed query={}", query[:40])
         return []
 
@@ -82,17 +100,32 @@ async def tavily_extract(
         [{"url", "content"}]；调用失败/超时返回空列表
     """
     payload = {"api_key": settings.TAVILY_API_KEY, "urls": urls}
+    # 临时取证埋点（同 tavily_search）：定位完成后删除。
+    started = time.monotonic()
     try:
         async with _client(timeout, transport) as client:
             resp = await client.post(_EXTRACT_URL, json=payload)
             resp.raise_for_status()
             data = resp.json()
         # 结果解析在 try 内，data 非 dict 时同样熔断返回空列表（见 tavily_search）
-        return [
+        out = [
             {"url": r.get("url", ""), "content": r.get("raw_content", "")}
             for r in data.get("results", [])
             if r.get("url")
         ]
-    except Exception:  # noqa: BLE001
+        logger.info(
+            "[retrieval] TIMING tavily_extract ok elapsed_ms={} urls={} got={}",
+            int((time.monotonic() - started) * 1000),
+            len(urls),
+            len(out),
+        )
+        return out
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[retrieval] TIMING tavily_extract fail elapsed_ms={} err={} urls={}",
+            int((time.monotonic() - started) * 1000),
+            type(exc).__name__,
+            len(urls),
+        )
         logger.exception("tavily_extract failed urls={}", len(urls))
         return []
