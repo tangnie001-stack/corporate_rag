@@ -218,7 +218,7 @@
   .agent-item{display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer}
   .agent-item:hover,.agent-item.active{background:var(--bg)}
   .agent-item-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
-  .agent-item-name{font-size:13px;color:var(--text)}
+  .agent-item-name{font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .agent-item-desc{font-size:12px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .agent-item .check{margin-left:auto;width:16px;height:16px;border:1px solid var(--border);border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0}
   .agent-item[aria-selected="true"] .check{border-color:var(--primary);background:var(--primary)}
@@ -2145,7 +2145,8 @@ function escapeHtml(str) {
   if (!str) return '';
   const div = document.createElement('div');
   div.textContent = str;
-  return div.innerHTML;
+  // innerHTML 只转义 & < >，额外转义引号以适配双引号属性上下文（data-name 等）
+  return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 // ── SSE 传输层：fetch + getReader 手动解析（替代原生 EventSource）──
@@ -2691,7 +2692,7 @@ function openAgentMenu(){
   $('agentTrigger').setAttribute('aria-expanded','true');
   paintMenuNav('agent', 'agentTrigger', 'agentMenu', 'agent');         // T5: 键盘打开时高亮首项并写 aria-activedescendant
 }
-function closeAgentMenu(){ $('agentMenu').classList.remove('open'); $('agentTrigger').setAttribute('aria-expanded','false'); }
+function closeAgentMenu(){ $('agentMenu').classList.remove('open'); $('agentTrigger').setAttribute('aria-expanded','false'); $('agentTrigger').removeAttribute('aria-activedescendant'); }
 
 // ── 技能选择器（消息级：菜单向上弹出，选中向活动输入框行首插入 /name ） ──
 // 加载技能候选：首项为前端合成的「不使用技能」（value=''），失败静默降级为仅该项
@@ -2788,6 +2789,8 @@ function closeSkillMenu(){
   });
   $('newSkillChip').setAttribute('aria-expanded', 'false');
   $('historySkillChip').setAttribute('aria-expanded', 'false');
+  $('newSkillChip').removeAttribute('aria-activedescendant');
+  $('historySkillChip').removeAttribute('aria-activedescendant');
 }
 
 // chip 文案与选中态（两个 chip 同步显示同一 state.skill）
@@ -2816,7 +2819,7 @@ function renderSlashMenu(){
   const c = activeComposer();
   const box = c.slashMenu;
   if(!box) return;
-  if(!slashState.open){ box.classList.remove('open'); return; }
+  if(!slashState.open){ box.classList.remove('open'); c.input.removeAttribute('aria-activedescendant'); return; }
   if(slashState.matches.length === 0){
     box.innerHTML = '<div class="slash-empty">没有匹配的技能</div>';
     box.classList.add('open');
@@ -3385,6 +3388,16 @@ function newSession() {
   state.boundAgent = ''; // 新会话无绑定值，请求体回退到选择器 state.agent
   state.skill = ''; // 新会话清空消息级技能
   slashState.open = false; // 行首 / 补全菜单复位
+  renderSlashMenu(); // 复位后重渲染，避免残留的 .slash-menu.open 带入新会话
+  // 剥掉活动输入框行首的 `/技能名 ` 前缀（与 selectSkill('') 同一正则），
+  // 避免 chip 显示「技能」但下次发送仍带技能；保留其余文本并派发 input 刷新发送按钮
+  const slashInput = activeComposer().input;
+  const slashText = slashInput.value || '';
+  if (slashText.charAt(0) === '/') {
+    slashInput.value = slashText.replace(/^\S+\s*/, '');
+    slashInput.setSelectionRange(0, 0);
+    slashInput.dispatchEvent(new Event('input'));
+  }
   paintSkillChip();
   updateHeader('', '');
   paintHeaderAgent(''); // 顶栏智能体段归零，避免残留上一会话的只读回显
