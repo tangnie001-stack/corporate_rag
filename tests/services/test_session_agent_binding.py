@@ -27,9 +27,8 @@ def _service(
 async def test_binds_on_first_request():
     """未绑定 + 合法 → 固化并返回该值。"""
     svc, chat_manager = _service(known=["finance-expert"])
-    assert (
-        await svc._resolve_session_agent("sess_1", "finance-expert") == "finance-expert"
-    )
+    result = await svc._resolve_session_agent("sess_1", "finance-expert")
+    assert result.effective == "finance-expert"
     chat_manager.bind_session_agent_async.assert_awaited_once_with(
         "sess_1", "finance-expert"
     )
@@ -38,7 +37,8 @@ async def test_binds_on_first_request():
 async def test_empty_request_keeps_unbound():
     """未绑定 + 传入空 → 保持未绑定（不写库）。"""
     svc, chat_manager = _service(known=["finance-expert"])
-    assert await svc._resolve_session_agent("sess_1", "") == ""
+    result = await svc._resolve_session_agent("sess_1", "")
+    assert result.effective == ""
     chat_manager.bind_session_agent_async.assert_not_awaited()
 
 
@@ -55,7 +55,7 @@ async def test_inconsistent_request_is_ignored_with_warning(monkeypatch):
         "sess_1", "legal-expert", bound="finance-expert"
     )
 
-    assert result == "finance-expert"
+    assert result.effective == "finance-expert"
     chat_manager.bind_session_agent_async.assert_not_awaited()
     assert any("agent" in str(item) for item in warned)
 
@@ -63,7 +63,8 @@ async def test_inconsistent_request_is_ignored_with_warning(monkeypatch):
 async def test_unknown_request_is_ignored():
     """未绑定 + 传入未注册名 → 忽略 + 返回空（降级系统默认）。"""
     svc, _ = _service(known=[])
-    assert await svc._resolve_session_agent("sess_1", "ghost") == ""
+    result = await svc._resolve_session_agent("sess_1", "ghost")
+    assert result.effective == ""
 
 
 async def test_stream_chat_wires_effective_agent():

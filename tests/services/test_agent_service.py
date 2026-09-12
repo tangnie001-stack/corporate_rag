@@ -1219,3 +1219,53 @@ class TestEventsLogCollection:
 
     def test_capture_none_noop(self):
         _record_event(None, SSEStatusEvent("s", "m"))  # 不抛异常即可
+
+
+class TestResolveSessionAgentSource:
+    """_resolve_session_agent 五分支的生效值与来源枚举（design D11）。"""
+
+    @pytest.mark.asyncio
+    async def test_bound_matching_request_keeps_bound(self):
+        service, _ = _make_service()
+        result = await service._resolve_session_agent(
+            "s1", "finance-expert", bound="finance-expert"
+        )
+        assert result.effective == "finance-expert"
+        assert result.source == "bound"
+
+    @pytest.mark.asyncio
+    async def test_bound_conflicting_request_is_ignored(self):
+        service, _ = _make_service()
+        result = await service._resolve_session_agent(
+            "s1", "legal-expert", bound="finance-expert"
+        )
+        assert result.effective == "finance-expert"
+        assert result.source == "ignored"
+
+    @pytest.mark.asyncio
+    async def test_no_request_no_bound_is_none(self):
+        service, _ = _make_service()
+        result = await service._resolve_session_agent("s1", "")
+        assert result.effective == ""
+        assert result.source == "none"
+
+    @pytest.mark.asyncio
+    async def test_unregistered_request_degrades_to_empty(self):
+        service, _ = _make_service()
+        service._preset_registry = Mock()
+        service._preset_registry.get = Mock(return_value=None)
+        result = await service._resolve_session_agent("s1", "ghost")
+        assert result.effective == ""
+        assert result.source == "unregistered"
+
+    @pytest.mark.asyncio
+    async def test_new_request_binds_as_new_bound(self):
+        service, chat_manager = _make_service()
+        service._preset_registry = Mock()
+        service._preset_registry.get = Mock(return_value=Mock())
+        result = await service._resolve_session_agent("s1", "finance-expert")
+        assert result.effective == "finance-expert"
+        assert result.source == "new_bound"
+        chat_manager.bind_session_agent_async.assert_awaited_once_with(
+            "s1", "finance-expert"
+        )

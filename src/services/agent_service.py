@@ -351,6 +351,20 @@ def _convert_event(
     return []
 
 
+@dataclass(frozen=True)
+class AgentResolution:
+    """会话智能体解析结果（design D11：来源由解析方给出，调用方不重推分支）。
+
+    effective: 本轮生效的智能体名（空=未绑定或未注册降级）
+    source: 解析来源枚举 —— bound（沿用绑定）/ new_bound（首次绑定）/
+        ignored（请求与会话绑定不一致，已忽略）/ unregistered（请求名未注册，
+        降级为空）/ none（请求与绑定都为空）
+    """
+
+    effective: str  # 生效值；来源：解析结果；范围：本轮请求；用途：ctx.agent/日志
+    source: str  # 来源枚举；来源：解析结果；范围：本轮请求；用途：日志/单测
+
+
 def _record_event(capture: _StreamCapture | None, event: SSEEvent) -> None:
     """事件采集：追加进本次生成的私有事件日志（design D1，独立于 manager 缓冲）。
 
@@ -813,9 +827,10 @@ class AgentService:
         # bind-once：读会话已绑定值，解析本轮生效智能体（首轮绑定 / 沿用 /
         # 不一致忽略 + warning），写入 ctx.agent 供 fork 执行者选择与 agent_used 回传
         bound_raw = await self._chat_manager.get_session_agent_async(session_id)
-        effective_agent = await self._resolve_session_agent(
+        resolution = await self._resolve_session_agent(
             session_id, agent, bound=bound_raw
         )
+        effective_agent = resolution.effective
         ctx.agent = effective_agent
         launch_context["agent"] = effective_agent
         # `/xxx` 前缀分派：只认 user_visible() 的名字（user-invocable:false 禁止
@@ -883,7 +898,7 @@ class AgentService:
 
     async def _resolve_session_agent(
         self, session_id: str, requested: str, bound: str = ""
-    ) -> str:
+    ) -> AgentResolution:
         """解析本会话生效的智能体名（bind-once，无 400）。
 
         Args:
@@ -892,7 +907,8 @@ class AgentService:
             bound: 会话已绑定的智能体名（空=未绑定）
 
         Returns:
-            生效值；已绑定一律返回绑定值（传入不一致 → 忽略 + warning）
+            AgentResolution：已绑定一律生效绑定值（请求不一致 → 忽略 + warning），
+            来源枚举见 dataclass docstring
         """
         if bound:
             if requested and requested != bound:
@@ -902,9 +918,10 @@ class AgentService:
                     bound=bound,
                     requested=requested,
                 )
-            return bound
+                return AgentResolution(effective=bound, source="ignored")
+            return AgentResolution(effective=bound, source="bound")
         if not requested:
-            return ""
+            return AgentResolution(effective="", source="none")
         if (
             self._preset_registry is None
             or self._preset_registry.get(requested) is None
@@ -915,9 +932,9 @@ class AgentService:
                 bound="",
                 requested=requested,
             )
-            return ""
+            return AgentResolution(effective="", source="unregistered")
         await self._chat_manager.bind_session_agent_async(session_id, requested)
-        return requested
+        return AgentResolution(effective=requested, source="new_bound")
 
     async def _inject_skill_message(
         self, session_id: str, kb_id: str, text: str
