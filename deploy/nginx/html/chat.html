@@ -2974,7 +2974,8 @@ function menuOptions(menu){
   return Array.prototype.slice.call(menu.querySelectorAll('[role="option"]'));
 }
 
-// 候选 id + 高亮态（class / aria-selected / 触发钮的 aria-activedescendant 三处同步）
+// 候选 id + 键盘高亮态（class + 触发钮的 aria-activedescendant 两处同步）。
+// aria-selected 归渲染函数所有（表示"已选中"），此处不触碰，避免高亮覆盖选中态。
 function paintMenuNav(kind, triggerId, menuId, idPrefix){
   const menu = $(menuId);
   const trigger = $(triggerId);
@@ -2985,7 +2986,6 @@ function paintMenuNav(kind, triggerId, menuId, idPrefix){
     const on = (i === active);
     el.id = idPrefix + 'Opt' + i;
     el.classList.toggle('active', on);
-    el.setAttribute('aria-selected', on ? 'true' : 'false');
   });
   if(active >= 0 && items[active]){
     trigger.setAttribute('aria-activedescendant', items[active].id);
@@ -3043,6 +3043,7 @@ agentTrigger.addEventListener('click', (e) => {
   if (menu.classList.contains('open')) {
     closeAgentMenu();
   } else {
+    menuNav.agent.active = -1;                // 鼠标开：清除键盘残留高亮
     openAgentMenu();
   }
 });
@@ -3063,6 +3064,7 @@ function wireSkillChip(idPrefix){
     if (menu.classList.contains('open')) {
       closeSkillMenu();
     } else {
+      menuNav.skill.active = -1;              // 鼠标开：清除键盘残留高亮
       openSkillMenu(idPrefix);
     }
   });
