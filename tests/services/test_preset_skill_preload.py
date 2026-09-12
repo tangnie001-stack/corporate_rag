@@ -34,15 +34,18 @@ def test_preload_renders_in_declared_order():
             "b": _Record("b", fork="方法论 B"),
         }
     )
-    text = svc._preload_skills_text(["a", "b"])
+    text, names = svc._preload_skills_text(["a", "b"])
     assert text.index("方法论 A") < text.index("方法论 B")
     assert text.count("\n\n") == 1
+    assert names == ["a", "b"]
 
 
 def test_preload_renders_without_task_text():
     """预加载不带任务文本：占位符渲染为空串（注入的是方法论）。"""
     svc = _service({"a": _Record("a", inline="方法论 A：$ARGUMENTS")})
-    assert svc._preload_skills_text(["a"]) == "方法论 A："
+    text, names = svc._preload_skills_text(["a"])
+    assert text == "方法论 A："
+    assert names == ["a"]
 
 
 def test_preload_skips_unknown_skill(monkeypatch):
@@ -53,9 +56,23 @@ def test_preload_skips_unknown_skill(monkeypatch):
         lambda event, **fields: logged.append({"event": event, **fields}),
     )
     svc = _service({"a": _Record("a", inline="方法论 A")})
-    text = svc._preload_skills_text(["ghost", "a"])
+    text, names = svc._preload_skills_text(["ghost", "a"])
     assert text == "方法论 A"
+    assert names == ["a"]
     assert any("ghost" in str(item) for item in logged)
+
+
+def test_preload_returns_text_and_resolved_names():
+    """返回 (正文, 成功解析名单)：去重、保序、查不到的不入名单（design D14）。"""
+    svc = _service(
+        {
+            "a": _Record("a", inline="方法论 A"),
+            "b": _Record("b", inline="方法论 B"),
+        }
+    )
+    text, names = svc._preload_skills_text(["a", "b", "ghost", "a"])
+    assert names == ["a", "b"]
+    assert "方法论 A" in text and "方法论 B" in text
 
 
 def test_preload_only_on_first_round():
@@ -66,8 +83,12 @@ def test_preload_only_on_first_round():
     preset.skills = ["a"]
     svc._preset_registry.get = MagicMock(return_value=preset)
 
-    assert svc._preload_if_first_round("finance-expert", []) == "方法论 A"
-    assert svc._preload_if_first_round("finance-expert", [object()]) == ""
+    text, names = svc._preload_if_first_round("finance-expert", [])
+    assert text == "方法论 A"
+    assert names == ["a"]
+    text, names = svc._preload_if_first_round("finance-expert", [object()])
+    assert text == ""
+    assert names == []
 
 
 def test_preload_skipped_when_inline_already_injected():
@@ -78,7 +99,9 @@ def test_preload_skipped_when_inline_already_injected():
     preset.skills = ["a"]
     svc._preset_registry.get = MagicMock(return_value=preset)
 
-    assert svc._preload_if_first_round("finance-expert", [object()]) == ""
+    text, names = svc._preload_if_first_round("finance-expert", [object()])
+    assert text == ""
+    assert names == []
 
 
 @pytest.mark.asyncio

@@ -701,16 +701,18 @@ class AgentService:
         self.capability_service = CapabilityService(skill_registry, preset_registry)
         core_logging.log_event(Event.SERVICE_READY)
 
-    def _preload_skills_text(self, skill_names: list[str]) -> str:
+    def _preload_skills_text(self, skill_names: list[str]) -> tuple[str, list[str]]:
         """按预设声明的 skills 顺序渲染并拼接各技能正文（隐藏注入用）。
 
         Args:
             skill_names: 预设 frontmatter 的 skills 列表（声明顺序即渲染顺序）
 
         Returns:
-            用 "\\n\\n" 拼接的正文；全部查不到时返回空串
+            (用 "\\n\\n" 拼接的正文, 成功解析的技能名列表——去重、按声明顺序保序；
+            全部查不到时正文为空串、名单为空列表)
         """
         parts: list[str] = []
+        resolved: list[str] = []
         for name in skill_names:
             if self._skill_registry is None:
                 break
@@ -726,9 +728,13 @@ class AgentService:
             if not body:
                 continue
             parts.append(render_skill_body(body, ""))
-        return "\n\n".join(parts)
+            if name not in resolved:
+                resolved.append(name)
+        return "\n\n".join(parts), resolved
 
-    def _preload_if_first_round(self, effective_agent: str, history: list) -> str:
+    def _preload_if_first_round(
+        self, effective_agent: str, history: list
+    ) -> tuple[str, list[str]]:
         """首轮预加载判定：仅在首轮、已绑定预设且该预设声明 skills 时给出待注入正文。
 
         Args:
@@ -736,17 +742,17 @@ class AgentService:
             history: 本轮的历史消息（若本轮已有 inline `/xxx` 注入，T5 已往其中追加条目→非空）
 
         Returns:
-            预加载正文；任一条件不满足返回空串
+            (预加载正文, 成功解析的技能名列表)；任一条件不满足返回 ("", [])
         """
         if history:
-            return ""
+            return "", []
         if not effective_agent:
-            return ""
+            return "", []
         if self._preset_registry is None:
-            return ""
+            return "", []
         preset = self._preset_registry.get(effective_agent)
         if preset is None or not preset.skills:
-            return ""
+            return "", []
         return self._preload_skills_text(preset.skills)
 
     async def stream_chat(
@@ -860,7 +866,9 @@ class AgentService:
         # 预设预绑定 skill 预加载：与 `/xxx` 走同一条持久化隐藏消息通道（T5b），
         # 仅首轮（history 空）且本轮无显式 `/xxx`（direct_skill == ""）时注入一次。
         if direct_skill == "":
-            preload_text = self._preload_if_first_round(effective_agent, history)
+            preload_text, _preload_names = self._preload_if_first_round(
+                effective_agent, history
+            )
             if preload_text:
                 preload_entry = await self._inject_skill_message(
                     session_id, kb_id, preload_text
