@@ -349,7 +349,7 @@ SSECitationEvent payload 与落库 sources 的新增字段 `tier: int | null`：
 | stage | 文案模板 | 产出条件 |
 |-------|---------|---------|
 | `turn_agent` | `当前使用了 {agent}`（`{agent}` = 预设展示名 `display_name`，缺失回落 `name`） | 本轮解析出生效智能体（`agent_display_name` 非空）；未绑定智能体则无此条 |
-| `turn_skill` | inline / preload：`成功加载 skills：{顿号连接的名单}`；fork：`使用技能：/{skill}（子代理执行）` | 本轮有技能动作且名单非空；本轮无技能动作或 `/xxx` 命令失败（未注册）则无此条 |
+| `turn_skill` | inline / preload：`成功加载 skills：{顿号连接的名单}`；fork：`使用技能：/{skill}（子代理执行）` | inline / preload 需名单非空；fork 需 `direct_skill` 非空；本轮无技能动作或 `/xxx` 命令失败（未注册）则无此条 |
 
 - 每轮**至多各一条**；条件不满足即不产出，**不得输出空行**（预加载正文为空时不置 preload，
   不声明「成功加载 skills」而名单为空）。

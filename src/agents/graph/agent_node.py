@@ -161,8 +161,10 @@ def make_agent_model_node(llm, tools, prompt_manager) -> Callable:
         turn_start = time.monotonic()
         # 采样温度分档（chat-temperature-policy）：未绑 KB → 非 KB 档（默认 0.6）；
         # 绑 KB → 不传 temperature，沿用模型构造温度 LLM_TEMPERATURE（默认 0.1），
-        # 同请求档位恒定（kb_id 首轮即固定）。temperature 为单一真源：同一变量既
-        # 用于 LLM 调用也用于日志（design D11 #1）
+        # 同请求档位恒定（kb_id 首轮即固定）。日志按下列局部变量上报温度，并以
+        # temp_source 标注取值来源（design D11 #1）：未绑 KB 时该变量同时传给 astream
+        # 与日志（显式传参）；绑 KB 时该变量只进日志，astream 不传参、实际取值为模型
+        # 构造默认（默认值即 LLM_TEMPERATURE，故上报该常量）
         chunks = []
         if state.kb_id:
             temperature = settings.LLM_TEMPERATURE

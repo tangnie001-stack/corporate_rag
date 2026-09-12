@@ -58,7 +58,8 @@
 - `skill injected`（session / info）——技能正文成功注入；`mode` 取 inline（命令触发）/
   preload（预设预绑定首轮预加载），`source` 取 command / preset
 - `skill dispatch`（session / info）——命令形态分派；`kind` 取 plain（普通文本，不记）/
-  known（命中技能）/ unknown（未注册命令）
+  known（命中技能）/ unknown（未注册命令）；`context` 取 inline / fork（技能 frontmatter
+  的形态）/ none（命令未命中技能，record 为空）
 - `model turn` 扩 `temperature` / `temp_source`（explicit 逐轮直传档 / default 模型构造档）/
   `kb_bound`，不新增事件
 

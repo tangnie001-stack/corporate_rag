@@ -95,6 +95,7 @@
 | G-04 | **代码语法高亮** | chat-markdown-rendering 后置项。助手消息代码块语法高亮：Prism（轻量、适合实时高亮）或 Shiki（质量高但整块 re-highlight 重）。**流式策略**：流式中保持纯文本/轻量样式，代码块闭合后一次性高亮，避免每帧重高亮卡顿 | deepseek-harness 对比 | P2 | 低 | chat-markdown-rendering |
 | G-05 | **LaTeX 数学公式** | chat-markdown-rendering 后置项。助手消息中 KaTeX 渲染数学公式（dsh 用 micromark 数学扩展原生支持） | deepseek-harness 对比 | P3 | 低 | chat-markdown-rendering |
 | G-06 | **前端框架化评估（架构方向）** | 当前静态 HTML + 节流渲染可承载 G-01 工具卡片与简单工作流面板。**触发信号**：①需 AST 级增量渲染（流式中选中/复制文本、交互式代码块）——react-markdown/remark 的优势，Vue v-html 与 innerHTML 无异；②UI 复杂度超出静态页面可维护性（多组件状态/路由）；③G-01/G-02/G-03 同时上线。**原则**：最小改动，每次用当前架构渐进承载，信号出现再单独立 change 评估并连同构建链/部署一起规划 | 2026-08-31 调研 | P3 | 高 | G-01, G-02, G-03 |
+| G-07 | **`/xxx` 直出轮的委派折叠区（delegate start/end 缺失）** | `/xxx` 命中 fork 技能走直出轮时，直出节点（`src/agents/graph/skill_direct.py`）只投递 `delegate action=delta`，从不投 `start`/`end`（`start`/`end` 仅由 `src/agents/skills/delegate_task.py` 投递），导致前端拿不到 open section、把整包 delta 丢弃（console 报 `delegate delta without open section`），直出轮没有委派折叠区。**建议**：直出节点补投 `start`/`end`（与 `delegate_task` 同构），或前端容忍无 `start` 的 delta。**注**：存量缺陷，非 turn-provenance-observability change 引入，实机验证时发现 | turn-provenance-observability 实机验证 | P2 | 低 | 无 |
 
 ## 标签说明
 
