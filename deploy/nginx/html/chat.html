@@ -320,8 +320,8 @@
   .header-title { font-size: 13px; color: var(--text-secondary); display: flex; align-items: center; gap: 10px; min-width: 0; }
   .header-title .dot { width: 6px; height: 6px; border-radius: 50%; background: #10B981; flex-shrink: 0; }
   .header-title .header-name { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .header-title .kb-info { color: var(--primary); font-weight: 500; flex-shrink: 0; }
-  .header-title .kb-info:empty { display: none; }
+  .header-title .kb-info, .header-title .header-agent { color: var(--primary); font-weight: 500; flex-shrink: 0; }
+  .header-title .kb-info:empty, .header-title .header-agent:empty { display: none; }
 
   .chat-thread { flex: 1; overflow-y: auto; display: flex; flex-direction: column; align-items: center; padding: 24px; }
   .chat-thread .inner { width: 100%; max-width: 880px; display: flex; flex-direction: column; gap: 16px; }
@@ -837,6 +837,7 @@
           <span class="dot"></span>
           <span class="header-name" id="headerTitle">会话</span>
           <span class="kb-info" id="headerKbInfo"></span>
+          <span class="header-agent" id="headerAgent"></span>
         </div>
         <div class="header-right">
           <!-- 任务/进度看板 chip：仅历史对话页（聊天中才有任务；新建会话页不展示） -->
@@ -938,6 +939,7 @@ const state = {
   kbId: '',        // 会话绑定的知识库 UUID（空 = 未绑定，纯对话）
   kbName: '',      // 会话绑定的知识库名称（顶栏展示用）
   agent: '',       // 本会话绑定的智能体预设名（'' = 默认/未绑定）
+  boundAgent: '',  // 会话记录中已绑定的智能体名（'' = 未绑定）；请求体优先取此值，agent_used 事件静默纠正
   agents: [],      // GET /api/agents 的候选（含前端合成的「默认」项）
   skill: '',       // 消息级技能名（'' = 不使用技能；选中后本会话持续生效）
   skills: [{ name:'', description:'不使用技能' }],  // GET /api/skills 的候选（含前端合成的「不使用技能」项；初始即含首项，菜单在加载完成前打开也有该项）
@@ -1062,21 +1064,38 @@ function showHistoryPage() {
   activeComposer().input.focus();
 }
 
-// 顶栏：`会话名 知识库:XXX`（未绑定只显示会话名）
+// 顶栏：`会话名 知识库:XXX 智能体:XXX`（未绑定段不显示）；智能体段由 paintHeaderAgent 单独维护
 function updateHeader(title, kbName) {
   $('headerTitle').textContent = title || '';
   $('headerKbInfo').textContent = kbName ? '知识库:' + kbName : '';
 }
 
-// 从会话列表缓存同步当前会话的 KB 绑定与顶栏
+// 顶栏第三段：智能体只读回显（未绑定清空即隐藏；候选未加载到时回退 slug）
+function paintHeaderAgent(name) {
+  const el = $('headerAgent');
+  if (!el) return;
+  if (!name) {
+    el.textContent = '';
+    return;
+  }
+  const agent = state.agents.find(function(a){ return a.name === name; });
+  const label = agent ? (agent.display_name || agent.name) : name;
+  el.textContent = '智能体:' + label;
+}
+
+// 从会话列表缓存同步当前会话的 KB / 智能体绑定与顶栏
 function syncHeaderFromSession() {
   const info = sessionMap[state.sessionId];
   if (info) {
     state.kbId = info.kb_id || '';
     state.kbName = info.kb_name || '';
+    state.boundAgent = info.agent || '';
     updateHeader(info.title || '', info.kb_name || '');
+    paintHeaderAgent(state.boundAgent);
   } else {
+    state.boundAgent = '';
     updateHeader('', '');
+    paintHeaderAgent('');
   }
 }
 
@@ -2255,6 +2274,15 @@ function buildStreamHandlers() {
         renderModelInfo(data.model || '', !!data.is_fallback);
       } catch (err) { /* ignore */ }
     },
+    agent_used: (data) => {
+      try {
+        state.lastSeq = (data.seq !== undefined) ? data.seq : state.lastSeq;
+        // 后端实际使用的智能体：与本会话显示不一致时静默纠正（不阻断、无 400）
+        const used = (data && data.agent) ? data.agent : '';
+        state.boundAgent = used;
+        paintHeaderAgent(used);
+      } catch (err) { /* ignore */ }
+    },
     done: (data) => {
       try {
         state.lastSeq = (data.seq !== undefined) ? data.seq : state.lastSeq;
@@ -2411,6 +2439,7 @@ function startStream(query) {
       kb_id: state.kbId,
       query: query,
       deep_thinking: state.deepThinking,
+      agent: state.boundAgent || state.agent,   // 恢复会话用绑定值；新会话用选择器值
     }),
   }, buildStreamHandlers());
   state.abortController = result.controller;
@@ -3250,10 +3279,12 @@ function newSession() {
   localStorage.setItem('rag_session_id', sid);
   resetKbSelector();
   selectAgent(''); // 新会话回到「默认」智能体
+  state.boundAgent = ''; // 新会话无绑定值，请求体回退到选择器 state.agent
   state.skill = ''; // 新会话清空消息级技能
   slashState.open = false; // 行首 / 补全菜单复位
   paintSkillChip();
   updateHeader('', '');
+  paintHeaderAgent(''); // 顶栏智能体段归零，避免残留上一会话的只读回显
   showNewPage();
   loadSessions();
   clearTaskBoard(); // 新会话无任务，本地清空看板，避免残留上一个会话条目（task-board change）
