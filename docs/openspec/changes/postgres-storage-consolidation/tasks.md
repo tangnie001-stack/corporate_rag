@@ -9,11 +9,11 @@
 
 - [ ] 2.1 建 `chunks` 表：`id` / `kb_id`（FK）/ `doc_id` / `chunk_index` / `chunk_total` / `content` / `content_seg` / `tsv`（`GENERATED ... AS to_tsvector('simple', content_seg) STORED`）/ `embedding vector(1024)` / `source` / `page` / `metadata jsonb`；唯一约束 `(kb_id, doc_id, chunk_index)`
 - [ ] 2.2 建索引：`(kb_id)` btree、`tsv` GIN、`(doc_id)` btree。**先不建 HNSW**（164 MB / 4 万分块下精确扫描足够且召回精确）
-- [ ] 2.3 **迁移内加 `CREATE EXTENSION IF NOT EXISTS vector;`**（放在 alembic 首版迁移，**不放** `deploy/postgres/init/` —— initdb 脚本只在数据目录首次初始化时执行，既有卷不重跑、托管实例不参与）
+- [ ] 2.3 **迁移内加 `CREATE EXTENSION IF NOT EXISTS vector;`**（放在 alembic 首版迁移，**不放** `deploy/postgres/init/` —— initdb 脚本只在数据目录首次初始化时执行，既有卷不重跑、托管实例不参与）。⚠ **迁移账号 ≠ 运行账号**：RDS 上扩展创建通常要求高权限账号，本任务须同时产出"由谁执行"的部署说明与权限不足时的可操作报错（评审 I1）
 - [ ] 2.4 7 张关系表迁 PostgreSQL：去 `MEDIUMTEXT`（`models/chat.py:6,44`）、去 MySQL 方言类型
 - [ ] 2.5 **合并双套 ORM 模型为一套**（以 `src/infra/db/models/` 为准，它含 `agent`/`process` 两列）；合并后加断言：对比两套表的列集合，确认无遗漏
-- [ ] 2.6 **合并双套 alembic 目录**（根 `alembic/` 与 `src/infra/db/mysql_db/alembic/`，二者 `e634...` 首版内容不同），`alembic.ini` 与 `target_metadata` 指向同一套
-- [ ] 2.7 **统一 `ChunkData` 为一份定义**：以 `src/chunking/validator.py:9-21`（含 `tokens`）为唯一类型，`src/parsers/base.py:17-31` 改为引用它；`chunk_id` 字段在 `bm25_index.py` 删除后确认无消费方则去掉。⚠ 该目标初稿只写在 proposal/design 里，tasks 无对应动作（评审 F8）
+- [ ] 2.6 **合并双套 alembic 目录**：**实际生效的是根 `alembic/`**（`alembic.ini:8` → 根 `env.py:9` 的 `from src.infra.db.models import *`），它只有 `e6304ba3a9ef_init_models.py` 一条；未被指向的 `src/infra/db/mysql_db/alembic/` 另有 `4f7b9c1d2e30_create_feedback.py` 与 `5a8c2d1e9f34_add_feedback_trace_id.py` —— 即**生效链缺失这两条 feedback 迁移**。合并时须把三条都纳入一条链，并让 `alembic.ini`、两个 `env.py` 的 `target_metadata` 指向同一套模型
+- [ ] 2.7 **统一 `ChunkData` 为一份定义**：以 `src/chunking/validator.py:9-21`（含 `tokens`）为唯一类型，`src/parsers/base.py:17-31` 改为引用它。⚠ **`chunk_id` 要二选一并写明**：三个 parser 以关键字构造它（`txt_parser.py:67`、`docx_parser.py:86`、`pymupdf_parser.py:225`），要么在统一类型里保留 `chunk_id`，要么同步改写这三个构造点 —— 直接删字段会让解析阶段抛 `TypeError`（评审 I5）。该目标初稿只写在 proposal/design 里，tasks 无对应动作（评审 F8）
 - [ ] 2.8 `deploy/mysql/init/001_schema.sql` → `deploy/postgres/init/`；删 `deploy/mysql/`
 
 ## 3. 引擎与 Repo
@@ -29,7 +29,7 @@
 - [ ] 4.3 **先写会失败的测试**：写入一个分块后读回，断言 `metadata` 五个契约键齐全，且去重、`RAGContext.source/page`、`entities` 三处取值非空
 - [ ] 4.4 `ChunkResult` 增分路排名字段；`bm25_score` 改名 `lexical_score`（与引擎无关的诚实命名）
 - [ ] 4.5 新增两路取数入口，使 dense 与词法各自取 top-k 并携带名次（方法名见 Open Question #4）
-- [ ] 4.6 **删除 `similarity_search_all`**：wrapper（`vector_store/__init__.py:86-107`）、实现（`search.py:75-113`）、`retrieval.py:100` 的 `if not kb_id` 分支、`tests/infra/db/test_vector_store.py:110-137` 与 `tests/rag/test_retrieval.py:73-83` 两处用例。依据：生产链路不可达（`rag_tools.py:135-139` 在 kb_id 空时直接返回 `[]`），且与集合式存储**语义不等价**
+- [ ] 4.6 **删除 `similarity_search_all`**：wrapper（`vector_store/__init__.py:86-107`）、实现（`search.py:75-113`）、`retrieval.py:100` 的 `if not kb_id` 分支、`tests/infra/db/test_vector_store.py:110-137` 与 `tests/rag/test_retrieval.py:73-83` 两处用例。依据：**生产链路不可达**（`rag_tools.py:135-139` 在 kb_id 空时直接返回 `[]`）。⚠ 初稿曾以"与集合式存储语义不等价"为由，**该论据经核实不成立**（子查询 k == 最终 k 时两者等价）—— 不要把它写回注释或 ADR
 - [ ] 4.7 `similarity_search` 的 `min(k, 100)` 上限**保留并注释来源**（Chroma 硬限，`search.py:44`），避免把能力提升混进等价性验收
 - [ ] 4.8 `similarity_search_multi` 确认无调用方后删除
 - [ ] 4.9 跑 `tests/infra/db/test_vector_store.py`（真 PG，集成测试）；同步 `docs/agents/api_contract.md`
@@ -37,7 +37,7 @@
 ## 5. 词法检索（应用侧分词）
 
 - [ ] 5.1 分词入口**集中到一处**（建议 `src/config/` 或 `src/rag/` 单一函数），写入侧与查询侧**必须调用同一个**
-- [ ] 5.2 **过滤单字词项**（长度 ≥ 2 才纳入检索文本与查询条件）。依据（实测）：jieba 会把「营业收入同比增长率保持稳定」切出独立的「率」，单字词项 df 极高会淹没精确词项排序
+- [ ] 5.2 **过滤单字词项**（长度 ≥ 2 才纳入检索文本与查询条件），依据是高文档频率的单字虚词会淹没精确词项排序。⚠ **查询侧过滤后若为空 SHALL 回退为不过滤**（或字符 bigram 兜底）—— 否则「涨了吗」「5 月」这类全单字查询会静默 0 命中（评审 I4）。另：实施时须**记录一次真实的 `jieba.lcut` 输出**作为依据（初稿引用的切分示例是人工构造的，不是 jieba 实际输出）
 - [ ] 5.3 **pin `jieba` 精确版本**（不用 `>=`）。理由：`tsv` 是 `content_seg` 的 `STORED` 生成列，**分词结果落库即固化**；jieba 升级后存量与新查询侧不一致 → 静默降召回，而"同进程内两函数比较"的守卫测试抓不到
 - [ ] 5.4 写入侧：`content` → 分词（过滤单字）→ `content_seg`
 - [ ] 5.5 查询侧：`query` → 同一分词 → 查询条件。**`ts_rank` vs `ts_rank_cd` 用探针实测选定**；`plainto_tsquery` 的 AND 语义已实测确认，作为基线，OR 组合作为对照项
@@ -54,20 +54,21 @@
 - [ ] 6.5 `src/services/app_service.py` 装配调整（不再构造词法索引组件）
 - [ ] 6.6 **`src/main.py` 删除 Chroma warmup**（`VectorStore().list_collections()`，`:61-67`）及其事件。⚠ 初稿遗漏；留着的后果是每次启动打一条 warning 而非报错（被 try/except 包住），更隐蔽（评审 F9）
 - [ ] 6.7 **`src/agents/tools/rag_tools.py:136` 的 `retrieval.search()` 去掉 `bm25` 形参**（初稿遗漏）
-- [ ] 6.8 CLI：删 `src/cli/rebuild_bm25.py`；`replay_trace.py:133` / `check_abstain.py:195` / `eval_ragas.py:537` 的构造替换；`eval_ragas.py:512` 的 `get_or_create_collection(kb_id).count()` 改为只读计数
+- [ ] 6.8 新增**两路贡献可见**的观测：把 `retrieval.py:89-94` 的 `[retrieval] hybrid done` 扩为分别带 dense 路与词法路的贡献数（或等价字段），并配一条断言两路贡献字段存在的测试；同步登记 `docs/agents/logging-rules.md`。⚠ `observability-logging` 的 ADDED 要求此前**无任何对应任务**（评审 I2）—— 不补就等于 spec 声称已做而实际没做
+- [ ] 6.9 CLI：删 `src/cli/rebuild_bm25.py`；`replay_trace.py:133` / `check_abstain.py:195` / `eval_ragas.py:537` 的构造替换；`eval_ragas.py:512` 的 `get_or_create_collection(kb_id).count()` 改为只读计数
 
 ## 7. 事务边界（入库与删除两条路径）
 
 - [ ] 7.1 **embedding 改为无条件预计算**，与 `CHUNK_EVAL_ENABLED` 解耦（该开关只决定"是否额外做分块质量评估"）。⚠ 现行只有开关为真时才预计算，开关为假时向量由 `add_chunks` 内部产生（`store.py:53-55`）→ 照初稿把写入包进事务会让 DashScope 调用落在**事务内**（评审 F3）
-- [ ] 7.2 `document_service.py` 重排：embedding 在事务外；`INSERT chunks` 与 `UPDATE document SET status='ready', chunk_count=N` **同事务**
-- [ ] 7.3 **删除路径纳入同事务**：`delete_document`（`:106-132`）的删分块与软删文档同事务、`delete_knowledge_base`（`app_service.py:98-116`）的删分块与软删 KB 同事务；**删除失败 SHALL NOT 被吞掉**（现状是"仅 warning 后照样软删"→ 永久孤儿分块，评审 F4）
+- [ ] 7.2 `document_service.py` 重排：embedding 在事务外；`INSERT chunks` 与 `UPDATE document SET status='ready', chunk_count=N` **同事务**。⚠ **必须先落实机制**：现状每个 Repo 方法各自开 session 并独立提交（`document_repo.py:14-17`、`kb_repo.py:16-17`），而分块写入走 `VectorStore`、文档状态走 `DocumentRepo` —— 两个互不了解的对象 → 天然两次事务。须引入一个 unit-of-work（例如让分块写入接受同一个 `AsyncSession`，或新增 `ChunksRepo`），并在本任务写明**由谁持有该 session**（评审 I3）
+- [ ] 7.3 **删除路径纳入同事务**：`delete_document`（`:106-132`）的删分块与软删文档、`delete_knowledge_base`（`app_service.py:98-116`）的删分块与软删 KB，均须走 7.2 的同一 unit-of-work；**删除失败 SHALL NOT 被吞掉**（现状"仅 warning 后照样软删"→ 永久孤儿分块，评审 F4）
 - [ ] 7.4 **先写会失败的故障注入测试**：① 在 `INSERT chunks` 与 `UPDATE document` 之间抛异常 → 两者都不落库；② 删分块失败时文档 SHALL NOT 被软删
 
 ## 8. 验收（两套判据，判据已固化）
 
 - [ ] 8.1 一次性搬迁脚本：从 Chroma 读出全部分块（含 embeddings）原样写入 `chunks`。**前提是 1.2 通过**；不可读则 dense 侧改用与词法相同的探针
-- [ ] 8.2 **dense 迁移等价性**：≥20 条固定查询（覆盖中文 / 数值 / 时间三类）× **单 `kb_id` 路径**，top-k 重合率 **≥ 0.9**；未达标先查 distance 语义与 WHERE 条件，**不进入后续步骤**
-- [ ] 8.3 **词法词项命中探针**：词项从**原始 `content`** 抽取（不用 `content_seg`/tsquery 自判，避免自我循环）；按 `2 ≤ df ≤ 0.1 × 分块数` 筛选、长度 ≥ 2；命中以**原始正文字符串包含**判定
+- [ ] 8.2 **dense 迁移等价性**：≥20 条固定查询（覆盖中文 / 数值 / 时间三类）× **单 `kb_id` 路径**，top-k 重合率 **≥ 0.9**；未达标先查 distance 语义与 WHERE 条件，**不进入后续步骤**。⚠ **查询清单必须落盘成文件**（不能只写在任务里）—— 否则验收不可复现（评审：F6 残留）
+- [ ] 8.3 **词法词项命中探针**：词项从**原始 `content`** 抽取（不用 `content_seg`/tsquery 自判，避免自我循环）；按 `2 ≤ df ≤ 0.1 × 分块数` 筛选、长度 ≥ 2；命中以**原始正文字符串包含**判定。⚠ 另补一条**单字 / 被切碎词项仍须可召回**的用例 —— 探针自带长度 ≥ 2 过滤，否则对"全单字查询"这一整类**永远测不到**（评审 I4）
 - [ ] 8.4 用同一套探针横向比较候选配置（字符级基线 / jieba+simple / 若可用的扩展方案），**固定打分算法**或只比词项可召回率；记录命中数 / 词项总数 / 词项清单
 - [ ] 8.5 验收记录中显式写出统计力限制（176 分块、k=30~50 时单词项命中集合可能已达语料 17%–28%，多数平凡通过 → **仅供相对比较**）
 - [ ] 8.6 **显式登记遗留**：端到端答案质量（RAGAS）在语料到位后独立评估

@@ -1,3 +1,17 @@
+## REMOVED Requirements
+
+### Requirement: MySQL 实体类型
+
+**Reason**: 该 requirement 的标题以具体引擎（MySQL）为限定，引擎替换为 PostgreSQL 后不再成立。其正文内容（每个表的查询结果用对应 dataclass Entity 而非 raw dict）本身仍然有效，只是需要引擎中立化。
+
+**Migration**: 见本 delta 的 `## ADDED Requirements` 中的「关系型实体类型」—— 同一要求的引擎中立化版本，scenario 与原要求一一对应。
+
+### Requirement: mysql_db.py 拆为 Repo
+
+**Reason**: 该 requirement 点名的 `MySQLDB` 类**在代码中已不存在**（仅 `src/chat/manager.py:82,134` 两处 docstring 残留），且引擎替换后该命名不再成立。该 requirement 早已是历史陈述。
+
+**Migration**: 见本 delta 的 `## ADDED Requirements` 中的「连接管理拆为 Repo」—— 保留「连接管理与表操作分离 + 5 个 Domain Repo」的实质要求，去掉已不存在的类名。
+
 ## MODIFIED Requirements
 
 ### Requirement: 检索结果统一类型
@@ -46,7 +60,21 @@
 
 #### Scenario: 全局检索路径已移除
 - **WHEN** 检索被调用
-- **THEN** SHALL NOT 存在不指定知识库的全局检索路径（该路径在生产链路不可达，且与集合式存储的语义不等价）
+- **THEN** SHALL NOT 存在不指定知识库的全局检索路径（该路径在生产链路不可达）
+
+### Requirement: ChatManager 改用 ChatRepo
+
+PersistenceService SHALL 接收 ChatRepo 而非关系型连接组件。
+
+#### Scenario: PersistenceService 注入 ChatRepo
+- **WHEN** PersistenceService 被初始化
+- **THEN** 参数为 ChatRepo 而非关系型连接组件
+- **WHEN** save_session() 被调用
+- **THEN** 内部调 chat_repo.create_session()
+- **WHEN** save_message() 被调用
+- **THEN** 内部调 chat_repo.save_message()
+
+## ADDED Requirements
 
 ### Requirement: 关系型实体类型
 
@@ -107,15 +135,3 @@
 - **THEN** 通过 UserRepo 访问
 - **WHEN** 需要操作评估报告
 - **THEN** 通过 EvalRepo 访问
-
-### Requirement: ChatManager 改用 ChatRepo
-
-PersistenceService SHALL 接收 ChatRepo 而非关系型连接组件。
-
-#### Scenario: PersistenceService 注入 ChatRepo
-- **WHEN** PersistenceService 被初始化
-- **THEN** 参数为 ChatRepo 而非关系型连接组件
-- **WHEN** save_session() 被调用
-- **THEN** 内部调 chat_repo.create_session()
-- **WHEN** save_message() 被调用
-- **THEN** 内部调 chat_repo.save_message()

@@ -7,7 +7,7 @@
 
 **3. 分块与文档状态没有事务。** `document_service.py:541` 写 Chroma、`:551` 更新 MySQL 状态、`:572` 重建 BM25，三步跨三店。进程死在中间就产生「有分块、文档未 ready」的孤儿。
 
-**4. 顺带清掉四类既有缺陷**：① collection-per-KB + 读路径 `get_or_create` 造就了 691 个 collection / 只有 5 个含分块；② `src/infra/db/models/` 与 `src/infra/db/mysql_db/models/` 是**两套重复且已不一致**的 ORM 定义（前者有 `agent`/`process`，后者没有），而 alembic 的 `target_metadata` 指向后者；③ 两套内容不同的 alembic 目录；④ `ChunkData` 两处定义。
+**4. 顺带清掉四类既有缺陷**：① collection-per-KB + 读路径 `get_or_create` 造就了 691 个 collection / 只有 5 个含分块；② `src/infra/db/models/` 与 `src/infra/db/mysql_db/models/` 是**两套重复且已不一致**的 ORM 定义（前者有 `agent`/`process`，后者没有）；③ 两套 alembic 目录内容不同 —— **实际生效的是根 `alembic/`（`alembic.ini:8` → 根 `env.py:9` 的 `from src.infra.db.models import *`），它只有一条首版迁移，而未被指向的 `src/infra/db/mysql_db/alembic/` 反而多出两条 feedback 迁移**（即生效链缺失这两条）；④ `ChunkData` 两处定义。
 
 **5. 参照项目不可照搬。** 同领域的 `financial_rag-main` 用的正是 pgvector + tsvector + 应用层 RRF，其**融合的组织形态值得学**；但它的稀疏侧是 `to_tsvector('simple', content)` + `ts_rank`，字段却叫 `bm25_score` —— **`simple` 对中文不分词、`ts_rank` 也不是 BM25**，该实现在中文上基本失效（`530.sql:585-586`、`search_service.py:629`）。本变更只取其形态，不取其实现。
 

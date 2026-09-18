@@ -8,6 +8,8 @@
 
 扩展创建 SHALL 使用 `CREATE EXTENSION IF NOT EXISTS`，SHALL 放在迁移里而 **SHALL NOT 只放在数据库首次初始化的脚本目录** —— 后者仅在数据目录首次初始化时执行，既有数据卷不会重跑、托管实例上根本不参与。
 
+**账号前置条件**：部分托管服务要求**高权限账号**才能执行 `CREATE EXTENSION`（低权限账号会得到 `permission denied to create extension`）。因此「迁移账号」SHALL NOT 假设等同于应用的运行账号：部署文档 SHALL 写明由具备扩展创建权限的账号执行一次扩展创建（或在控制台启用），且迁移在扩展已存在时 SHALL 幂等跳过。
+
 #### Scenario: 清库后迁移
 
 - **WHEN** 执行 `alembic upgrade head`
@@ -15,8 +17,13 @@
 
 #### Scenario: 扩展随迁移创建
 
-- **WHEN** 在一个尚未启用向量扩展的空数据库上执行迁移
+- **WHEN** 在一个尚未启用向量扩展的空数据库上，以**具备扩展创建权限**的账号执行迁移
 - **THEN** 迁移 SHALL 先创建所需扩展再建含向量列的表，SHALL NOT 因扩展缺失而失败
+
+#### Scenario: 权限不足时给出可操作的失败
+
+- **WHEN** 以不具备扩展创建权限的账号执行迁移且扩展尚未启用
+- **THEN** 失败信息 SHALL 指明需要由高权限账号先创建扩展，SHALL NOT 表现为难以归因的建表错误
 
 #### Scenario: 迁移幂等
 

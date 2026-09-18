@@ -161,9 +161,11 @@ to_tsvector('simple','营业收入 同比 增长') @@ plainto_tsquery('simple','
 
 这同时回答了为什么 `financial_rag-main` 的稀疏侧在中文上失效：它存的是**未预分词**的 `content`，却用 `to_tsvector('simple', content)`（`530.sql:585-586`）。
 
-**实测顺带发现（新问题）**：jieba 的 `lcut` 会切出**单字 token**（上例中 `'率':4` 是独立 token）。单字 token 是噪声源 —— 任何含「率」的分块都会命中「率」，且这类词的文档频率极高，会把精确词项的排序淹没。
+**关于单字 token：初稿的证据站不住，但结论仍成立（评审更正）**。初稿称"jieba 把『营业收入同比增长率保持稳定』切出独立的『率』"——**那个空格分隔的示例是人工构造的，不是 jieba 的实际输出**（该示例用于验证 PG 的分词器行为，不是验证 jieba 的切分结果）。核 jieba 词典：`增长率`(935)、`增长`(20465)、`率`(8539) 均存在，按最短路径代价 `增长率` 成词概率高于 `增长`+`率`；且 `营业收入` 不在词典（OOV，走 HMM，输出不确定）。**因此不能拿这个例子当"jieba 会切出单字"的实测依据。**
 
-**因此写入侧 SHALL 过滤单字 token**（长度 ≥ 2 才纳入检索文本），查询侧同规则。这条不是优化，是让排序可用。
+过滤单字的**决定仍成立**，但依据换成可复现的观察：中文高频虚词（`的`/`了`/`是`/`在`）本身就是单字，文档频率接近 1，纳入检索文本会淹没精确词项的排序。**实施时应记录一次真实的 `jieba.lcut` 输出作为依据**，而非引用人工切分。
+
+⚠ **过滤会引入第二种失效模式**（评审 I4）：若某次查询经分词后**全部 token 长度 < 2**（如「涨了吗」「5 月」），查询侧过滤后为空 → 查询条件为空 → 词法路 **0 命中**；此前字符级实现能命中。**因此查询侧过滤后若为空，SHALL 回退为不过滤**（或走字符 bigram 兜底）。且验收探针须补一条「单字 / 被切碎词项仍须可召回」的用例 —— 否则探针自带长度 ≥ 2 过滤，对这一整类**永远测不到**。
 
 **方案**：
 
@@ -270,7 +272,8 @@ to_tsvector('simple','营业收入 同比 增长') @@ plainto_tsquery('simple','
 
 - `similarity_search(kb_id, query, k)` 语义不变（余弦**距离**），只换后端。
 - 新增的方法返回带 `dense_rank` / `sparse_rank` 的结果（在 `ChunkResult` 上增字段或返回并集）。
-- **`similarity_search_all` 删除**（含其 wrapper `vector_store/__init__.py:86-107`、`search.py:75-113` 实现、以及 `tests/` 中的两条用例）。理由：唯一调用点是 `retrieval.py:100` 的 `if not kb_id` 分支，而 `rag_tools.py:135-139` 在 `kb_id` 为空时**直接返回 `[]`、根本不调检索**（docstring 明写"KB=RAG 开关硬保证"）→ 该分支在生产链路上**不可达，只被测试养着**。它同时是"单表全局检索与 Chroma 逐 collection 合并**语义不等价**"的来源（Chroma 版逐库各取 top-k 再合并，`search.py:91-112`），删掉它让 dense 等价性只需覆盖"单 `kb_id`"路径。
+- **`similarity_search_all` 删除**（含其 wrapper `vector_store/__init__.py:86-107`、`search.py:75-113` 实现、以及 `tests/` 中的两条用例）。理由：唯一调用点是 `retrieval.py:100` 的 `if not kb_id` 分支，而 `rag_tools.py:135-139` 在 `kb_id` 为空时**直接返回 `[]`、根本不调检索**（docstring 明写"KB=RAG 开关硬保证"）→ 该分支在生产链路上**不可达，只被测试养着**。
+  ⚠ **更正**（评审指出初稿的论据错误）：初稿称它与单表检索"语义不等价"。**这不成立** —— `search.py:75-113` 的实现是"每个 collection 以 `k` 取 top-k，合并后 `[:k]`"，而 `retrieval.py:100` 传入的 `k` 与最终 `k` 相同；此时"逐 collection top-k 的并集"必然包含全局 top-k，排序后取 k 即等于全局 top-k，与单表 `ORDER BY ... LIMIT k` **等价**。删除的正当理由只有"生产链路不可达"这一条。
 - `similarity_search` 里 Chroma 的 `n_results=min(k, 100)` 是 **Chroma 的硬上限**（`search.py:44`），PG 无此限 → **保留该上限并注释来源**，避免把"能力提升"混进等价性验收。
 - `similarity_search_multi` 在 `src/` 里**无调用方** → 确认后删除。
 - 契约变更须同步 `docs/agents/api_contract.md` 与受影响测试断言（`CLAUDE.md` 的契约同步要求）。
@@ -334,7 +337,7 @@ to_tsvector('simple','营业收入 同比 增长') @@ plainto_tsquery('simple','
 - ~~`plainto_tsquery` 的 AND 语义~~ → **实测确认是 AND**（`'营业收入' & '增长'`），"长查询召回偏严"是真实风险。**决定：先用 AND 落地，把 OR 组合作为探针的一个对照项**（它属于"打分/查询构造"变量，可与分词配置分开测）。
 - ~~`similarity_search` 的 `min(k, 100)` 上限~~ → **决定保留并注释来源**（Chroma 硬限），避免把能力提升混进等价性验收。
 - ~~`similarity_search_multi`~~ → **决定删除**（`src/` 无调用方，确认后删）。
-- ~~`similarity_search_all`~~ → **决定删除**（生产链路不可达 + 语义不等价，见 D8）。
+- ~~`similarity_search_all`~~ → **决定删除**（理由：生产链路不可达；**初稿的"语义不等价"论据已更正为不成立**，见 D8）。
 - ~~`metadata` 哪些键升列~~ → **决定** `doc_id`/`chunk_index`/`chunk_total`/`source`/`page` 升列并**在读取时回填进 `metadata`**（见 D3）。
 - ~~是否引入两路权重~~ → **决定不引入**（加权 RRF 是能力新增，须独立验收，见 D5）。
 - ~~`TOP_K_RETRIEVAL` 三方不一致由谁收口~~ → **决定由 `retrieval-fetch-and-dedup` 收口**，本变更只通知（见 D9）。
