@@ -36,3 +36,6 @@ Thumbs.db
 
 # Playwright CLI artifacts
 .playwright-cli/
+
+# Firecrawl CLI artifacts（多 URL 抓取时会落盘）
+.firecrawl/

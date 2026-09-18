@@ -104,9 +104,9 @@ def test_skill_tool_anchor_exclude_suppresses(tmp_path):
 def test_skill_body_tool_names_exist_in_code():
     """skill 正文引用的工具名必须存在（Q3 叙述级防腐）。
 
-    inline skill（finance-qa）正文引用 retrieve_kb 等指令，若工具改名而正文未
-    同步，主 agent 收到指向不存在工具的注入指令。正文属叙述层不在 check_docs
-    frontmatter 扫描范围，故在此用已知工具名词典比对正文（fork 正文应零工具名）。
+    skill 正文若引用工具名（如 retrieve_kb、search_web），该工具必须在代码中已注册，
+    否则正文会指向不存在的工具。正文属叙述层，不在 check_docs 的 frontmatter 扫描
+    范围，故在此用已知工具名词典比对正文（当前 skill 全为 fork，正文应零工具名）。
     """
     import re
 

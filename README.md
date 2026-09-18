@@ -280,7 +280,7 @@ Nginx 已预配 SSE 支持（`proxy_buffering off`），确保流式问答不卡
 | LLM_MODEL | 大语言模型 | qwen-max |
 | EMBEDDING_MODEL | 向量化模型 | text-embedding-v3 |
 | CHUNK_SIZE | 分块大小 | 512 |
-| TOP_K_RETRIEVAL | 检索召回数 | 8 |
+| TOP_K_RETRIEVAL | 检索召回数 | 30 |
 | TOP_K_RERANK | 重排序保留数 | 5 |
 | MEMORY_WINDOW | 对话窗口大小 | 6 |
 

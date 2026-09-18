@@ -19,6 +19,8 @@
 
 - **chat-core 确定性回归**：登录 → 新建会话 → 选 KB → 提问 → SSE 流式渲染 → 工具状态 → 引用 → 历史会话（sse-tool-detail 3.2 的 detail + resume 属其中：断言状态标签文案含 `query=`/`queries=`，刷新后 resume 回放仍在）
 - **行为验收（KB 造数 + 日志断言，冒烟级）**：agent-loop-hardening 5.3/4.5（绑 KB 无 [n] 被 KB 护栏引导补标 → 引用横条；态 A 纯对话不跑 judge；regen 后 search_web 完整执行不空白；缺年份→联网仍缺→标注"知识库与网络均未覆盖"）；检索行为信号（retrieval-quality-signals 4.2 / logging-convention-migration 4.3：真实 query 触发后日志出现对应 `retrieval_signal:` 行）
+- **会话智能体与 skill 调用（`session-agent-and-skill-invocation` 的 8.4 / 8.5 / 8.8 / 8.9 / 8.10 / 8.11 / 8.12）**：新建对话选智能体 → 技能选择器选技能 → 第二轮仍受 skill 影响 → 刷新后顶栏回显（值来自 `sessions/list`）；一句话触发多个并行委派 → 事件/看板按 `delegate_id` 不串号；**绑定 KB + 选定智能体 → 答案仍带 `[n]`**（验证环境约束层未被 preset 覆盖，⚠ **须在 change `prompt-layering-and-domain-binding` 之后重跑** —— 该变更会把"环境约束层"重组为六段，验证对象是新写的）；子代理中途请求确认 → 澄清卡 → 答复后继续完成；绑定后传入不同 agent → 按绑定值生成、不报错，日志出现 `agent mismatch ignored`；`/xxx` 调 `context: fork` skill → `[n]` 有来源横条、抽屉可打开、日志无 `invalid_citation`；`scripts/migrations/2026-09-11-add-session-agent.sql` 幂等（列已存在时）+ 存量会话首次携带 agent 的 `bind-if-empty`
+  - 交接日期 2026-09-18：该 change 的 8.6（prod compose 补 `agents/` 挂载）与 8.7（清理 `src/api/chat.py` 死代码）已由其**自行完成**，不在承接范围内
 
 **承接方式**：测试内通过 document upload API **自建/自清受控 KB**（fixture），对"纯 UI 可断言"项以结构断言为主；对"后端事实"（judge 是否执行、search_web 是否执行、信号行是否出现）经测试捕获的 `X-Trace-ID` → 容器 `grep /data/logs` 做**后端日志断言**。依赖 LLM 随机行为的验收项按"受控 KB 尽力触发 + 结构断言 + 失败附 trace 转人工"标为冒烟级，不与确定性回归混在同一门禁语义。
 

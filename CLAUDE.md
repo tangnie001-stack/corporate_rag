@@ -32,9 +32,11 @@ Python 3.11+ / FastAPI / ChromaDB / LangChain / DashScope / MySQL 8.0 / Redis 7 
 | docs/agents/chunking-issues.md | 分块问题排查与修复记录 | 遇到分块问题优先查阅 |
 | docs/agents/defensive-patterns.md | 防御性模式：并发 / SSE / 精排 / 实体 / prompt / DB / 部署的防复发规则 | 写相关领域代码前 |
 | docs/agents/ui-design-flow.md | UI 设计流程与产物路径：全局基线 `docs/design/MASTER.md` / 页面规格 `docs/design/pages/<name>.md` / 效果预览 `docs/design/<name>-mockup.html` | **改 UI / 新增组件前必读**；产出按此流程落 `docs/design/`，改完用 playwright-cli 验证 |
+| docs/agents/dev-flow.md | 开发流程与 skill 选用：六环节（需求/bug → 完善 → 方案 → 验证 → 生成文件 → 执行）的主 skill、支撑项与必配闸门路由表 | **开工前**决定走哪套 skill 流程时；到评审、验证环节前查 |
 | docs/agents/cookbook.md | 操作记录协议：什么该记、怎么记；条目按协议追加 | 遇到可复用操作流程时按协议记录；需要操作步骤时查阅 |
 | docs/agents/requirements_pool.md | 需求池（意向清单，非已确认需求） | 规划/排期时参考；不作为功能实现依据 |
 | docs/agents/reference-projects.md | 参考资源：本地 github 镜像仓库（按域分组、评分排序、何时查阅）+ 附录「本地已安装技能」（`~/.agents/skills/`） | 写对应领域代码前、选型/排期时参考；找 agent/skill 范例时 |
+| docs/adr/ | 架构决策记录：一条决策一文件（背景/候选/决策/理由/后果/复查条件），**只追加不可变**；与 `superpowers/specs`（设计）、`openspec/changes`（执行）的分工见目录 README | 做不可逆的技术选型/取舍**前**查有无既有决策（避免重开已决问题）；写下新决策时按 README 模板 |
 
 ## 代码目录结构（修改代码前必读）
 

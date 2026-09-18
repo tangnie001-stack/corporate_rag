@@ -176,7 +176,7 @@ CHUNK_SIZE: int = int(os.getenv("CHUNK_SIZE", "512"))
 # 相邻分块的重叠字符数：保证跨块的句子不会丢失关键信息
 CHUNK_OVERLAP: int = int(os.getenv("CHUNK_OVERLAP", "64"))
 # 初步检索返回的 top-K 数量（送入 reranker 之前的候选数）
-TOP_K_RETRIEVAL: int = int(os.getenv("TOP_K_RETRIEVAL", "50"))
+TOP_K_RETRIEVAL: int = int(os.getenv("TOP_K_RETRIEVAL", "30"))
 # 重排序后保留的 top-N 数量（最终送入 LLM 的上下文数量）
 TOP_K_RERANK: int = int(os.getenv("TOP_K_RERANK", "5"))
 # 检索结果按 doc_id 去重的每文档保留条数（1 = 现状；>1 供多样性 A/B 实验）

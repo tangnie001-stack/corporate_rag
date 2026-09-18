@@ -211,6 +211,7 @@ services:
       - app_logs:/data/logs
       - chroma_onnx_cache:/root/.cache/chroma
       - ./skills:/app/skills
+      - ./agents:/app/agents
     depends_on:
       mysql:
         condition: service_healthy

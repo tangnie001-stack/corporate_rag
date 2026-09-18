@@ -1,9 +1,8 @@
-"""流式聊天 SSE 端点 — 支持分阶段状态推送和引用高亮。"""
+"""流式聊天 SSE 端点 — 支持分阶段状态推送。"""
 
 import asyncio
 from collections.abc import AsyncGenerator, Callable
 
-import jieba
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
@@ -24,130 +23,6 @@ from src.utils.sse import (
 )
 
 router = APIRouter()
-
-# ── Query-Biased Snippet helpers ───────────────────────────────────
-
-STOP_WORDS = {
-    "的",
-    "了",
-    "是",
-    "在",
-    "有",
-    "和",
-    "就",
-    "不",
-    "人",
-    "都",
-    "一",
-    "个",
-    "上",
-    "也",
-    "很",
-    "到",
-    "说",
-    "要",
-    "去",
-    "你",
-    "会",
-    "着",
-    "没有",
-    "看",
-    "好",
-    "自己",
-    "这",
-    "那",
-    "什么",
-    "怎么",
-    "吗",
-    "吧",
-    "啊",
-    "呢",
-}
-
-
-def get_query_biased_snippet(query: str, chunk_text: str, window: int = 100) -> dict:
-    """基于查询关键词提取摘要片段及高亮位置。
-
-    用 jieba 分词从查询中提取关键词，在分块文本中定位匹配位置，
-    返回首个关键词周围的上下文窗口和高亮区域。
-
-    Args:
-        query: 用户原始查询文本
-        chunk_text: 分块完整文本
-        window: 关键词前后上下文窗口大小（字符数，默认 100）
-
-    Returns:
-        dict: 包含 snippet（摘要文本）、highlights（高亮位置列表，
-        每项含 start/end/keyword）、fallback（是否无匹配的标记）
-    """
-    words = jieba.lcut(query)
-    keywords = [w for w in words if len(w) > 1 and w not in STOP_WORDS]
-    if not keywords:
-        return {"snippet": chunk_text[:200], "highlights": [], "fallback": True}
-    matches: list[tuple[int, int, str]] = []
-    for kw in keywords:
-        idx = chunk_text.find(kw)
-        while idx != -1:
-            matches.append((idx, idx + len(kw), kw))
-            idx = chunk_text.find(kw, idx + 1)
-    if not matches:
-        return {"snippet": chunk_text[:200], "highlights": [], "fallback": True}
-    first = min(m[0] for m in matches)
-    start = max(0, first - window)
-    end = min(len(chunk_text), first + window)
-    snippet = chunk_text[start:end]
-    highlights = []
-    for hs, he, kw in matches:
-        if hs >= start and he <= end:
-            highlights.append({"start": hs - start, "end": he - start, "keyword": kw})
-    if highlights:
-        highlights.sort(key=lambda h: h["start"])
-        merged = [highlights[0]]
-        for h in highlights[1:]:
-            if h["start"] <= merged[-1]["end"]:
-                merged[-1]["end"] = max(merged[-1]["end"], h["end"])
-            else:
-                merged.append(h)
-        highlights = merged
-    return {"snippet": snippet, "highlights": highlights, "fallback": False}
-
-
-def _build_highlighted_snippet(qbs: dict) -> str:
-    """将 query-biased snippet 转为含 <mark> 高亮的 HTML 片段。
-
-    若为 fallback（无关键词匹配），仅做 HTML 转义后返回原文，
-    保证前端可安全渲染。否则按 highlights 区间逐段包裹 <mark> 标签。
-
-    Args:
-        qbs: get_query_biased_snippet() 返回的摘要字典，含
-        snippet、highlights、fallback 三个键
-
-    Returns:
-        str: 含 <mark> 高亮标签的 HTML 字符串
-    """
-    from html import escape
-
-    snippet = qbs["snippet"]
-    if qbs.get("fallback"):
-        return escape(snippet)
-
-    highlights = qbs.get("highlights", [])
-    if not highlights:
-        return escape(snippet)
-
-    # 遍历高亮区间逐段拼接 HTML，重叠区间已由调用方合并
-    parts = []
-    pos = 0
-    for h in highlights:
-        start = h["start"]
-        end = h["end"]
-        if start > pos:
-            parts.append(escape(snippet[pos:start]))
-        parts.append(f"<mark>{escape(snippet[start:end])}</mark>")
-        pos = end
-    if pos < len(snippet):
-        parts.append(escape(snippet[pos:]))
-    return "".join(parts)
 
 
 async def _run_with_finalize(

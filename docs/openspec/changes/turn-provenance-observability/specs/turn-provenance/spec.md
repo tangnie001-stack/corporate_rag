@@ -23,8 +23,8 @@
 系统 SHALL 在每轮生成开始时，通过 SSE `status` 事件声明本轮的技能动作：`stage` 取专用值 `turn_skill`。若无本轮技能动作（无 `/xxx`、非首轮、或命令失败），系统 SHALL NOT 产出 `turn_skill` 事件。声明表达**本轮触发**的技能动作（意图）；其执行结果（成功 / 中断 / 降级）SHALL NOT 由声明承载——fork 结果由委派区呈现，失败原因由既有兜底文案呈现，已发出的声明不撤回、不改写。
 
 #### Scenario: inline 技能加载成功
-- **WHEN** 用户以 `/finance-qa 任务` 触发命中 inline 技能并成功注入
-- **THEN** 该轮产出 `stage=turn_skill`、`message="成功加载 skills：finance-qa"` 的事件
+- **WHEN** 用户以 `/financial-statement-analyzer 任务` 触发命中 inline 技能并成功注入
+- **THEN** 该轮产出 `stage=turn_skill`、`message="成功加载 skills：financial-statement-analyzer"` 的事件
 
 #### Scenario: 首轮多个技能一条列全
 - **WHEN** 预设声明 `skills: [a, b, c]` 且三者在首轮均解析成功

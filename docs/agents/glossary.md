@@ -55,6 +55,46 @@
 - **来源等级（source tier）**：引用来源的权威等级，取值 T0（内部文档，KB 固定）/ T1（官方一手）/ T2（权威媒体）/ T3（一般，未命中默认中性档）/ T4（UGC），由 `SOURCE_TIER_RULES` 域名规则表确定性定档（`.gov.cn`/`.edu.cn` 模式升 T1），模型判断不改写已定档位；以徽标形式透明呈现在引用抽屉条目，系统不裁决可信度；字段语义与标签权威见 api_contract.md「citation.tier」
 - **候选规则信号**：种子清单（`SOURCE_TIER_RULES`）的成长机制——离线 SQL 从 `conversation_history.sources` 聚合全部域名引用次数，达阈值者经人工审核（对照规则表与拒绝清单、核对样本引用上下文）后加入规则表，被拒域名记入文档化拒绝清单（negative cache）；不使用 LLM 定档或自动升级；操作步骤见 cookbook.md「候选规则审核」
 
+## Harness（本项目定位）
+
+> 行业对本词**无统一口径**（LangChain / HuggingFace / 社区三方分法互不兼容），本节只固化**本项目口径**，供内部文档与命名统一。
+
+**两个主流口径**
+
+| 口径 | 公式 | 出处 | harness 的范围 |
+|------|------|------|---------------|
+| 宽 | `Agent = Model + Harness` | LangChain《The Anatomy of an Agent Harness》(2026-03) | 除模型外的**一切**代码、配置与执行逻辑（"If you're not the model, you're the harness"） |
+| 窄 | `Agent = Model + Scaffolding + Harness` | HuggingFace `agent-glossary` (2026-05) | 仅**模型不可见**的执行层；`Scaffolding` 另指模型可见的规则层 |
+
+**本项目采用宽口径**：harness = 模型之外、让模型能真正干活的那套工程系统。判定依据（三问，任一命中即属 harness）：改它会改变 Agent 的**行为/知识**（非仅性能）→ 属 harness 而非 runtime；产出是**内容**（提示词/检索结果/答案）而非**进程**；删掉它 Agent 会**变笨或幻觉**，而非**跑不起来**。
+
+**边界限定（勿与 coding harness 混淆）**：本项目 harness 的"环境"是**知识库 + 联网检索**，**不含文件系统 / Shell / Sandbox**。与 Claude Code、Codex 那类"给模型一台计算机"的 coding harness 不同源——听到"harness"就预期能跑命令，是**预期错**而非定义错。
+
+**与相邻术语的分界**
+
+| 术语 | 位置 | 本项目对应 |
+|------|------|-----------|
+| `framework`（框架） | 你调它、它替你搭的库 | LangGraph、FastAPI——**本项目不是 framework** |
+| `runtime`（运行时） | 执行层：沙箱隔离 / 资源配额 / 网络与凭证 / 容器调度 / 进程级恢复 | 不适用（无沙箱；流式状态在单 worker 进程内） |
+| `scaffolding`（脚手架） | 模型**可见**的规则层 | 宽口径下属于 harness 的一部分 |
+| `harness` | 见上 | 本项目自称 |
+
+**本项目模块归属**（写作 spec / 分模块时按此归类，勿混用两套口径）
+
+| 层 | 落点 |
+|----|------|
+| Scaffolding（模型可见） | `src/config/prompts.py`、工具描述、`SKILL.md` 的 name/description、`agents/*.md` 预设正文、输出格式约束 |
+| Harness（模型不可见） | LangGraph 图与循环、工具注册表路由、迭代预算与停止条件、verify 与护栏强制、SSE 事件发射、会话状态装载与持久化、trace |
+| Model | DashScope 侧的模型本体，非本项目所有 |
+
+**命名结论**：本项目自称 `Corporate Agent Harness` 成立（宽口径），既有文件与 spec 命名（`chat-harness-ui`、`agent-harness-foundation`）沿用不改。
+
+**常见错误**
+
+- ❌ 把 LangGraph 说成"本项目 harness"——它是 **framework**，本项目是**用它搭出的 harness**
+- ❌ 以为 harness 必含沙箱/Bash——那是 **coding harness** 的语感，本项目无
+- ❌ 与 `agent` 混用——agent 是**执行主体**（`src/agents/graph/` 的循环），harness 是**包住它的整套系统**
+
 ## Agent / Skill / Tool 三概念（易混，先分清）
 
 | 术语 | 一句话 | 本项目对应 | 常见错误 |

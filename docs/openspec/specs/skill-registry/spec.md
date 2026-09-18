@@ -16,11 +16,17 @@ TBD - created by archiving change agent-delegation-skills. Update Purpose after 
 #### Scenario: frontmatter 解析
 
 - **WHEN** 解析 SKILL.md
-- **THEN** 提取 frontmatter 字段：name、description、context、model、thinking、allowed-tools、max-iterations
+- **THEN** 提取 frontmatter 字段：name、description、context、model、allowed-tools、user-invocable、disable-model-invocation、agent
 - **AND** name 缺省时用目录名；description 缺省时用正文首段
+- **AND** `name`（含缺省取自目录名时）**仅允许 ASCII slug** `^[A-Za-z0-9][A-Za-z0-9_-]*$`——`/xxx` 命令天然是 ASCII 惯例，非 ASCII 名会让 `/财报分析` 落进"非命令形态"分支被**静默**当普通文本；违反者加载期记 warning 并跳过
+- **AND** 中文展示需求走 `description`，不塞进 `name`
+- **AND** `allowed-tools` 以**逗号分隔字符串**书写，内部转为列表
+- **AND** `agent`（可选）声明该 fork skill 的执行者预设名，覆盖会话选定值
+- **AND** 已废弃的 `thinking` 与 `max-iterations` 字段不再被识别（历史写法忽略并记 warning；迭代上限改由执行者 agent 定义的 `maxTurns` 控制）
 
 ### Requirement: SkillRecord 运行时对象
-系统 SHALL 为每个加载的 skill 生成 SkillRecord，含 {name, description, context, inline_prompt, agent_prompt, model, thinking, allowed_tools, max_iterations, source_path}。
+
+系统 SHALL 为每个加载的 skill 生成 SkillRecord，含 {name, description, context, inline_prompt, fork_body, agent, model, allowed_tools, user_invocable, disable_model_invocation, source_path}。
 
 #### Scenario: context 值约束
 
@@ -33,7 +39,12 @@ TBD - created by archiving change agent-delegation-skills. Update Purpose after 
 - **THEN** 正文存为 inline_prompt（供主 agent 注入执行）
 - **AND** inline_prompt 控制在短方法论规模（建议 ≤500 字）——内容注入后留在 messages 历史，长文会造成上下文累积膨胀；长文领域内容应建模为 fork skill（独立子代理上下文，不占主对话）
 - **WHEN** context=fork
-- **THEN** 正文存为 agent_prompt（供子代理 system_prompt）
+- **THEN** 正文存为 fork_body（供子代理作为 **user message** 的任务/方法论内容）
+
+#### Scenario: 双轴控制字段默认推导
+
+- **WHEN** skill 未显式声明 user-invocable / disable-model-invocation
+- **THEN** 加载期依据 allowed-tools 与工具 readonly 属性推导默认值（见 skill-invocation capability），并写入 SkillRecord 的 user_invocable / disable_model_invocation
 
 ### Requirement: 注册表加载与冲突
 系统 SHALL 用 SkillRegistry 聚合所有 SkillRecord 并按名索引。

@@ -1,3 +1,13 @@
+> **归档说明（2026-09-18）**
+>
+> **勾选状态失真，以代码为准。** 归档时呈现 5/68，但实际实现主体已落地：`src/agents/skills/`（loader + registry + models）、`src/agents/presets/`（loader + registry + models）、`src/api/capabilities.py`（`GET /api/skills` / `GET /api/agents`）、`deploy/nginx/html/chat.html` 的两个选择器（智能体会话级 / 技能消息级）、`/xxx` 解析与 `SKILL_INJECTION_PREFIX` 注入链路、`prompt_manager.get_base_system_prompt()` 拆分。sections 1–7 的勾选多属**记录未更新**，非工作未完成；未逐条复核，不做追认。
+>
+> **本次归档附带完成的两项**：8.6（`docker-compose.prod.yml` 补 `./agents:/app/agents`）、8.7（删除 `src/api/chat.py` 的 `get_query_biased_snippet` / `_build_highlighted_snippet` / `STOP_WORDS` / `import jieba`，并同步文件头 docstring）。8.1–8.3 门禁实测通过（pytest 925 passed / ruff 全通过 / pyright 0 error / check_docs 0 error）。
+>
+> **验证类工作在别处闭环**：8.4 / 8.5 / 8.8 / 8.9 / 8.10 / 8.11 / 8.12 全部交接 change `e2e-playwright-regression`（其 proposal「承接 P1 各 change 的人工 E2E/验收场景」已登记）。其中 **8.8 依赖 change `prompt-layering-and-domain-binding` 先落地**（该变更会把"环境约束层"重组为六段）。
+>
+> **spec 同步**：本 change 的 9 个 delta 已于 2026-09-18 手动并入在效 `docs/openspec/specs/`，故归档使用 `--skip-specs`，避免重复应用。
+
 ## 1. 契约层（SKILL.md frontmatter）
 
 - [ ] 1.1 `SkillRecord` 删除 `thinking` 与 `max_iterations` 字段、新增 `user_invocable` / `disable_model_invocation` / **`agent`**；`agent_prompt` **改名 `fork_body`**（`src/agents/skills/models.py`）
@@ -84,15 +94,17 @@
 
 ## 8. 验证与收尾
 
-- [ ] 8.1 `pytest tests/ -v` 全绿
-- [ ] 8.2 `ruff check .` 无错误、`pyright src/` 不新增 error
-- [ ] 8.3 `python -m src.cli.check_docs` 0 error
-- [ ] 8.4 手工 E2E：新建对话选智能体 → 用技能选择器选技能 → 发消息 → 第二轮仍受 skill 影响 → 刷新后顶栏仍回显智能体（值来自 `sessions/list`）
-- [ ] 8.5 手工 E2E：一句话触发多个可并行委派 → 观察并发执行且事件/看板按 `delegate_id` 不串号
-- [ ] 8.6 **两个 compose 文件**都补 `agents/` volume 挂载（同 `skills/`）：`docker-compose.override.yml`（dev）+ `docker-compose.prod.yml`
-- [ ] 8.7 清理死代码：`src/api/chat.py` 的 `get_query_biased_snippet` / `_build_highlighted_snippet` 及随之不再需要的 `jieba` import（两者无任何调用方；归档计划 `2026-07-23-rag-orchestration-phase2` 曾记录应删除但未删）
-- [ ] 8.8 手工 E2E：会话**绑定 KB 且选定智能体** → 答案仍带 `[n]` 引用（验证环境约束层未被 preset 覆盖）
-- [ ] 8.9 手工 E2E：子代理中途请求确认 → 弹澄清卡 → 答复 → **继续完成**（不从头上重来）
-- [ ] 8.10 手工验证 `scripts/migrations/<date>-add-session-agent.sql` 可重复执行/幂等说明（列已存在时的处理）；**上线前已存在的会话**首次携带 agent 能成功绑定（`bind-if-empty`）
-- [ ] 8.11 手工 E2E：绑定后请求携带不同 agent（或直连 API 传错）→ 本轮仍按绑定值生成、**不报错**，日志出现 `agent mismatch ignored` warning，前端标识被 `agent_used` 纠正
-- [ ] 8.12 手工 E2E：会话绑定 KB + 选定智能体，用 `/xxx` 调一个 `context: fork` skill → 答案的 `[n]` 有来源横条、抽屉可打开（验证 D24 引用池并轨）；日志无 `invalid_citation`
+- [x] 8.1 `pytest tests/ -v` 全绿 —— **2026-09-18 实测：925 passed, 14 skipped**
+- [x] 8.2 `ruff check .` 无错误、`pyright src/` 不新增 error —— **2026-09-18 实测：ruff All checks passed；pyright 0 errors**
+- [x] 8.3 `python -m src.cli.check_docs` 0 error —— **2026-09-18 实测：11 篇文档，0 error, 2 warn**
+- [ ] 8.4 手工 E2E → **交接 change `e2e-playwright-regression`**：新建对话选智能体 → 用技能选择器选技能 → 发消息 → 第二轮仍受 skill 影响 → 刷新后顶栏仍回显智能体（值来自 `sessions/list`）
+- [ ] 8.5 手工 E2E → **交接 change `e2e-playwright-regression`**：一句话触发多个可并行委派 → 观察并发执行且事件/看板按 `delegate_id` 不串号
+- [x] 8.6 两个 compose 文件都补 `agents/` volume 挂载 —— dev `docker-compose.override.yml:7` 原本已有；**prod `docker-compose.prod.yml:214` 于 2026-09-18 补齐**（此前 prod 只挂 `skills`，生产上智能体预设加载不到）
+- [x] 8.7 清理死代码 —— **2026-09-18 完成**：删除 `src/api/chat.py` 的 `get_query_biased_snippet` / `_build_highlighted_snippet` / `STOP_WORDS` 与 `import jieba`；文件头 docstring 的"引用高亮"一并移除（全仓已无 `<mark>` 产出方）。`ruff` / `pyright` 均通过
+- [ ] 8.8 手工 E2E → **交接 change `e2e-playwright-regression`**。⚠ **必须在 change `prompt-layering-and-domain-binding` 之后重跑** —— 该变更会把"环境约束层"重组为六段，验证对象是新写的：会话**绑定 KB 且选定智能体** → 答案仍带 `[n]` 引用（验证环境约束层未被 preset 覆盖）
+- [ ] 8.9 手工 E2E → **交接 change `e2e-playwright-regression`**：子代理中途请求确认 → 弹澄清卡 → 答复 → **继续完成**（不从头上重来）
+- [ ] 8.10 手工验证 → **交接 change `e2e-playwright-regression`**：`scripts/migrations/2026-09-11-add-session-agent.sql` 可重复执行/幂等说明（列已存在时的处理）；**上线前已存在的会话**首次携带 agent 能成功绑定（`bind-if-empty`）
+- [ ] 8.11 手工 E2E → **交接 change `e2e-playwright-regression`**：绑定后请求携带不同 agent（或直连 API 传错）→ 本轮仍按绑定值生成、**不报错**，日志出现 `agent mismatch ignored` warning，前端标识被 `agent_used` 纠正
+- [ ] 8.12 手工 E2E → **交接 change `e2e-playwright-regression`**：会话绑定 KB + 选定智能体，用 `/xxx` 调一个 `context: fork` skill → 答案的 `[n]` 有来源横条、抽屉可打开（验证 D24 引用池并轨）；日志无 `invalid_citation`
+
+> **本 change 的收尾分工**（2026-09-18）：8.1–8.3 与 8.6–8.7 由本 change 自理（8.6/8.7 已完成）；**8.4/8.5/8.8/8.9/8.10/8.11/8.12 全部交接 change `e2e-playwright-regression`**，由它以确定性用例或受控冒烟承接（其 proposal「承接 P1 各 change 的人工 E2E/验收场景」一节），跑通后两处交叉标注闭环。其中 **8.8 依赖 change `prompt-layering-and-domain-binding` 先落地**。
