@@ -67,6 +67,21 @@
 
 **prod 侧**：指向阿里云 RDS，不再本地起库。**前提**：prod 与 dev 不同机 —— 两份 compose 的 `postgres_data` 卷名与 `./data/*` 路径相同，同机执行会互相污染（这条要写进 compose 注释与部署文档）。
 
+**镜像**：dev 现在用的 `postgres:15-alpine` **不自带 pgvector**（官方 postgres 镜像不含第三方扩展）。改用 pgvector 官方镜像 `pgvector/pgvector:pg15`（或 pin 到 `pgvector/pgvector:0.8.6-pg15`），且**大版本必须与 RDS 对齐**，否则本地绿、上线行为不同。
+
+**应用 database 与账号的创建（初稿想当然了，评审 F2）**：`postgres` 镜像只在**数据目录首次初始化**时执行 `docker-entrypoint-initdb.d` 下的脚本。因此：
+
+- **dev**：既有卷 `corporate_rag_postgres_data` 不会重跑 init 脚本 → 必须显式一次性 `CREATE DATABASE`（或删卷重建并挂载 `./deploy/postgres/init`）。这是两条不同的动作，`tasks.md` 不得只写"改路径"。
+- **prod**：RDS 由控制台/SQL 预建应用库与**最小权限账号**，init 脚本根本不参与。
+- `vector` 扩展的创建**不依赖 initdb**（见 D3）：放进 alembic 首版迁移，幂等且两条路径都生效。
+
+**共享实例的运维后果（初稿只写了"故障域共享"，不完整，评审 F11）——以下四条为显式接受项，须记入 ADR**：
+
+1. **备份与 PITR 是实例级的**：恢复应用库会同时回退 Langfuse 的数据（反之亦然）。两个应用的恢复点被绑死。
+2. **连接数是共享预算**：prod compose 实为 `--workers 4`（`docker-compose.prod.yml:202`），叠加 `pool_size=10 + max_overflow=10`（`engine.py:23-24`）≈ **80 连接**，再加 Langfuse 与其 worker，可能触及 RDS 的 `max_connections`。**连接预算必须作为 RDS 规格的输入**（与"生产单 worker"规则一并决策，见 Open Questions）。
+3. **大版本升级是实例级维护窗口**：两个应用必须同时兼容新版本。
+4. **账号模型**：现有 compose 只创建了 `langfuse` 一个用户；"独立 database + 独立账号"需要额外的创建步骤与权限划分（与上面的 F2 同源）。
+
 ### D2：融合留在应用层 —— 不是"退而求其次"，而是 PG 上没有可下推的东西
 
 **候选**：① 应用层融合（现状形态，改后端）；② RRF 写进 SQL；③ 换用有原生融合的引擎（Milvus / OpenSearch）；④ ParadeDB `pg_search` 的原生 hybrid。
@@ -85,7 +100,12 @@
 - 三家示例都绑上各自专有语法（`|||`/`@@@`/`pdb.score()`、`Doris` 的 `MATCH_ANY`、HorizonDB 的 `azure_ai`）→ 换实现即重写。
 - 2 次往返变 1 次、去重下推省下的传输量：`k=30` 下 60 行 vs 50 行，**无关痛痒**。
 
-**业界侧印证**：`financial_rag-main`（pgvector + tsvector，与本变更同栈）、WeKnora（**有 OpenSearch 后备却仍写在 Go 里**）、Dify（连关键词打分都在 Python）、RAGFlow 的 ES 路径 —— 全是应用层融合。WeKnora 与 `financial_rag-main` 都实现了**加权 RRF**，而 Elasticsearch 原生 RRF 官方明说"各 child retriever 权重必须相等" —— **加权与运行时按租户可配，正是应用层融合长期存在的理由。**
+**必须把两条不同的论据分开**（初稿把它们揉成一条，是论证错误）：
+
+- **论据 ①（约束，本项目适用）：Postgres 生态缺乏可用的融合能力。** pgvector 本体不提供；ParadeDB 到 0.25.9 仍标 `coming soon`；其余可选项要么无托管（破"能用托管就用托管"原则），要么需要 RDS 预装扩展（可用性未确认）。**因此"下推"在本栈上只是把手写 RRF 搬进 SQL。**
+- **论据 ②（业界取向，只用来说明"应用层融合不是落后"）：即便引擎提供原生融合，需要加权与多租户可配的产品仍会选择应用层。** 证据：WeKnora 有 OpenSearch 后端（其 2.19 有原生 RRF）却把**加权 RRF 写在 Go 里**（`internal/application/service/knowledgebase_search_fusion.go:84-125`，配置项 `RRFK` / `RRFVectorWeight=0.5` / `RRFKeywordWeight=0.3`，per-tenant 可配）；`financial_rag-main`（pgvector + tsvector，与本变更同栈）在 Python 里做**按 domain 加权**的 RRF；Dify 连关键词打分都在 Python。**Elasticsearch 原生 RRF 官方明说"各 child retriever 权重必须相等"** —— 加权能力正是原生方案的缺口。
+
+⚠ **WeKnora 属论据 ②，不能用来支持论据 ①。** 它是"有原生能力却不用"，不是"没有原生能力"。初稿把它当作"PG 无融合"的佐证，属类比错位，此处更正。
 
 **未选 ③**：会把选型从"收敛到一个托管 PG"推回"PG + 另一个检索引擎"（Milvus 需托管版；OpenSearch 需自建或托管版），与本变更的首要目标（收敛、少一个自建状态组件）冲突。若将来"融合由引擎负责"成为硬需求，这是一条需要重开评估的路，**不是本变更可以顺手兼容的**。
 
@@ -109,6 +129,12 @@ chunks
 索引      (kb_id) btree  ·  tsv GIN  ·  (doc_id) btree
 ```
 
+**DDL 前置**：该表依赖 `vector` 扩展，创建表之前 SHALL 执行 `CREATE EXTENSION IF NOT EXISTS vector;`。**该语句放在 alembic 首版迁移里，不放在 `deploy/postgres/init/`** —— initdb 脚本只在数据目录首次初始化时执行（见 D8 与 tasks 2.6），dev 的既有数据卷不会重跑、prod 指向 RDS 时脚本根本不参与；只有放进迁移才幂等且两条路径都生效。
+
+**读取契约（必须显式约定，否则静默破坏去重与引用）**：`ChunkResult.metadata` SHALL 在读取时由**列值 + jsonb 平铺合并**回填（冲突以列为准），至少包含 `doc_id` / `chunk_index` / `chunk_total` / `source` / `page`。
+
+理由不是洁癖：`_dedup_by_doc_id` 读的是 `r.metadata.get("doc_id")`（`src/rag/retrieval.py:53`），而 `doc_id` 在新表里是**列**。若不回填，该分支对所有结果取 `None` → 走"无 doc_id 则保留"路径 → **去重在无声中完全失效**，同文档分块重新占满候选窗口；同时 `rag_tools.py:171-176` 的 `source`/`page`/`doc_id` 变空、`retrieval.py:187-188` 的实体透传归零（引用与来源渲染一并损坏）。三者都不会报错。
+
 **决策与理由**
 
 - **`doc_id` / `chunk_index` / `chunk_total` / `source` / `page` 升为列**（不留在 jsonb 里）：这五个键是**契约字段**（`store.py:47-51`、`rag_tools.py:171-176` 读 `source`/`page`/`doc_id`），升列后可被约束与索引，且 jsonb 只承载 chunker 的自定义键。
@@ -118,7 +144,26 @@ chunks
 
 ### D4：中文词法检索 —— jieba 预分词 + `to_tsvector('simple')`，**不依赖任何 PG 扩展**
 
-**问题**：PG 默认的 tsvector 分词器**不对中文分词**（连续 CJK 会被当作单个 token）。这正是 `financial_rag-main` 的稀疏检索在中文上失效的原因（`530.sql:585-586` 是 `to_tsvector('simple', content)`，查询用 `plainto_tsquery('simple', ...)`）。**诚实标注：该分词器行为未在本机实测**（拉取 PG 镜像时 Docker Hub 不通），属 PG 已知特性，若需钉死应在 RDS 上跑一条 `to_tsvector` 验证。
+**问题（已实测确认，不再是推断）**：PG 默认的 tsvector 分词器**不对中文分词**。2026-09-19 在 `postgres:15-alpine` 上实测：
+
+```
+to_tsvector('simple','营业收入同比增长率保持稳定')
+  → '营业收入同比增长率保持稳定':1                    ← 整串 CJK 只产出 1 个 token
+  count(*) = 1
+
+to_tsvector('simple','营业收入 同比 增长 率 保持 稳定')   ← jieba 预分词后（空格分隔）
+  → '保持':5 '同比':2 '增长':3 '率':4 '稳定':6 '营业收入':1   ← 6 个 token，按词切分 ✅
+
+plainto_tsquery('simple','营业收入 增长')  → '营业收入' & '增长'   ← AND 语义
+to_tsvector('simple','营业收入 同比 增长') @@ plainto_tsquery('simple','营业收入 增长')  → t
+to_tsvector('simple','营业收入 同比 增长') @@ plainto_tsquery('simple','营业收入 负债')  → f
+```
+
+这同时回答了为什么 `financial_rag-main` 的稀疏侧在中文上失效：它存的是**未预分词**的 `content`，却用 `to_tsvector('simple', content)`（`530.sql:585-586`）。
+
+**实测顺带发现（新问题）**：jieba 的 `lcut` 会切出**单字 token**（上例中 `'率':4` 是独立 token）。单字 token 是噪声源 —— 任何含「率」的分块都会命中「率」，且这类词的文档频率极高，会把精确词项的排序淹没。
+
+**因此写入侧 SHALL 过滤单字 token**（长度 ≥ 2 才纳入检索文本），查询侧同规则。这条不是优化，是让排序可用。
 
 **方案**：
 
@@ -142,6 +187,8 @@ chunks
 
 **硬约束（必须做成守卫测试）**：写入侧与查询侧**必须用同一份 jieba 配置与词典**。不一致不会报错，只会静默降召回 —— 这是本方案唯一的新失效模式。
 
+**版本漂移是同一风险的第二种形态**：`tsv` 是 `content_seg` 的 `STORED` 生成列，因此**分词结果一旦落库就固化了**。jieba 升级或词典变更后，存量 `content_seg` 与查询侧新分词器不一致 → 同样静默降召回，而"同一进程内两函数比较"的守卫测试**抓不到**它。缓解：`jieba` 依赖 pin 精确版本；并把"分词器配置或版本变更必须触发 `content_seg` 全量重写"写成不变量与迁移检查。
+
 **命名纪律**：`ts_rank` / `ts_rank_cd` **不是 BM25**（是 cover-density 排名）。字段名**不得**沿用 `bm25_score` 的叫法（那是 `financial_rag-main` 的命名错误），用 `ts_rank_score` 或 `lexical_score`。
 
 ### D5：删除 `bm25_index.py`；`rrf_fusion` 保留并迁移
@@ -149,6 +196,8 @@ chunks
 - `bm25_index.py` 的**索引生命周期**（`build_index` / `rebuild_from_results` / `delete_index` / pickle 读写 / 索引文件路径）**全部删除** —— 其载体（独立索引文件）不复存在。
 - `rrf_fusion` / `rrf_fusion_multi`（`bm25_index.py:120-181`）是**纯函数**，**原样迁移**到独立模块（建议 `src/rag/fusion.py`），其测试与调用点只需改 import。
 - `document_service.py:572` 的"每文档入库后全量重建词法索引"**删除** —— 该 O(n) 重建与随之而来的失败静默（`:145-150`）一并消失。
+
+**融合参数保持现状：仅 `k` 与 `top_n` 可配，本变更 SHALL NOT 引入两路权重。** 现行 `rrf_fusion`（`bm25_index.py:120-125`）的签名是 `(dense, bm25_res, k=60, top_n=50)`，**没有权重参数**。初稿的 `hybrid-retrieval` delta 要求"两路权重可配"，与"原样迁移、行为不变"直接矛盾 —— 加权重会改变融合输出，从而污染 dense 迁移等价性的验证框架。加权 RRF 是**能力新增**（参照项目 WeKnora / `financial_rag-main` 都有），应作为**独立变更**并配自己的验收，不塞进这次存储替换。
 
 ### D6：两套验收 —— 因为分词口径变了，两路不能共用同一判据
 
@@ -161,6 +210,19 @@ chunks
 | **端到端答案（RAGAS）** | **明确不在本次验收内**，登记为"语料到位后再做" | 176 分块上 RAGAS 的方差会盖过信号 |
 
 **探针集从语料自身派生**，不需要外部标注 —— 这是它能在小语料上成立的原因。它也正好打在今天最弱的地方：字符级 unigram 会把「资产负债率」拆成 6 个单字，任何含「资」或「产」的 chunk 都被命中，精确词项反而被淹没。
+
+**但"可判定"必须落到具体判据，初稿只写了原则（评审 F6）**。固化如下：
+
+| 判据 | 具体定义 |
+|---|---|
+| dense 阈值 | 固定查询集（**≥20 条**，覆盖单 KB 的中文/数值/时间三类），比对替换前后 top-k（k 取 `TOP_K_RETRIEVAL`）的**重合率 ≥ 0.9**；未达标先查 distance 语义与 WHERE 条件，不进入下一步。**只覆盖单 `kb_id` 路径**（全局路径随 `similarity_search_all` 一并删除） |
+| 探针词项来源 | 从**原始 `content`** 正则抽取（**不得**用 `content_seg` 或 tsquery 自判，那会让同一分词器既造索引又造标签 = 自我循环） |
+| 探针词项筛选 | 统计每个候选词的文档频率 `df`，**只保留 `2 ≤ df ≤ 0.1 × 语料分块数`** 的词项 —— 剔除 `df=1`（无从判断召回）与高频词（平凡通过）。长度 ≥ 2 字（与写入侧的单字过滤同规则） |
+| 命中判据 | "含该词项的分块"以**原始 `content` 的字符串包含**判定，与分词器无关 |
+| 横向比较的可归因性 | 比较不同分词配置时**固定打分算法**（或用与打分无关的量：**词项可召回率**）。否则"字符级 + BM25" vs "jieba + ts_rank" 同时改了两个变量，无法归因 |
+| 报告口径 | 必须报**命中数 / 词项总数**与词项清单，并声明**仅供相对比较**，不得作为质量基线或发布判据 |
+
+**小语料下的统计力限制要明说**：176 个分块、k=30~50 时，单个词项的命中集合可能已达语料的 17%–28%，多数词项会**平凡通过**。因此探针的正确用途是**在同一语料上横向比配置**（相对判据），不是给出绝对命中率门槛。
 
 **副产品**：这套探针同时是 **D4 中扩展方案的选型依据** —— 用它实测而不是猜。**反面教材**：`financial_rag-main` 若有这套探针，早就会发现自己的中文检索是坏的。
 
@@ -183,14 +245,34 @@ chunks
 
 **为什么 embedding 必须在事务外**：它是外网调用（DashScope），耗时数百毫秒到数秒，放进事务会长时间持有连接与锁。
 
+**但初稿的表述与现有代码不相容，必须修正**：`embedding` 目前**不是无条件预计算**的 —— 只有 `CHUNK_EVAL_ENABLED` 为真时才在 `document_service.py:509-516` 预计算并复用于两处；开关为假时 `chunk_embeddings=None`，向量由 `add_chunks` 内部产生（`vector_store/store.py:53-55`）。若照初稿把 `add_chunks` 包进 `BEGIN`，在开关关闭的配置下，DashScope 调用就会落在**事务内**。
+
+**因此**：embedding SHALL **无条件预计算**（与 `CHUNK_EVAL_ENABLED` 解耦，开关只决定"是否额外做分块质量评估"），写入事务只接收已算好的向量。
+
+**删除路径同样需要同事务（初稿漏了）**：
+
+```
+现在： delete_document（document_service.py:106-132）
+        删分块失败 → 仅 warning（:126） → 随后照样软删文档
+        → 永久孤儿分块（且 KB 软删后仍可能被全局检索扫到）
+
+      delete_knowledge_base（app_service.py:98-116）
+        软删文档 → 删 collection → 删索引 → 软删 KB，四步跨三店无事务
+
+之后： DELETE FROM chunks WHERE doc_id = $1  与  软删文档      同事务
+      DELETE FROM chunks WHERE kb_id  = $1  与  软删 KB        同事务
+      删除失败 SHALL NOT 被吞掉（不得"warning 后继续软删"）
+```
+
 ### D8：`VectorStore` 契约**扩展**而非重写
 
 保持现有 11 个方法的名称与签名（`typed-data-layer` 的既有 requirement 明文要求"接口不变"），**新增**按支路取 top-k 的入口，使两路结果各自携带名次（分路可辨）。
 
 - `similarity_search(kb_id, query, k)` 语义不变（余弦**距离**），只换后端。
 - 新增的方法返回带 `dense_rank` / `sparse_rank` 的结果（在 `ChunkResult` 上增字段或返回并集）。
-- `similarity_search` 里 Chroma 的 `n_results=min(k, 100)` 是**Chroma 的硬上限**，PG 无此限 → 见 Open Questions。
-- `similarity_search_multi` 在 `src/` 里**无调用方** → 见 Open Questions。
+- **`similarity_search_all` 删除**（含其 wrapper `vector_store/__init__.py:86-107`、`search.py:75-113` 实现、以及 `tests/` 中的两条用例）。理由：唯一调用点是 `retrieval.py:100` 的 `if not kb_id` 分支，而 `rag_tools.py:135-139` 在 `kb_id` 为空时**直接返回 `[]`、根本不调检索**（docstring 明写"KB=RAG 开关硬保证"）→ 该分支在生产链路上**不可达，只被测试养着**。它同时是"单表全局检索与 Chroma 逐 collection 合并**语义不等价**"的来源（Chroma 版逐库各取 top-k 再合并，`search.py:91-112`），删掉它让 dense 等价性只需覆盖"单 `kb_id`"路径。
+- `similarity_search` 里 Chroma 的 `n_results=min(k, 100)` 是 **Chroma 的硬上限**（`search.py:44`），PG 无此限 → **保留该上限并注释来源**，避免把"能力提升"混进等价性验收。
+- `similarity_search_multi` 在 `src/` 里**无调用方** → 确认后删除。
 - 契约变更须同步 `docs/agents/api_contract.md` 与受影响测试断言（`CLAUDE.md` 的契约同步要求）。
 
 ### D9：在途变更处置
@@ -202,6 +284,8 @@ chunks
 | `prompt-layering-and-domain-binding` / `skill-external-sources` / `e2e-playwright-regression` / `turn-provenance-observability` / `llm-callback-handler` | 不受影响 |
 
 **顺序：本变更先于 `retrieval-fetch-and-dedup`。** 先改底层再改口径，只需重定基一次；反过来要在移动的靶子上写 delta。
+
+**`TOP_K_RETRIEVAL` 默认值的三方不一致由谁收口（评审 Blocking OQ）—— 定为 `retrieval-fetch-and-dedup`。** 现状：代码已是 `30`（`settings.py:179`）、在效 spec 写 `10`（`retrieval-quality` 的 "Retrieval parameter configuration"）、该 change 声称"已先行落地 30"。**该 requirement 不在本变更的 delta 内**，故本变更**不碰**它；由 `retrieval-fetch-and-dedup` 在自己的 delta 里收口并在 proposal 中显式写成"本变更负责修正"。`tasks.md` 只做通知，不承担修正 —— 否则两方都以为对方会改，归档后仍是假陈述。
 
 ## Risks / Trade-offs
 
@@ -219,20 +303,24 @@ chunks
 
 **前置（不阻塞设计，但不做就不能开工）**
 
-0. **RDS 扩展清单**：`SELECT name, default_version FROM pg_available_extensions WHERE name IN ('vector','zhparser','pg_jieba','pg_bigm','pg_trgm');` 同时确认 pgvector 版本。**本变更不依赖结果**（D4 走 jieba+simple），但结果决定探针的对照候选与后续优化空间。
+0. **RDS 侧三件事**：① 扩展清单 `SELECT name, default_version FROM pg_available_extensions WHERE name IN ('vector','zhparser','pg_jieba','pg_bigm','pg_trgm','pg_search');`；② **`vector` 是否可直接 `CREATE EXTENSION`（需要什么权限/账号）** —— RDS 的扩展创建通常要求高权限账号，这条不确认会在建表时卡住；③ 已装版本 `SELECT extversion FROM pg_extension WHERE extname='vector';`（对照 pgvector 当前 **0.8.6**：HNSW 需 ≥0.5，`hnsw.iterative_scan` 需 ≥0.8；升级用 `ALTER EXTENSION vector UPDATE;`）。**本变更的机制不依赖扩展清单**（走 jieba+simple），但 `vector` 是硬依赖。
+0b. **Chroma → PG 向量能否原样搬迁**：用只读 client 跑一次 `collection.get(include=["documents","metadatas","embeddings"])` 并记录结果。**这条决定第 2 步与 dense 等价性验收是否成立**，是任务 1.2 的第一件事。
 
 **步骤**
 
-1. **建 PG 与 schema**：本地起 `postgres`（named volume、去掉 langfuse profile、上调内存、增建应用 database）；写首版迁移；合并双套 models 与双套 alembic。
-2. **数据搬迁（仅用于验收）**：一次性脚本从 Chroma 读出全部 176 个分块的 `documents`/`metadatas`/`embeddings`，原样写入 `chunks`。**目的是让 dense 等价性成为可判定的差分** —— 若走"重新入库"，分块与 embedding 都会变，等价性就失去依据。
-   - ⚠ 待确认：Chroma 能否原样读出 embeddings（见 Open Questions #4）。若不能，dense 侧退化为"用探针同时覆盖两路"。
-3. **dense 等价性验证**：固定 query set，比对两库 top-k 重合率。不达标则先查 distance 语义与过滤条件，不进入下一步。
-4. **词法选型与验证**：用词项命中探针横向比较 `字符级`(今天，作为基线) / `jieba+simple` /（若可用）`pg_trgm` / `zhparser`，选定配置并记录数字。
-5. **切代码**：`engine.py` → repos → `vector_store/` → 删除 `bm25_index.py` 并迁移 `rrf_fusion` → `retrieval.py` → `document_service.py`（事务化 + 去 BM25 重建）→ `app_service.py` 装配 → 5 个 CLI 脚本。
-6. **compose 改造**：dev 的 `postgres` 去 profile 门、上调内存、`app` 加 `depends_on: postgres(service_healthy)`；退役 MySQL 服务与 Chroma/BM25 的卷。
-7. **事务化验收（故障注入）**：在 `INSERT chunks` 与 `UPDATE document` 之间注入异常，确认**两者都不落库**（无孤儿）。
-8. **prod 指向 RDS**：改 `docker-compose.prod.yml`，写入"不同机"前置；确认 RDS 上 pgvector 可用与迁移账号权限。
-9. **清理收尾**：删依赖（`chromadb` / `rank_bm25` / `aiomysql`）、删 `data/chroma_persist` 与 `data/bm25_index`、删 `deploy/chroma/Dockerfile`（未被任何 compose 引用）、`deploy/mysql/init` → `deploy/postgres/init`；更新 `code-map.md` / `api_contract.md` / `data-flow.md` / `glossary.md` / `defensive-patterns.md`；写 ADR（存储收敛 + 融合位置 + 共享实例的故障域代价）。
+1. **建 PG 与 schema**：
+   - 镜像换 `pgvector/pgvector:pg15`（pin 版本更好），大版本与 RDS 对齐
+   - dev：`postgres` 去掉 langfuse profile 门、上调内存；**显式一次性创建应用 database + 最小权限账号**（既有卷不会重跑 initdb 脚本）
+   - 首版迁移内含 `CREATE EXTENSION IF NOT EXISTS vector;`（幂等，dev 与 prod 都生效）
+   - 合并双套 models 与双套 alembic
+2. **数据搬迁（仅用于验收）**：一次性脚本从 Chroma 读出全部 176 个分块的 `documents`/`metadatas`/`embeddings`，原样写入 `chunks`。**目的是让 dense 等价性成为可判定的差分** —— 若走"重新入库"，分块与 embedding 都会变，等价性就失去依据。**前提是前置 0b 通过**；不通过则 dense 侧改用与词法相同的探针。
+3. **dense 等价性验证**：≥20 条固定查询 × 单 `kb_id` 路径，top-k 重合率 ≥ 0.9（见 D6）。不达标则先查 distance 语义与 WHERE 条件，不进入下一步。
+4. **词法选型与验证**：用词项命中探针（D6 的固化判据）横向比较 `字符级`(今天，作为基线) / `jieba+simple` /（若可用）`pg_trgm` / `zhparser`，**固定打分算法或只比词项可召回率**，记录命中数与词项清单。
+5. **切代码**：`engine.py` → repos → `vector_store/`（含**删除 `similarity_search_all` 与其分支、测试**）→ 删除 `bm25_index.py` 并迁移 `rrf_fusion` → `retrieval.py` → `document_service.py`（**入库与删除两条路径事务化** + 去 BM25 重建 + embedding 无条件预计算）→ `app_service.py` 装配 → `src/main.py`（删 Chroma warmup 及其事件）→ `rag_tools.py`（`search()` 去 bm25 形参）→ 5 个 CLI 脚本。
+6. **compose 改造**：dev 的 `postgres` 去 profile 门、换镜像、上调内存、`app` 加 `depends_on: postgres(service_healthy)`；退役 MySQL 服务与 Chroma/BM25 的卷。
+7. **事务化验收（故障注入）**：在 `INSERT chunks` 与 `UPDATE document` 之间注入异常，确认**两者都不落库**；同法验证删除路径（删分块失败时文档 SHALL NOT 被软删）。
+8. **prod 指向 RDS**：改 `docker-compose.prod.yml`，写入"不同机"前置；在 RDS 上预建应用库与最小权限账号、确认 `CREATE EXTENSION vector` 可执行；把连接预算作为实例规格输入。
+9. **清理收尾**：删依赖（`chromadb` / `rank_bm25` / `aiomysql`）、删 `data/chroma_persist` 与 `data/bm25_index`、删 `deploy/chroma/Dockerfile`（未被任何 compose 引用）、`deploy/mysql/init` → `deploy/postgres/init`；更新 `code-map.md` / `api_contract.md` / `data-flow.md` / `glossary.md` / `defensive-patterns.md`；写 ADR（存储收敛 + 融合位置 + **共享实例的四条运维后果**，见 D1）。
 
 **回滚**
 
@@ -241,12 +329,22 @@ chunks
 
 ## Open Questions
 
-1. **RDS 是否提供 `zhparser` / `pg_jieba` / `pg_bigm` / `pg_trgm`？** 若有，是否改用引擎侧分词？**建议：本变更不依赖**（D4 的 jieba 路线无条件可用），把"引擎侧分词"作为**独立后续优化**，用同一套探针决定是否值得切换。理由：把不阻塞的决策提前，只会增加本变更的变数。
-2. **`ts_rank` 还是 `ts_rank_cd`？查询用 `plainto_tsquery`（AND）还是 OR 组合？** AND 语义在长查询下召回偏严。**建议：用探针实测决定，不靠推理**（这正是探针的第一个用途）。
-3. **dense 是否建 HNSW？** **建议：先不建**（164 MB / 4 万分块下精确扫描足够且召回精确）。需要 pgvector ≥ 0.5 才能建 HNSW；`hnsw.iterative_scan` 需 ≥ 0.8。此项不影响 schema，可后加。
-4. **Chroma 能否原样读出 176 条分块的 embeddings？**（`collection.get(include=["embeddings"])`）**这条决定第 2 步的可行性，进而决定 dense 等价性验收是否成立。** 若不能原样读出，dense 侧改用与 sparse 相同的探针（两路都靠"词项/语义命中"判），等价性验收降级为"命中率对比"。
-5. **`VectorStore` 新增方法的命名与签名？** 建议 `dense_rank` / `sparse_rank` 作为 `ChunkResult` 的可选字段，新增一个返回两路并集的方法（名字待定，倾向 `retrieve_branches` 或 `hybrid_candidates`）。该项是**契约变更**，须同步 `api_contract.md`。
-6. **`similarity_search` 的 `min(k, 100)` 上限要不要保留？** Chroma 的硬限（`search.py:44`），PG 无此限。保留 = 行为等价；去掉 = 能力提升但改变边界条件。**建议保留并注释来源**，避免把"能力提升"混进"迁移等价性"验收。
-7. **`similarity_search_multi`（`src/` 无调用方）删除还是保留？** 建议删除，并在 tasks 里注明"确认无调用方后删"。
-8. **`metadata` 中哪些键升列？** 建议 `doc_id`/`chunk_index`/`chunk_total`/`source`/`page` 升列（D3），其余留 jsonb。需确认 chunker 产出的键集合没有遗漏会被 SQL 过滤的键。
-9. **prod 与 dev 是否部署在不同机器？** 两份 compose 的卷名与 `./data/*` 路径相同 → 同机必然互相污染。若确实同机，必须先做路径隔离（如 `./data/prod/...`）。
+**已在本轮修订中定案（不再开放）**
+
+- ~~`plainto_tsquery` 的 AND 语义~~ → **实测确认是 AND**（`'营业收入' & '增长'`），"长查询召回偏严"是真实风险。**决定：先用 AND 落地，把 OR 组合作为探针的一个对照项**（它属于"打分/查询构造"变量，可与分词配置分开测）。
+- ~~`similarity_search` 的 `min(k, 100)` 上限~~ → **决定保留并注释来源**（Chroma 硬限），避免把能力提升混进等价性验收。
+- ~~`similarity_search_multi`~~ → **决定删除**（`src/` 无调用方，确认后删）。
+- ~~`similarity_search_all`~~ → **决定删除**（生产链路不可达 + 语义不等价，见 D8）。
+- ~~`metadata` 哪些键升列~~ → **决定** `doc_id`/`chunk_index`/`chunk_total`/`source`/`page` 升列并**在读取时回填进 `metadata`**（见 D3）。
+- ~~是否引入两路权重~~ → **决定不引入**（加权 RRF 是能力新增，须独立验收，见 D5）。
+- ~~`TOP_K_RETRIEVAL` 三方不一致由谁收口~~ → **决定由 `retrieval-fetch-and-dedup` 收口**，本变更只通知（见 D9）。
+
+**仍需在实施前解决**
+
+1. **（Blocking 事实）RDS 上 `vector` 能否直接 `CREATE EXTENSION`、需要什么权限？** 以及 RDS 是否预置 `zhparser` / `pg_jieba` / `pg_bigm` / `pg_trgm`。**推荐**：扩展清单只影响探针的对照候选（本变更不依赖），但 `vector` 的创建权限是**硬前置** —— 若需高权限账号，必须在部署文档里写明由谁执行。
+2. **（Blocking 事实）Chroma 能否原样读出 176 条分块的 embeddings？** 决定数据搬迁与 dense 等价性验收是否成立（前置 0b）。**推荐**：作为任务 1.2 第一件事执行；不可读则 dense 侧降级为与词法相同的探针判据。
+3. **`ts_rank` 还是 `ts_rank_cd`？** **推荐**：用探针实测决定（与分词配置分开测，保持可归因性）。
+4. **`VectorStore` 新增方法的命名与签名？** 倾向 `dense_rank` / `sparse_rank` 作为 `ChunkResult` 可选字段 + 一个返回两路并集的方法（名字待定）。**该项是契约变更**，须同步 `api_contract.md`。属实现局部，可留到编码时定。
+5. **单字 token 之外是否还要过滤停用词？** 实测已确认 jieba 会切出单字（如「率」）。**推荐**：本变更只做"长度 ≥ 2"这一条硬规则（可解释、可测试）；停用词表会引入一份需要维护的配置，等探针显示它在拖累排序再引入。
+6. **prod 与 dev 是否部署在不同机器？** 两份 compose 的卷名与 `./data/*` 路径相同 → 同机必然互相污染。**推荐**：不同机；若同机则先做路径隔离。
+7. **prod 的 worker 数与连接预算**：`CLAUDE.md` 要求单 worker（进程内流式状态），`docker-compose.prod.yml:202` 实为 `--workers 4`；4 × (10+10) ≈ 80 连接 + Langfuse。**推荐**：本变更**只登记不处置**（不属存储替换），但在 ADR 里写成 RDS 规格的输入约束与既有冲突项。

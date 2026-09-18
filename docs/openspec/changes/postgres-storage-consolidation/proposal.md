@@ -26,36 +26,40 @@
 
 ## Capabilities
 
-> ⚠ **本变更的 capability 面很宽（12 个），这是"换了系统底层存储"的必然结果**：多条既有 requirement 在正文里**点名了将要消失的组件**（`MySQL` / `ChromaDB` / `BM25Index` / `bm25_index.py`），不改就会在归档后变成假陈述。其中 **5 个承载真实行为变化、6 个是纯命名同步**（只把组件名换掉，行为不变），另有 1 个是新建能力。已在下方分别标注。
+> ⚠ **本变更的 capability 面很宽（14 个），这是"换了系统底层存储"的必然结果**：多条既有 requirement 在正文里**点名了将要消失的组件**（`MySQL` / `ChromaDB` / `BM25Index` / `bm25_index.py` / `collection`），不改就会在归档后变成假陈述。其中 **1 个新建、6 个承载真实行为变化、7 个纯命名同步**。
+>
+> **本轮修订补入了 2 个先前遗漏的 capability（`kb-routing`、`database-migrations`），并在 3 个已有 delta 里补上了遗漏的 requirement**（评审 F7 指出：初稿声称"12 个面已覆盖"但集合不完整 —— 数量不是问题，**完整性**才是）。
 
 ### New Capabilities
 
-- `hybrid-retrieval`: 混合检索的取数与融合契约 —— 同一 PostgreSQL 内的两路取数（dense / 词法）各自取 top-k、融合在应用层、结果携带分路排名、写入与查询的分词口径同源、融合参数（k / 权重 / top_n）可配。**（新建）**
+- `hybrid-retrieval`: 混合检索的取数与融合契约 —— 同一 PostgreSQL 内的两路取数（dense / 词法）各自取 top-k、融合在应用层、结果携带分路排名、写入与查询的分词口径同源（含版本漂移不变量）、融合参数（`k` / `top_n`）可配。**（新建）**
 
 ### Modified Capabilities
 
-**承载真实行为变化（5）**
+**承载真实行为变化（6）**
 
 - `retrieval-quality`（ADDED）: 新增「迁移等价性与词项命中探针」要求 —— 两路各有一套可判定的验收判据；并把端到端质量评估显式移出本次范围。
 - `retrieval-quality`（MODIFIED）: 「Rerank context passthrough」中的 `ChromaDB chunk metadata` 改为 `chunks` 表。
 - `observability-logging`（ADDED）: 新增「稀疏支路贡献可见」要求 —— 融合后仍须能分辨某结果来自哪一路。
+- `observability-logging`（MODIFIED）: 「生成层可观测（LLM 摘要事件）」正文要求"经 MySQL 会话表获取"，须随引擎改名（初稿遗漏）。
 - `database-orm`（MODIFIED）: 「ORM 模型定义」的 `MySQL 表` → PostgreSQL，并写入「模型与迁移脚本的**单一事实源**」（消除两套模型、两套 alembic）；「搜索类型搬迁」的引用方列表移除 `bm25_index.py`。
-- `typed-data-layer`（MODIFIED）: 「检索结果统一类型」的链路名（`ChromaDB / BM25` → 同一 PostgreSQL 的两路），`ChunkResult` 增加分路排名字段；「MySQL 实体类型」→ 关系型实体类型。
+- `typed-data-layer`（MODIFIED）: 「检索结果统一类型」的链路名（`ChromaDB / BM25` → 同一 PostgreSQL 的两路），`ChunkResult` 增加分路排名字段与 **`metadata` 回填契约**；「MySQL 实体类型」→ 关系型实体类型；**另补「mysql_db.py 拆为 Repo」与「ChatManager 改用 ChatRepo」两条**（正文点名 `MySQLDB` 类，初稿遗漏）。该 capability 的「api/documents.py 走 service」**不改** —— 其正文不含引擎/组件命名，本变更不影响它。
 - `architecture-tidy`（MODIFIED）: 「AppService 直接持有全局依赖」不再持有 `BM25Index`（该组件退役）。
+- `database-migrations`（MODIFIED）: 「第一版迁移」写死了 6 张表与 `scripts/clean_all_data.py`，本变更新增 `chunks` 表并换引擎（含 `CREATE EXTENSION IF NOT EXISTS vector`），该 requirement 必须同步。
 
-**纯命名同步（6，行为不变，只是组件名不再成立）**
+**纯命名同步（7，行为不变，只是组件名不再成立）**
 
-- `agent-service`（MODIFIED）: 「Graph initialization」的依赖列表去掉 `bm25`。
+- `agent-service`（MODIFIED）: 除「Graph initialization」的依赖列表去掉 `bm25` 外，**补上「Conversation persistence」**（该 requirement 正文写"写入 Redis 与 MySQL"，初稿漏了它）。
 - `multi-query-retrieval`（MODIFIED）: 「多查询合并检索」的 `dense + BM25 混合检索` 改为 `dense + 词法两路检索`。
 - `chunk-entity-enrichment`（MODIFIED）: 「Entity injection into chunk metadata」的 `before storing in ChromaDB` / `in MySQL` 改为分块表与关系型表。
 - `model-config`（MODIFIED）: 「Embedding 创建」的维度一致性对照对象从 `ChromaDB collection` 改为 `chunks.embedding` 列。
 - `request-abort`（MODIFIED）: 「abort 后清理与孤儿消息处理」中的 `MySQL` → PostgreSQL（落库时机与语义不变）。
 - `streaming-run`（MODIFIED）: 「任务状态查询」中的 `MySQL 存在 assistant 消息` → PostgreSQL（判定逻辑不变）。
-- （`retrieval-judgment` **不在其列**：其「检索结果去重」要求只规定"按 doc_id 去重、位置在 RRF 融合后 rerank 前"，不涉及存储，本变更不改变它。我先前在草稿中曾误列此条，已更正。）
+- `kb-routing`（MODIFIED）: 「语义路由匹配知识库」的 scenario 写"直接在 kb_a 的 **collection** 检索"——collection 概念消失，必须改（初稿遗漏）。
+- （`retrieval-judgment` **不在其列**：其「检索结果去重」要求只规定"按 doc_id 去重、位置在 RRF 融合后 rerank 前"，不涉及存储，本变更不改变它。初稿曾误列此条，已更正。）
 
-**未列入 Capabilities 的两处**（避免把实现细节当契约）：
-- `chunk-data-model`：其现有 requirement 已要求 `ChunkData` 是唯一标准类型，仓库里存在两份定义属于**未满足既有 requirement**，本变更修正它而非修改它。
-- `database-migrations`：换引擎不改变「Alembic 初始化 / 自动生成 / 第一版迁移」的行为；合并两套目录由 `database-orm` 的单一事实源要求覆盖。
+**未列入 Capabilities 的一处**（避免把实现细节当契约）：
+- `chunk-data-model`：其现有 requirement 已要求 `ChunkData` 是唯一标准类型，仓库里存在两份定义属于**未满足既有 requirement**，本变更修正它而非修改它（但**必须有 task** —— 初稿只在 proposal/design 里声明了目标，tasks 里没有对应动作，评审 F8）。
 
 ## Impact
 
@@ -66,9 +70,12 @@
 - `src/infra/db/mysql_db/*_repo.py`（5 个）— 引擎无关，主要改动是幂等写入与 JSON 字段
 - `src/infra/db/vector_store/`（6 模块）— 后端换 pgvector；`client.py` 的 collection 生命周期与 HNSW metadata 参数退役
 - `src/infra/search/bm25_index.py` — 删除；`rrf_fusion` / `rrf_fusion_multi` 迁移到独立模块
-- `src/rag/retrieval.py` — 两路取数与融合调用点调整（融合逻辑本身不变）
-- `src/services/document_service.py` — 分块写入与文档状态合并为一个事务；去掉 BM25 重建调用
+- `src/rag/retrieval.py` — 两路取数与融合调用点调整；**删除不可达的 `if not kb_id` 分支**（其调用方 `rag_tools.py:135-139` 在 kb_id 为空时直接返回 `[]`）
+- `src/agents/tools/rag_tools.py` — `retrieval.search()` 去掉 `bm25` 形参（初稿遗漏）
+- `src/main.py` — 删除 Chroma warmup（`VectorStore().list_collections()`，`:61-67`）及其事件（初稿遗漏；留着的后果是每次启动打一条 warning 而非报错，更隐蔽）
+- `src/services/document_service.py` — 入库与删除两条路径事务化；去掉 BM25 重建调用；embedding 改为无条件预计算
 - `src/services/app_service.py` — 组件装配（BM25 实例退役）
+- `src/chunking/validator.py` + `src/parsers/base.py` — 统一 `ChunkData` 为一份定义（初稿只在 Context 声明了目标，tasks 里没有对应动作，评审 F8）
 - `src/cli/` — `rebuild_bm25.py` 删除；`replay_trace.py` / `check_abstain.py` / `eval_ragas.py` 的 BM25 装配替换
 - `alembic/` + `src/infra/db/mysql_db/alembic/` — 合并为一套并重写首版迁移
 - `deploy/mysql/init/001_schema.sql` → `deploy/postgres/init/`（含应用 database 创建）
