@@ -8,6 +8,9 @@
 
 ## 一、一句话结论
 
+> **本文的适用范围**：只回答「**规模与能力维度**——这个量级该用哪个向量库」。
+> **高可用（HA）/ 机器故障单点**是另一个维度，结论不同且已单独成档，见 [vector-store-ha-options.md](./vector-store-ha-options.md)。两文不冲突：本文说「规模上不必换」，该文说「**若要求不成单点，则用「换归属」而非「换库」**——把向量与中文检索挂到已是 HA 的托管数据库（RDS PG + pgvector + pg_jieba）上」。阅读时请勿把本文结论误读为"什么都不用做"。
+
 **这个量级推荐继续用 ChromaDB，不要引入 Milvus。**
 
 理由是量化的、而非直觉的：
@@ -290,7 +293,7 @@ PyPI 一手发布记录（[pypi.org/project/chromadb](https://pypi.org/project/c
 
 ## 六、未核实项 / 存疑项（明确列出）
 
-1. **Chroma 官方「PersistentClient 线程不安全」原文**：未找到。官方文档、官方 issue 中均无该措辞。项目注释（`client.py:33-35`）是**工程判断**；我能佐证的只有「1.5.9 本地路径使用 `chromadb_rust_bindings`」这一事实。
+1. **Chroma 线程安全性的官方立场**：官方 Cookbook 明确写「**Chroma is thread-safe**」，同时写「**not process-safe for concurrent writers sharing the same local persistence path**」（[System Constraints](https://cookbook.chromadb.dev/core/system_constraints/)）。即官方**从未**说过「非线程安全」——项目注释（`client.py:33-35`）称「PersistentClient 底层 Rust 绑定非线程安全」与官方立场**相反**。官方记录的失败模式是**多进程**（见 [vector-store-ha-options.md](./vector-store-ha-options.md) §B1：#7040 实测两进程打开同一 `persist_dir` 挂起约 16 分钟），而项目那把 `RLock` 是**进程内**的——既可能多余（官方称线程安全），又**无法覆盖**官方记录的多进程风险。此条值得单独验证。
 2. **SQLite FTS5 trigram 支持 LIKE/GLOB 的一手原文**：`sqlite.org/fts5.html` 本次抓取始终返回空/失败，未能引到官方原句。但我在本项目库上用 `EXPLAIN QUERY PLAN` 实测到 `LIKE` 走 `VIRTUAL TABLE INDEX 0:L0`、`MATCH` 走 `0:M1`，**间接证明 trigram 索引可服务 LIKE**。二手佐证：某第三方 tokenizer 仓库 README 称「不支持 LIKE & GLOB 是 FTS5 的限制」——属二手。
 3. **Milvus 2.6.x 完整破坏性变更清单**：`milvus.io/docs/v2.6.x/release_notes.md` 本次多次抓取失败（403 与空返回），只能从 GitHub `v2.6.0` release 页、官方升级指南、MQ 文档中获得**部分**结论；不排除还有未列出的破坏性变更。
 4. **Milvus standalone 稳态实测内存数字**：未找到官方 idle 基准。只能给「官方最低 8 GB / 推荐 16 GB」与「数据本身 0.3–0.47 GB」两端，中间的系统开销未实测。
