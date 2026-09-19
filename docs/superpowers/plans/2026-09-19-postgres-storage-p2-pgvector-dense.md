@@ -52,7 +52,7 @@
 | **D3** | 读取路径走 PG：`similarity_search` 按余弦距离升序返回 `ChunkResult`，`min(k, 100)` 上限保留 | Task 6 的测试 |
 | **D4** | **`metadata` 回填契约**：每条结果的 `metadata` 都含 `doc_id` / `chunk_index` / `chunk_total` / `source` / `page`，且 jsonb 自定义键（含 `parent_content`）原样可读 | Task 3 单测 + Task 6 集成测试 |
 | **D5** | 全局检索路径消失：`similarity_search_all` / `similarity_search_multi` 无定义无调用；`retrieval.search` 无 `not kb_id` 分支 | Task 4 |
-| **D6** | **dense 迁移等价性**：同一份语料（Chroma 搬迁而来）、同一批 ≥20 条固定查询，替换前后 top-k 重合率 **≥ 0.9** | Task 8 |
+| **D6** | **dense 迁移等价性**：同一份语料（Chroma 搬迁而来）、同一批 ≥20 条固定查询，替换前后 top-k 重合率 **≥ 0.9**。⚠️ **该闸门有三处灵敏度上限**：判据是**均值 ≥ 0.9 且不逐条设闸**（24 条查询下允许最多 2 条完全错位）；指标**只比 id 集合、不比 distance/score** → **单位化向量下 distance 语义回归会被漏检**（而 D3 要的正是「余弦距离升序」）；两侧共用同一 embedder → **查询向量层面的不等价天然不在覆盖内**（这是为隔离「存储」而定的设计） | Task 8 |
 | **D7** | Chroma **代码路径**已删除；依赖 / `data/chroma_persist` / `deploy/chroma/` **保留**（回滚与复现依据） | Task 9 |
 | **D8** | 门禁全绿 + **PG 上跑通一次真实 E2E 冒烟**（登录 → 建库 → 上传到 ready → 提问 → 引用渲染） | Task 11 |
 

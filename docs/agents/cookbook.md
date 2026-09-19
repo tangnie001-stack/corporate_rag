@@ -72,6 +72,17 @@
 - app 的 uvicorn 无 `--reload`（见 CLAUDE.md 常用命令），必须 restart 进程才能加载新代码
 - 判断"代码改动是否已生效"先看 override：挂了 `src/` 则文件已同步只需 restart；未挂载才需要 `--build`
 
+### E2E / 验收前的进程代码前置条件
+
+**场景**：跑 E2E 或任何验收类操作（上传 → ready → 提问 → 检索）之前，需要确认 app 容器加载的是当前代码
+**步骤**：
+1. 先 `docker compose restart app`（app 的 uvicorn 无 `--reload`，容器可能已陈旧数小时，早于最近的代码改动）
+2. 再执行 E2E / 验收步骤
+**验证**：`docker exec corporate-rag-app grep <本次改动的新符号> /app/src/...` 能命中，或比对容器启动时间晚于最后一次代码改动
+**注意事项**：
+- **不做这一步会看到静默不一致**：陈旧进程可能仍在跑旧存储路径 → API 报告成功（`document.status='ready'` 且 `chunk_count>0`），但**新存储里没有数据**（如 PG `chunks` 是 0 行）
+- 定性是**操作疏忽（运维）**，不是代码缺陷；单 worker / 无 reload 是本项目有意的既定形态，不会为验收改成 reload
+
 ### ALTER TABLE 操作（PostgreSQL）
 
 **场景**：`conversation_history` 表结构变更（如 session-process-replay 新增 process 列）

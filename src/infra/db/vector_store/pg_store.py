@@ -6,7 +6,10 @@
   「检索条数的能力提升」混进迁移等价性验收。
 """
 
+from __future__ import annotations
+
 import asyncio
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -15,10 +18,14 @@ from src.config import EMBEDDING_MODEL
 from src.core import logging as core_logging
 from src.core.log_events import Event
 from src.core.logging import LOG_MAX_BODY
-from src.infra.db.mysql_db.chunk_repo import ChunkRepo
 from src.infra.db.vector_store.mapping import build_rows, row_to_chunk_result
 from src.infra.db.vector_store.types import ChunkQueryResult, ChunkResult
 from src.models import get_embeddings
+
+if TYPE_CHECKING:
+    # 仅在类型检查期导入，避免在导入期与 chunk_repo 形成循环依赖
+    # （chunk_repo → vector_store 父包 __init__ → pg_store → chunk_repo）。
+    from src.infra.db.mysql_db.chunk_repo import ChunkRepo
 
 # 查询条数硬上限：PG 本身没有这个限制，保留它是为了让等价性验收只度量
 # 「存储替换」，不把检索条数的能力变化混进来（Task 6 dense_search 与 Task 8 会 import 它）。
@@ -67,6 +74,7 @@ class PgVectorStore:
         """
         if chunk_repo is None:
             from src.infra.db.engine import session_factory
+            from src.infra.db.mysql_db.chunk_repo import ChunkRepo
 
             chunk_repo = ChunkRepo(session_factory)
         if embed_fn is None:
