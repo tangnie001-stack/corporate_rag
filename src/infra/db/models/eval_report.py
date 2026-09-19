@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, Integer, String, Text, func
+from sqlalchemy import Boolean, Index, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.infra.db.base import Base, UTCDateTime
@@ -30,3 +30,5 @@ class EvalReportModel(Base):
     created_at: Mapped[datetime] = mapped_column(
         UTCDateTime(), server_default=func.now(), nullable=False
     )
+
+    __table_args__ = (Index("idx_kb_date", "kb_id", "eval_date"),)
