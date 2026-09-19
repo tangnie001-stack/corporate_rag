@@ -1490,7 +1490,7 @@ Expected: 部分失败 —— 接下来两个 Task 处理。
 
 ```bash
 ruff check src/infra/db && pyright src/infra/db
-git add src/infra/db/engine.py tests/infra/db/test_engine_pg.py
+git add src/infra/db/engine.py tests/infra/db/test_engine_pg.py docker-compose.yml
 git commit -m "feat(db): 引擎与迁移切到 PostgreSQL（asyncpg）"
 ```
 
@@ -1499,13 +1499,13 @@ git commit -m "feat(db): 引擎与迁移切到 PostgreSQL（asyncpg）"
 ## Task 7: 幂等写入改用 `ON CONFLICT`
 
 **Files:**
-- Modify: `src/infra/db/mysql_db/chat_repo.py:19-44`
+- Modify: `src/infra/db/mysql_db/chat_repo.py:19-44`（`create_session` 改 `ON CONFLICT`）**与 `:66-98`（`get_sessions` 的 GROUP BY 违规修复，见 Step 4b）**
 - Modify: `src/infra/db/mysql_db/kb_repo.py:16-50`（只补 docstring，逻辑不动）
-- Test: `tests/infra/db/test_repo_upsert.py`（新建）
+- Test: `tests/infra/db/test_repo_upsert.py`（新建）、`tests/infra/db/test_get_sessions_pg.py`（新建，见 Step 4b）
 
 **Interfaces:**
 - Consumes: Task 6 的 `session_factory`
-- Produces: **签名与返回语义完全不变** —— `ChatRepo.create_session(session) -> None`（`session` 是带 `.id` / `.user_id` / `.title` / `.kb_id` / `.agent` 属性的对象）与 `KbRepo.get_or_create_kb(user_id, name, description="") -> tuple[str, bool]`（`(kb_id, created)`）
+- Produces: **签名与返回语义完全不变** —— `ChatRepo.create_session(session) -> None`（`session` 是带 `.id` / `.user_id` / `.title` / `.kb_id` / `.agent` 属性的对象）与 `KbRepo.get_or_create_kb(user_id, name, description="") -> tuple[str, bool]`（`(kb_id, created)`）；`ChatRepo.get_sessions(user_id="") -> list` 的返回行结构不变，但在 PostgreSQL 上**不再抛 `GroupingError`**
 
 > ⚠ **本任务收窄了 change 里 tasks §3.2 的措辞。** tasks §3.2 写「5 个 Repo 的幂等写入改为 `INSERT ... ON CONFLICT DO UPDATE`」。实读代码后：只有 `chat_repo.create_session` 是**纯幂等插入**，可以安全改写；`kb_repo.get_or_create_kb` 是**三态语义**（新建 / 复活软删 / 已存在活跃），`ON CONFLICT DO UPDATE` 表达不了「已存在活跃 → 返回 False」，硬改会改掉返回值。另外 3 个 repo（document / eval / user）**根本没有** `IntegrityError` 捕获。因此本任务只改 1 处，并在 change 文档里注明该收窄（见 Step 6）。**Step 2 是特性化测试（characterization test）**：它在改写前后都必须通过 —— 这是重构，不是新功能，所以不存在「先失败」的步骤。
 
@@ -1682,6 +1682,26 @@ Expected: **PASS（5 条）**。若有失败，说明当前实现的行为与你
         强行改写会改掉返回值语义。
         """
 ```
+
+- [ ] **Step 4b: 修 `ChatRepo.get_sessions` 在 PostgreSQL 上的 GROUP BY 违规（Task 6 实测暴露，控制器裁决纳入本任务）**
+
+**为什么在这里修**：Task 6 把引擎切到 PG 后，`tests/infra/db/test_mysql_db.py` 有 2 条测试失败，实测异常是：
+
+```
+asyncpg.exceptions.GroupingError: column "knowledge_base.name" must appear in the GROUP BY clause
+                                 or be used in an aggregate function
+```
+
+根因在**生产代码** `src/infra/db/mysql_db/chat_repo.py` 的 `get_sessions`：它 `select` 了 `KbModel.name`（经 `func.coalesce(...).label("kb_name")`）、`SessionModel.title/agent/created_at/updated_at` 等非聚合列，却只 `group_by(SessionModel.id)`。MySQL 能靠"按主键分组"的函数依赖推断放过它，**PostgreSQL 不允许**。
+
+这不是测试问题：`get_sessions` 是**会话列表**的数据来源，不修就是迁移后会话列表直接 500。裁决把它放进本任务（而不是 Task 8），因为**本任务已经拥有 `chat_repo.py`**，一个文件的生产代码改动应落在同一个任务与同一次评审里。
+
+**改法**（二选一，选可读性更好的那个，并在报告里说明选了什么）：
+
+- **A（推荐）**：把 `group_by(SessionModel.id)` 改为按**实际选择的非聚合列**分组 —— 即 `group_by(SessionModel.id, SessionModel.title, SessionModel.kb_id, SessionModel.agent, SessionModel.created_at, SessionModel.updated_at, KbModel.name)`。语义与 MySQL 下的推断结果一致（每个会话一行，名字来自 join）。
+- **B**：保留 `group_by(SessionModel.id)`，把其余列都包成聚合形式（`func.max(SessionModel.title)` 等）或改为子查询聚合消息数。改动更大，但分组语义更"正统"。
+
+**回归测试（必须加）**：新建 `tests/infra/db/test_get_sessions_pg.py`，造 1 个 KB + 1 个会话 + 若干消息，断言 `get_sessions()` 返回 1 行、`kb_name` 等于该 KB 名、`message_count` 等于消息条数。**要在改代码前先跑**，确认它在 PG 上因 `GroupingError` 失败（这就是本步的 RED）。
 
 - [ ] **Step 5: 跑测试确认行为未变**
 
