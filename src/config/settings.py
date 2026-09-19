@@ -15,6 +15,7 @@
 """
 
 import os
+import urllib.parse
 
 from dotenv import load_dotenv
 
@@ -147,6 +148,34 @@ MYSQL_PORT: int = int(os.getenv("MYSQL_PORT", "3306"))
 MYSQL_USER: str = os.getenv("MYSQL_USER", "root")
 MYSQL_PASSWORD: str = os.getenv("MYSQL_PASSWORD", "financial_qa_pass")
 MYSQL_DATABASE: str = os.getenv("MYSQL_DATABASE", "financial_qa")
+
+# --- PostgreSQL（应用关系型库；Langfuse 用同实例的另一个 database）---
+POSTGRES_HOST: str = os.getenv("POSTGRES_HOST", "localhost")
+POSTGRES_PORT: int = int(os.getenv("POSTGRES_PORT", "5432"))
+POSTGRES_USER: str = os.getenv("POSTGRES_USER", "corporate_rag")
+POSTGRES_PASSWORD: str = os.getenv("POSTGRES_PASSWORD", "")
+POSTGRES_DATABASE: str = os.getenv("POSTGRES_DATABASE", "corporate_rag")
+
+
+def build_postgres_dsn() -> str:
+    """拼装应用库的 SQLAlchemy 异步 DSN。
+
+    Returns:
+        postgresql+asyncpg:// 形式的连接串，账号密码按 URL 规则转义。
+
+    Raises:
+        RuntimeError: 密码为空时抛出 —— 空密码只会得到一个连不上的 DSN，
+            失败会推迟到首次查询，不如在这里直接失败。
+    """
+    if not POSTGRES_PASSWORD:
+        raise RuntimeError("POSTGRES_PASSWORD 未配置，无法构造 PostgreSQL DSN")
+    user = urllib.parse.quote_plus(POSTGRES_USER)
+    password = urllib.parse.quote_plus(POSTGRES_PASSWORD)
+    return (
+        f"postgresql+asyncpg://{user}:{password}"
+        f"@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DATABASE}"
+    )
+
 
 # ====== Redis ======
 # 对话历史缓存，支持会话级上下文记忆；连接失败时自动降级为内存存储

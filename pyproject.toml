@@ -38,6 +38,11 @@ dependencies = [
     "jieba>=0.42.1",
     "minio>=7.2.0,<8.0.0",
     "pymupdf4llm==1.28.2",
+    # PostgreSQL 关系型存储：asyncpg 为 SQLAlchemy 异步驱动，pgvector 提供向量类型，
+    # sqlalchemy 此前仅作传递依赖，已被直接 import，故显式声明并带 asyncio extra
+    "asyncpg>=0.30.0,<1.0.0",
+    "pgvector>=0.3.6,<1.0.0",
+    "sqlalchemy[asyncio]>=2.0.36,<3.0.0",
 ]
 
 [project.optional-dependencies]
