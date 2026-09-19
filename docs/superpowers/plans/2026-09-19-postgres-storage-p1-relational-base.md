@@ -121,6 +121,11 @@
 - **契约同步**：改了公共方法签名或响应结构时，同步 `docs/agents/api_contract.md` 与受影响测试断言。
 - **PG 数据目录**：必须继续用 docker **named volume**，**绝不**绑到 `/mnt/d`（9p 的 fsync/原子性弱）。
 - **本地 PG 大版本**：用 `pgvector/pgvector:pg15`（= PG 15.19 + pgvector 0.8.6），与 RDS 对齐。
+- **宿主侧连库约定（Task 5 实测发现，Task 6 起统一遵守）**：dev 的 `postgres` 服务**不发布宿主端口**，而 `.env` 里的 `POSTGRES_HOST=postgres` 是 compose 服务名、**宿主上解析不了** —— 所以「在宿主上用 `.venv` 跑 alembic / pytest」原本连不上库（Task 5 临时用 `socat` 转发才跑通，**每个任务各自再发明一次转发是不可接受的**）。
+  **统一约定：**
+  1. dev 的 `postgres` 服务发布**仅回环**端口 `127.0.0.1:5432:5432`（不暴露到局域网；prod compose 不动）。
+  2. **宿主侧**跑 alembic / pytest 的命令一律加前缀 `POSTGRES_HOST=localhost`。这**有效且优先于 `.env`**：`python-dotenv` 默认 `override=False`，已存在的环境变量不会被覆盖（Task 5 的探针库已验证该机制）。
+  3. **容器侧**（app）继续用 `.env` 的 `POSTGRES_HOST=postgres`，不受影响。
 
 ---
 
@@ -1376,12 +1381,40 @@ git commit -m "feat(db): 重写 alembic 为从零建表的 PG baseline（8 张�
 ## Task 6: 引擎与迁移切到 PostgreSQL 驱动
 
 **Files:**
+- Modify: `docker-compose.yml`（dev 的 `postgres` 服务加**仅回环**端口发布）
 - Modify: `src/infra/db/engine.py:8-32`
 - Test: `tests/infra/db/test_engine_pg.py`（新建）
 
 **Interfaces:**
 - Consumes: Task 3 的 `build_postgres_dsn()`
-- Produces: `src.infra.db.engine.engine`（`postgresql+asyncpg` 方言）、`session_factory`（签名不变，5 个 repo 的构造注入契约不变）
+- Produces: 宿主侧可直连的 dev PG（`127.0.0.1:5432`）；`src.infra.db.engine.engine`（`postgresql+asyncpg` 方言）、`session_factory`（签名不变，5 个 repo 的构造注入契约不变）
+
+- [ ] **Step 0: 环境前置 —— 让宿主能连到 dev PG（本任务必须先做）**
+
+**问题**：`postgres` 服务不发布宿主端口，`.env` 的 `POSTGRES_HOST=postgres` 在宿主上解析不了 → 宿主侧 `.venv` 跑 `pytest`/`alembic` 连不上库（Task 5 只能临时用 `socat` 转发）。
+
+**修法一（compose，一次性）**：给 dev 的 `postgres` 服务加**仅回环**端口发布，不要暴露到局域网：
+
+```yaml
+  postgres:
+    # 仅回环：宿主侧跑 pytest/alembic 需要它；不对外暴露
+    ports:
+      - "127.0.0.1:5432:5432"
+```
+
+`docker-compose.prod.yml` **不要**加（本轮不安装 prod，且 prod 将来指向 RDS）。
+
+**修法二（命令行约定，Task 6/7/8/10 一律遵守）**：宿主侧命令加前缀 `POSTGRES_HOST=localhost`：
+
+```bash
+docker compose up -d postgres          # 应用新配置（重建容器，卷保留）
+docker compose exec -T postgres pg_isready -U langfuse
+POSTGRES_HOST=localhost .venv/bin/python -c "import asyncio; from src.infra.db.engine import engine; print(engine.dialect.name)"
+```
+
+`test_pg_baseline.py` 与后续所有宿主侧 pytest 都用这个前缀（例如 `POSTGRES_HOST=localhost pytest tests/infra/db/ -v`）。
+
+**为什么前缀有效**：`python-dotenv` 默认 `override=False`，不会覆盖已存在的环境变量 —— Task 5 的探针库已实测确认该机制。
 
 - [ ] **Step 1: 写会失败的测试**
 
