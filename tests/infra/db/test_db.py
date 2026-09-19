@@ -1,6 +1,5 @@
-"""MySQL 数据层集成测试 — 使用 KbRepo / DocumentRepo。"""
+"""关系型数据层集成测试 — 使用 KbRepo / DocumentRepo / ChatRepo（PostgreSQL）。"""
 
-import asyncio
 import uuid
 
 import pytest
@@ -204,6 +203,12 @@ async def test_save_message_passthrough_status():
 
 @pytest.mark.asyncio
 async def test_user_created_at_before_assistant():
+    """user 消息必须先于 assistant 消息落库（M1 时序）。
+
+    改造前这里有一处 asyncio.sleep(1.1) —— 那是为绕过 MySQL DATETIME 的秒级
+    精度。PostgreSQL 的时间戳是微秒精度，且两条消息各自独立事务提交，
+    不需要再等待；断言用 <= 也已宽容到能接受相同时间戳。
+    """
     from src.infra.db.models.chat import MessageModel
     from src.infra.db.mysql_db import ChatRepo
 
@@ -213,7 +218,6 @@ async def test_user_created_at_before_assistant():
     await chat_repo.save_message(
         MessageModel(session_id=session_id, kb_id="", role="user", content="q")
     )
-    await asyncio.sleep(1.1)  # 越过 1 秒，模拟生成耗时
     await chat_repo.save_message(
         MessageModel(
             session_id=session_id,

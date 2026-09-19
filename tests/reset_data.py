@@ -1,4 +1,4 @@
-"""数据重置工具 — 一键清除 MySQL、ChromaDB、Redis 的全部数据。
+"""数据重置工具 — 一键清除 PostgreSQL、ChromaDB、Redis 的全部数据。
 
 用法（独立运行）：
     source .venv/bin/activate
@@ -23,27 +23,30 @@ from src.infra.db.engine import engine
 from src.infra.db.models import *
 from src.services.app_service import AppService
 
+# reset 的范围与改造前一致：不含 users / sessions / eval_report / feedback
+_RESET_TABLES = "conversation_history, document, knowledge_base, chunks"
 
-async def _reset_mysql_async() -> None:
-    """异步清空 MySQL 所有业务表。
 
-    使用 TRUNCATE + 临时关闭外键检查，避免 CASCADE 约束报错。
-    """
+async def _reset_pg_async() -> None:
+    """异步清空 PostgreSQL 的业务数据（见 reset_pg 的范围说明）。"""
     async with engine.begin() as conn:
-        await conn.execute(text("SET FOREIGN_KEY_CHECKS = 0"))
-        await conn.execute(text("TRUNCATE TABLE conversation_history"))
-        await conn.execute(text("TRUNCATE TABLE document"))
-        await conn.execute(text("TRUNCATE TABLE knowledge_base"))
-        await conn.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
-    logger.info("MySQL: 已清空所有业务表")
+        # CASCADE：chunks 与 document 的外键都指向 knowledge_base
+        await conn.execute(text(f"TRUNCATE {_RESET_TABLES} CASCADE"))
+    logger.info("PostgreSQL: 已清空业务表 {}", _RESET_TABLES)
 
 
-def reset_mysql() -> None:
-    """清空 MySQL 所有业务表。
+def reset_pg() -> None:
+    """清空 PostgreSQL 中本项目的业务数据。
 
-    使用 asyncio.run 包装异步实现。
+    与改造前的 MySQL 版保持同一范围：只清会话历史、文档、知识库，
+    以及随它们派生的分块表。
+
+    ⚠ 刻意不清 users —— 清了就登不进 dev 界面（凭据在 .env 的 TEST_ACCOUNT，
+    供 cookbook.md 的手工 API 调试使用；全仓 .py 无引用）。
+    现状亦不清 sessions / eval_report / feedback，此处保持现状，不在本变更扩大范围。
+    本函数只连应用库，不会误删同实例上的 Langfuse 库。
     """
-    asyncio.run(_reset_mysql_async())
+    asyncio.run(_reset_pg_async())
 
 
 def reset_vector_store() -> None:
@@ -80,17 +83,17 @@ def reset_redis() -> None:
 def reset_all(
     service: AppService | None = None,
 ) -> None:
-    """一键重置全部数据存储（MySQL + ChromaDB + Redis）。
+    """一键重置全部数据存储（PostgreSQL + ChromaDB + Redis）。
 
     Args:
         service: 已有的 AppService 实例（可选，用于通过其 chat_manager 清 Redis）
     Raises:
-        RuntimeError: MySQL 连接失败
+        RuntimeError: PostgreSQL 连接失败
     """
     logger.info("========== 开始重置所有数据 ==========")
 
-    # MySQL
-    reset_mysql()
+    # PostgreSQL
+    reset_pg()
 
     # ChromaDB（直接删目录，不和客户端交互）
     reset_vector_store()
@@ -117,24 +120,27 @@ def reset_all(
 
 
 if __name__ == "__main__":
-    # 独立运行时直接通过 docker exec 操作（避开 Python 客户端锁竞争）
+    # 独立运行时直接通过 docker compose exec 操作（避开 Python 客户端锁竞争）
     import subprocess
     import sys
 
-    logger.info("========== 开始重置所有数据 (docker exec 模式) ==========")
+    logger.info("========== 开始重置所有数据 (docker compose exec 模式) ==========")
 
-    # MySQL
-    sql = "SET FOREIGN_KEY_CHECKS = 0; TRUNCATE TABLE conversation_history; TRUNCATE TABLE document; TRUNCATE TABLE knowledge_base; SET FOREIGN_KEY_CHECKS = 1;"
+    # PostgreSQL
+    sql = f"TRUNCATE {_RESET_TABLES} CASCADE;"
     r = subprocess.run(
         [
             "docker",
+            "compose",
             "exec",
-            "financial-qa-mysql",
-            "mysql",
-            "-uroot",
-            "-pfinancial_qa_pass",
-            "financial_qa",
-            "-e",
+            "-T",
+            "postgres",
+            "psql",
+            "-U",
+            "corporate_rag",
+            "-d",
+            "corporate_rag",
+            "-c",
             sql,
         ],
         capture_output=True,
@@ -143,9 +149,9 @@ if __name__ == "__main__":
         check=False,  # returncode 在下方手动检查
     )
     if r.returncode == 0:
-        logger.info("MySQL: 已清空所有业务表")
+        logger.info("PostgreSQL: 已清空业务表 {}", _RESET_TABLES)
     else:
-        logger.error("MySQL: 清空失败: {}", r.stderr)
+        logger.error("PostgreSQL: 清空失败: {}", r.stderr)
         sys.exit(1)
 
     # ChromaDB
