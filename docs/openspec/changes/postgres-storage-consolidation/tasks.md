@@ -7,7 +7,7 @@
 > | **P1** | `docs/superpowers/plans/2026-09-19-postgres-storage-p1-relational-base.md` | PostgreSQL 关系型底座：配置 → compose PG 服务 → alembic baseline（8 表 + pgvector 扩展）→ 合并 ORM → 统一 `ChunkData` → 引擎切 asyncpg → repo 幂等写入 → 退役 MySQL → 文档收尾 | **已完成**（收口 `0535c56`，hash 回填与补正见其后续提交） |
 > | **P2** | `docs/superpowers/plans/2026-09-19-postgres-storage-p2-pgvector-dense.md` | `vector_store/` 换 pgvector、`ChunkResult.metadata` 回填契约、删除 `similarity_search_all`、Chroma→PG 数据搬迁、dense 迁移等价性验收 | **已完成**（收口 `43ab19a`） |
 > | P3 | `docs/superpowers/plans/2026-09-19-postgres-storage-p3-lexical-tsvector.md` | jieba 分词入口 + 查询串构造与转义 + `content_seg` 换分词输出与存量全量重写 + 词项命中探针选型 + `rrf_fusion` 迁移到 `src/rag/fusion.py` + 两路同源并发 + 删除 `bm25_index.py` | **已完成**（收口 `88ed8e0`；DoD D1–D9 全部达成，验收报告见 `docs/tmp/p3-acceptance-2026-09-19.md`） |
-> | P4 | （待 P3 落地后编写） | 入库/删除两条路径同事务 + 故障注入验收 + 依赖与卷清理 + prod compose 与 dev 同构（**不指向 RDS、不安装**）+ 文档与 ADR + 归档 | 未编写 |
+> | P4 | `docs/superpowers/plans/2026-09-19-postgres-storage-p4-transactions-and-cleanup.md` | 入库/删除两条路径同事务（`session_scope` 原语 + 11 处可选会话）+ 故障注入验收 + 依赖与卷清理（含 Chroma/BM25 的数据目录）+ prod compose 与 dev 同构 + ADR + delta 对账 + 归档 | **计划已编写**（待执行） |
 >
 > 分阶段的原因与各 capability 的覆盖对照见 P1 计划文件的「阶段定位」与「覆盖的 spec requirement」两节。
 >
