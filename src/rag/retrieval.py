@@ -72,7 +72,7 @@ async def search(
 
     Args:
         query: 用户查询文本
-        kb_id: 知识库 ID，为空时执行全局检索
+        kb_id: 知识库 ID（调用方保证非空：`rag_tools.py` 在 kb_id 为空时直接返回空结果）
         vector_store: 向量数据库实例
         bm25: BM25 ���法检索引擎实例，启用混合检索时传入
 
@@ -95,21 +95,16 @@ async def search(
         results = _dedup_by_doc_id(results)
         return results
 
-    if not kb_id:
-        results = await asyncio.to_thread(
-            vector_store.similarity_search_all, query, k=TOP_K_RETRIEVAL
-        )
-    else:
-        results = await asyncio.to_thread(
-            vector_store.similarity_search, kb_id, query, k=TOP_K_RETRIEVAL
-        )
+    results = await asyncio.to_thread(
+        vector_store.similarity_search, kb_id, query, k=TOP_K_RETRIEVAL
+    )
     if results:
         result_count = len(results)
     else:
         result_count = 0
     log_event(
         Event.SEARCH_DONE,
-        kb_id=kb_id or "all",
+        kb_id=kb_id,
         query_len=len(query),
         result_count=result_count,
     )

@@ -822,16 +822,13 @@ name = f"kb_{kb_id.replace('-', '')}"
 
 **已知限制：** `k` 最大 100。
 
-### 4.5 `VectorStore.similarity_search_all(query, k) → list[dict]`
+> **全局检索路径已移除。** `rag_tools` 在 `kb_id` 为空时直接返回空结果，不再有「不指定知识库」的检索入口。
 
-与 `similarity_search` 返回格式相同。遍历所有 `kb_*` collection，
-合并后按 `distance` 升序排列取 top-k。
-
-### 4.6 `VectorStore.delete_collection(kb_id) → bool`
+### 4.5 `VectorStore.delete_collection(kb_id) → bool`
 
 删除整个知识库的 collection（包括所有向量数据）。
 
-### 4.7 `VectorStore.get_chunks_by_doc_id(doc_id, kb_id) → list[dict]`
+### 4.6 `VectorStore.get_chunks_by_doc_id(doc_id, kb_id) → list[dict]`
 
 按文档 ID 查询所有分块。由分块预览端点调用。
 

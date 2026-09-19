@@ -17,6 +17,23 @@ from src.infra.db.vector_store import VectorStore
 from src.parsers.base import ChunkData
 
 
+def test_global_retrieval_entries_are_gone():
+    """全局检索路径已移除：不指定知识库的检索在生产链路上不可达，只被测试养着。"""
+    vs = VectorStore.__dict__
+    assert "similarity_search_all" not in vs
+    assert "similarity_search_multi" not in vs
+
+
+def test_search_source_has_no_global_branch():
+    """retrieval.search 源码里不得再出现 not kb_id 的全局分支。"""
+    import inspect
+
+    from src.rag import retrieval
+
+    src = inspect.getsource(retrieval.search)
+    assert "similarity_search_all" not in src
+
+
 @pytest.fixture
 def vs():
     """临时目录 fixture：创建隔离的 VectorStore 实例。"""
@@ -106,36 +123,6 @@ class TestVectorStore:
         names = vs.list_collections()
         assert len(names) == 1
         assert names[0] == f"kb_{kb_id}"
-
-    def test_similarity_search_all(self, vs, kb_id):
-        """搜索所有 collection，返回按距离排序的跨知识库结果。"""
-        # 准备工作：创建两个 KB collection，各写入一条文档
-        kb_a = uuid.uuid4().hex
-        kb_b = uuid.uuid4().hex
-        col_a = vs.get_or_create_collection(kb_a)
-        col_b = vs.get_or_create_collection(kb_b)
-        col_a.add(
-            ids=["a:0"],
-            documents=["苹果公司的营收情况"],
-            metadatas=[{"source": "a.txt"}],
-        )
-        col_b.add(
-            ids=["b:0"], documents=["特斯拉的营收情况"], metadatas=[{"source": "b.txt"}]
-        )
-
-        # 注意：不清空 _collection_cache。
-        # ChromaDB get_collection() 不保存创建时设置的 embedding_function，
-        # 清空后重新 get_collection 会导致 query 时 embedding 维度不匹配。
-        results = vs.similarity_search_all("营收", k=2)
-        assert len(results) == 2
-        # 结果应按 distance 升序排列（越小越相似）
-        for i in range(len(results) - 1):
-            assert results[i].distance <= results[i + 1].distance
-
-    def test_similarity_search_all_no_collections(self, vs):
-        """无任何 collection 时返回空列表。"""
-        results = vs.similarity_search_all("test", k=5)
-        assert results == []
 
     def test_concurrent_similarity_search_safe(self, vs, kb_id):
         """并发相似度检索不抛异常：chromadb PersistentClient 非线程安全，

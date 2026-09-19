@@ -68,20 +68,6 @@ class TestSearch:
         assert len(results) == 1
         vs.similarity_search.assert_called_once()
 
-    @pytest.mark.asyncio
-    async def test_search_all_when_no_kb(self):
-        """无 kb_id 时应调用 similarity_search_all。"""
-        vs = MagicMock()
-        vs.similarity_search_all = MagicMock(
-            return_value=[
-                ChunkResult(id="1", content="test", metadata={"doc_id": "d1"})
-            ]
-        )
-        with patch("src.rag.retrieval.HYBRID_SEARCH_ENABLED", False):
-            results = await retrieval.search("query", "", vector_store=vs)
-        assert len(results) == 1
-        vs.similarity_search_all.assert_called_once()
-
 
 # ==================== 重排序测试 ====================
 class TestRerank:

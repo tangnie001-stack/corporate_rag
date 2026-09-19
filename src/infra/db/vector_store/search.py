@@ -2,7 +2,7 @@
 
 from loguru import logger
 
-from src.config import EMBEDDING_MODEL, TOP_K_RETRIEVAL
+from src.config import EMBEDDING_MODEL
 from src.core import logging as core_logging
 from src.core.log_events import Event
 from src.core.logging import LOG_MAX_BODY
@@ -70,47 +70,6 @@ def similarity_search(collection, embed_fn, kb_id, query, k=5) -> list[ChunkResu
         str(formatted)[:LOG_MAX_BODY] if formatted else "[]",
     )
     return formatted
-
-
-def similarity_search_all(
-    collections_dict, embed_fn, query, k=TOP_K_RETRIEVAL
-) -> list[ChunkResult]:
-    """在所有 collection 中进行语义搜索，合并后排序取 top-k。
-
-    遍历所有知识库逐一执行 similarity_search，汇总后按距离升序排列。
-
-    Args:
-        collections_dict: 知识库 ID 到 Collection 的映射字典
-        embed_fn: 嵌入函数
-        query: 查询文本
-        k: 最终返回结果上限，默认使用全局配置 TOP_K_RETRIEVAL
-
-    Returns:
-        合并排序后的检索结果列表
-    """
-    all_results: list[ChunkResult] = []
-    for kb_id in collections_dict:
-        try:
-            col = collections_dict[kb_id]
-            results = similarity_search(col, embed_fn, kb_id, query, k=k)
-            all_results.extend(results)
-        except Exception as e:  # noqa: BLE001
-            core_logging.log_event(
-                Event.SEARCH_COLLECTION_FAILED, kb_id=kb_id, err=str(e)
-            )
-            continue
-
-    all_results.sort(
-        key=lambda r: r.distance if r.distance is not None else float("inf")
-    )
-    result = all_results[:k]
-    core_logging.log_event(
-        Event.SEARCH_ALL_DONE,
-        collections=len(collections_dict),
-        query_len=len(query),
-        result_count=len(result),
-    )
-    return result
 
 
 def get_chunks_by_doc_id(collection, doc_id: str) -> list[ChunkResult]:
