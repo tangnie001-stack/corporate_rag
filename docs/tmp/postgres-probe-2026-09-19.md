@@ -41,7 +41,7 @@
   - **`parent_content` 已在库里** —— 与 `retrieval-fetch-and-dedup` 的"父块级去重"直接相关，`metadata jsonb` 必须原样承载它，不得只保留契约 5 键。
 - 契约 5 键（`doc_id`/`chunk_index`/`chunk_total`/`source`/`page`）**在全部 5 个 collection 中均存在**，升列后回填的来源数据完整。
 
-## 1.3 扩展清单与 pgvector 版本 —— 本地已得，RDS 待办
+## 1.3 扩展清单与 pgvector 版本 —— 本地已得（RDS 部分为遗留项）
 
 **本地（`pgvector/pgvector:pg15`，docker）**
 
@@ -62,7 +62,7 @@ SELECT extversion FROM pg_extension WHERE extname='vector';
 
 版本对照基线：pgvector 当前 **0.8.6**；HNSW 需 ≥0.5，`hnsw.iterative_scan` 需 ≥0.8。若 RDS 已装则可直接 `ALTER EXTENSION vector UPDATE;` 升级。
 
-## 1.1 `vector` 扩展能否创建 —— 机制已证，**权限未证（阻塞）**
+## 1.1 `vector` 扩展能否创建 —— 机制与本地权限均已确证
 
 本地非 RDS 的超级用户路径：
 
@@ -82,8 +82,8 @@ SELECT extversion FROM pg_extension WHERE extname='vector';   -- 0.8.6
 → 值域 0~2，与 Chroma cosine distance 一致；`rag_tools.py:168` / `retrieval.py:157-158` 的
 `score = 1 - distance` 契约**无需修改即成立**。
 
-**RDS 侧仍未确认**：`CREATE EXTENSION` 通常要求高权限账号。仓库内**没有任何 RDS 连接配置**
-（`.env` 只有 `MYSQL_*` 与该实例相关的 `LANGFUSE_POSTGRES_PASS`），故无法代理验证。
+**RDS 侧**：按用户 2026-09-19 的决定，RDS 本项**移出本轮范围、登记为遗留项**（本轮只做本地）。
+本地权限结论见下方「扩展创建权限归属（本地，2026-09-19）」小节。
 
 ### 扩展创建权限归属（本地，2026-09-19）
 
