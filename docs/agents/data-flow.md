@@ -5,7 +5,7 @@
 ```
 用户上传 → MinIO 存储 → 文档解析(parse) → 策略检测
 → 智能分块(chunk) → 分块质量校验 → [可选]分块质量评估
-→ ChromaDB 向量入库 → MySQL 元数据更新(ready)
+→ ChromaDB 向量入库 → PostgreSQL 元数据更新(ready)
 ```
 
 入口: `POST /api/kbs/documents/upload` → 后台 `asyncio.create_task(_process_document_task)`
@@ -15,7 +15,7 @@
 
 ```
 用户提问 → POST /api/chat/stream → SSE 建立 → agent 循环 → verify → format
-→ 引用(citations) → 对话历史持久化(Redis + MySQL)
+→ 引用(citations) → 对话历史持久化(Redis + PostgreSQL)
 ```
 
 入口: `POST /api/chat/stream`（body: `ChatStreamRequest`：session_id / kb_id / query / deep_thinking）
@@ -265,8 +265,8 @@ SSE 消费侧按事件类型接线（`agent_service._convert_event`，src/servic
 ## 链路 3：知识库管理
 
 ```
-创建知识库 → MySQL get_or_create（名称去重）→ 返回 kb_id
-列出知识库 → MySQL 查询 + 文档计数
+创建知识库 → PostgreSQL get_or_create（名称去重）→ 返回 kb_id
+列出知识库 → PostgreSQL 查询 + 文档计数
 删除知识库 → 软删文档 → ChromaDB 删集合 → 软删 KB 记录
 ```
 
@@ -275,9 +275,9 @@ SSE 消费侧按事件类型接线（`agent_service._convert_event`，src/servic
 ## 链路 4：会话管理 ★
 
 ```
-列出会话 → MySQL 查询最近 50 条
-查看消息 → MySQL 查询 session 消息历史
-删除会话 → Redis 清理 → MySQL 事务删除 session + 消息
+列出会话 → PostgreSQL 查询最近 50 条
+查看消息 → PostgreSQL 查询 session 消息历史
+删除会话 → Redis 清理 → PostgreSQL 事务删除 session + 消息
 ```
 
 入口: `POST /api/sessions/list` / `POST /api/sessions/messages` / `POST /api/sessions/delete`
@@ -285,7 +285,7 @@ SSE 消费侧按事件类型接线（`agent_service._convert_event`，src/servic
 ## 链路 5：认证
 
 ```
-登录/注册 → MySQL 查用户 → 密码校验/自动注册 → Redis 存 token
+登录/注册 → PostgreSQL 查用户 → 密码校验/自动注册 → Redis 存 token
 校验 → Redis 查 token → 返回 user_id
 登出 → Redis 删 token
 匿名 → 生成 UUID → Cookie 持久化
@@ -297,7 +297,7 @@ SSE 消费侧按事件类型接线（`agent_service._convert_event`，src/servic
 
 **子链路 6a — 测试集生成**：
 ```
-MySQL 查元信息 → ChromaDB 取分块 → 脱敏 → 构建 KnowledgeGraph
+PostgreSQL 查元信息 → ChromaDB 取分块 → 脱敏 → 构建 KnowledgeGraph
 → transforms → 生成测试集 QA → 保存 JSON
 ```
 命令: `python -m src.cli.eval_ragas --kb-id xxx --generate --size 20`

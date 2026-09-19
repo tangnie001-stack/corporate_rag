@@ -72,16 +72,19 @@
 - app 的 uvicorn 无 `--reload`（见 CLAUDE.md 常用命令），必须 restart 进程才能加载新代码
 - 判断"代码改动是否已生效"先看 override：挂了 `src/` 则文件已同步只需 restart；未挂载才需要 `--build`
 
-### ALTER TABLE 操作
+### ALTER TABLE 操作（PostgreSQL）
 
 **场景**：`conversation_history` 表结构变更（如 session-process-replay 新增 process 列）
+**前提**：表结构由 alembic 唯一链管理（根 `alembic/`，见 `docs/agents/code-map.md`「关系型存储（PostgreSQL）」）。常规变更应改 ORM 模型（`src/infra/db/models/`）后生成迁移；下面是一次性手工 DDL 的 PG 等价写法。
 **步骤**：
-1. 进 MySQL 容器执行表结构变更，本例（session-process-replay）：
+1. 进 PostgreSQL 容器执行表结构变更，本例（session-process-replay）：
    ```sql
-   ALTER TABLE conversation_history ADD COLUMN process MEDIUMTEXT NULL COMMENT '过程事件JSON（历史回放）';
+   ALTER TABLE conversation_history ADD COLUMN process TEXT NULL;
+   COMMENT ON COLUMN conversation_history.process IS '过程事件JSON（历史回放）';
    ```
-**验证**：`SHOW COLUMNS FROM conversation_history LIKE 'process';` 确认列存在且类型/可空性正确
-**注意事项**：可空列无需回填，代码对 NULL 容忍；先改代码后 DDL（或反过来）均可，无强顺序依赖
+**验证**：`\d conversation_history`，或
+   `SELECT data_type, is_nullable FROM information_schema.columns WHERE table_name='conversation_history' AND column_name='process';`
+**注意事项**：PG 的 `TEXT` 无长度上限；可空列无需回填，代码对 NULL 容忍
 
 ## 调试
 
@@ -119,26 +122,28 @@
 
 **场景**：种子域名清单（`src/config/const.py SOURCE_TIER_RULES`）成长——定期从历史引用中筛出高频未命中域名，人工审核后决定加入规则表或记入拒绝清单。本 change 无 DDL，不建任何表。
 **步骤**：
-1. 跑聚合 SQL（MySQL 8.0；`sources` 列为 TEXT 存双重转义 JSON 字符串，需先 `JSON_UNQUOTE(CAST(... AS JSON))` 解包一层再 JSON_TABLE，直接对列做 `'$[*]'` 会解析为标量得 0 行）：
+1. 跑聚合 SQL（PostgreSQL；`sources` 为 TEXT，存的是 JSON 序列化后可能再转义一层的 JSON 字符串 —— 用 `#>> '{}'` 剥掉外层字符串再 `::jsonb`，直接对列做 `jsonb_array_elements` 会因它是标量字符串而得 0 行）：
    ```sql
+   WITH parsed AS (
+     SELECT m.id,
+            jsonb_array_elements((m.sources::jsonb #>> '{}')::jsonb) AS elem
+     FROM conversation_history m
+     WHERE m.sources IS NOT NULL AND m.sources <> ''
+   )
    SELECT
      CASE
-       WHEN jt.val LIKE "http%://%" THEN SUBSTRING_INDEX(SUBSTRING_INDEX(jt.val, "/", 3), "/", -1)
-       ELSE SUBSTRING_INDEX(jt.val, "/", 1)
+       WHEN elem->>'source' LIKE 'http%://%'
+         THEN split_part(regexp_replace(elem->>'source', '^.*?://', ''), '/', 1)
+       ELSE split_part(elem->>'source', '/', 1)
      END AS domain_raw,
-     COUNT(*)            AS cite_count,
-     COUNT(DISTINCT m.id) AS msg_count
-   FROM conversation_history m
-   JOIN JSON_TABLE(
-     JSON_UNQUOTE(CAST(m.sources AS JSON)),
-     '$[*]' COLUMNS (val VARCHAR(1024) PATH '$.source')
-   ) jt
-   WHERE m.sources IS NOT NULL
+     COUNT(*)           AS cite_count,
+     COUNT(DISTINCT id) AS msg_count
+   FROM parsed
    GROUP BY domain_raw
-   HAVING cite_count >= 5
+   HAVING COUNT(*) >= 5
    ORDER BY cite_count DESC;
    ```
-   说明：KB 来源（如 `tencent_2024_annual.pdf`）与带 scheme 的 web URL 都能提取；存量字符串数组脏数据显示为 NULL，人工审核时排除；未命中过滤不在 SQL 侧做（不复刻 Python 解析逻辑），人工对照规则表排除。
+   说明：`#>> '{}'` + `::jsonb` 对单层与双层转义都成立；KB 来源（如 `tencent_2024_annual.pdf`）与带 scheme 的 web URL 都能提取；存量字符串数组脏数据解出 NULL，人工审核时排除；未命中过滤不在 SQL 侧做（不复刻 Python 解析逻辑），人工对照规则表排除。
 2. 人工对照 `SOURCE_TIER_RULES` 与下方拒绝清单，排除已命中/已拒绝域名，筛出候选（阈值建议：≥5 次且跨 ≥3 会话，即 `cite_count >= 5 AND msg_count >= 3`）。
 3. 打开样本消息核对引用上下文，确认该域名内容性质（官方/媒体/UGC）。
 4. 批准 → `SOURCE_TIER_RULES` 加行 → `docker compose restart app` 生效 → 涉及标签文案时同步 api_contract.md（动线：const.py → api_contract.md → chat.html）。

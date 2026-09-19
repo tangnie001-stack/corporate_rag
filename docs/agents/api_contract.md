@@ -10,7 +10,7 @@
 | 标识符 | 格式 | 说明 | 常见错误 |
 |--------|------|------|----------|
 | `kb_id` | UUID 字符串（如 `53890512-f252-45bf-9485-25b4253cb4f1`）或空字符串 `""` | 知识库唯一标识。`""` 表示"不检索"（未绑定 KB，纯对话） | ❌ 传了 `kb_name`（"2024年报"） |
-| `doc_id` | UUID 字符串 | 文档唯一标识 | ❌ 传了 MySQL 自增 ID |
+| `doc_id` | UUID 字符串 | 文档唯一标识 | ❌ 传了数据库自增 ID（doc_id 是 UUID） |
 | `session_id` | 任意字符串 | 会话标识，用于关联对话历史 | ❌ 传了空字符串 |
 | `chunk_id` | `"{doc_id}:{index}"` 格式 | 向量库中的文档分块 ID | - |
 
@@ -157,7 +157,7 @@ Content-Type: `text/event-stream`
 | `query` | 用户问题 |
 | `deep_thinking` | 深度思考开关（可选，默认 `false`）：`true` 时 agent 主 LLM 以思考模式调用（`enable_thinking=true`）；`false` 显式关闭。来自 `chat-thinking-toggle` capability |
 
-> **落库时机（streaming-decouple M1）**：请求开始（per-session Redis 锁获取后）即同步写 user 消息到 MySQL（`svc.save_user_async`），session 创建幂等。端点方法自 streaming-decouple M3.4 起为 **POST**（GET→POST 迁移与前端传输层替换 EventSource 一同落地），前端经 `fetchStream`（fetch + getReader 手动解析 SSE）调用，不再依赖原生 EventSource。Redis 的 user 写入仍保留在 `agent_service.stream_chat` 内（发生在 `get_history_async()` 之后，避免当前 query 作为历史进 prompt）。
+> **落库时机（streaming-decouple M1）**：请求开始（per-session Redis 锁获取后）即同步写 user 消息到 PostgreSQL（`svc.save_user_async`），session 创建幂等。端点方法自 streaming-decouple M3.4 起为 **POST**（GET→POST 迁移与前端传输层替换 EventSource 一同落地），前端经 `fetchStream`（fetch + getReader 手动解析 SSE）调用，不再依赖原生 EventSource。Redis 的 user 写入仍保留在 `agent_service.stream_chat` 内（发生在 `get_history_async()` 之后，避免当前 query 作为历史进 prompt）。
 
 事件流（按推送顺序，不含追问路径）：
 
@@ -590,10 +590,10 @@ Success:
 
 | 键 | 类型 | 说明 |
 |----|------|------|
-| `status` | str | `generating`（缓冲存在且无终态，生成中）/ `completed`（缓冲有 done/error 终态，或 MySQL 已有 assistant 消息）/ `idle`（无缓冲且无 assistant 消息） |
+| `status` | str | `generating`（缓冲存在且无终态，生成中）/ `completed`（缓冲有 done/error 终态，或 PostgreSQL 已有 assistant 消息）/ `idle`（无缓冲且无 assistant 消息） |
 | `buffer_seq` | int\|null | 当前缓冲最大事件序号，仅缓冲存在时返回 |
 
-判定顺序：先查进程内缓冲（`streaming_manager`），无缓冲时回退查 MySQL 消息
+判定顺序：先查进程内缓冲（`streaming_manager`），无缓冲时回退查 PostgreSQL 消息
 （`svc.get_messages` 是否存在 `role=assistant`）。会话不存在或无权访问返回 404
 （`SESSION_NOT_FOUND`），与 2.4.2/2.4.3 一致。
 
@@ -714,9 +714,9 @@ Success:
 
 ---
 
-## 3. 接口层：AppService ↔ MySQLDB
+## 3. 接口层：AppService ↔ Repo 层
 
-### 3.1 `MySQLDB.get_all_kb() → list[tuple[str, str]]`
+### 3.1 `Repo 层.get_all_kb() → list[tuple[str, str]]`
 
 | 元组位置 | 列名 | 类型 |
 |----------|------|------|
@@ -725,7 +725,7 @@ Success:
 
 ⚠️ 返回顺序按 `created_at DESC`。调用方不要假设按名称排序。
 
-### 3.2 `MySQLDB.get_documents(kb_id) → list[dict]`
+### 3.2 `Repo 层.get_documents(kb_id) → list[dict]`
 
 | 键 | 类型 | 说明 |
 |----|------|------|
@@ -738,18 +738,18 @@ Success:
 | `error_msg` | str \| None | 处理失败时的错误信息 |
 | `meta_info` | str \| None | JSON 字符串，含 `eval` 评估数据 |
 
-### 3.3 `MySQLDB.delete_kb(kb_id) → bool`
+### 3.3 `Repo 层.delete_kb(kb_id) → bool`
 
 CASCADE 级联删除：知识库 → 文档 → 对话历史。
 
 ⚠️ 调用方必须同时调用 `VectorStore.delete_collection()` 清理向量数据，
-MySQLDB 不感知 ChromaDB。
+Repo 层不感知 ChromaDB。
 
-### 3.4 `MySQLDB.update_document_status(doc_id, status, chunk_count=0, error_msg="") → None`
+### 3.4 `Repo 层.update_document_status(doc_id, status, chunk_count=0, error_msg="") → None`
 
 更新文档处理状态。由 `_process_document` 后台任务调用。
 
-### 3.5 `MySQLDB.update_document_meta_info(doc_id, meta_info) → None`
+### 3.5 `Repo 层.update_document_meta_info(doc_id, meta_info) → None`
 
 更新文档的 `meta_info` JSON 列（存储分块评估结果）。由 `_process_document_task` 在分块质量评估后调用。
 
@@ -757,9 +757,9 @@ MySQLDB 不感知 ChromaDB。
 |------|------|------|
 | `meta_info` | dict | 写入 JSON 列的字典，评估结果放在 `{"eval": {...}}` 下 |
 
-### 3.6 `MySQLDB.insert_eval_report(report) → None`
+### 3.6 `Repo 层.insert_eval_report(report) → None`
 
-插入一条 RAGAS 评估报告。首次调用时自动建表（幂等）。
+插入一条 RAGAS 评估报告。表结构由 alembic baseline 统一创建（`alembic/versions/0001_pg_baseline.py`），插入路径不再自动建表。
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
@@ -775,7 +775,7 @@ MySQLDB 不感知 ChromaDB。
 | `report.report_path` | str\|null | CSV 报告路径 |
 | `report.detail_json` | list\|null | 逐条 QA 得分 `[{"q_index":0, "faithfulness":0.95}, ...]` |
 
-### 3.7 `MySQLDB.get_latest_eval_report(kb_id) → dict | None`
+### 3.7 `Repo 层.get_latest_eval_report(kb_id) → dict | None`
 
 获取知识库最新的 RAGAS 评估报告。按 `eval_date DESC LIMIT 1` 查询。
 
@@ -1002,7 +1002,7 @@ agent（LLM + bind_tools）← entry_point
         event: citation (去重)
         event: model_info (模型名 + fallback 状态)
         event: done
-    → 后台任务收尾（_run_with_finalize）落库 assistant 到 MySQL（best-effort，失败仅记日志）
+    → 后台任务收尾（_run_with_finalize）落库 assistant 到 PostgreSQL（best-effort，失败仅记日志）
       → chat_manager.save_assistant_async()（仅写 assistant 消息，status=complete/interrupted；session + user 消息已在请求开始时写入，见上文「落库时机」）
 ```
 
@@ -1036,7 +1036,7 @@ agent（LLM + bind_tools）← entry_point
       1. parsing — 调用 parser 提取文本
       2. chunking — ParentChildChunker 分层切分 + 质量校验
       3. indexing — ChromaDB PersistentClient.add_chunks()
-      4. ready — 更新 MySQL 状态
+      4. ready — 更新 PostgreSQL 状态
     → 前端轮询 POST /api/kbs/documents/status 直至 ready/failed
 ```
 

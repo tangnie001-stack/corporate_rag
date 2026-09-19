@@ -7,7 +7,7 @@
 | 术语 | 定义 | 常见错误 |
 |------|------|---------|
 | `kb_id` | 知识库唯一标识，UUID 字符串；`""` 表示"不检索"（未绑定 KB，纯对话） | ❌ 传 `kb_name` |
-| `doc_id` | 文档唯一标识，UUID | ❌ 传 MySQL 自增 ID |
+| `doc_id` | 文档唯一标识，UUID | ❌ 传数据库自增 ID（doc_id 是 UUID） |
 | `session_id` | 会话标识，用于关联对话历史 | ❌ 传空字符串 |
 | `chunk_id` | 向量库中的分块 ID，格式 `"{doc_id}:{index}"` | — |
 | `trace_id` | 请求追踪 ID，格式 `trace_<uuid>` | — |
@@ -157,10 +157,19 @@
 
 ## 基础设施
 
+- **PostgreSQL**：关系型存储后端（用户 / 知识库 / 文档 / 会话 / 消息 / 反馈 / 评估报告 7 张表，外加检索底座表 `chunks`），经 `postgresql+asyncpg` 访问。结构、引擎归属与迁移链见 `docs/agents/code-map.md`「关系型存储（PostgreSQL）」
 - **ChromaDB**：向量数据库，按 kb 分 collection
 - **MinIO**：文档对象存储
 - **LiteLLM**：LLM 代理，`LLM_BASE_URL` 指向（默认 `http://litellm-proxy:4000`）
 - **DashScope**：通义千问系列模型的提供商（Embedding / LLM / Rerank）
+
+## 关系型存储（P1 落地）
+
+| 术语 | 定义 | 常见错误 |
+|------|------|---------|
+| `存储收敛（storage consolidation）` | 把关系型存储从 MySQL 迁到 PostgreSQL 的变更方向。P1 只换关系型后端；向量仍走 ChromaDB、词法仍走 `rank_bm25`，检索链路行为不变（Chroma/词法的收敛属后续阶段） | ❌ 以为 P1 同时改了检索路径 |
+| `DSN 单一来源` | 应用 DSN 只由 `src/config/settings.py:build_postgres_dsn()` 产出（`postgresql+asyncpg://`，`POSTGRES_PASSWORD` 缺失即抛 `RuntimeError`），`src/infra/db/engine.py` 在模块级消费它。宿主侧跑 alembic / pytest 时用 `POSTGRES_HOST=localhost` 覆盖 `.env` 里的 compose 服务名（`python-dotenv` 默认 `override=False`，已存在的环境变量优先） | ❌ 各处自行拼连接串；❌ 宿主侧忘了加 `POSTGRES_HOST=localhost` |
+| `chunks 表` | P1 baseline 手写建出的检索底座表，**没有对应 ORM 模型**。`content_seg` 是供分词/生成列使用的正文文本列；`tsv` 是 `to_tsvector('simple', content_seg)` 的持久化生成列（GIN 索引）；`embedding` 为 `vector(1024)`。P1 只建表并用冒烟测试证明可写可检索，不接线 | ❌ 以为 `chunks` 有 ORM 模型可直接查询；❌ 把 `content_seg`/`tsv` 当成应用层字段名 |
 
 ## 如何更新
 

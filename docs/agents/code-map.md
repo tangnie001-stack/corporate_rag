@@ -13,17 +13,17 @@
 |------|------|
 | `src/` | 后端 Python 源码（分层见下） |
 | `tests/` | 单元测试，与 `src/` 模块一一对应 |
-| `deploy/` | 部署件：`nginx/`（反向代理 + 前端静态文件）、各中间件 Dockerfile（mysql/chroma/clickhouse） |
+| `deploy/` | 部署件：`nginx/`（反向代理 + 前端静态文件）、各中间件 Dockerfile（postgres/chroma/clickhouse） |
 | `deploy/nginx/html/` | **前端页面静态文件**（chat.html / index.html / login.html 等） |
 | `skills/` | 运行时 skill 内容库（`<name>/SKILL.md`，业务侧管理，compose volume 挂载进容器 `/app/skills`） |
 | `agents/` | **智能体预设内容库**（`<name>.md` 平坦文件，业务侧管理；见下方「三个 `agents` 的区别」） |
 | `docs/` | 文档：`agents/`（本目录，规则/契约/排查）、`design/`（UI 设计规格与 HTML 预览）、`openspec/`（OpenSpec 主目录）、`superpowers/`、`pitfalls/` |
 | `openspec/` | **符号链接 → `docs/openspec`**；OpenSpec changes / specs |
-| `alembic/` + `alembic.ini` | 数据库迁移 |
+| `alembic/` + `alembic.ini` | 数据库迁移（唯一链；baseline `alembic/versions/0001_pg_baseline.py` 从零建 8 张表） |
 | `scripts/` | 运维脚本（清库、重建 KB 数据、migrations） |
 | `litellm/` | LiteLLM 代理配置（模型网关） |
 | `data/`、`logs/` | 运行期数据与日志挂载点 |
-| `docker-compose.yml` / `.override.yml` / `.prod.yml` | 编排（mysql / redis / postgres / clickhouse / minio / langfuse / nginx / litellm-proxy / app 共 9 个服务） |
+| `docker-compose.yml` / `.override.yml` / `.prod.yml` | 编排（redis / postgres / clickhouse / minio / langfuse / nginx / litellm-proxy / app 共 8 个服务） |
 | `Dockerfile`、`pyproject.toml` | 应用镜像与依赖 |
 
 > **三个 `agents` 的区别（勿混淆）**：根 `agents/` = 智能体预设**内容**（`<name>.md` 平坦文件）；
@@ -46,18 +46,37 @@ agents/            LangGraph agent 循环
   ├─ skills/       主从委派运行时：loader/registry/executor/delegate_task/models/invocation/prefix(/xxx 解析与清洗纯函数) + fork 执行层 fork_stream/fork_tools/delegate_run
   └─ presets/      智能体预设：models / loader / registry
 rag/               检索与知识库路由：retrieval / context / prompt / stream / temporal
-chat/              对话管理：manager(Redis) / persistence(MySQL) / streaming / task_registry / process_log
+chat/              对话管理：manager(Redis) / persistence(PostgreSQL) / streaming / task_registry / process_log
 chunking/          分块：router(策略路由) / strategies(4 种) / validator / scorer
 parsers/           文档解析：pdf / docx / txt + base / router
 core/              日志：logging / log_events / log_event_specs
 config/            settings(环境变量) / prompts(提示词) / const(常量/文案/枚举) / response_codes
-infra/             基础设施：db(engine/vector_store/models) / llm / search / auth / redis_client
+infra/             基础设施：db(engine/DSN + models + mysql_db repos + vector_store) / llm / search / auth / redis_client
 middleware/        auth / trace_id / response_processor（统一响应包装）
 cli/               RAGAS 评估、检索对比、trace 回放等命令行工具
 models.py          LLM / Embedding / Rerank 工厂（get_llm / get_embedding / get_rerank）
 utils/             sse 事件类型 / errors / desensitize / auth_crypto
 tools/             工具基类（base.py）
 ```
+
+### 关系型存储（PostgreSQL）
+
+- **引擎与 DSN 归属**：`src/infra/db/engine.py` 在模块级构造异步引擎与 `session_factory`；
+  DSN 由 `src/config/settings.py:build_postgres_dsn()` 提供（`postgresql+asyncpg://` 形式，
+  `POSTGRES_PASSWORD` 缺失时抛 `RuntimeError`）。连接池参数（`pool_size` / `max_overflow`）
+  也在 `engine.py`，与 Langfuse 共享同一实例，见 `docs/agents/defensive-patterns.md`。
+- **ORM 模型唯一来源**：`src/infra/db/models/`（`chat` / `document` / `eval_report` /
+  `feedback` / `kb` / `user`），声明式基类与通用 Mixin 在 `src/infra/db/base.py`。
+- **Repo 层**：`src/infra/db/mysql_db/`（`chat_repo` / `document_repo` / `eval_repo` /
+  `kb_repo` / `user_repo`）。⚠ **包名在 P1 迁移后已名不副实** —— 里面全是 PostgreSQL repo，
+  `mysql_db` 只是历史包名；改名（如改为 `repos/`）是独立事项，见需求池 L4。
+- **迁移唯一链**：根 `alembic/`（`alembic.ini` 的 `script_location` 指向它），当前唯一
+  revision 是 `alembic/versions/0001_pg_baseline.py`，从零建 8 张表 —— 7 张由 ORM metadata
+  生成，`chunks` 为手写增补。
+- **`chunks` 表没有对应 ORM 模型**：由上述 baseline 手写建出（`content_seg` 文本列 +
+  `tsv` 生成列 + `embedding vector(1024)` + 3 个索引），P2 决定是否补 ORM 模型。若补，
+  属性名不能用 `metadata`（与 `Base.metadata` 冲突），须 `mapped_column("metadata", …)`
+  映射、列名不变。
 
 **分层调用规则**（改代码前必守，详见 `CLAUDE.md`）：`api/` 不得直接调 `infra/`、`config/`，
 必须经 `services/`；`api/chat.py` 不含 SSE 格式化函数。前端只经 Nginx `/api/*` 打到后端，
@@ -176,4 +195,5 @@ Nginx 容器把本目录挂到 `/usr/share/nginx/html` 直接托管，**无 npm 
 | 改分块 | `src/chunking/`（`strategies/` 加策略 + `router.py` 挂路由）；排查见 `docs/agents/chunking-issues.md` |
 | 改常量 / 文案 / 阈值 | `src/config/`（`settings.py` 环境变量、`prompts.py` 提示词、`const.py` 常量与 SSE 文案） |
 | 加日志事件 / 前缀 | `src/core/log_events.py`、`log_event_specs.py`；规范见 `docs/agents/logging-rules.md` |
+| 改数据库 schema / 迁移 | `src/infra/db/models/`（ORM）+ `alembic/versions/`（迁移）；见本文「关系型存储（PostgreSQL）」 |
 | 改部署 / 容器 | `docker-compose*.yml`、`Dockerfile`；操作见 `docs/agents/cookbook.md` |
