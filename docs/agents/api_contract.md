@@ -843,7 +843,7 @@ dense 路 top-k，按余弦距离（pgvector `<=>`）升序。`similarity_search
 | `sparse_rank` | 该结果在词法路的排名（0 起） |
 | `dense_rank` | `None` |
 
-**查询条件在应用层构造**（`src/infra/db/lexical_query.py`）：每个词元先按安全字符集（中日韩字符 / 字母 / 数字 / 下划线）剔除，再拼成 `词元:*` 并以 ` & ` 连接；词元全被滤掉时降级为 `content LIKE '%原文%'`（LIKE 通配符已转义）。**用户原文不得直接交给 `to_tsquery`** —— 含空格会抛语法错误。
+**查询条件在应用层构造**（`src/infra/db/lexical_query.py`）：每个词元先按安全字符集（中日韩字符 / 字母 / 数字 / 下划线）剔除，再拼成 `词元:*` 并以 ` | ` 连接（前缀 OR：任一词元命中即召回，精度由下游 RRF/rerank 承担）；词元全被滤掉时降级为 `content LIKE '%原文%'`（LIKE 通配符已转义）。**用户原文不得直接交给 `to_tsquery`** —— 含空格会抛语法错误。
 
 ### 4.6 `async VectorStore.delete_collection(kb_id) → bool`
 

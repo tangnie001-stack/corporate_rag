@@ -12,7 +12,7 @@ def test_prefix_wildcard_per_token():
     """H2：每个词元必须带前缀通配，否则词形不一致时静默 0 命中。"""
     plan = build_lexical_query("营业收入增长")
     assert plan.use_substring is False
-    assert plan.tsquery == " & ".join(f"{t}:*" for t in plan.terms)
+    assert plan.tsquery == " | ".join(f"{t}:*" for t in plan.terms)
     assert plan.tsquery.count(":*") == len(plan.terms)
 
 
@@ -69,7 +69,7 @@ def test_special_chars_never_raise_and_never_leak_operators(query):
         if plan.use_substring:
             assert plan.tsquery == ""
             continue
-        # 词元之间才允许出现 ` & `，单看词元部分不得含任何操作符
+        # 词元之间才允许出现 ` | `，单看词元部分不得含任何操作符
         for term in plan.terms:
             assert op not in term
 

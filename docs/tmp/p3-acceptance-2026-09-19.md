@@ -148,7 +148,31 @@ POST /api/kbs/documents/status  body {"kb_id":"b987747d…","doc_id":"0e0aeeed�
 2026-09-20 03:13:42.953 | INFO    | trace_c7182b58-758c-4e1a-b762-885080fe8bdd | a610dfbf-0d50-44b7-be1c-5e0c4e4e49b8 | src.core.logging:log_event:213 - [retrieval] hybrid done kb_id=b987747dd83547949b1c4e8af1ebbb50 query_len=11 dense_count=1 sparse_count=0 result_count=1
 ```
 
-根因（已排查）：生产查询构造是 **前缀 AND**（`lexical_query.py:29 _JOINER = " & "`），`资产负债率 变化 趋势` 的词元为 `资产负债率` / `变化` / `趋势`；语料 `content_seg` 只含 `资产负债率`，不含 `变化`、`趋势` → AND 谓词为空 → `sparse_count=0`。这是**查询词元在语料无对应词元**时的正确行为（走 dense 兜住，`result_count=1` 仍有结果），**不是** `content_seg` 未重写导致的缺陷（同一 E2E 的 `资产负债率` 查询 `sparse_count=1` 即为反证）。按 brief 判定规则，D7 由「库里确实含该词项」的查询（`资产负债率`）成立。
+根因（已排查）：生产查询构造原为 **前缀 AND**（`lexical_query.py:29 _JOINER = " & "`），`资产负债率 变化 趋势` 的词元为 `资产负债率` / `变化` / `趋势`；语料 `content_seg` 只含 `资产负债率`，不含 `变化`、`趋势` → AND 谓词为空 → `sparse_count=0`。**该说明已被修复轮 1 推翻并更新**：AND 使词法路对典型多词自然查询贡献为零，连接符已翻转为前缀 OR（见文末「修复轮 1」）。翻转后同一类自然查询 `sparse_count > 0`（见下）。
+
+#### 修复轮 1 复测：自然语言查询的 `sparse_count>0`（D7 的更强证据）
+
+连接符翻转为前缀 OR 后，新建 KB `99e491625c314a8fb78348c756ab311a`、文档 `7eaa289e-5e7d-4e56-a059-10a7f35a8f83`（`p3_fix1_smoke.txt`，同含中文财务术语），用**自然的多词问题** `query="资产负债率有什么变化"` 复测。检索入参为 `query=资产负债率 变化`（SSE `status.detail`），原始日志行：
+
+```
+2026-09-20 03:24:46.864 | INFO    | trace_791db44b-0c2e-43ca-8fbe-7de5360ef1c5 | 2e530932-d5be-43cc-8b5b-cc4845d249be | src.core.logging:log_event:213 - [retrieval] hybrid done kb_id=99e491625c314a8fb78348c756ab311a query_len=8 dense_count=1 sparse_count=1 result_count=1
+```
+
+- **`sparse_count=1`（> 0）** —— AND 时代同类多词查询为 0，翻转后自然查询亦成立。
+- `citations` 非空：`{"source":"p3_fix1_smoke.txt","page":1,...,"score":0.4959686089383502,"tier":0}`；答案正确引用上传内容（65.3% / +4.1pp / 研发费用 +18.0% / 净利润 -12.5%）。
+
+同一语料上 AND 与 OR 的受控对照（同一查询、只换连接符）：
+
+```
+query='资产负债率 变化'      terms=('资产负债率','变化')
+  OR  (翻转后) tsquery='资产负债率:* | 变化:*'      sparse_count=1
+  AND (翻转前) tsquery='资产负债率:* & 变化:*'      sparse_count=0
+query='资产负债率 变化 趋势'  terms=('资产负债率','变化','趋势')
+  OR  (翻转后) tsquery='资产负债率:* | 变化:* | 趋势:*'      sparse_count=1
+  AND (翻转前) tsquery='资产负债率:* & 变化:* & 趋势:*'      sparse_count=0
+```
+
+即：**翻转前**，词法路对典型多词自然查询 `sparse_count=0`、贡献为零，「混合检索」退化为纯 dense；**翻转后**，同一查询 `sparse_count=1`，词法路真实贡献可见。D7 不再仅由精心挑选的单概念查询（`资产负债率`）成立。
 
 ---
 
@@ -226,7 +250,7 @@ brief Step 5 预期收尾计数为 `5|0|176|1`，实测为 `90|102|176|1`。差�
 | R3 | `multi-query-retrieval` 的在效规格/ delta 正文引用已不存在的 `retrieve_node` / `rewritten_queries`（`rrf_fusion_multi` 无生产调用方） | 需求池 **F-29** → 随 `retrieval-fetch-and-dedup` 重定基处理 |
 | R4 | 词法路质量的**判据缺口**：探针为集合成员口径，`k ≈ 池规模` 下**测不了排序/分词质量**，替换的收益/损失未被建立 | 需求池 **F-30** → k ≪ 池的新判据或端到端 RAGAS |
 | R5 | 端到端答案质量（RAGAS）不在本次验收内 | 需求池 **F-30** 关联；语料到位后的独立评估活动 |
-| R6 | **测试污染**：`tests/infra/db/test_db.py` 直连真实 PG 写入 `test-user` KB / 空 `user_id` document 且**无 teardown**，每次 pytest 累积约 5 KB / 6 doc（本轮已致 `knowledge_base` 达 90 行） | **新发现**，非 P3 代码改动；归属测试基础设施（建议修 `test_db.py` 或加 fixture 清理） |
+| R6 | **测试污染**：`tests/infra/db/test_db.py` 直连真实 PG 写入 `test-user` KB / 空 `user_id` document 且**无 teardown**，每次 pytest 累积约 5 KB / 6 doc（本轮已致 `knowledge_base` 达 90 行）。修复轮 1 已用仓库复位/搬迁路径把 dev 库恢复为 `5|0|176|1` | **需求池 F-31**（修复轮 1 登记）；归属测试基础设施（给真实 PG 测试补 fixture teardown 或统一走复位） |
 | R7 | `alembic/env.py` 的 `compare_server_default=True` | 需求池 **F-22** → 独立变更 |
 | R8 | `src/infra/db/mysql_db/` 包改名（内容已全为 PG repo） | 需求池 **F-18** → 独立变更 |
 | R9 | `src/api/documents.py:246` 越层与双删除路径收编 | 需求池 **F-23 / F-25** → P4 同事务改造 |
@@ -254,3 +278,114 @@ brief Step 5 预期收尾计数为 `5|0|176|1`，实测为 `90|102|176|1`。差�
 - 反向证伪成立：词法路独立产出非零得分，兜底路径不抛错。
 - 语料已恢复到 **176 分块**；工作区干净。
 - 已知残留与既有污染见 ⑥ / ⑧，均**不属于 P3 的 DoD 范围或按边界不得处理**。
+
+---
+
+## 修复轮 1
+
+> 修复轮 1/5：收口 Task 11（`b31fee3`）暴露的 F1（查询连接符 AND→OR，控制器裁决 R11-a）、F2（dev 库恢复）、F3（自然语言查询 E2E 复测）、F4（登记 F-31）。
+
+### ① 改动清单（文件:行）
+
+| 文件:行 | 改动 | 关键原文（改后） |
+|---|---|---|
+| `src/infra/db/lexical_query.py:9`（模块 docstring） | `&` → `|` | `` `词元:*`（前缀通配…），以 ` | ` 连接。`` |
+| `src/infra/db/lexical_query.py:28-32`（`_JOINER`） | `" & "` → `" | "`，注释改写为「召回取向」并陈述理由 | `# 词元之间的连接符：前缀 OR。取**召回取向** —— AND 只要有一个补词不在库里\n# 就让整条查询返回 0（实测自然语言查询被改写为「资产负债率 变化 趋势」时\n# `变化`/`趋势` 不在语料，sparse_count=0，词法路贡献为零）；精度由下游\n# RRF / 去重 / rerank 承担，不靠本层收紧谓词。\n_JOINER = " | "` |
+| `src/infra/db/lexical_query.py:39`（`LexicalQuery.tsquery` docstring） | `&` → `|` | `` `词元:*` 以 ` | ` 连接；词元为空时为空串…`` |
+| `tests/infra/db/test_lexical_query.py:15` | 断言 `" & ".join` → `" | ".join` | `assert plan.tsquery == " | ".join(f"{t}:*" for t in plan.terms)` |
+| `tests/infra/db/test_lexical_query.py:72` | 注释 ` & ` → ` | ` | `# 词元之间才允许出现 ` | `，单看词元部分不得含任何操作符` |
+| `docs/agents/api_contract.md:846`（§4.5） | ` & ` → ` | ` + 补前缀 OR 语义说明 | `…再拼成 `词元:*` 并以 ` | ` 连接（前缀 OR：任一词元命中即召回，精度由下游 RRF/rerank 承担）…` |
+| `docs/tmp/p3-lexical-probe-2026-09-19.md` §选型结论（约 87-92 行） | 选型由 prefix-AND 改为 **prefix-OR**，依据改写为服务路径实测；三张表测量数字未动 | `- 查询构造：**prefix-OR**（分组 B 命中数/总数：prefix-AND = 15/30 / prefix-OR = 18/30 …）`；`- **连接符翻转（改选 prefix-OR）**：依据**不是**分组 B 的 +10.0 个百分点…真正依据是**服务路径实测**…` |
+| `docs/agents/requirements_pool.md`（F-30 后） | 新增 F-31（6 列，与表头一致） | 见 ② |
+| `docs/tmp/p3-acceptance-2026-09-19.md`（§④、§⑧、本「修复轮 1」） | 补自然语言查询 E2E 观测；R6 关联 F-31 | 本文件 |
+
+- `docs/agents/glossary.md` 的「词法检索」「分词口径」两条**未提连接符/查询构造**，无需改动。
+- ⚠ 边界外但已察觉：`docs/agents/data-flow.md:145` 仍有 `词元:* & …` 字样（不在本轮允许改动清单内，未动，登记为 concern）。
+
+### ② 验证命令与证据
+
+**F2（dev 库恢复）——按仓库复位/搬迁路径，非逐行 DELETE：**
+
+```
+# 1) 复位业务表（刻意不含 users）
+$ docker compose exec -T postgres psql -U corporate_rag -d corporate_rag -c \
+  "TRUNCATE conversation_history, document, knowledge_base, chunks CASCADE;"
+TRUNCATE TABLE
+
+# 2) 从 Chroma 重新搬迁（幂等）
+$ POSTGRES_HOST=localhost .venv/bin/python scripts/migrate_chroma_to_pg.py
+migrate chroma->pg done: {'collections': 5, 'records': 176, 'written': 176, 'dimension_mismatch': 0, ...}
+corpus ok: collections=691 non_empty=5 chunks=176 dim=1024 none_embedding=0
+
+# 3) 不变量复验 + 重写
+$ POSTGRES_HOST=localhost .venv/bin/python scripts/rewrite_content_seg.py --check
+total=176 stale=0
+exit=0
+$ POSTGRES_HOST=localhost .venv/bin/python scripts/rewrite_content_seg.py --apply
+rewritten=0
+exit=0
+
+# 复验（预期 5|0|176|1 与 5）
+$ docker compose exec -T postgres psql -U corporate_rag -d corporate_rag -tAc \
+  "SELECT (SELECT count(*) FROM knowledge_base) || '|' || (SELECT count(*) FROM document) || '|' || (SELECT count(*) FROM chunks) || '|' || (SELECT count(*) FROM users);"
+5|0|176|1
+$ docker compose exec -T postgres psql -U corporate_rag -d corporate_rag -tAc "SELECT count(DISTINCT kb_id) FROM chunks;"
+5
+```
+
+（复核）176 块全部归属 `p2-migration` 的 5 个知识库：`SELECT k.user_id || ' -> ' || count(c.*) … GROUP BY k.user_id` → `p2-migration -> 176`。TRUNCATE 前计数 `90|102|176|1`，F-31 所述既有测试污染行已随复位清除；未碰 `users`、未碰 `data/`、未动 MySQL 卷。
+
+**F3（自然语言查询 E2E 复测）——见 §④「修复轮 1 复测」**，`hybrid done` 原始日志行：
+
+```
+2026-09-20 03:24:46.864 | INFO    | trace_791db44b-0c2e-43ca-8fbe-7de5360ef1c5 | 2e530932-d5be-43cc-8b5b-cc4845d249be | src.core.logging:log_event:213 - [retrieval] hybrid done kb_id=99e491625c314a8fb78348c756ab311a query_len=8 dense_count=1 sparse_count=1 result_count=1
+```
+
+E2E 产生的 KB/文档/会话已清理（`DELETE 1(chunks); DELETE 1(document); DELETE 2(conversation_history); DELETE 1(knowledge_base); COMMIT`），随后按 F2 顺序复位恢复。
+
+**F1 定向测试：**
+
+```
+$ POSTGRES_HOST=localhost .venv/bin/python -m pytest \
+  tests/infra/db/test_lexical_query.py tests/infra/db/test_chunk_repo_lexical.py tests/rag/test_retrieval.py -v
+56 passed, 1 warning in 1.40s
+
+$ .venv/bin/pyright src/
+0 errors, 0 warnings, 0 informations
+
+$ ruff check src/ tests/
+All checks passed!
+```
+
+### ③ 翻转前后 `sparse_count` 对照（同一类自然查询）
+
+| 查询（agent 改写后的检索入参） | 翻转前 AND | 翻转后 OR |
+|---|---|---|
+| `资产负债率 变化`（来自自然问句「资产负债率有什么变化」） | `0` | `1` |
+| `资产负债率 变化 趋势`（上一轮 E2E 首句的自然改写） | `0`（`query_len=11`，日志行见 §④） | `1` |
+
+受控对照口径：同一 E2E 语料、同一查询、只替换连接符（`' | '` ↔ `' & '`），分别经 `VectorStore.lexical_search` 与 `ChunkRepo.search_lexical` 取数；AND 臂 `sparse_count=0`、OR 臂 `sparse_count=1`。翻转前生产日志实测亦为 0（`query_len=11`），与受控对照一致。
+
+### ④ 最终计数与工作区
+
+```
+5|0|176|1      （knowledge_base | document | chunks | users）
+5              （SELECT count(DISTINCT kb_id) FROM chunks）
+```
+
+`git status --short`（见提交前；提交后为空）：
+
+```
+ M docs/agents/api_contract.md
+ M docs/agents/requirements_pool.md
+ M docs/tmp/p3-lexical-probe-2026-09-19.md
+ M src/infra/db/lexical_query.py
+ M tests/infra/db/test_lexical_query.py
+```
+
+- 收尾计数在**只跑 F1 定向测试**之后取得；**未再跑全量 pytest**（避免再次污染）。全量门禁结论沿用上一轮 `1058 passed, 14 skipped`。
+- 未删 `users`、未碰 `data/`、未动 MySQL 卷、未改探针脚本、未改测量数字。
+
+### ⑤ commit hash
+
+- **`<SHA>`**（`fix(p3): 查询构造翻转为前缀 OR（服务路径实测 AND 使词法路零贡献）+ 恢复语料`）
