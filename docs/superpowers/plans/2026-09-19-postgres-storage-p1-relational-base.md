@@ -29,11 +29,10 @@
 
 | capability | requirement | 覆盖它的 Task |
 |---|---|---|
-| `database-orm` | ORM 模型定义（MySQL 表 → PostgreSQL；模型与迁移的单一事实源） | Task 2、5、7 |
+| `database-orm` | ORM 模型定义（单一事实源 / 不依赖 MySQL 方言类型 / 查询路径索引齐备） | Task 2、5、7 |
 | `database-orm` | 搜索类型搬迁（引用方列表移除 `bm25_index.py`） | **不在 P1**（P3） |
 | `database-migrations` | 第一版迁移（改为从零建表 baseline，8 张表） | Task 5 Step 4–6 |
 | `database-migrations` | 扩展由超级用户创建 + 迁移做可操作的前置断言 | Task 0、Task 4 Step 1/6、Task 5 Step 5/9 |
-| `chunk-data-model` | `ChunkData` 是唯一标准类型（修正既有未满足项） | Task 1 |
 | `typed-data-layer` | 检索结果统一类型 / `ChunkResult` 分路字段 / `metadata` 回填契约 | **不在 P1**（P2） |
 | `hybrid-retrieval` | 两路取数与融合位置 / 来源可辨 / 参数可配 / 分块按知识库归属 / 写入与查询分词同源 / 查询条件构造与转义 | **不在 P1**（P2 覆盖归属与分路，P3 覆盖分词与融合） |
 | `retrieval-quality` | 迁移等价性与词项命中探针 / rerank passthrough | **不在 P1**（P2 dense 等价性、P3 词法探针、P2 rerank） |
@@ -41,7 +40,11 @@
 | `architecture-tidy` | AppService 不再持有 `BM25Index` | **不在 P1**（P3） |
 | `agent-service` / `multi-query-retrieval` / `chunk-entity-enrichment` / `model-config` / `request-abort` / `streaming-run` / `kb-routing` | 纯命名同步 | **不在 P1**（P2/P3，随各自改动的文件一起） |
 
-**P1 的 `chunks` 表只建表、不接线** —— 它由 P2（向量存储）与 P3（词法检索）分别使用。P1 只保证表结构与 `CREATE EXTENSION` 就位。
+**本表只列 change 里真实存在的 14 个 delta**（与 `specs/` 下的目录一一对应）。
+
+> **另有一项不在上表、但 P1 必须做**：`chunk-data-model`。本 change **没有**它的 delta 目录 —— proposal 明确把它归入「未列入 Capabilities 的一处」，理由是它的既有 requirement 已要求 `ChunkData` 是唯一标准类型，仓库里存在两份属于**未满足既有 requirement**，本变更修正它而非修改它。但 proposal 同时要求「**必须有 task**」，所以 **Task 1 就是它的落点**，本表不为它单列一行以免让读者以为有 spec 需要同步。
+
+**P1 的 `chunks` 表只建表、不接线** —— 它由 P2（向量存储）与 P3（词法检索）分别使用。P1 只保证表结构与扩展就位。
 
 ## Global Constraints
 
@@ -206,21 +209,33 @@ git commit -m "refactor: 统一 ChunkData 为一份定义（保留 chunk_id 字�
 
 ---
 
-## Task 2: 删除死代码那套 ORM 模型，并让 alembic 只指向一套
+## Task 2: 让 ORM 成为单一且 PG 可用的 schema 来源
 
 **Files:**
 - Delete: `src/infra/db/mysql_db/models/`（整目录）
 - Delete: `src/infra/db/mysql_db/alembic/`（整目录）
 - Modify: `src/infra/db/mysql_db/__init__.py`（若它 import 了 `models`）
-- Test: `tests/infra/db/test_single_model_source.py`（新建）
+- Modify: `src/infra/db/models/chat.py:6,43-45`（去 `MEDIUMTEXT`）
+- Modify: `src/infra/db/models/chat.py`、`document.py`、`eval_report.py`（补 5 个查询路径索引）
+- Test: `tests/infra/db/test_single_model_source.py`（新建）、`tests/infra/db/test_model_metadata.py`（新建）
 
 **Interfaces:**
 - Consumes: Task 1 无关
-- Produces: 全局唯一的 ORM 模型来源 `src.infra.db.models`；`Base.metadata` 只含 7 张业务表
+- Produces: 全局唯一的 ORM 模型来源 `src.infra.db.models`；`Base.metadata` 只含 7 张业务表，且**每张表都能在 PostgreSQL 方言下编译**、**5 个查询路径索引已声明** —— 这是 Task 5 用 autogenerate 生成 baseline 的前提
 
 **实测依据：** `src/infra/db/mysql_db/models/` 除自身 `__init__.py` 与**不生效的** `src/infra/db/mysql_db/alembic/env.py:16` 外**无人 import**（全仓已 grep 确认）—— 是死代码。生效链是根 `alembic/env.py:9` 的 `from src.infra.db.models import *`。两套的 `e6304ba3a9ef_init_models.py` **操作完全一致**，仅 `UTCDateTime` 引用写法不同，所以删掉不生效那套不会丢任何表/列定义。
 
-- [ ] **Step 1: 写会失败的测试**
+**为什么本任务同时要修 metadata（两个实测发现的 bug，都会在 Task 5 引爆）：**
+
+1. **`MEDIUMTEXT` 会让 autogenerate 的产物直接不可执行。** `models/chat.py:43-45` 的 `conversation_history.process` 用的是 `sqlalchemy.dialects.mysql.MEDIUMTEXT`。实测：
+   ```
+   CompileError: (in table 'x', column 'process'): Compiler <PGTypeCompiler>
+                 can't render element of type MEDIUMTEXT
+   ```
+   → 若 Task 5 先跑 autogenerate，生成的迁移里会带 `mysql.MEDIUMTEXT()`，`alembic upgrade head` 一执行就崩。**因此必须在本任务先清掉。**
+2. **ORM 里没有任何 `Index`，baseline 会静默丢掉 5 个索引。** 全仓 `src/infra/db/models/` 只有 `kb.py:18` 的 `UniqueConstraint("user_id","name",name="uk_user_kb")`；而旧 schema 有 `idx_user_kb`(document)、`idx_session`(conversation_history)、`idx_user` 与 `idx_updated_at`(sessions)、`idx_kb_date`(eval_report)。迁移由 metadata 生成 → **未声明的索引不会被建立**；更糟的是下一次 autogenerate 会把"库里有、metadata 里没有"的索引生成为 **drop**。受影响的正是热路径：`ChatRepo.get_messages`（按 `session_id` 查 + 按 `created_at` 排）、`ChatRepo.get_sessions`（按 `updated_at DESC` 排 50 条）、`KbRepo.get_all_kb`（join `kb_id`）。
+
+- [ ] **Step 1: 写死代码来源的守卫测试**
 
 新建 `tests/infra/db/test_single_model_source.py`：
 
@@ -231,6 +246,7 @@ import importlib
 
 import pytest
 
+import src.infra.db.models  # noqa: F401  —— 必须先 import 才会填充 Base.metadata
 from src.infra.db.base import Base
 
 
@@ -260,12 +276,57 @@ def test_metadata_has_all_business_tables():
     assert expected <= set(Base.metadata.tables)
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 2: 写 metadata 可用的守卫测试**
 
-Run: `pytest tests/infra/db/test_single_model_source.py -v`
-Expected: FAIL —— 前两条 `pytest.raises(ModuleNotFoundError)` 不触发（模块仍在），第三条例外。
+新建 `tests/infra/db/test_model_metadata.py`：
 
-- [ ] **Step 3: 删除两套死代码目录**
+```python
+"""ORM metadata 必须能被 PostgreSQL 方言渲染，且带上查询路径索引。
+
+这两条是 Task 5 用 autogenerate 生成 baseline 的前提：
+方言类型会在渲染期直接失败；未声明的索引不会被建立、还会在下次 autogenerate 时被 drop。
+"""
+
+import pytest
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.schema import CreateTable
+
+import src.infra.db.models  # noqa: F401  —— 必须先 import 才会填充 Base.metadata
+from src.infra.db.base import Base
+
+# 旧 MySQL schema 里服务于查询路径的索引（名称为保持可追溯而沿用旧名）
+EXPECTED_INDEXES = {
+    "idx_user_kb": ("document", ("user_id", "kb_id")),
+    "idx_session": ("conversation_history", ("session_id", "created_at")),
+    "idx_user": ("sessions", ("user_id",)),
+    "idx_updated_at": ("sessions", ("updated_at",)),
+    "idx_kb_date": ("eval_report", ("kb_id", "eval_date")),
+}
+
+
+@pytest.mark.parametrize("table_name", sorted(Base.metadata.tables))
+def test_every_table_compiles_under_postgresql(table_name):
+    """任何 MySQL 方言类型都会在渲染期抛出 CompileError。"""
+    table = Base.metadata.tables[table_name]
+    ddl = str(CreateTable(table).compile(dialect=postgresql.dialect()))
+    assert "CREATE TABLE" in ddl
+
+
+@pytest.mark.parametrize("index_name", sorted(EXPECTED_INDEXES))
+def test_query_path_index_is_declared(index_name):
+    table_name, columns = EXPECTED_INDEXES[index_name]
+    table = Base.metadata.tables[table_name]
+    found = [ix for ix in table.indexes if ix.name == index_name]
+    assert found, f"{table_name} 缺少索引 {index_name}"
+    assert tuple(c.name for c in found[0].columns) == columns
+```
+
+- [ ] **Step 3: 跑测试确认失败**
+
+Run: `pytest tests/infra/db/test_model_metadata.py tests/infra/db/test_single_model_source.py -v`
+Expected: FAIL —— `test_every_table_compiles_under_postgresql[conversation_history]` 因 `MEDIUMTEXT` 抛 `CompileError`；5 个索引全部 not found；死代码两条不触发。
+
+- [ ] **Step 4: 删除两套死代码目录**
 
 ```bash
 git rm -r src/infra/db/mysql_db/models src/infra/db/mysql_db/alembic
@@ -274,7 +335,7 @@ git rm -r src/infra/db/mysql_db/models src/infra/db/mysql_db/alembic
 rm -rf src/infra/db/mysql_db/models/__pycache__ src/infra/db/mysql_db/alembic/versions/__pycache__
 ```
 
-- [ ] **Step 4: 检查 `mysql_db/__init__.py` 与全仓 import**
+- [ ] **Step 5: 确认全仓没有残留引用**
 
 ```bash
 grep -rn "mysql_db.models\|mysql_db.alembic" --include="*.py" .
@@ -282,17 +343,71 @@ grep -rn "mysql_db.models\|mysql_db.alembic" --include="*.py" .
 
 预期：无输出。若有输出，逐处改到 `src.infra.db.models`。
 
-- [ ] **Step 5: 跑测试确认通过**
+- [ ] **Step 6: 去掉 `MEDIUMTEXT`**
 
-Run: `pytest tests/infra/db/test_single_model_source.py -v`
-Expected: PASS（3 条全绿）。
+`src/infra/db/models/chat.py`：
 
-- [ ] **Step 6: 跑门禁并提交**
+- 删掉 `:6` 的 `from sqlalchemy.dialects.mysql import MEDIUMTEXT`
+- `:43-45` 改为：
+
+```python
+    process: Mapped[str | None] = mapped_column(
+        Text, nullable=True, comment="过程事件JSON（历史回放）"
+    )
+```
+
+- [ ] **Step 7: 补 5 个查询路径索引**
+
+`src/infra/db/models/chat.py` —— `SessionModel` 补 `__table_args__`：
+
+```python
+    __table_args__ = (
+        Index("idx_user", "user_id"),
+        # 注意：不需要 DESC。MySQL 的旧 schema 写的是 updated_at DESC，
+        # 但 PostgreSQL 能对 ASC btree 做反向扫描，get_sessions 的
+        # ORDER BY updated_at DESC LIMIT 50 照样走索引。
+        Index("idx_updated_at", "updated_at"),
+    )
+```
+
+`MessageModel`（同文件）补：
+
+```python
+    __table_args__ = (Index("idx_session", "session_id", "created_at"),)
+```
+
+`src/infra/db/models/document.py` —— `DocModel` 补：
+
+```python
+    __table_args__ = (Index("idx_user_kb", "user_id", "kb_id"),)
+```
+
+`src/infra/db/models/eval_report.py` —— `EvalReportModel` 补：
+
+```python
+    __table_args__ = (Index("idx_kb_date", "kb_id", "eval_date"),)
+```
+
+每个文件的 `from sqlalchemy import ...` 补上 `Index`。
+
+**索引名沿用旧 MySQL 的名字**（`idx_*`），便于对照与排查；不要改成 SQLAlchemy 默认的 `ix_*`。
+
+- [ ] **Step 8: 跑测试确认通过**
+
+Run: `pytest tests/infra/db/ -v`
+Expected: PASS（两个新文件的全部用例 + 既有存储侧用例）。
+
+- [ ] **Step 9: 跑门禁并提交**
+
+分两个提交，便于日后回溯：
 
 ```bash
-ruff check . && pyright src/infra/db
-git add -A
+ruff format src/infra/db/models && ruff check src/infra/db && pyright src/infra/db
+git add src/infra/db/mysql_db tests/infra/db/test_single_model_source.py
 git commit -m "refactor(db): 删除不生效的第二套 ORM 模型与 alembic 目录（死代码）"
+
+git add src/infra/db/models tests/infra/db/test_model_metadata.py
+git commit -m "fix(db): ORM metadata 备妥 PG 迁移——去 MEDIUMTEXT、补 5 个查询路径索引"
 ```
 
 ---
@@ -645,8 +760,10 @@ git commit -m "feat(deploy): 增加 pgvector PostgreSQL 服务与应用库（dev
 - Test: `tests/infra/db/test_pg_baseline.py`（新建）
 
 **Interfaces:**
-- Consumes: Task 3 的 `build_postgres_dsn()`；Task 4 的 PG 服务
+- Consumes: Task 3 的 `build_postgres_dsn()`；Task 4 的 PG 服务（含应用库内已创建好的 `vector` 扩展）；**Task 2 备妥的 ORM metadata（PG 可渲染、索引齐备 —— 本任务的 autogenerate 直接以它为输入）**
 - Produces: 一条 alembic 链（`alembic upgrade head` 从空库建出 8 张表）；`chunks` 表结构见下
+
+> ⚠ **前置依赖是 Task 2，不是 Task 4。** autogenerate 从 `Base.metadata` 生成迁移，所以 metadata 里任何 MySQL 方言类型都会变成生成物里的非法 DDL（实测 `MEDIUMTEXT` → `CompileError`），任何未声明的索引都会**不被建立**。Task 2 已把这两件事修掉；**若跳过 Task 2 直接做本任务，生成的 baseline 一执行就崩，且会静默丢掉 5 个索引。**
 
 **为什么不能移植旧迁移：** 根 `alembic/versions/e6304ba3a9ef_init_models.py` 通篇是 `op.alter_column(..., existing_type=mysql.*)` / `drop_index` / `create_foreign_key` —— 它是**针对 `deploy/mysql/init/001_schema.sql` 已建好的表**做 MySQL 增量 diff，且**假定 `eval_report` 已存在**（`:241-249` 直接对它 `add_column`，而全仓没有任何地方 CREATE 它）。换 PG 必须换成一条**从零建表**的 baseline。
 
@@ -749,6 +866,38 @@ async def test_knowledge_base_unique_constraint():
         "WHERE conrelid = 'knowledge_base'::regclass AND contype = 'u'"
     )
     assert rows, "knowledge_base 必须有 (user_id, name) 唯一约束"
+
+
+@pytest.mark.parametrize(
+    ("index_name", "table_name"),
+    [
+        ("idx_user_kb", "document"),
+        ("idx_session", "conversation_history"),
+        ("idx_user", "sessions"),
+        ("idx_updated_at", "sessions"),
+        ("idx_kb_date", "eval_report"),
+        ("ix_chunks_kb_id", "chunks"),
+        ("ix_chunks_doc_id", "chunks"),
+    ],
+)
+async def test_indexes_exist_in_database(index_name, table_name):
+    """索引必须真的被建出来了 —— ORM 里声明 ≠ 数据库里有。"""
+    rows = await _collect(
+        "SELECT indexname FROM pg_indexes WHERE tablename = :t AND indexname = :i",
+        t=table_name,
+        i=index_name,
+    )
+    assert rows, f"{table_name} 缺少索引 {index_name}"
+
+
+async def test_chunks_tsv_gin_index_is_gin():
+    """tsv 索引必须是 GIN，否则全文检索会退化为顺序扫描。"""
+    rows = await _collect(
+        "SELECT indexdef FROM pg_indexes "
+        "WHERE tablename = 'chunks' AND indexname = 'ix_chunks_tsv'"
+    )
+    assert rows, "chunks 缺少 ix_chunks_tsv 索引"
+    assert "USING gin" in rows[0][0], rows[0][0]
 ```
 
 **运行前提**：Task 4 的 PG 已起、`POSTGRES_*` 已配、`alembic upgrade head` 已跑过。
@@ -773,7 +922,33 @@ async def run_async_migrations() -> None:
     await connectable.dispose()
 ```
 
-同时删掉 `alembic.ini:89` 的 `sqlalchemy.url` 行（改由上面提供），或把它改成注释说明「URL 由 `src/config` 提供」。
+**同时改 `run_migrations_offline()`，否则 `alembic upgrade --sql` 会拿到 `None`** —— 它读的正是即将被我删掉的 `config.get_main_option("sqlalchemy.url")`：
+
+```python
+def run_migrations_offline() -> None:
+    """离线生成 SQL 脚本（不连库）。
+
+    也需要 DSN：改用与应用同一处拼装，避免与 alembic.ini 漂移。
+    """
+    from src.config.settings import build_postgres_dsn
+
+    context.configure(
+        url=build_postgres_dsn(),
+        target_metadata=target_metadata,
+        literal_binds=True,
+        dialect_opts={"paramstyle": "named"},
+    )
+    with context.begin_transaction():
+        context.run_migrations()
+```
+
+然后删掉 `alembic.ini:89` 的 `sqlalchemy.url` 行，把它替换成一行注释说明「URL 由 `src/config` 的 `build_postgres_dsn()` 提供」。
+
+验证 offline 仍然可用：
+
+```bash
+alembic upgrade head --sql | head -20    # 预期：打印 DDL，不报 None
+```
 
 - [ ] **Step 4: 删掉旧链，生成新 baseline**
 
@@ -783,6 +958,19 @@ alembic revision --autogenerate -m "pg baseline" --rev-id 0001
 ```
 
 预期：生成 `alembic/versions/0001_pg_baseline.py`，内含 7 张表的 `op.create_table(...)`。
+
+**生成后立刻核对两件事**（这正是 Task 2 存在的理由）：
+
+```bash
+# ① 生成物里不得出现任何 MySQL 方言类型
+grep -n "mysql\." alembic/versions/0001_pg_baseline.py && echo "❌ 有 MySQL 类型残留，回 Task 2" || echo "✅ 无 MySQL 类型"
+# ② 5 个索引都要出现在生成物里
+for ix in idx_user_kb idx_session idx_user idx_updated_at idx_kb_date; do
+  grep -q "$ix" alembic/versions/0001_pg_baseline.py && echo "✅ $ix" || echo "❌ 缺 $ix"
+done
+```
+
+**若索引缺失**：不是改生成物，而是回 Task 2 把它们补进 ORM `__table_args__` 再重新生成 —— 手改生成物会在下次 autogenerate 时被覆盖，且下次还会把它们生成为 `drop`。
 
 - [ ] **Step 5: 在 baseline 前加扩展前置断言、末尾追加 `chunks` 表**
 
@@ -854,6 +1042,12 @@ alembic revision --autogenerate -m "pg baseline" --rev-id 0001
     # 顺带避开「近似索引 + WHERE 过滤导致返回不足 k 条」。将来加是纯增量。
 ```
 
+> **⚠ 给 P2 的约定（写进本文件，别忘了）：** `chunks` 的 `metadata` 列**没有 ORM 模型**（它在 baseline 里手写）。P2 若为 `chunks` 加 ORM 模型，**属性名不能叫 `metadata`** —— 那会覆盖 `Base.metadata`。要写成属性名与列名分离：
+> ```python
+> extra: Mapped[dict] = mapped_column("metadata", postgresql.JSONB(), nullable=False, server_default=sa.text("'{}'::jsonb"))
+> ```
+> 列名保持 `metadata`，不改 DDL。这条约定已记入 `design.md` D3。
+
 `downgrade()` 必须能真正回滚（Step 8 会验证）：autogenerate 已经为 7 张表生成了反向的 `op.drop_table(...)`，**按依赖倒序**排列即可（`conversation_history` → `document` → `eval_report` → `feedback` → `sessions` → `knowledge_base` → `users`），并在其**之前**加：
 
 ```python
@@ -881,7 +1075,7 @@ Expected: `upgrade` 无报错；`alembic current` 显示 `0001 (head)`。
 - [ ] **Step 7: 跑测试确认通过**
 
 Run: `pytest tests/infra/db/test_pg_baseline.py -v`
-Expected: PASS（5 条全绿）。
+Expected: PASS（8 张表 + 扩展 + 关键列 + 生成列 + 唯一约束 + 7 个索引 + GIN 判定，全部通过）。
 
 - [ ] **Step 8: 验证 `alembic downgrade base` 再 `upgrade head` 可循环**
 
@@ -1011,19 +1205,20 @@ git commit -m "feat(db): 引擎与迁移切到 PostgreSQL（asyncpg）"
 
 ---
 
-## Task 7: 去掉 MySQL 方言类型与 `IntegrityError` 式幂等写入
+## Task 7: 幂等写入改用 `ON CONFLICT`
 
 **Files:**
-- Modify: `src/infra/db/models/chat.py:6,43-45`
-- Modify: `src/infra/db/mysql_db/chat_repo.py:25-44`
-- Modify: `src/infra/db/mysql_db/kb_repo.py:19-50`
+- Modify: `src/infra/db/mysql_db/chat_repo.py:19-44`
+- Modify: `src/infra/db/mysql_db/kb_repo.py:16-50`（只补 docstring，逻辑不动）
 - Test: `tests/infra/db/test_repo_upsert.py`（新建）
 
 **Interfaces:**
 - Consumes: Task 6 的 `session_factory`
 - Produces: **签名与返回语义完全不变** —— `ChatRepo.create_session(session) -> None`（`session` 是带 `.id` / `.user_id` / `.title` / `.kb_id` / `.agent` 属性的对象）与 `KbRepo.get_or_create_kb(user_id, name, description="") -> tuple[str, bool]`（`(kb_id, created)`）
 
-> ⚠ **本任务收窄了 change 里 tasks §3.2 的措辞。** tasks §3.2 写「5 个 Repo 的幂等写入改为 `INSERT ... ON CONFLICT DO UPDATE`」。实读代码后：只有 `chat_repo.create_session` 是**纯幂等插入**，可以安全改写；`kb_repo.get_or_create_kb` 是**三态语义**（新建 / 复活软删 / 已存在活跃），`ON CONFLICT DO UPDATE` 表达不了「已存在活跃 → 返回 False」，硬改会改掉返回值。另外 3 个 repo（document / eval / user）**根本没有** `IntegrityError` 捕获。因此本任务只改 1 处，并在 change 文档里注明该收窄（见 Step 7）。**Step 2 是特性化测试（characterization test）**：它在改写前后都必须通过 —— 这是重构，不是新功能，所以不存在「先失败」的步骤。
+> ⚠ **本任务收窄了 change 里 tasks §3.2 的措辞。** tasks §3.2 写「5 个 Repo 的幂等写入改为 `INSERT ... ON CONFLICT DO UPDATE`」。实读代码后：只有 `chat_repo.create_session` 是**纯幂等插入**，可以安全改写；`kb_repo.get_or_create_kb` 是**三态语义**（新建 / 复活软删 / 已存在活跃），`ON CONFLICT DO UPDATE` 表达不了「已存在活跃 → 返回 False」，硬改会改掉返回值。另外 3 个 repo（document / eval / user）**根本没有** `IntegrityError` 捕获。因此本任务只改 1 处，并在 change 文档里注明该收窄（见 Step 6）。**Step 2 是特性化测试（characterization test）**：它在改写前后都必须通过 —— 这是重构，不是新功能，所以不存在「先失败」的步骤。
+
+> **本任务不碰 `src/infra/db/models/chat.py`。** 去 `MEDIUMTEXT` 与补索引已移到 **Task 2** —— 它们是 Task 5 的 autogenerate 能产出可执行迁移的前提，必须早于 Task 5。
 
 - [ ] **Step 1: 写特性化测试（改写前必须先通过）**
 
@@ -1138,20 +1333,7 @@ async def test_get_or_create_kb_revives_soft_deleted(kb_repo):
 Run: `pytest tests/infra/db/test_repo_upsert.py -v`
 Expected: **PASS（5 条）**。若有失败，说明当前实现的行为与你的理解不符 —— **先照着实际行为改测试**，再进入下一步；不要带着错误的理解改写代码。
 
-- [ ] **Step 3: 去掉 `MEDIUMTEXT`**
-
-`src/infra/db/models/chat.py`：
-
-- 删掉 `:6` 的 `from sqlalchemy.dialects.mysql import MEDIUMTEXT`
-- `:43-45` 改为：
-
-```python
-    process: Mapped[str | None] = mapped_column(
-        Text, nullable=True, comment="过程事件JSON（历史回放）"
-    )
-```
-
-- [ ] **Step 4: 把 `chat_repo.create_session` 改成 `ON CONFLICT DO NOTHING`**
+- [ ] **Step 3: 把 `chat_repo.create_session` 改成 `ON CONFLICT DO NOTHING`**
 
 `src/infra/db/mysql_db/chat_repo.py:19-44` 改为（**签名 `(self, session)` 不变**）：
 
@@ -1189,7 +1371,7 @@ Expected: **PASS（5 条）**。若有失败，说明当前实现的行为与你
 
 **不要**改成 `on_conflict_do_update` —— 那会覆盖已有会话的 `title`/`kb_id`/`agent`，直接违反 `test_create_session_does_not_overwrite_existing`。
 
-- [ ] **Step 5: `kb_repo.get_or_create_kb` 保持异常兜底不改，只补注释**
+- [ ] **Step 4: `kb_repo.get_or_create_kb` 保持异常兜底不改，只补注释**
 
 `src/infra/db/mysql_db/kb_repo.py:16-50` 的**代码逻辑不动**（它是三态语义，见上方 Interfaces 的说明），只在 docstring 里补上契约：
 
@@ -1210,40 +1392,29 @@ Expected: **PASS（5 条）**。若有失败，说明当前实现的行为与你
         """
 ```
 
-- [ ] **Step 6: 跑测试确认行为未变**
+- [ ] **Step 5: 跑测试确认行为未变**
 
 Run: `pytest tests/infra/db/ -v`
 Expected: PASS（含 Step 1 的 5 条特性化测试，全部行为与改写前一致）。
 
-- [ ] **Step 7: 在 change 文档注明 tasks §3.2 的收窄**
+- [ ] **Step 6: 确认收窄已登记在 change 的修正记录里**
 
-在 `docs/openspec/changes/postgres-storage-consolidation/tasks.md` 的 §3.2 后追加一行：
-
-```markdown
-  > ⚠ **收窄（P1 实施时据实修正）**：实读代码后只有 `chat_repo.create_session` 是纯幂等插入，
-  > 可安全改为 `ON CONFLICT DO NOTHING`；`kb_repo.get_or_create_kb` 是三态语义
-  > （新建 / 复活软删 / 已存在活跃），`ON CONFLICT DO UPDATE` 表达不了「已存在活跃 → False」，
-  > 保持异常兜底并补 docstring 说明；document / eval / user 三个 repo 无 `IntegrityError` 捕获。
-  > 故实际改动为 **1 处**，非 5 处。
-```
-
-- [ ] **Step 8: 跑门禁并提交**
+该收窄的登记**已经在 `tasks.md` 的「§2 实施期修正记录」表里**（创建本计划时一并写入），本步骤只需**核对**它仍准确；若实施中发现与该行描述不符（例如你还改了别的 repo），**更新那一行**而不是新加一行。用 `grep` 定位：
 
 ```bash
-ruff check src/infra/db && pyright src/infra/db
-git add src/infra/db/models/chat.py src/infra/db/mysql_db/chat_repo.py \
-        src/infra/db/mysql_db/kb_repo.py tests/infra/db/test_repo_upsert.py \
-        docs/openspec/changes/postgres-storage-consolidation/tasks.md
-git commit -m "refactor(db): create_session 改用 ON CONFLICT DO NOTHING；去 MySQL 方言类型"
+grep -n "kb_repo.get_or_create_kb" docs/openspec/changes/postgres-storage-consolidation/tasks.md
 ```
 
 - [ ] **Step 7: 跑门禁并提交**
 
 ```bash
 ruff check src/infra/db && pyright src/infra/db
-git add src/infra/db/models/chat.py src/infra/db/mysql_db/chat_repo.py src/infra/db/mysql_db/kb_repo.py tests/infra/db/test_repo_upsert.py
-git commit -m "refactor(db): 幂等写入改用 ON CONFLICT，去掉 MySQL 方言类型"
+git add src/infra/db/mysql_db/chat_repo.py src/infra/db/mysql_db/kb_repo.py \
+        tests/infra/db/test_repo_upsert.py
+git commit -m "refactor(db): create_session 改用 ON CONFLICT DO NOTHING（kb_repo 保持三态异常兜底）"
 ```
+
+> 注意本提交**不含 `src/infra/db/models/chat.py`** —— 去 `MEDIUMTEXT` 与补索引已在 **Task 2** 完成（它们是 autogenerate 的前置条件，必须早于 Task 5）。
 
 ---
 
@@ -1488,7 +1659,7 @@ git commit -m "chore(db): 退役 MySQL（服务/卷/init 脚本/驱动/配置）
 
 - [ ] **Step 3: 登记遗留项 L1–L4 到需求池**
 
-在 `docs/agents/requirements_pool.md` 追加（编号沿用现有序列，勿覆盖）：
+在 `docs/agents/requirements_pool.md` 追加（**编号从 `F-16` 起**，当前最大是 `F-15`；追加在 F 系列末尾，勿覆盖既有条目）：
 
 1. **（L1+L2）RDS 托管化切换**：RDS 侧的扩展清单与 `CREATE EXTENSION` 权限、RDS 上预建应用库与最小权限账号、`docker-compose.prod.yml` 指向 RDS、prod 安装与部署验证。背景：本轮（2026-09-19 用户决定）只做本地，不处理远程 RDS、不进行 prod 安装；本地已实测 `vector` 不是 trusted 扩展（应用账号会被拒），托管侧须先确认同项权限。
 2. **（L3）`docker-compose.prod.yml` 的 `--workers 4` 与 `CLAUDE.md` 的「生产单 worker」规则冲突** —— 4 × (pool_size 10 + max_overflow 10) ≈ 80 连接，与 Langfuse 共享 RDS 的 `max_connections`。属独立变更（涉及流式生成状态在进程内这一前提），也是托管化时 RDS 规格的输入约束。
@@ -1516,7 +1687,7 @@ Expected: 测试全绿、ruff 无错、pyright 不新增 error、无 `print()`�
 `docs/openspec/changes/postgres-storage-consolidation/tasks.md` 现在是**指针文件**（任务清单已迁到本计划），不要去找 checkbox 勾选。本步骤要做两件事：
 
 1. 把顶部阶段表里 **P1 的状态从「待执行」改成「已完成」**（附本次收口的 commit 短 hash）。
-2. 在「§2 实施期修正记录」表里补上执行期发现的新条目（本次已知至少有两条：`vector` 非 trusted 扩展 → 扩展改由超级用户创建、迁移只做断言；`kb_repo.get_or_create_kb` 保持异常兜底）。**若执行中还发现了别的事实偏差，一并登记**。
+2. 在「§2 实施期修正记录」表里补上执行期发现的新条目。**创建本计划时已预先登记 5 行**（① `vector` 非 trusted 扩展须超级用户创建；② pg 幂等写入收窄为 1 处；③ 范围收窄为只做本地；④ ORM 缺 5 个查询路径索引；⑤ `MEDIUMTEXT` 与 PG 方言冲突导致顺序错误）。执行中若还发现别的事实偏差，**一并登记**；若发现预登记的某行描述不准，**修正那一行**而不是新增重复行。
 
 - [ ] **Step 7: 提交**
 

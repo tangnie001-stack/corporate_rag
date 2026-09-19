@@ -176,7 +176,10 @@ chunks
 - **`id` 格式保持不变**：`ChunkResult.id` 被 `RagContext.chunk_id`（`rag_tools.py:174`）与引用渲染消费，改格式会波及 citation。
 - **不建 HNSW**：164 MB / 4 万分块规模下，`kb_id` btree + 精确扫描是几十毫秒级且**召回精确**，顺带避开 pgvector 与 Chroma 共有的"近似索引 + WHERE 过滤导致返回不足 k 条"的坑。若将来规模或延迟要求变化，再加 HNSW 是纯增量（`CREATE INDEX` 不改 schema）。
 - **`upsert` 语义**：Chroma 的 `collection.add` 遇重复 id 抛错（无 upsert），PG 侧用 `INSERT ... ON CONFLICT` —— 重复入库不再依赖捕获异常。
-  ⚠ **但只有纯幂等插入能这么改**（P1 实施时据实收窄）：`ChatRepo.create_session` 是「主键冲突静默跳过」→ `ON CONFLICT DO NOTHING` 等价。`KbRepo.get_or_create_kb` 是**三态语义**（新建 / 复活软删 / 已存在活跃），返回值 `(kb_id, created)` 被 `kb_service` 消费，而 `ON CONFLICT DO UPDATE` 的 `RETURNING` 只能看到更新后的行，**无法区分"原本活跃"与"刚被复活"** → 硬改会改掉返回值。该处保持「插入撞唯一键 → 回滚 → 回读」的异常兜底，并补 docstring 写明三态契约。`document` / `eval` / `user` 三个 repo 本就没有 `IntegrityError` 捕获，无需改动。因此本变更实际改动的是 **1 处，不是 5 处**。
+  ⚠ **但只有纯幂等插入能这么改**（P1 实施时据实收窄）：`ChatRepo.create_session` 是「主键冲突静默跳过」→ `ON CONFLICT DO NOTHING` 等价。`KbRepo.get_or_create_kb` 是**三态语义**（新建 / 复活软删 / 已存在活跃），返回值 `(kb_id, created)` 被 `kb_service` 消费，而 `ON CONFLICT DO UPDATE` 的 `RETURNING` 只能看到更新后的行，**无法区分"原本活跃"与"刚被复活"** → 硬改会改掉返回值。该处保持「插入唯一键冲突 → 回滚 → 回读」的异常兜底，并补 docstring 写明三态契约。`document` / `eval` / `user` 三个 repo 本就没有 `IntegrityError` 捕获，无需改动。因此本变更实际改动的是 **1 处，不是 5 处**。
+- **`metadata` 列名的 ORM 约定（给 P2 的接口约定）**：`metadata` 是 SQLAlchemy declarative 的**保留属性名**（`Base.metadata`），因此当 P2 为 `chunks` 写 ORM 模型时，**属性名不得叫 `metadata`**，须写成
+  `extra: Mapped[dict] = mapped_column("metadata", postgresql.JSONB(), ...)` 这类"属性名与列名分离"的形式（列名保持 `metadata`，不改 DDL）。这是 SQLAlchemy 的常规用法，不需要为此改列名。
+- **既有 7 张关系表的索引必须随 metadata 带过来（P1 实测发现，否则静默丢失）**：现有 ORM 只声明了 `uk_user_kb` 一个 `UniqueConstraint`，**没有任何 `Index`**；而旧 MySQL schema 里有 4 个索引（`document(user_id, kb_id)`、`conversation_history(session_id, created_at)`、`sessions(user_id)`、`sessions(updated_at DESC)`），旧迁移里还有 `eval_report(kb_id, eval_date)`。因为迁移由 autogenerate 从 metadata 生成，**未在 metadata 里声明的索引不会被建立**；更糟的是下次再跑 autogenerate 会把"库里有、metadata 里没有"的索引生成为 **drop**。因此这 5 个索引 SHALL 补进 ORM 的 `__table_args__`（而不是只写进 baseline 迁移）。受影响的是热路径：`ChatRepo.get_messages`（按 `session_id` 查 + 按 `created_at` 排）、`ChatRepo.get_sessions`（按 `updated_at DESC` 排 50 条）、`KbRepo.get_all_kb`（join `kb_id`）。
 
 ### D4：中文词法检索 —— jieba 预分词 + `to_tsvector('simple')`，**不依赖任何 PG 扩展**
 

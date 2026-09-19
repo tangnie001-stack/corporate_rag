@@ -7,7 +7,7 @@
 
 **3. 分块与文档状态没有事务。** `document_service.py:541` 写 Chroma、`:551` 更新 MySQL 状态、`:572` 重建 BM25，三步跨三店。进程死在中间就产生「有分块、文档未 ready」的孤儿。
 
-**4. 顺带清掉七类既有缺陷**：① collection-per-KB + 读路径 `get_or_create` 造就了 691 个 collection / 只有 5 个含分块；② `src/infra/db/models/` 与 `src/infra/db/mysql_db/models/` 是两套重复 ORM 定义（后者是**死代码**：除自身与那个不生效的 alembic env 外无人 import）；③ 两套 alembic 目录，**实际生效的是根 `alembic/`**（`alembic.ini:8` → 根 `env.py:9` 的 `from src.infra.db.models import *`），而 `feedback` 表的建表语句只存在于**未被指向**的那套里；④ `ChunkData` 两处定义；⑤ **prod 的 `app` 没有 `./data` 挂载**（只有 dev 有）→ prod 的 Chroma 落在容器可写层，容器重建即丢（前置核查 1.4 顺带发现）；⑥ **`eval_report` 表从未被任何机制创建过** —— 全仓 `CREATE TABLE` 只在 `deploy/mysql/init/001_schema.sql`（5 张表），而根迁移直接 `op.add_column("eval_report", …)` 预设它已存在；⑦ **根迁移是从已存在表出发的 MySQL 增量 diff**，不是从零建表。⑥+⑦ 合起来意味着：**全新部署下 `eval_report` 与 `feedback` 都不存在**，评测与反馈功能在全新环境上是坏的（当前环境能用只是有人手工建过表）。本变更的 PG baseline 迁移建全 8 张表，**一并修掉 ⑥⑦** —— 须写明是既有缺陷被顺带修掉，非新引入。
+**4. 顺带清掉八类既有缺陷**：① collection-per-KB + 读路径 `get_or_create` 造就了 691 个 collection / 只有 5 个含分块；② `src/infra/db/models/` 与 `src/infra/db/mysql_db/models/` 是两套重复 ORM 定义（后者是**死代码**：除自身与那个不生效的 alembic env 外无人 import）；③ 两套 alembic 目录，**实际生效的是根 `alembic/`**（`alembic.ini:8` → 根 `env.py:9` 的 `from src.infra.db.models import *`），而 `feedback` 表的建表语句只存在于**未被指向**的那套里；④ `ChunkData` 两处定义；⑤ **prod 的 `app` 没有 `./data` 挂载**（只有 dev 有）→ prod 的 Chroma 落在容器可写层，容器重建即丢（前置核查 1.4 顺带发现）；⑥ **`eval_report` 表从未被任何机制创建过** —— 全仓 `CREATE TABLE` 只在 `deploy/mysql/init/001_schema.sql`（5 张表），而根迁移直接 `op.add_column("eval_report", …)` 预设它已存在；⑦ **根迁移是从已存在表出发的 MySQL 增量 diff**，不是从零建表。⑥+⑦ 合起来意味着：**全新部署下 `eval_report` 与 `feedback` 都不存在**，评测与反馈功能在全新环境上是坏的（当前环境能用只是有人手工建过表）。本变更的 PG baseline 迁移建全 8 张表，**一并修掉 ⑥⑦** —— 须写明是既有缺陷被顺带修掉，非新引入；⑧ **ORM metadata 里没有任何 `Index`**（只有 `uk_user_kb` 一个唯一约束），而旧 schema 有 5 个索引 —— 因为迁移改由 autogenerate 从 metadata 生成，不补就会**静默丢掉这些索引**（且下次 autogenerate 会把它们生成为 drop），受影响的正是每轮对话都走的热路径。P1 把它们补进 ORM `__table_args__`。
 
 **5. 参照项目不可照搬。** 同领域的 `financial_rag-main` 用的正是 pgvector + tsvector + 应用层 RRF，其**融合的组织形态值得学**；但它的稀疏侧是 `to_tsvector('simple', content)` + `ts_rank`，字段却叫 `bm25_score` —— **`simple` 对中文不分词、`ts_rank` 也不是 BM25**，该实现在中文上基本失效（`530.sql:585-586`、`search_service.py:629`）。本变更只取其形态，不取其实现。
 
@@ -36,13 +36,13 @@
 
 ### Modified Capabilities
 
-**承载真实行为变化（6）**
+**承载真实行为变化（6 个 capability，8 条 delta）**
 
 - `retrieval-quality`（ADDED）: 新增「迁移等价性与词项命中探针」要求 —— 两路各有一套可判定的验收判据；并把端到端质量评估显式移出本次范围。
 - `retrieval-quality`（MODIFIED）: 「Rerank context passthrough」中的 `ChromaDB chunk metadata` 改为 `chunks` 表。
 - `observability-logging`（ADDED）: 新增「稀疏支路贡献可见」要求 —— 融合后仍须能分辨某结果来自哪一路。
 - `observability-logging`（MODIFIED）: 「生成层可观测（LLM 摘要事件）」正文要求"经 MySQL 会话表获取"，须随引擎改名（初稿遗漏）。
-- `database-orm`（MODIFIED）: 「ORM 模型定义」的 `MySQL 表` → PostgreSQL，并写入「模型与迁移脚本的**单一事实源**」（消除两套模型、两套 alembic）；「搜索类型搬迁」的引用方列表移除 `bm25_index.py`。
+- `database-orm`（MODIFIED）: 「ORM 模型定义」的 `MySQL 表` → PostgreSQL，并写入「模型与迁移脚本的**单一事实源**」（消除两套模型、两套 alembic）；**另补两条实测约束** —— 模型不得依赖 MySQL 方言类型（否则 autogenerate 在 PG 方言下渲染期直接失败），且既有查询路径索引必须补进 metadata（否则迁移不建、下次 autogenerate 还会生成为 drop）；「搜索类型搬迁」的引用方列表移除 `bm25_index.py`。
 - `typed-data-layer`（MODIFIED）: 「检索结果统一类型」的链路名（`ChromaDB / BM25` → 同一 PostgreSQL 的两路），`ChunkResult` 增加分路排名字段与 **`metadata` 回填契约**；「MySQL 实体类型」→ 关系型实体类型；**另补「mysql_db.py 拆为 Repo」与「ChatManager 改用 ChatRepo」两条**（正文点名 `MySQLDB` 类，初稿遗漏）。该 capability 的「api/documents.py 走 service」**不改** —— 其正文不含引擎/组件命名，本变更不影响它。
 - `architecture-tidy`（MODIFIED）: 「AppService 直接持有全局依赖」不再持有 `BM25Index`（该组件退役）。
 - `database-migrations`（MODIFIED）: 「第一版迁移」写死了 6 张表与 `scripts/clean_all_data.py`；**且现存"第一版迁移"实为针对已存在表的 MySQL 增量 diff、且假定 `eval_report` 已存在**。本变更必须把它换成**从零建表的新 baseline**（建全 8 张表：7 张关系表 + `chunks`）。**扩展创建的归属也被实测推翻并更正**：`vector` 不是 trusted 扩展，迁移用的应用账号建不了（`Must be superuser`）→ 扩展改由超级用户一次性创建，迁移只做**前置断言 + 可操作的失败**。该 requirement 必须同步。
@@ -67,7 +67,7 @@
 
 - `src/infra/db/engine.py` — DSN 与驱动（`mysql+aiomysql` → `postgresql+asyncpg`）、连接池
 - `src/infra/db/models/` + `src/infra/db/mysql_db/models/` — 合并为一套；去 `MEDIUMTEXT` 与 MySQL 方言类型
-- `src/infra/db/mysql_db/*_repo.py`（5 个）— 引擎无关，主要改动是幂等写入与 JSON 字段
+- `src/infra/db/mysql_db/*_repo.py`（5 个）— 引擎无关。**幂等写入的改写只落在 1 处**（`chat_repo.create_session` → `ON CONFLICT DO NOTHING`）：`kb_repo.get_or_create_kb` 是三态语义、`ON CONFLICT DO UPDATE` 表达不了，另 3 个 repo 本就没有 `IntegrityError` 捕获。其余改动是 JSON 字段与类型
 - `src/infra/db/vector_store/`（6 模块）— 后端换 pgvector；`client.py` 的 collection 生命周期与 HNSW metadata 参数退役
 - `src/infra/search/bm25_index.py` — 删除；`rrf_fusion` / `rrf_fusion_multi` 迁移到独立模块
 - `src/rag/retrieval.py` — 两路取数与融合调用点调整；**删除不可达的 `if not kb_id` 分支**（其调用方 `rag_tools.py:135-139` 在 kb_id 为空时直接返回 `[]`）

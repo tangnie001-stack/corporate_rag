@@ -6,6 +6,10 @@
 
 该目录 SHALL 是 ORM 模型的**唯一来源**：SHALL NOT 存在第二套重复的模型定义，SHALL NOT 存在与 `alembic.ini` 实际指向不一致的第二套迁移目录。迁移脚本的 `target_metadata` SHALL 指向同一套模型。
 
+模型 SHALL **不依赖任何 MySQL 方言类型**，使全部表能在 PostgreSQL 方言下渲染出 DDL（迁移由 autogenerate 从该 metadata 生成，MySQL 专有类型会在渲染期直接失败）。
+
+模型 SHALL 保留既有关系型 schema 中用于**查询路径**的索引，SHALL NOT 只保留唯一约束 —— 迁移由 metadata 生成，未在 metadata 中声明的索引不会被建立，且下次 autogenerate 会把"库里有、metadata 里没有"的索引生成为**删除**。
+
 #### Scenario: 模型继承基类
 
 - **WHEN** 定义一个表模型
@@ -20,6 +24,16 @@
 
 - **WHEN** 在仓库内搜索同一张表的 ORM 类定义
 - **THEN** 每个表 SHALL 只有一个定义处
+
+#### Scenario: 全部表可在 PostgreSQL 方言下渲染
+
+- **WHEN** 用 PostgreSQL 方言编译 `Base.metadata` 中每一张表
+- **THEN** 全部 SHALL 编译成功，SHALL NOT 出现 `CompileError: can't render element of type …`
+
+#### Scenario: 查询路径索引被保留
+
+- **WHEN** 对比既有关系型 schema 与 ORM metadata 中的索引
+- **THEN** 既有 schema 中服务于查询路径的索引（按会话查消息、按用户与更新时间列会话、按知识库关联文档）SHALL 在 metadata 中声明，SHALL NOT 只保留唯一约束
 
 ### Requirement: 搜索类型搬迁
 
