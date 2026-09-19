@@ -18,7 +18,8 @@ from src.core import logging as core_logging
 from src.core.log_events import Event
 from src.core.logging import LOG_MAX_BODY
 from src.infra.db.mysql_db.chunk_repo import ChunkRepo
-from src.infra.db.vector_store.mapping import build_rows
+from src.infra.db.vector_store.mapping import build_rows, row_to_chunk_result
+from src.infra.db.vector_store.types import ChunkQueryResult, ChunkResult
 from src.models import get_embeddings
 
 # Chroma 后端沿用的硬上限（vector_store/search.py:43 的 n_results=min(k, 100)）。
@@ -118,3 +119,92 @@ class PgVectorStore:
             data_str,
         )
         return len(rows)
+
+    async def dense_search(
+        self, kb_id: str, query: str, k: int = 5
+    ) -> list[ChunkResult]:
+        """dense 路取 top-k（余弦距离升序），并填充 dense_rank。
+
+        Args:
+            kb_id: 知识库 ID
+            query: 查询文本
+            k: 返回条数上限（内部再按 MAX_QUERY_K 截断）
+
+        Returns:
+            按余弦距离升序的 ChunkResult；每项 distance 有值、dense_rank 为 0 起的名次
+        """
+        effective_k = min(k, MAX_QUERY_K)
+        query_vec = await asyncio.to_thread(self._embed_fn.embed_query, query)
+        pairs = await self._repo.search_dense(kb_id, query_vec, effective_k)
+        results = [
+            row_to_chunk_result(row, distance=distance, dense_rank=rank)
+            for rank, (row, distance) in enumerate(pairs)
+        ]
+        core_logging.log_event(
+            Event.SEARCH_RESULT,
+            kb_id=kb_id,
+            query_len=len(query),
+            result_count=len(results),
+        )
+        logger.debug(
+            "[PG] method=dense_search | kb_id={} | rows={} | data={}",
+            kb_id,
+            len(results),
+            str(results)[:LOG_MAX_BODY],
+        )
+        return results
+
+    async def similarity_search(
+        self, kb_id: str, query: str, k: int = 5
+    ) -> list[ChunkResult]:
+        """dense 检索入口（dense_search 的别名，保留既有方法名与语义）。
+
+        语义与 Chroma 后端一致：余弦**距离**，越小越相似；消费方用 score = 1 - distance。
+        """
+        return await self.dense_search(kb_id, query, k=k)
+
+    async def get_chunks_by_doc_id(self, doc_id: str, kb_id: str) -> list[ChunkResult]:
+        """取某文档的全部分块（分路字段为 None）。"""
+        rows = await self._repo.get_by_doc(doc_id, kb_id)
+        return [row_to_chunk_result(row) for row in rows]
+
+    async def get_chunks_paginated(
+        self, doc_id: str, kb_id: str, page: int = 1, page_size: int = 50
+    ) -> ChunkQueryResult:
+        """分页取某文档的分块。"""
+        rows, total = await self._repo.get_paginated(doc_id, kb_id, page, page_size)
+        return ChunkQueryResult(
+            items=[row_to_chunk_result(row) for row in rows],
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
+
+    async def get_all_chunks(self, kb_id: str) -> list[ChunkResult]:
+        """取整个知识库的全部分块（BM25 全量重建用）。"""
+        rows = await self._repo.get_by_kb(kb_id)
+        core_logging.log_event(Event.CHUNKS_READ, kb_id=kb_id, count=len(rows))
+        return [row_to_chunk_result(row) for row in rows]
+
+    async def list_collections(self) -> list[str]:
+        """枚举含分块的知识库 ID（PG 无 collection，语义是「有哪些 kb 有分块」）。
+
+        只读，不创建任何东西。
+        """
+        return await self._repo.list_kb_ids()
+
+    async def delete_document(self, kb_id: str, doc_id: str) -> int:
+        """删除某文档的全部分块，返回删除行数。"""
+        return await self._repo.delete_by_doc(kb_id, doc_id)
+
+    async def delete_collection(self, kb_id: str) -> bool:
+        """删除某知识库的全部分块；返回是否删除了行。"""
+        deleted = await self._repo.delete_by_kb(kb_id)
+        return deleted > 0
+
+    async def get_or_create_collection(self, kb_id: str) -> str:
+        """PG 无 collection 概念：该方法不产生副作用，直接返回 kb_id。
+
+        保留是为了维持既有方法名契约；调用方不应依赖它「创建」任何东西。
+        """
+        return kb_id
