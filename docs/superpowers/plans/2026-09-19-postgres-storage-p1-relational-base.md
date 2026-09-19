@@ -25,13 +25,35 @@
 
 **为什么不一次写完 P2–P4：** 它们要改的正是 P1 改过的文件（`document_service.py` / `vector_store/` / `retrieval.py`），把 P2–P4 的代码级步骤现在写死，会在 P1 落地时全部失准。P1 是唯一设计已完全确定、且不依赖后续阶段的部分。
 
+## ⚠ 已知陷阱（先读这张表，别翻全文才发现）
+
+每一条都是 **2026-09-19 实测出来的**，不是推测。带 T# 的编号在正文里被引用。
+
+| # | 陷阱 | 实测依据 | 怎么避 |
+|---|---|---|---|
+| **T1** | `MEDIUMTEXT` 会让 autogenerate 的产物**不可执行** | `models/chat.py:43-45` 的 `conversation_history.process` 是 `mysql.MEDIUMTEXT`；PG 方言渲染它抛 `CompileError: can't render element of type MEDIUMTEXT` | 去 `MEDIUMTEXT` **必须早于** autogenerate（Task 2 在 Task 5 之前）；Task 5 生成后 `grep -n "mysql\."` 核对 |
+| **T2** | ORM 里没有任何 `Index` → baseline **静默丢掉 5 个查询路径索引** | 全仓 models 只有 `kb.py:18` 的 `uk_user_kb`；旧 schema 有 `idx_user_kb`/`idx_session`/`idx_user`/`idx_updated_at`/`idx_kb_date`。下次 autogenerate 还会把它们生成为 **drop** | 5 个索引补进 ORM `__table_args__`（Task 2）；Task 5 生成后逐个核对；数据库侧测试断言索引**真的存在** |
+| **T3** | `vector` 扩展**不是 trusted 扩展** → 应用账号建不了 | `vector.control` 无 `trusted = true`；应用账号得 `ERROR: permission denied ... HINT: Must be superuser`；`langfuse`（`POSTGRES_USER`）实测 `rolsuper = t` 可建，建后应用账号能正常用 `vector(1024)` | 扩展由**超级用户一次性创建**：全新卷走 Task 4 的 init 脚本、既有卷走 Task 4 的一次性命令 |
+| **T4** | 迁移里写 `CREATE EXTENSION` 会失败；用 try/except 吞掉会把权限问题**伪装成成功** | 同 T3（迁移用的是应用账号） | 迁移**不建扩展**，只在建 `chunks` 前断言存在并抛**带命令的** `RuntimeError`（Task 5 Step 5/9） |
+| **T5** | `reset_data.py` 是**三合一重置**，不是单库重置 | `reset_all()` 同时清 MySQL + **删 Chroma persist 目录** + Redis FLUSHALL | P1 只替换 MySQL 那一段，**保留** `reset_vector_store()` 与 Redis 逻辑（Chroma 要到 P4 才退役）（Task 8） |
+| **T6** | `reset_data.py` 的 TRUNCATE 列表**不得含 `users`** | 现有实现只清 3 张表（`conversation_history`/`document`/`knowledge_base`），**刻意保留 `users`** —— 清了就没法登录（`.env` 的 `TEST_ACCOUNT`/`TEST_PASSWORD`） | TRUNCATE 列表与现状**保持一致**，不要顺手扩到 8 张表（Task 8） |
+| **T7** | `reset_data.py` 的 `__main__` 块**本来就走不通** | 它 `docker exec financial-qa-mysql`，而实际容器名是 `corporate-rag-mysql`（早已过时），且整段 MySQL 专有 | 该块一并改成 PG；**不要**以为它能用来验证重置逻辑（Task 8） |
+| **T8** | `engine.py` 在 **import 期**就构造 DSN → 缺 `POSTGRES_PASSWORD` 时**导入即抛错** | `engine.py` 模块级 `DSN = build_postgres_dsn()`；4 个 CLI、repos、services、`tests/infra/db/*` 都在这条链上（全仓**无** `create_all`，所以只有这一处导入期副作用） | Task 3 Step 5 **先**把 `POSTGRES_PASSWORD` 写进 `.env`；牢记"任何导入 engine 的进程都需要它" |
+| **T9** | Task 9 之后**不要** `docker compose down -v` / `docker volume prune` | MySQL 卷 `corporate_rag_mysql_data` 是回滚的**唯一依据**；只从 compose 删服务/卷**声明**不会删实际卷（实测卷与容器都还在） | 记下 pre-P1 commit 作回滚锚点；**P1 验收通过前不动 MySQL 卷**（Task 9 有「回滚锚点」段） |
+| **T10** | `chunks.metadata` 列名与 `Base.metadata` **冲突** | `metadata` 是 SQLAlchemy declarative 的保留属性名 | `chunks` 现在没有 ORM 模型；**P2 若加**，属性名须另起、用 `mapped_column("metadata", …)` 映射，**列名不改**（Task 5 有约定块，design D3 已记） |
+| **T11** | `ChunkData` 有 **5 处位置参数**构造，统一后会静默改语义 | `tests/chunking/test_chunking.py:48,49,59,60,69` 传 `ChunkData(a, b, "0")`；现字段序 `(content, metadata, tokens)` → 统一后 `(content, metadata, chunk_id, tokens)`，`"0"` 从 `tokens` 改落 `chunk_id`。已核实 `router.py:15` 只读 `metadata["block_type"]`/`content`，故断言仍过 | 统一后把那 5 处改成**关键字**（Task 1） |
+| **T12** | 下列不属于 P1，但**别在 P1 里顺手改** | — | `min(k,100)` 是 Chroma 硬限（`search.py:44`）、`score = 1 - distance` 契约、分块 id 格式 —— P1 全部不碰；P3 的 jieba 三处硬缺陷（H1/H2/H3）见 `design.md` D4 |
+
+> P2–P4 的陷阱（Chroma/HNSW、H1 无效兜底、H2 词形不一致、H3 tsquery 解析面、9p 文件系统）记录在 `design.md` 与 `docs/tmp/postgres-probe-2026-09-19.md`，不在本表重复。
+
 ## 本 plan 覆盖的 spec requirement（自查表）
 
 | capability | requirement | 覆盖它的 Task |
 |---|---|---|
 | `database-orm` | ORM 模型定义（单一事实源 / 不依赖 MySQL 方言类型 / 查询路径索引齐备） | Task 2、5、7 |
 | `database-orm` | 搜索类型搬迁（引用方列表移除 `bm25_index.py`） | **不在 P1**（P3） |
-| `database-migrations` | 第一版迁移（改为从零建表 baseline，8 张表） | Task 5 Step 4–6 |
+| `database-migrations` | 第一版迁移（从零建表 baseline，8 张表） | Task 5 Step 4–6 |
+| `database-migrations` | 分块表建成即可用（可写入 / 生成列自动填充 / 词法可命中 / 向量可排序 / 外键约束） | Task 5 Step 1、7 |
 | `database-migrations` | 扩展由超级用户创建 + 迁移做可操作的前置断言 | Task 0、Task 4 Step 1/6、Task 5 Step 5/9 |
 | `typed-data-layer` | 检索结果统一类型 / `ChunkResult` 分路字段 / `metadata` 回填契约 | **不在 P1**（P2） |
 | `hybrid-retrieval` | 两路取数与融合位置 / 来源可辨 / 参数可配 / 分块按知识库归属 / 写入与查询分词同源 / 查询条件构造与转义 | **不在 P1**（P2 覆盖归属与分路，P3 覆盖分词与融合） |
@@ -44,7 +66,7 @@
 
 > **另有一项不在上表、但 P1 必须做**：`chunk-data-model`。本 change **没有**它的 delta 目录 —— proposal 明确把它归入「未列入 Capabilities 的一处」，理由是它的既有 requirement 已要求 `ChunkData` 是唯一标准类型，仓库里存在两份属于**未满足既有 requirement**，本变更修正它而非修改它。但 proposal 同时要求「**必须有 task**」，所以 **Task 1 就是它的落点**，本表不为它单列一行以免让读者以为有 spec 需要同步。
 
-**P1 的 `chunks` 表只建表、不接线** —— 它由 P2（向量存储）与 P3（词法检索）分别使用。P1 只保证表结构与扩展就位。
+**P1 的 `chunks` 表只建表 + 一条可用性冒烟测试、不接线** —— 它由 P2（向量存储）与 P3（词法检索）分别使用。P1 只保证表**结构与扩展**就位，并用 Task 5 的一条冒烟测试证明它**真的可写可检索**（否则"表存在"到 P2 才失效，会归因错人）。
 
 ## Global Constraints
 
@@ -113,13 +135,16 @@ git commit -m "docs: 补记本地扩展创建权限实测结论（应用账号�
 **Files:**
 - Modify: `src/chunking/validator.py:9-21`（成为唯一类型）
 - Modify: `src/parsers/base.py:17-31`（改为 re-export）
+- Modify: `tests/chunking/test_chunking.py:48,49,59,60,69`（5 处位置参数改关键字）
 - Test: `tests/chunking/test_chunk_data_unified.py`（新建）
 
 **Interfaces:**
 - Consumes: 无
-- Produces: `ChunkData` 唯一类，位于 `src.chunking.validator`；`src.parsers.base` 继续可 `from src.parsers.base import ChunkData`（re-export），字段为 `content: str`、`metadata: dict`、`chunk_id: str = ""`、`tokens: int = 0`
+- Produces: `ChunkData` 唯一类，位于 `src.chunking.validator`；`src.parsers.base` 继续可 `from src.parsers.base import ChunkData`（re-export），字段顺序为 `content: str`、`metadata: dict`、`chunk_id: str = ""`、`tokens: int = 0`
 
-**为什么这样定字段：** 两个既有定义各有一个对方没有的字段 —— `parsers/base.py` 有 `chunk_id: str`（必填），`chunking/validator.py` 有 `tokens: int = 0`。三个 parser 都以关键字传 `chunk_id`（`txt_parser.py:64-68`、`docx_parser.py:83-87`、`pymupdf_parser.py:217-226`），写入侧（`validator` 版）从不传。因此**合并时保留 `chunk_id` 并给默认值 `""`**，两侧构造点都不用改。
+**为什么这样定字段：** 两个既有定义各有一个对方没有的字段 —— `parsers/base.py` 有 `chunk_id: str`（必填），`chunking/validator.py` 有 `tokens: int = 0`。三个 parser 都以关键字传 `chunk_id`（`txt_parser.py:64-68`、`docx_parser.py:83-87`、`pymupdf_parser.py:217-226`），写入侧（`validator` 版）从不传。因此**合并时保留 `chunk_id` 并给默认值 `""`**。
+
+**⚠ 生产代码两侧构造点确实都不用改（都用关键字），但测试里有 5 处例外（陷阱 T11）：** `tests/chunking/test_chunking.py` 的 `ChunkData("a", {"block_type": "text"}, "0")` 是**位置参数**，而它 import 的是 `chunking.validator` —— 该类型当前字段序是 `(content, metadata, tokens)`，所以今天 `"0"` 落进 **`tokens`**（一个字符串，无意义值）；统一后落进 **`chunk_id`**。已核实 `ChunkRouter.detect_strategy` 只读 `chunk.metadata["block_type"]` 与 `chunk.content`（`src/chunking/router.py:15`），**不读这两个字段**，所以那 3 个测试不会挂 —— 但这是**静默的语义漂移**，本任务顺手把它显式化。
 
 - [ ] **Step 1: 写会失败的测试**
 
@@ -153,6 +178,20 @@ def test_writer_side_omits_chunk_id_and_tokens():
     chunk = ChunkData(content="文本", metadata={"source": "a.pdf"})
     assert chunk.chunk_id == ""
     assert chunk.tokens == 0
+
+
+def test_positional_order_is_part_of_the_contract():
+    """位置参数顺序是契约，不是实现细节。
+
+    解析侧历史顺序是 (content, metadata, chunk_id)；写入侧历史顺序是
+    (content, metadata, tokens)。统一后必须固定为一种并显式声明，
+    否则位置参数调用点会静默改变含义（见陷阱 T11）。
+    """
+    chunk = ChunkData("c", {"k": "v"}, "cid", 7)
+    assert chunk.content == "c"
+    assert chunk.metadata == {"k": "v"}
+    assert chunk.chunk_id == "cid"
+    assert chunk.tokens == 7
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
@@ -194,17 +233,38 @@ __all__ = ["ChunkData", ...]  # 保留该文件原有的其它导出符号
 
 （`src/parsers/base.py` 原本还有别的符号，**只替换 `ChunkData` 那一段**，不要动其它内容。）
 
-- [ ] **Step 5: 跑测试确认通过**
+- [ ] **Step 5: 把 5 处位置参数构造改成关键字（陷阱 T11）**
+
+`tests/chunking/test_chunking.py` 的 48/49/59/60/69 行，把第 3 个位置参数显式写成关键字：
+
+```python
+# 改前（"0" 落进 tokens —— 一个无意义的字符串）
+ChunkData("a", {"block_type": "text"}, "0")
+
+# 改后（语义显式；这两个字段 router 都不读，所以断言不受影响）
+ChunkData("a", {"block_type": "text"}, chunk_id="0")
+```
+
+改完确认没有别的位置参数调用点：
+
+```bash
+grep -rnE "ChunkData\([^=)]*,[^=)]*,[^=)]*\)" src/ tests/ --include="*.py"
+```
+
+预期：无输出（若还有，一并用关键字）。
+
+- [ ] **Step 6: 跑测试确认通过**
 
 Run: `pytest tests/chunking/test_chunk_data_unified.py tests/parsers/ tests/chunking/ -v`
 Expected: PASS，且 `tests/parsers/` 与 `tests/chunking/` 全绿。
 
-- [ ] **Step 6: 跑门禁并提交**
+- [ ] **Step 7: 跑门禁并提交**
 
 ```bash
 ruff check src/chunking src/parsers && pyright src/chunking/validator.py src/parsers/base.py
-git add src/chunking/validator.py src/parsers/base.py tests/chunking/test_chunk_data_unified.py
-git commit -m "refactor: 统一 ChunkData 为一份定义（保留 chunk_id 字段，消除双份类型）"
+git add src/chunking/validator.py src/parsers/base.py \
+        tests/chunking/test_chunk_data_unified.py tests/chunking/test_chunking.py
+git commit -m "refactor: 统一 ChunkData 为一份定义（字段序显式声明，位置参数改关键字）"
 ```
 
 ---
@@ -417,6 +477,7 @@ git commit -m "fix(db): ORM metadata 备妥 PG 迁移——去 MEDIUMTEXT、补 
 **Files:**
 - Modify: `src/config/settings.py:145-149`（新增 PG 变量，`MYSQL_*` 暂时保留）
 - Modify: `.env`（新增 PG 变量；已 gitignore，不进提交）
+- Create: `.env.example`（仅键名，不含真值 —— 仓库当前没有这个文件）
 - Test: `tests/config/test_pg_settings.py`（新建）
 
 **Interfaces:**
@@ -516,7 +577,7 @@ def build_postgres_dsn() -> str:
 Run: `pytest tests/config/test_pg_settings.py -v`
 Expected: PASS（3 条全绿）。
 
-- [ ] **Step 5: 在 `.env` 补上 PG 变量**
+- [ ] **Step 5: 在 `.env` 补上 PG 变量（顺序很重要 —— 陷阱 T8）**
 
 ```bash
 POSTGRES_HOST=postgres
@@ -526,14 +587,50 @@ POSTGRES_PASSWORD=<与 compose 一致的密码>
 POSTGRES_DATABASE=corporate_rag
 ```
 
-同时把这几行补进 `.env.example`（若有）。**不要**在日志或提交里出现明文密码。
+**⚠ 这一步必须在 Task 4/6 之前完成。** `engine.py` 在**模块级**执行 `DSN = build_postgres_dsn()`，而 `build_postgres_dsn()` 在密码为空时抛 `RuntimeError` —— 也就是说**缺这个变量会表现为"导入 `src.infra.db.engine` 就崩"**，而该模块在 4 个 CLI、repos、services、`tests/infra/db/*` 的链上。好在 `settings.py:22` 会 `load_dotenv()`（从仓库根运行即生效），所以只要 `.env` 写好了就不会遇到。
 
-- [ ] **Step 6: 跑门禁并提交**
+**不要**在日志或提交里出现明文密码。
+
+- [ ] **Step 6: 新建 `.env.example`（记录"需要哪些环境变量"）**
+
+仓库**当前没有** `.env.example`（`ls .env.example` → No such file）。本变更新增了一个**强制必填**的变量（compose 里写的是 `${POSTGRES_PASSWORD:?}`），却没有地方记录"这个项目需要哪些键" —— 下一个人 clone 下来 `docker compose config` 直接失败且不知道缺什么。**这是本变更的直接后果，所以要顺手补上。**
+
+**硬约束：`.env.example` 不得含任何真值**（`.env` 里有 `LANGFUSE_POSTGRES_PASS`、`DASHSCOPE_API_KEY`、`TEST_PASSWORD` 等）。
+
+从 `.env` 提取键名（**只看键名，不取值**）生成骨架：
+
+```bash
+grep -oE "^[A-Z_]+" .env | sort -u | sed 's/$/=/' > .env.example
+git status --short .env.example
+head -20 .env.example
+```
+
+然后在文件顶部加一段说明，并给新增的必填键标注：
+
+```bash
+# 环境变量清单（仅键名，不含任何真值）
+# 复制为 .env 后填入真实值。以下键为必填，缺失会导致启动或 compose 校验失败：
+#   POSTGRES_PASSWORD   —— 应用库账号密码；compose 里用 ${POSTGRES_PASSWORD:?} 强制要求
+#   MYSQL_PASSWORD      —— 遗留：P1 后已不再需要（退役中，Task 9 删除）
+#   REDIS_PASSWORD
+#   DASHSCOPE_API_KEY
+#   LANGFUSE_POSTGRES_PASS
+```
+
+**确认文件里没有真值**（这一步别省）：
+
+```bash
+grep -nE "pass|key|secret" .env.example | grep -vE "=$" && echo "❌ 有非空值，检查" || echo "✅ 全部为空值"
+```
+
+把 `.env.example` 加进提交（它在 .gitignore 里吗？先确认：`git check-ignore -v .env.example`，若被忽略则加 `!.env.example` 例外）。
+
+- [ ] **Step 7: 跑门禁并提交**
 
 ```bash
 ruff check src/config && pyright src/config
-git add src/config/settings.py tests/config/test_pg_settings.py
-git commit -m "feat(config): 新增 PostgreSQL 连接配置与单一 DSN 拼装入口"
+git add src/config/settings.py tests/config/test_pg_settings.py .env.example
+git commit -m "feat(config): 新增 PostgreSQL 连接配置与单一 DSN 拼装入口；补 .env.example 键名清单"
 ```
 
 ---
@@ -793,6 +890,7 @@ git commit -m "feat(deploy): 增加 pgvector PostgreSQL 服务与应用库（dev
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -819,6 +917,16 @@ async def _collect(sql: str, **params) -> list:
         async with engine.connect() as conn:
             result = await conn.execute(text(sql), params)
             return list(result)
+    finally:
+        await engine.dispose()
+
+
+async def _execute(sql: str, **params) -> None:
+    """一次性连接执行写入并提交。"""
+    engine = create_async_engine(build_postgres_dsn(), poolclass=NullPool)
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text(sql), params)
     finally:
         await engine.dispose()
 
@@ -898,6 +1006,84 @@ async def test_chunks_tsv_gin_index_is_gin():
     )
     assert rows, "chunks 缺少 ix_chunks_tsv 索引"
     assert "USING gin" in rows[0][0], rows[0][0]
+
+
+# --- chunks 可用性冒烟（表存在 ≠ 表可用）-----------------------------------
+# P1 期间没有任何业务代码读写 chunks，所以只有下面这几条测试会碰它。
+# 若生成列表达式写错、或维度写成 1023，结构断言全绿而这里会立刻暴露。
+
+PROBE_KB = "p1probe-kb"
+PROBE_DOC = "p1probe-doc"
+
+
+def _vec(axis: int) -> str:
+    """构造一个 1024 维单位向量字面量（axis 位置为 1）。"""
+    values = ["0"] * 1024
+    values[axis] = "1"
+    return "[" + ",".join(values) + "]"
+
+
+async def _cleanup_probe() -> None:
+    await _execute("DELETE FROM chunks WHERE kb_id = :k", k=PROBE_KB)
+    await _execute("DELETE FROM knowledge_base WHERE id = :k", k=PROBE_KB)
+
+
+async def test_chunks_is_writable_and_searchable():
+    """插入 → 生成列自动算 → 词法可命中 → 向量可排序。"""
+    await _cleanup_probe()
+    # knowledge_base 的 description/doc_count/is_deleted 只有 Python 侧默认值，
+    # 没有 server_default，因此裸 SQL 插入必须显式给值。
+    await _execute(
+        "INSERT INTO knowledge_base (id, user_id, name, description, doc_count, is_deleted)"
+        " VALUES (:k, 'p1probe', 'p1probe', '', 0, 0)",
+        k=PROBE_KB,
+    )
+    try:
+        await _execute(
+            "INSERT INTO chunks (id, kb_id, doc_id, chunk_index, chunk_total,"
+            " content, content_seg, embedding, source, page)"
+            " VALUES (:i, :k, :d, 0, 2, '营业收入同比增长', '营业 收入 同比 增长',"
+            " CAST(:e AS vector), 'probe.pdf', 1)",
+            i="p1probe-1", k=PROBE_KB, d=PROBE_DOC, e=_vec(0),
+        )
+        await _execute(
+            "INSERT INTO chunks (id, kb_id, doc_id, chunk_index, chunk_total,"
+            " content, content_seg, embedding, source, page)"
+            " VALUES (:i, :k, :d, 1, 2, '资产负债率上升', '资产 负债率 上升',"
+            " CAST(:e AS vector), 'probe.pdf', 2)",
+            i="p1probe-2", k=PROBE_KB, d=PROBE_DOC, e=_vec(1),
+        )
+
+        rows = await _collect(
+            "SELECT tsv IS NOT NULL AS ok FROM chunks WHERE id = 'p1probe-1'"
+        )
+        assert rows[0][0] is True, "tsv 生成列必须自动填充（未写入却应有值）"
+
+        rows = await _collect(
+            "SELECT id FROM chunks WHERE kb_id = :k"
+            " AND tsv @@ plainto_tsquery('simple', '营业')",
+            k=PROBE_KB,
+        )
+        assert [r[0] for r in rows] == ["p1probe-1"], "词法路必须能命中"
+
+        rows = await _collect(
+            "SELECT id FROM chunks WHERE kb_id = :k"
+            " ORDER BY embedding <=> CAST(:q AS vector) LIMIT 1",
+            k=PROBE_KB, q=_vec(1),
+        )
+        assert rows[0][0] == "p1probe-2", "余弦距离排序必须生效"
+    finally:
+        await _cleanup_probe()
+
+
+async def test_chunks_kb_id_foreign_key_is_enforced():
+    """kb_id 外键必须真的约束住 —— 否则 Parent P2 的"按库归属"是空话。"""
+    with pytest.raises(IntegrityError):
+        await _execute(
+            "INSERT INTO chunks (id, kb_id, doc_id, chunk_index, chunk_total,"
+            " content, content_seg)"
+            " VALUES ('p1probe-bad', 'p1probe-nonexistent', 'd', 0, 1, 'c', 'c')"
+        )
 ```
 
 **运行前提**：Task 4 的 PG 已起、`POSTGRES_*` 已配、`alembic upgrade head` 已跑过。
@@ -1075,7 +1261,7 @@ Expected: `upgrade` 无报错；`alembic current` 显示 `0001 (head)`。
 - [ ] **Step 7: 跑测试确认通过**
 
 Run: `pytest tests/infra/db/test_pg_baseline.py -v`
-Expected: PASS（8 张表 + 扩展 + 关键列 + 生成列 + 唯一约束 + 7 个索引 + GIN 判定，全部通过）。
+Expected: PASS —— 8 张表 + 扩展 + 关键列 + 生成列 + 唯一约束 + 7 个索引 + GIN 判定 + **`chunks` 可写入可检索** + **外键真的约束住**，全部通过。
 
 - [ ] **Step 8: 验证 `alembic downgrade base` 再 `upgrade head` 可循环**
 
@@ -1423,17 +1609,35 @@ git commit -m "refactor(db): create_session 改用 ON CONFLICT DO NOTHING（kb_r
 **Files:**
 - Delete: `tests/infra/db/test_mysql_db.py`
 - Create: `tests/infra/db/test_db.py`（由前者改写，273 行 / 11 个测试）
-- Modify: `tests/reset_data.py:23-41`（`reset_mysql` → `reset_pg`）
+- Modify: `tests/reset_data.py`（**只替换 MySQL 那一段**，见 Step 3）
 - 无需改动但需确认：`tests/infra/search/test_query_router.py:179,211,239`（patch 路径 `src.infra.db.mysql_db.DocumentRepo` 保持不变 —— P1 不改包名）、`tests/rag/test_temporal.py:12`、`scripts/rebuild_kb_data.py:24`
 - Test: 本身
 
 **Interfaces:**
 - Consumes: Task 5 的 8 张表、Task 6 的引擎
-- Produces: `tests/reset_data.py` 提供 `reset_pg()`（清空全部业务表并按需重建）
+- Produces: `tests/reset_data.py` 提供 `reset_pg()`，且**继续提供** `reset_vector_store()` 与 Redis 重置（见 Step 3）
 
 **要保住的 11 个测试行为**（逐一照搬，不要重写断言）：`test_create_and_get_kb`、`test_document_crud`、`test_get_kb_name_by_id`、`test_get_doc_names`、`test_get_all_kb_doc_count`、`test_create_session_idempotent`、`test_message_status_default_complete`、`test_save_message_passthrough_status`、`test_user_created_at_before_assistant`、`test_bind_session_agent_is_bind_once`、`test_create_session_with_agent_persists`。
 
-- [ ] **Step 1: 改名并跑一遍，看方言相关断言破在哪**
+> ⚠ **本任务最容易出的错不是"测试挂了"，而是"测试悄悄变弱了"** —— 改写 273 行代码时删掉一条断言，测试照样全绿。所以 Step 1 先做基线快照，Step 5 再做机械化对照。
+
+- [ ] **Step 1: 改写前先做基线快照（此时 MySQL 仍在跑，Task 9 还没执行）**
+
+`reset_data.py` 现在仍是"三合一"，`test_mysql_db.py` 现在仍能连 MySQL —— **这是唯一能同时跑旧实现与新实现的机会**。
+
+```bash
+# ① 测试名清单（用于 Step 5 对照有没有漏搬）
+pytest tests/infra/db/test_mysql_db.py --collect-only -q > /tmp/p1_task8_baseline.txt
+# ② 断言条数（机械化对照，防止"搬过去时少写了几条断言"）
+echo "assert 条数: $(grep -c 'assert' tests/infra/db/test_mysql_db.py)" >> /tmp/p1_task8_baseline.txt
+# ③ 基线通过情况（记录通过数）
+pytest tests/infra/db/test_mysql_db.py -q --tb=short 2>&1 | tail -5 | tee -a /tmp/p1_task8_baseline.txt
+cat /tmp/p1_task8_baseline.txt
+```
+
+**把输出里的「测试名清单」「assert 条数」「通过数」三项记下来**（终端留着或写在草稿里）。若基线本身就有失败，**先查清原因再动手**——不要在红色基线上改写。
+
+- [ ] **Step 2: 改名并跑一遍，看方言相关断言破在哪**
 
 ```bash
 git mv tests/infra/db/test_mysql_db.py tests/infra/db/test_db.py
@@ -1442,42 +1646,96 @@ pytest tests/infra/db/test_db.py -v
 
 Expected: 多数通过（SQLAlchemy 屏蔽了方言差异），少数因 MySQL 专有行为失败。**逐条记录失败原因再改**，不要盲改。
 
-- [ ] **Step 2: 修 `tests/reset_data.py` 为单库重置**
+- [ ] **Step 3: 修 `tests/reset_data.py` —— 只替换 MySQL 那一段**
 
-把 `reset_mysql()`（`:23-41` 附近）改为：
+**这里有三件事容易做错（陷阱 T5/T6/T7），逐条对照：**
+
+**① 不要把它变成"单库重置"。** 现状 `reset_all()` 清**三件事**：MySQL + **删 Chroma persist 目录**（`reset_vector_store()`）+ Redis FLUSHALL。P1 之后 Chroma 与 Redis **仍在使用**（Chroma 要到 P4 才退役），所以只替换 MySQL 那一段，另两段原样保留。
+
+**② TRUNCATE 列表不要扩到 8 张表。** 现状只清 3 张表，**刻意不碰 `users`**（清了就没法登录，`.env` 里有 `TEST_ACCOUNT`/`TEST_PASSWORD`）；`sessions` / `eval_report` / `feedback` 也不在现状列表里。新增的 `chunks` 属于同一域（随文档与知识库派生），**要一起清**。
 
 ```python
-async def reset_pg() -> None:
-    """清空 PostgreSQL 中本项目的全部业务表。
-
-    用 TRUNCATE ... RESTART IDENTITY CASCADE 一次性清空并重置序列；
-    表名硬编码于此，避免误删同实例上的 Langfuse 库（本函数只连应用库）。
-    """
-    from sqlalchemy import text
-
-    from src.infra.db.engine import engine
-
-    tables = (
-        "conversation_history, document, eval_report, feedback, "
-        "sessions, knowledge_base, users, chunks"
-    )
+async def _reset_pg_async() -> None:
+    """异步清空 PostgreSQL 的业务数据（见 reset_pg 的范围说明）。"""
     async with engine.begin() as conn:
-        await conn.execute(text(f"TRUNCATE {tables} CASCADE"))
+        # CASCADE：chunks 与 document 的外键都指向 knowledge_base
+        await conn.execute(text(f"TRUNCATE {_RESET_TABLES} CASCADE"))
+
+
+def reset_pg() -> None:
+    """清空 PostgreSQL 中本项目的业务数据。
+
+    与改造前的 MySQL 版保持同一范围：只清会话历史、文档、知识库，
+    以及随它们派生的分块表。
+
+    ⚠ 刻意不清 users —— 清了本地就没法登录（测试依赖 .env 的 TEST_ACCOUNT）。
+    现状亦不清 sessions / eval_report / feedback，此处保持现状，不在本变更扩大范围。
+    本函数只连应用库，不会误删同实例上的 Langfuse 库。
+    """
+    asyncio.run(_reset_pg_async())
 ```
 
-调用点同步改名；`src/infra/db/mysql_db/alembic/` 已删（Task 2），确认 `reset_data.py` 不再引用它。
+顶部加模块级常量（避免散落）：
 
-- [ ] **Step 3: 修 patch 路径**
+```python
+# reset 的范围与改造前一致：不含 users / sessions / eval_report / feedback
+_RESET_TABLES = "conversation_history, document, knowledge_base, chunks"
+```
 
-`tests/infra/search/test_query_router.py:179,211,239` 的
-`patch("src.infra.db.mysql_db.DocumentRepo", ...)` —— 本阶段**不改包名**，路径保持原样即可；只需确认它仍能 import 成功。
+**不要写向后兼容的 `reset_mysql` 别名** —— 直接改名 `reset_mysql` → `reset_pg`、`_reset_mysql_async` → `_reset_pg_async`，并把 `reset_all()` 与外部调用点同步改名（`grep -rn "reset_mysql" .` 确认无残留）。`reset_vector_store()` 与 Redis 两段**一行都不动**。
 
-- [ ] **Step 4: 跑全量测试**
+**③ `__main__` 块本来就走不通，一并改成 PG。** 它现在 `docker exec financial-qa-mysql`（**容器名早已过时**，实际是 `corporate-rag-mysql`），且整段 MySQL 专有。改成对 PG 容器执行同样的 TRUNCATE：
+
+```bash
+docker compose exec -T postgres psql -U corporate_rag -d corporate_rag \
+  -c "TRUNCATE conversation_history, document, knowledge_base, chunks CASCADE;"
+```
+
+Chroma 与 Redis 两段在 `__main__` 里同样保留。
+
+- [ ] **Step 4: 处理 `test_user_created_at_before_assistant` 的 1.1 秒 sleep**
+
+该测试的 `await asyncio.sleep(1.1)  # 越过 1 秒，模拟生成耗时` 是**为绕过 MySQL `DATETIME` 的秒级默认精度**而存在的（注释自己写了"越过 1 秒"）。PostgreSQL 的 `now()` 是**微秒**精度，且 `ChatRepo.save_message` 每次各自开事务并提交，两次写入必然拿到不同时间戳；断言用的是 `<=`（即使相同也通过）。
+
+去掉它，并在 docstring 里说明原因：
+
+```python
+async def test_user_created_at_before_assistant():
+    """user 消息必须先于 assistant 消息落库（M1 时序）。
+
+    改造前这里有一处 asyncio.sleep(1.1) —— 那是为绕过 MySQL DATETIME 的秒级
+    精度。PostgreSQL 的时间戳是微秒精度，且两条消息各自独立事务提交，
+    不需要再等待；断言用 <= 也已宽容到能接受相同时间戳。
+    """
+```
+
+保留断言 `assert msgs[0].created_at <= msgs[1].created_at` 不动。**若你不接受"测试依赖时钟精度"这个取舍，把 sleep 留在原处也成立** —— 代价是每次跑多等 1.1 秒。
+
+- [ ] **Step 5: 对照基线，确认没有"悄悄变弱"**
+
+```bash
+# ① 测试名集合必须与基线一致（没有漏搬、没有多出）
+pytest tests/infra/db/test_db.py --collect-only -q
+echo "--- 与基线的差集（应为空）---"
+diff <(grep "::" /tmp/p1_task8_baseline.txt | sort) \
+     <(pytest tests/infra/db/test_db.py --collect-only -q | grep "::" | sort) && echo "✅ 测试名一致"
+
+# ② 断言条数不得少于基线
+echo "改后 assert 条数: $(grep -c 'assert' tests/infra/db/test_db.py)"
+grep "assert 条数" /tmp/p1_task8_baseline.txt
+```
+
+**断言条数允许增加（PG 相关的新断言），不允许减少。** 若减少，逐条对照基线找出被删的断言 —— **尤其是这三个容易被"简化"掉的**：
+- `test_create_session_idempotent`：必须仍有"第二次调用不抛错"的验证
+- `test_bind_session_agent_is_bind_once`：必须仍有 `True`/`False` **两个**返回值的验证（bind-once 的语义全在这个布尔值上）
+- `test_message_status_default_complete`：必须仍验证默认值是 `complete`（不是 `interrupted`）
+
+- [ ] **Step 6: 跑全量测试**
 
 Run: `pytest tests/ -v`
 Expected: 全绿。若有失败，**逐个定位**；共同的失败原因是"还在连 MySQL"，回查 Task 4/6 的 DSN 与环境变量。
 
-- [ ] **Step 5: 跑门禁**
+- [ ] **Step 7: 跑门禁**
 
 ```bash
 ruff format . && ruff check . --fix && pyright src/
@@ -1485,11 +1743,18 @@ ruff format . && ruff check . --fix && pyright src/
 
 Expected: ruff 无错；pyright 不新增 error（存量第三方误报不算）。
 
-- [ ] **Step 6: 提交**
+- [ ] **Step 8: 提交**
+
+在提交信息里写明基线对照结果（`.py` 计数与通过数）：
 
 ```bash
 git add -A tests scripts
-git commit -m "test(db): 存储侧测试与重置脚手架改为真实 PostgreSQL"
+git commit -m "test(db): 存储侧测试与重置脚手架改为真实 PostgreSQL
+
+- test_mysql_db.py → test_db.py（273 行 / 11 个测试 / 断言数不减少）
+- reset_data.py 只替换 MySQL 段：Chroma 目录删除与 Redis FLUSHALL 保留，
+  TRUNCATE 范围与改造前一致（不含 users）
+- 去掉 test_user_created_at_before_assistant 的 1.1s sleep（MySQL 秒级精度 workaround）"
 ```
 
 ---
@@ -1507,6 +1772,33 @@ git commit -m "test(db): 存储侧测试与重置脚手架改为真实 PostgreSQ
 **Interfaces:**
 - Consumes: Task 8 全绿
 - Produces: 仓库内不再有 MySQL 依赖与配置
+
+## ⚠ 回滚锚点（本任务之前先读，陷阱 T9）
+
+**本任务是 P1 里唯一一步让"回滚变难"的操作** —— 但它比看起来安全，前提是别做下面两件多余的事。
+
+**先记锚点：**
+
+```bash
+git rev-parse HEAD > /tmp/p1_pre_retire_commit.txt
+cat /tmp/p1_pre_retire_commit.txt
+```
+
+把该 commit 抄进本任务最终的提交信息（或变更文档），它是"退回去"的目标。
+
+**事实：本任务不会删掉 MySQL 数据。** 本任务只是从 compose 里**删掉服务定义与卷声明**；`mysql_data` 卷的真实名是 `corporate_rag_mysql_data`（compose 里显式 `name:`），
+Docker **不会**因为你删了 compose 里的声明而删除这个卷。实测（2026-09-19）该卷与 `corporate-rag-mysql` 容器都还在。
+
+**因此回滚路径是：** `git revert` 本任务（及后续）的提交 → compose 恢复 mysql 服务与卷声明 → `docker compose up -d mysql` → **旧数据还在，旧代码能跑**。
+
+**必须遵守的两条禁令（在 P1 验收通过之前）：**
+
+1. **不要 `docker compose down -v`** —— `-v` 会真的删除命名卷。
+2. **不要 `docker volume prune`**（也别用 `docker system prune --volumes`）—— 它会把未被任何容器引用的卷一并删掉，而本任务之后 MySQL 卷恰好就是"未被引用"的状态，**正好是 prune 的目标**。
+
+把这两条写进 compose 文件顶部的注释（连同"prod 与 dev 不同机"那条），否则下一个人一句 `prune` 就把回滚依据清掉了。
+
+> **为什么值得写这一段**：用户已明确"业务数据可以丢"，但**"业务数据可丢"不等于"回滚不需要 MySQL 在"** —— 回滚要的是"旧代码能跑起来"，而旧实现连上一个空的 MySQL 会直接启动失败。真正的回滚依据是这个**卷还在**这个事实，而它只需要两条禁令就能保住。
 
 - [ ] **Step 1: 写会失败的测试**
 
@@ -1571,6 +1863,18 @@ Expected: FAIL（驱动还在、`MYSQL_HOST` 还在、目录还在）。
 - `git rm -r deploy/mysql`
 - `docker-compose.yml`：删 `mysql` 服务块（`:3-25`）、app 的 `mysql:` 依赖与 `MYSQL_HOST`/`MYSQL_PASSWORD` 环境变量、`volumes` 段里的 `mysql_data`（`:256-257`）。
 - `docker-compose.prod.yml`：同上（`:10-29`、`:19-20`、`:224-225`、app 的 `MYSQL_*`）。
+
+**在两个 compose 文件顶部加注释（含上面两条禁令）**：
+
+```yaml
+# ⚠ 以下命名卷是 P1 回滚的依据，在 P1 验收通过之前不要删：
+#     corporate_rag_mysql_data  —— 已退役的 MySQL 数据（回滚时旧实现要连它）
+#   具体禁令：
+#     1) 不要 `docker compose down -v`（-v 会真的删命名卷）
+#     2) 不要 `docker volume prune` / `docker system prune --volumes`
+#        （MySQL 卷在退役后恰好处于"未被容器引用"状态，正是 prune 的目标）
+#   回滚锚点 commit 见本任务提交信息。
+```
 
 > ⚠ **先把 `deploy/postgres/init/` 挂载确认无误再删 `deploy/mysql/`**（Task 4 已完成）。删完立刻 `docker compose config` 校验。
 
@@ -1687,7 +1991,7 @@ Expected: 测试全绿、ruff 无错、pyright 不新增 error、无 `print()`�
 `docs/openspec/changes/postgres-storage-consolidation/tasks.md` 现在是**指针文件**（任务清单已迁到本计划），不要去找 checkbox 勾选。本步骤要做两件事：
 
 1. 把顶部阶段表里 **P1 的状态从「待执行」改成「已完成」**（附本次收口的 commit 短 hash）。
-2. 在「§2 实施期修正记录」表里补上执行期发现的新条目。**创建本计划时已预先登记 5 行**（① `vector` 非 trusted 扩展须超级用户创建；② pg 幂等写入收窄为 1 处；③ 范围收窄为只做本地；④ ORM 缺 5 个查询路径索引；⑤ `MEDIUMTEXT` 与 PG 方言冲突导致顺序错误）。执行中若还发现别的事实偏差，**一并登记**；若发现预登记的某行描述不准，**修正那一行**而不是新增重复行。
+2. 在「§2 实施期修正记录」表里补上执行期发现的新条目。**创建本计划时已预先登记 10 行**（① `vector` 非 trusted 扩展须超级用户创建；② PG 幂等写入收窄为 1 处；③ 范围收窄为只做本地；④ ORM 缺 5 个查询路径索引；⑤ `MEDIUMTEXT` 与 PG 方言冲突导致顺序错误；⑥ `ChunkData` 位置参数语义漂移；⑦ `reset_data.py` 三合一 / TRUNCATE 范围 / `__main__` 容器名；⑧ MySQL 卷是回滚依据 + 两条禁令；⑨ import 期 DSN 与 `.env.example` 缺失；⑩ `chunks` 空表盲区）。执行中若还发现别的事实偏差，**一并登记**；若发现预登记的某行描述不准，**修正那一行**而不是新增重复行。
 
 - [ ] **Step 7: 提交**
 

@@ -22,6 +22,12 @@
 - **WHEN** 前置的扩展创建已完成，执行 `alembic upgrade head`
 - **THEN** 全部表（含 `chunks`）SHALL 被创建
 
+#### Scenario: 分块表建成即可用
+
+- **WHEN** 迁移完成后向分块表插入一行（含分段检索文本与一个 1024 维向量）
+- **THEN** 全文检索生成列 SHALL 被自动填充、词法条件 SHALL 能命中该行、向量列 SHALL 能按余弦距离排序，且知识库外键 SHALL 拒绝不存在的知识库标识
+- **AND** 该可用性 SHALL 由自动化测试覆盖 —— 仅断言"表与列存在"不足以证明表可用，而本阶段业务代码尚未接入该表，缺少这层覆盖会让表结构缺陷推迟到下一阶段才暴露
+
 #### Scenario: 扩展已在超级用户上下文创建
 
 - **WHEN** 在应用库中以具备超级用户权限的账号执行 `CREATE EXTENSION IF NOT EXISTS vector`

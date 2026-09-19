@@ -403,6 +403,10 @@ to_tsvector('simple','营业收入 同比 增长') @@ plainto_tsquery('simple','
 - **[`ts_rank` 不是 BM25]** → 命名必须诚实（`ts_rank_score`），否则会重复 `financial_rag-main` 的误导。若将来必须真 BM25：ParadeDB（无托管）或应用层自算，都是**另一次评估**。
 - **[9p 文件系统]** → **已规避**：`postgres_data` 是 docker named volume（在 docker VM 内），不是 bind mount。**这条必须守住** —— 9p 上的 PG 比 BM25 脆弱得多，而我们刚在 `bm25-index-durability` 上踩过一次。
 - **[dev 与 prod 的 compose 标识全同]** → 同机**不可共存**（容器名冲突，第二个 `up` 直接失败）。缓解：D1 的"不同机"前置写进 compose 注释与部署文档。
+- **[DSN 在导入期构造 → 缺 `POSTGRES_PASSWORD` 表现为"导入即崩"]** → `engine.py` 是模块级 `DSN = build_postgres_dsn()`，`build_postgres_dsn()` 在密码为空时抛 `RuntimeError`；而该模块在 4 个 CLI、repos、services、存储侧测试的链上。缓解：`.env` 必须先补该变量（`settings.py:22` 的 `load_dotenv()` 使其在仓库根运行时生效）；不改惰性初始化，因为 `engine`/`session_factory` 是模块级单例、5 个 repo 与 4 个 CLI 直接 import，改惰性等于重构装配层，超出本变更范围。
+- **[必填环境变量没有清单]** → 仓库**没有 `.env.example`**，而本变更新增了强制必填的 `POSTGRES_PASSWORD`（compose 用 `${POSTGRES_PASSWORD:?}`）。后果：新克隆的人 `docker compose config` 直接失败且不知道缺什么。缓解：新建 `.env.example` 只列键名（**不含任何真值**），并标注哪些必填。
+- **[`tests/reset_data.py` 是"三合一重置"，易被误改成单库]** → `reset_all()` 同时清 MySQL + 删 Chroma persist 目录 + Redis FLUSHALL。P1 之后 Chroma 与 Redis **仍在使用**（Chroma 到 P4 才退役），只能替换 MySQL 那一段。
+- **[`reset_data.py` 的 TRUNCATE 范围被"顺手扩大"]** → 现状只清 `conversation_history` / `document` / `knowledge_base`，**刻意不碰 `users`**（清了就没法登录，测试依赖 `.env` 的 `TEST_ACCOUNT`）。缓解：范围保持不变，只补新增的 `chunks`（同域派生数据）；并借机修掉 `__main__` 块里那个早已过时的容器名（`financial-qa-mysql`）。
 - **[prod 的 Chroma 无持久化挂载]**（1.4 顺带发现，既有缺陷）→ prod 的 `app` 只挂 `app_logs`/`chroma_onnx_cache`/`./skills`/`./agents`，**没有 `./data`** → prod 的 Chroma 落在容器可写层，容器重建即丢。本变更"删除 Chroma"会一并消除它；须在 proposal/ADR 里写明这是**既有缺陷被本变更顺带修掉**，以免被误认为新引入。
 - **[双套 ORM 合并时漏字段]** → `agent`/`process` 两列只存在于运行时那套。缓解：以 `src/infra/db/models/` 为准，合并后用一条断言对照两张表的列集合。
 - **[切换无并行验证]** → 数据可丢，故不设双写/影子读；但 **Chroma 数据须保留到 dense 等价性验证通过**（冻结只读、不再写入）。"数据可丢"指不需要为业务连续性保留，不是要提前删。
@@ -436,6 +440,9 @@ to_tsvector('simple','营业收入 同比 增长') @@ plainto_tsquery('simple','
 **回滚**
 
 - 代码回滚 = 恢复旧实现与旧 compose；Chroma 数据保留到第 3 步通过，故可回滚。
+- **MySQL 卷是关系型侧的回滚依据，且它不会被"删 compose 声明"这件事删掉。** `mysql_data` 的真实卷名是 `corporate_rag_mysql_data`（compose 里显式 `name:`）；退役步骤只是从 compose 删掉服务与卷**声明**，Docker 不会因此删除该卷（2026-09-19 实测：该卷与 `corporate-rag-mysql` 容器都还在）。因此回滚路径是 `git revert` → 恢复 compose → `docker compose up -d mysql`，**旧数据还在**。
+- ⚠ **两条禁令（P1 验收通过之前）**：① 不要 `docker compose down -v`（`-v` 会真的删命名卷）；② 不要 `docker volume prune` / `docker system prune --volumes` —— MySQL 卷在退役后恰好处于"未被任何容器引用"的状态，**正是 prune 的目标**。这两条要写进 compose 顶部注释。
+  **注意区分**："业务数据可丢"说的是**不需要为业务连续性保留数据**，不等于"回滚不需要 MySQL 在" —— 回滚要的是"旧代码能跑起来"，而旧实现连上一个空的 MySQL 会直接启动失败。
 - **注意**：若已执行第 9 步（删了 `data/chroma_persist`），回滚不再可能 —— 因此第 9 步必须放在验收全部通过之后。
 
 ## Open Questions
