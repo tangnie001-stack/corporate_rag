@@ -113,7 +113,7 @@
 
 **因此 ② 的实质不是"利用引擎能力"，而是"把 RRF 公式手写进 SQL 字符串"**（ParadeDB / Apache Doris / Azure HorizonDB 三家官方示例都是手写 CTE + `ROW_NUMBER()` + `1.0/(60+r)`），代价明确而收益为零：
 
-- ParadeDB 官方警告**必须加 tiebreaker**，否则同一条查询两次运行可能返回不同候选 → 与现有 `rrf_fusion`（`src/infra/search/bm25_index.py:120-152`，纯 Python dict + `sorted`）的确定性需要逐条对齐，否则引入不可复现的漂移。
+- ParadeDB 官方警告**必须加 tiebreaker**，否则同一条查询两次运行可能返回不同候选 → 与现有 `rrf_fusion`（`src/rag/fusion.py`，纯 Python dict + `sorted`）的确定性需要逐条对齐，否则引入不可复现的漂移。
 - 三家示例都绑上各自专有语法（`|||`/`@@@`/`pdb.score()`、`Doris` 的 `MATCH_ANY`、HorizonDB 的 `azure_ai`）→ 换实现即重写。
 - 2 次往返变 1 次、去重下推省下的传输量：`k=30` 下 60 行 vs 50 行，**无关痛痒**。
 
@@ -280,7 +280,7 @@ to_tsvector('simple','营业收入 同比 增长') @@ plainto_tsquery('simple','
 | `a:` | `'a'`（**静默丢弃** `:`） | 不适用 |
 | `研发费用 5 月`（含空格） | **ERROR: syntax error in tsquery** | `'研发费用' & '5' & '月'` |
 
-**决定**：查询串 SHALL 在程序侧构造 —— 每个词元先按安全字符集（CJK / 字母 / 数字 / 下划线）剔除，再输出 `token:*`，以 ` & ` 连接；剔除后为空则整体降级为 H1 的子串兜底。
+**决定**：查询串 SHALL 在程序侧构造 —— 每个词元先按安全字符集（CJK / 字母 / 数字 / 下划线）剔除，再输出 `token:*`，以 ` | ` 连接（**前缀 OR**，取**召回取向**：AND 只要有一个补词不在库里就让整条查询返回 0 —— 服务路径实测自然语言查询被改写为「资产负债率 变化 趋势」时 `变化`/`趋势` 不在语料，`sparse_count=0`，词法路贡献为零；精度由下游 RRF / 去重 / rerank 承担，不靠本层收紧谓词）；剔除后为空则整体降级为 H1 的子串兜底。
 **该构造点是继"分词同源"之后第二个可静默降召回或抛错的入口，SHALL 有自己的守卫测试。**
 
 **硬约束（必须做成守卫测试）**：以下三条都不报错、只静默降召回或抛错，每条都要有守卫测试：
@@ -454,7 +454,7 @@ to_tsvector('simple','营业收入 同比 增长') @@ plainto_tsquery('simple','
 
 **已在本轮修订中定案（不再开放）**
 
-- ~~`plainto_tsquery` 的 AND 语义~~ → **实测确认是 AND**（`'营业收入' & '增长'`）。~~**决定：先用 AND 落地**~~ → **该决定已被 2026-09-19 实测推翻（H2）**：`plainto_tsquery` 的单词元查询在词形不一致时**直接 0 命中**（`增长` vs 文档词元 `增长率`；`营业收入` vs `营业`+`收入`），不是"长查询偏严"。**改定：查询侧用前缀匹配 `to_tsquery('simple','token:* & …')`，AND 与 OR 两种组合由探针比较选定。**
+- ~~`plainto_tsquery` 的 AND 语义~~ → **实测确认是 AND**（`'营业收入' & '增长'`）。~~**决定：先用 AND 落地**~~ → **该决定已被 2026-09-19 实测推翻（H2）**：`plainto_tsquery` 的单词元查询在词形不一致时**直接 0 命中**（`增长` vs 文档词元 `增长率`；`营业收入` vs `营业`+`收入`），不是"长查询偏严"。**改定：查询侧用前缀匹配 `to_tsquery('simple','token:* | …')`，连接符取**前缀 OR** —— 探针分组 B 显示 OR 的命中覆盖面不低于 AND（该对比的 +10.0 个百分点是超集谓词的机械后果、非质量证据），但决定性依据是服务路径实测：前缀 AND 使多词自然查询整条谓词为空、`sparse_count=0`（见 D4「中文词法检索」的决定）。**
 - ~~Chroma 能否原样读出 176 条分块的 embeddings~~ → **已实测通过（1.2）**：5 个 collection / 176 分块 / 维度 1024 / 无 `None` 行，`parent_content` 已在 metadata 中。
 - ~~本地能否验证 PG 中文分词扩展~~ → **已实测（1.3）**：`pgvector/pgvector:pg15` 只提供 `vector` 0.8.6 与 `pg_trgm` 1.6，**无** `zhparser`/`pg_jieba`/`pg_bigm`/`pg_search` → 本地只能对照 `pg_trgm`。
 - ~~`similarity_search` 的 `min(k, 100)` 上限~~ → **决定保留并注释来源**（Chroma 硬限），避免把能力提升混进等价性验收。

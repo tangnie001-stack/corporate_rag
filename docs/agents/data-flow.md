@@ -142,7 +142,7 @@ api_contract.md「task 事件详情」）：
 agent（bind_tools）
   ├ retrieve_kb：hybrid 混合检索 + rerank 精排 → ctx.tool_contexts（kind=kb）
   │   dense 路：chunks 表按 kb_id 过滤 + pgvector `<=>` 余弦距离 top-k
-  │   词法路：PostgreSQL 全文检索（chunks.tsv @@ to_tsquery('simple', 词元:* & …)，
+  │   词法路：PostgreSQL 全文检索（chunks.tsv @@ to_tsquery('simple', 词元:* | …)，
   │            按 ts_rank 降序；词元全被滤掉时降级为 content 子串匹配）
   │   query 含时间词且 TEMPORAL_PARSE_ENABLED 时先 parse_temporal →
   │   ctx.temporal_years / missing_years（完整性校验数据源，rag_tools.py:109-122）

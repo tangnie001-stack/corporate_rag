@@ -1,7 +1,7 @@
 """Agent 工具 — search_web（Tavily 联网搜索兜底）。
 
 独立模块承载 search_web，避免 rag_tools.py 超过 400 行红线。工具无闭包依赖
-（不需 vector_store/bm25/reranker），直接读 config 与 current_request_ctx；
+（不需 vector_store/reranker），直接读 config 与 current_request_ctx；
 结果与 retrieve_kb 共用 RequestContext.tool_contexts（全局递增编号），
 format_node 统一产出引用，kind=web 区分来源。
 """

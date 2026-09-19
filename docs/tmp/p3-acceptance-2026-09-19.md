@@ -1,6 +1,6 @@
 # P3 词法检索验收（BM25 → PostgreSQL 全文检索）
 
-- HEAD：`f656219`（`docs(p3): 修正 glossary 的存储收敛结论与 F-30 归因、F-27 的已删文件标注`）
+- HEAD：`8cd8f45`（`docs(p3): 回填修复轮 1 的 commit hash`；本波提交前的实际 HEAD，本文件此后含「修复轮 1」「修复轮 2」两轮补记）
 - 回滚锚点：`2afa8ab1d10e051aee528c18050e990819f0de2a`（Task 0 记录，`git revert` / `git reset` 目标）
 - 测试：`1058 passed, 14 skipped, 31 warnings in 103.65s (0:01:43)`
 - ruff：`All checks passed!`（exit 0）；pyright：`0 errors, 0 warnings, 0 informations`（exit 0）
@@ -263,10 +263,12 @@ brief Step 5 预期收尾计数为 `5|0|176|1`，实测为 `90|102|176|1`。差�
 
 来源：`docs/tmp/p3-lexical-probe-2026-09-19.md`。
 
+> ⚠ **本节判据已被推翻**：第 4 条的「`prefix-OR` 恰高 10.0pp、未达翻转阈值，故维持 `" & "`」是**探针当时的结论**；后续发现判据只看了分组 B 的 +10.0pp，而翻转的**决定性依据在服务路径实测** —— 前缀 AND 下多词自然查询（如「资产负债率 变化 趋势」）整条谓词为空、`sparse_count=0`，词法路零贡献；翻转为前缀 OR 后同一查询 `sparse_count=1`（证据见「修复轮 1」§③）。**连接符当前落地为 `_JOINER = " | "`（前缀 OR）**（`src/infra/db/lexical_query.py`）。第 4 条正文原样保留探针当时的判据（「超过 10 个百分点」vs 实测 10.0pp），作为决策史的一部分。
+
 1. 分组 A1（唯一同口径对比）：`char-bm25` 1.0000 vs `jieba-bm25` 0.9667，差 **1 个词项 = 3.33pp**，方向与"jieba 更好"**相反**；
 2. 该差值**可归因于分词造成的排序差异**，但命中判据是"原始正文是否包含"、**不含排序质量** ⇒ **不能读作质量差**，"替换有收益/无收益"**均未被本探针建立**；
 3. 分组 C（`ts_rank` vs `ts_rank_cd`）零差是**结构必然**（过滤臂候选集相同且 ≤ k），该口径**测不了排序质量**；
-4. 分组 B：`prefix-AND` 0.5000 > `plainto-AND` 0.4667（**印证 H2 前缀通配修复方向正确**）；`prefix-OR` 0.6000 恰高 10.0pp，未达"超过 10 个百分点"的翻转阈值，故维持 `" & "`；`substring` 1.0000 是**定义性**（恒真），非策略对比；
+4. 分组 B：`prefix-AND` 0.5000 > `plainto-AND` 0.4667（**印证 H2 前缀通配修复方向正确**）；`prefix-OR` 0.6000 恰高 10.0pp，未达"超过 10 个百分点"的翻转阈值，故维持 `" & "`；`substring` 1.0000 是**定义性**（恒真），非策略对比；〔**本结论已被推翻（见本节顶部注）**：+10.0pp 是 OR 作为超集谓词的机械后果、不构成质量证据；真正依据是服务路径 `sparse_count` 由 0→1 的实测。**当前落地为前缀 OR（`" | "`）**。〕
 5. 端到端答案质量（RAGAS）**不在本次验收内**，已登记为需求池 F-30（判据缺口）+ 语料到位后的独立评估。
 
 ---
@@ -389,3 +391,126 @@ All checks passed!
 ### ⑤ commit hash
 
 - **`d2bbc5df033fd89d651ef1b40a1dd21f1d1cf178`**（`d2bbc5d`，`fix(p3): 查询构造翻转为前缀 OR（服务路径实测 AND 使词法路零贡献）+ 恢复语料`）
+
+---
+
+## 修复轮 2（终审修复波）
+
+> 终审整段返回 "With fixes"（**无 Critical**，5 条 Important + 若干一并处理项）。**根因一条**：最后一次决策反转（连接符前缀 AND → 前缀 OR）没有传播到所有仍记旧状态的产物，导致交付物与交付代码自相矛盾。本波不设计新方案，只把翻转补齐。完整报告见 `.superpowers/sdd/2026-09-19-postgres-storage-p3-lexical-tsvector/final-fix-report.md`；commit hash 见文末「修复轮 2 · commit hash」。
+
+### ① 改动清单（文件:行）
+
+| 发现 | 文件:行 | 改动 |
+|---|---|---|
+| I1 | `docs/openspec/changes/postgres-storage-consolidation/design.md:283` | 决定叙述由 ` & ` 连接改为当前状态 ` \| `（前缀 OR），并补召回取向理由 |
+| I1 | `.../design.md:457` | 「改定」句的落地形态连接符 `token:* & …` → `token:* \| …` |
+| I2 | `docs/agents/data-flow.md:145` | `词元:* & …` → `词元:* \| …` |
+| I3 | 本文件 §⑨（`262-270`） | 保留探针当时判据，显式标注已被推翻 |
+| I4 | `scripts/lexical_probe.py:211-216`、`:318` | 两臂各自显式构造（不再从生产构造器反推）+ 显式用例 mode 标签 |
+| I5 | `scripts/lexical_probe_report.py:258-279`、`:22` | 选型结论改为 prefix-OR，如实陈述两层依据 |
+| M1 | `.../design.md:116` | `src/infra/search/bm25_index.py:120-152` → `src/rag/fusion.py` |
+| M1 | `docs/openspec/specs/typed-data-layer/spec.md:21` | **不改**：delta 的 MODIFIED requirement 整块替换，已覆盖 `bm25_res`（判据见终审报告 ④） |
+| M2 | `docs/agents/glossary.md:194` | 复核为已是 D6（`f656219` 已改），无需改动 |
+| M3 | `src/agents/tools/web_tools.py:4` | docstring 去掉 `bm25` |
+| M4 | 本文件 `:3` | HEAD `f656219` → `8cd8f45`（本波提交前实际 HEAD） |
+
+**I1 改后原文（`design.md:283`）：**
+
+```
+**决定**：查询串 SHALL 在程序侧构造 —— 每个词元先按安全字符集（CJK / 字母 / 数字 / 下划线）剔除，再输出 `token:*`，以 ` | ` 连接（**前缀 OR**，取**召回取向**：AND 只要有一个补词不在库里就让整条查询返回 0 —— 服务路径实测自然语言查询被改写为「资产负债率 变化 趋势」时 `变化`/`趋势` 不在语料，`sparse_count=0`，词法路贡献为零；精度由下游 RRF / 去重 / rerank 承担，不靠本层收紧谓词）；剔除后为空则整体降级为 H1 的子串兜底。
+```
+
+**I2 改后原文（`data-flow.md:145`）：**
+
+```
+  │   词法路：PostgreSQL 全文检索（chunks.tsv @@ to_tsquery('simple', 词元:* | …)，
+  │            按 ts_rank 降序；词元全被滤掉时降级为 content 子串匹配）
+```
+
+**I3 改后原文（本文件 §⑨ 第 4 条，历史判据保留 + 内联标注）：**
+
+```
+4. 分组 B：`prefix-AND` 0.5000 > `plainto-AND` 0.4667（**印证 H2 前缀通配修复方向正确**）；`prefix-OR` 0.6000 恰高 10.0pp，未达"超过 10 个百分点"的翻转阈值，故维持 `" & "`；`substring` 1.0000 是**定义性**（恒真），非策略对比；〔**本结论已被推翻（见本节顶部注）**：+10.0pp 是 OR 作为超集谓词的机械后果、不构成质量证据；真正依据是服务路径 `sparse_count` 由 0→1 的实测。**当前落地为前缀 OR（`" | "`）**。〕
+```
+
+**I4 改后核心（`lexical_probe.py:211-216`）：**
+
+```
+        plan = build_lexical_query(term)
+        # 两臂各自显式构造：生产构造器 `build_lexical_query` 只产出当前选定的
+        # 连接符（` | `），从它反推另一臂会退化成空操作（两臂发出同一条谓词，
+        # 重跑无法复现 A/B 差异）；`plan.terms` 已是安全化后的词元，直接拼装。
+        and_tsq = " & ".join(f"{t}:*" for t in plan.terms)
+        or_tsq = " | ".join(f"{t}:*" for t in plan.terms)
+```
+
+**I5 改后核心（`lexical_probe_report.py` 选型结论）：**
+
+```
+- 查询构造：**prefix-OR**（分组 B 命中数/总数：prefix-AND = 15/30 / prefix-OR = 18/30 / plainto-AND = 14/30 / substring = 30/30（定义性））
+- **连接符取 prefix-OR**（`_JOINER = " | "`）。依据分两层：（1）探针分组 B 显示 OR 的命中覆盖面**不低于** AND（18/30 vs 15/30，高 10.0 个百分点）—— 但 OR 是 AND 的**超集谓词**，在「集合成员」口径近饱和时该差值是其**机械后果、不能读作质量证据**（三张表的测量数字是那次对比的记录）；（2）**决定性的依据来自服务路径实测**：前缀 AND 下，多词自然查询（如「资产负债率 变化 趋势」）因补词不在语料而整条谓词为空 ⇒ `sparse_count=0`、词法路对典型查询零贡献（混合检索退化为纯 dense）；翻转为 OR 后同一查询 `sparse_count=1`。精度交由下游 RRF / 去重 / rerank 承担。
+```
+
+### ② 探针重跑：分组 B 两臂已可复现（I4 证据）
+
+重跑命令（只读，未写业务数据）：
+
+```
+POSTGRES_HOST=localhost .venv/bin/python scripts/lexical_probe.py --out /tmp/probe_rerun1.md
+```
+
+分组 B 输出：
+
+| 配置 | 命中数/总数 | 词项命中率 |
+|---|---|---|
+| prefix-AND | 15/30 | 0.5000 |
+| prefix-OR | 18/30 | 0.6000 |
+| plainto-AND | 14/30 | 0.4667 |
+| substring（定义性，非策略对比） | 30/30 | 1.0000 |
+
+两臂谓词确实不同（直接证明，非仅计数差）：`营业收入` → `terms=('营业','收入')`，AND = `营业:* & 收入:*`，OR = `营业:* | 收入:*`。
+
+与交付产物 `docs/tmp/p3-lexical-probe-2026-09-19.md` 对照：**分组 B 四行逐字一致**（15/30 / 18/30 / 14/30 / 30/30），词项清单一致。差异仅在**消费生产构造器 `build_lexical_query` 的两组**：A2 `jieba-tsrank` 与 C `ts_rank`/`ts_rank_cd` 由翻转前的 15/30 变为翻转后的 18/30（它们随生产连接符一并翻转）。产物作为"那次对比的记录"**保持原样**，本次重跑差异如实登记于此，**未改动产物任何测量数字**。
+
+### ③ 门禁三连（翻转后全量）
+
+```
+=== pytest ===
+1058 passed, 14 skipped, 31 warnings in 101.37s (0:01:41)
+
+=== ruff ===
+All checks passed!
+
+=== pyright ===
+0 errors, 0 warnings, 0 informations
+```
+
+### ④ 语料恢复与复验（F-31 顺序：先全量，后恢复，之后不再跑全量）
+
+```
+污染后（恢复前）：10|6|176|1
+$ docker compose exec -T postgres psql -U corporate_rag -d corporate_rag -c \
+    "TRUNCATE conversation_history, document, knowledge_base, chunks CASCADE;"
+TRUNCATE TABLE
+$ POSTGRES_HOST=localhost .venv/bin/python scripts/migrate_chroma_to_pg.py
+corpus ok: collections=691 non_empty=5 chunks=176 dim=1024 none_embedding=0
+migrate chroma->pg done: {'collections': 5, 'records': 176, 'written': 176, ...}
+$ POSTGRES_HOST=localhost .venv/bin/python scripts/rewrite_content_seg.py --check
+total=176 stale=0 ; exit=0
+$ POSTGRES_HOST=localhost .venv/bin/python scripts/rewrite_content_seg.py --apply
+rewritten=0 ; exit=0
+```
+
+复验：
+
+```
+5|0|176|1      （knowledge_base | document | chunks | users）
+5              （count(DISTINCT kb_id) FROM chunks）
+p2-migration -> 176
+```
+
+恢复之后**未再跑全量 pytest**。未删 `users`、未碰 `data/`、未动 MySQL 卷。
+
+### ⑤ commit hash
+
+见终审修复报告 `.superpowers/sdd/2026-09-19-postgres-storage-p3-lexical-tsvector/final-fix-report.md` ⑥ 与文末回填。
