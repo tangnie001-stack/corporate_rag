@@ -513,4 +513,7 @@ p2-migration -> 176
 
 ### ⑤ commit hash
 
-见终审修复报告 `.superpowers/sdd/2026-09-19-postgres-storage-p3-lexical-tsvector/final-fix-report.md` ⑥ 与文末回填。
+- **`2cb1c5d`**（`fix(p3): 探针两臂各自显式构造 + 渲染器选型结论改为 prefix-OR（终审 I4/I5）`）—— I4/I5
+- **`d37f19b`**（`docs(p3): 连接符翻转补齐到设计与验收产物 + 清理陈旧引用（终审 I1-I3、M1-M4）`）—— I1/I2/I3、M1-M4、本「修复轮 2」节
+
+（完整逐条对照见终审修复报告 `.superpowers/sdd/2026-09-19-postgres-storage-p3-lexical-tsvector/final-fix-report.md`；本行 hash 由随后的 `docs(p3): 回填修复轮 2 的 commit hash` 提交回填。）
