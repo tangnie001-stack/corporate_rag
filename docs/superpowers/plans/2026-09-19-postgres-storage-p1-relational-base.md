@@ -2068,6 +2068,21 @@ P1 验收通过前不要 docker compose down -v / docker volume prune。"
 
 ## Task 10: 在 PostgreSQL 上跑一次真实 E2E 冒烟
 
+> **⚠ 端点路径以本节为准（Task 10 执行时实测修正；下面各 Step 的 curl 里若与本节冲突，以本节为准）。**
+> 计划初稿里的 `/api/kb`、`/api/documents/upload`、`GET /api/documents`、`DELETE ...` **都不存在**。实测真实路径：
+>
+> | 动作 | 真实端点 |
+> |---|---|
+> | 登录（不存在则自动注册） | `POST /api/auth/login`，body `{"account","password"}` → `data.token` |
+> | 建知识库 | `POST /api/kbs` |
+> | 上传文档 | `POST /api/kbs/documents/upload` |
+> | 列文档 / 查状态 | `GET /api/kbs/documents/list`、`GET /api/kbs/documents/status` |
+> | 删文档 | `POST /api/kbs/documents/delete` |
+> | 删知识库 | `POST /api/kbs/delete` |
+> | 提问（流式） | `POST /api/chat/stream`，body 用 **`query`** + `session_id`（**没有** `message` 字段） |
+>
+> 全部经 nginx，前缀 `http://localhost`。
+
 **Files:**
 - 无代码改动（只读验证）；结果记入本任务提交信息
 
@@ -2226,6 +2241,32 @@ grep -nE "MEDIUMTEXT|JSON_TABLE|JSON_UNQUOTE|FOREIGN_KEY_CHECKS|SHOW COLUMNS|mys
 
 **判据**：改完后 `grep` 上述模式不应再有"看起来是现行操作步骤"的条目；纯历史记录要显式标注，避免下一个人照抄。
 
+- [ ] **Step 2c: 清理 P1 测试留下的业务数据残留（Task 10 实测发现）**
+
+**问题**：Task 10 实测发现 PG 应用库**并非空库** —— 有 **67 个文档 / 56 个知识库**，由 Task 7/8/9 的测试运行写入（非迁入数据）。这些是 **P1 自己的测试垃圾**：PG 曾是新建的空库，所以其中没有用户原有数据。
+
+不清理的后果：**P1 交付后 dev 界面会显示 56 个随机命名的垃圾知识库** —— 与本 plan「P1 结束时你会看到什么」里"知识库列表变空"的描述恰好相反，会让验收人误判为异常。
+
+**清理方式**（`reset_pg` 的 TRUNCATE 范围正是为此设计的：清 `conversation_history` / `document` / `knowledge_base` / `chunks`，**刻意保留 `users`**，所以 Task 10 自动注册的账号不会被清掉）：
+
+```bash
+POSTGRES_HOST=localhost .venv/bin/python -c "
+from tests.reset_data import reset_pg
+reset_pg()
+"
+```
+
+确认残留已清：
+
+```bash
+docker compose exec -T postgres psql -U corporate_rag -d corporate_rag -tAc \
+  "SELECT (SELECT count(*) FROM knowledge_base), (SELECT count(*) FROM document), (SELECT count(*) FROM chunks);"
+```
+
+Expected: `0|0|0`；`users` 应仍有 1 行 —— 那是 Task 10 自动注册的账号，**不要**清它。
+
+> 同时把本 plan「P1 结束时你会看到什么」表里「知识库列表变空」那一行改准：**默认情况下不是空的，而是有 P1 测试残留**；执行完本步之后才是空的。
+
 - [ ] **Step 3: 登记遗留项 L1–L4 到需求池**
 
 在 `docs/agents/requirements_pool.md` 追加（**编号从 `F-16` 起**，当前最大是 `F-15`；追加在 F 系列末尾，勿覆盖既有条目）：
@@ -2284,7 +2325,7 @@ P1 是**换引擎 + 空库重建**，所以界面上的状态变化是预期行�
 
 | 现象 | 是不是问题 | 说明 |
 |---|---|---|
-| 知识库列表变空 | **不是** | PG 是全新库；旧数据在 MySQL 里（卷还在，仅用于回滚，应用已不读它）。按"业务数据可丢"的既定前提，重新建库/重传即可 |
+| 知识库列表**不为空、而是有一批随机命名的垃圾知识库** | **不是故障，但要清** | Task 10 实测：PG 里有 67 文档 / 56 知识库，全是 Task 7/8/9 测试运行写入的残留（PG 曾是新建空库，所以没有用户原有数据）。**按 Task 11 Step 2c 清掉**，清完才是空的。旧文档写"列表变空"，那是**没清之前**不会出现的样子 |
 | 需要重新登录 | **不是** | PG 的 `users` 是空的；但 **`/auth/login` 在账号不存在时会先自动注册**（`src/api/auth.py:38-41`），所以直接用 `.env` 的 `TEST_ACCOUNT`/`TEST_PASSWORD` 登录即可 —— **不需要任何 seed 脚本**。注册会自动创建一个新的 `user_id`，因此旧的 session/知识库归属关系不再适用（本来也该重建） |
 | 旧的会话历史看不了 | **不是** | 同上，`sessions` / `conversation_history` 在 PG 里是空的 |
 | `docker compose ps` 里没有 `mysql` | **是预期的** | Task 9 已退役。但**卷 `corporate_rag_mysql_data` 仍在**（`docker volume ls` 能看到），这是回滚依据，见 Task 9 的「回滚锚点」 |
