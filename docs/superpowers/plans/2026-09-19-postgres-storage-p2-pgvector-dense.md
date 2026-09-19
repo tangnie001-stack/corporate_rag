@@ -1519,7 +1519,7 @@ class PgVectorStore:
             kb_id,
             doc_id,
             len(rows),
-            str(rows)[:LOG_MAX_BODY] if rows else "[]",
+            str(rows)[:LOG_MAX_BODY],
         )
         return len(rows)
 ```
@@ -1721,7 +1721,7 @@ Expected: FAIL —— `AttributeError: 'PgVectorStore' object has no attribute '
             "[PG] method=dense_search | kb_id={} | rows={} | data={}",
             kb_id,
             len(results),
-            str(results)[:LOG_MAX_BODY] if results else "[]",
+            str(results)[:LOG_MAX_BODY],
         )
         return results
 
