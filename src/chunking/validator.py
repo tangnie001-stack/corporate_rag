@@ -10,14 +10,15 @@ from dataclasses import dataclass, field
 class ChunkData:
     """分块数据的唯一标准类型。
 
-    content/metadata 是解析与写入两侧共用的载荷；chunk_id 供解析阶段标识来源位置，
-    tokens 供分块质量评估使用（解析阶段不填，默认 0）。
+    content/metadata 是解析与写入两侧共用的载荷；chunk_id 标识来源位置（解析生成，
+    BM25 重建索引时复用 Chroma id 覆盖写入），tokens 供分块质量评估使用（解析阶段不填，默认 0）。
     """
 
-    content: str
-    metadata: dict
-    # 解析阶段生成的来源标识（形如 "{source}:{index}" 或 "{source}:p{page}:{index}"）；
-    # 写入侧不填，默认空串
+    content: str  # 分块正文文本，解析侧产出、写入侧消费
+    metadata: dict  # 来源元数据（source / page / doc_id / block_type 等）
+    # 来源标识：解析阶段按 "{source}:{index}" 或 "{source}:p{page}:{index}" 生成，
+    # 入库写入侧不填、默认空串；
+    # BM25 重建索引时以 Chroma id（"{doc_id}:{index}"）覆盖写入，并读回作词法检索的文档 id
     chunk_id: str = ""
     # 分块后的 token 数，由分块质量评估填充；解析阶段不填，默认 0
     tokens: int = 0

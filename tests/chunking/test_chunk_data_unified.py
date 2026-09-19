@@ -28,11 +28,10 @@ def test_writer_side_omits_chunk_id_and_tokens():
 
 
 def test_positional_order_is_part_of_the_contract():
-    """位置参数顺序是契约，不是实现细节。
+    """位置参数的顺序是构造契约，不是实现细节。
 
-    解析侧历史顺序是 (content, metadata, chunk_id)；写入侧历史顺序是
-    (content, metadata, tokens)。统一后必须固定为一种并显式声明，
-    否则位置参数调用点会静默改变含义（见陷阱 T11）。
+    字段序固定为 (content, metadata, chunk_id, tokens)，不得随意调整；
+    否则既有的位置参数调用点会静默改变含义。
     """
     chunk = ChunkData("c", {"k": "v"}, "cid", 7)
     assert chunk.content == "c"
