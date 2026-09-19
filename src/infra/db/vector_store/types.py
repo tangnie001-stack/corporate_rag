@@ -1,4 +1,4 @@
-"""检索结果类型 — ChromaDB 语义检索和 BM25 词法检索的统一输出类型。"""
+"""检索结果类型 — dense 语义检索与词法检索的统一输出类型。"""
 
 from dataclasses import dataclass, field
 
@@ -7,20 +7,27 @@ from dataclasses import dataclass, field
 class ChunkResult:
     """检索结果统一类型。
 
-    替代 similarity_search / BM25 search / RRF fusion / rerank 之间的 list[dict]。
-    统一 ChromaDB 语义检索和 BM25 词法检索的输出格式。
+    替代 similarity_search / 词法检索 / RRF fusion / rerank 之间的 list[dict]。
+    统一 dense 与词法两路的输出格式；两路同源于一个 PostgreSQL 实例。
     """
 
     id: str
-    """分块 ID，格式为 {doc_id}:{chunk_index}（ChromaDB）或解析器生成（BM25）。"""
+    """分块 ID，格式为 {doc_id}:{chunk_index}。"""
     content: str
     """分块的文本内容，由文档解析器生成，可能包含 Markdown 格式。"""
     metadata: dict = field(default_factory=dict)
-    """元数据字典，包含 source（文件名）、page（页码）、doc_id（文档ID）等。"""
+    """元数据字典，含 doc_id / chunk_index / chunk_total / source / page 五个契约键，
+    以及 chunker 产出的全部自定义键（如 parent_content / block_type / heading_path）。
+    由列值与 jsonb 平铺合并回填，冲突以列为准。"""
     distance: float | None = None
-    """余弦距离，仅语义检索时有值（越小越相似），BM25 检索和分页查询时为 None。"""
-    bm25_score: float | None = None
-    """BM25 词法检索分数，仅 BM25 检索时有值，语义检索和分页查询时为 None。"""
+    """余弦距离，仅 dense 检索时有值（越小越相似）；词法检索与分页查询时为 None。"""
+    lexical_score: float | None = None
+    """词法检索得分，仅词法检索时有值；dense 检索与分页查询时为 None。
+    与引擎无关的命名：P3 后它来自 PostgreSQL 全文检索，不再是 BM25。"""
+    dense_rank: int | None = None
+    """该结果在 dense 路的排名（0 起）；未出现在 dense 路时为 None。"""
+    sparse_rank: int | None = None
+    """该结果在词法路的排名（0 起）；未出现在词法路时为 None。"""
 
 
 @dataclass(slots=True)

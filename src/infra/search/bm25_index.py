@@ -93,16 +93,17 @@ class BM25Index:
         scores = bm25.get_scores(tokenized)
         ranked = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:k]
         results = []
-        for idx in ranked:
+        for rank, idx in enumerate(ranked):
             chunk = chunks[idx]
-            # chunks 可能是 dict（旧格式）或 ChunkData（新格式）
+            # 兼容旧格式：chunks 可能是 dict（历史 pickle）或 ChunkData（新格式）
             if isinstance(chunk, dict):
                 results.append(
                     ChunkResult(
                         id=chunk.get("id", chunk.get("chunk_id", "")),
                         content=chunk.get("content", ""),
                         metadata=chunk.get("metadata", {}),
-                        bm25_score=float(scores[idx]),
+                        lexical_score=float(scores[idx]),
+                        sparse_rank=rank,
                     )
                 )
             else:
@@ -111,10 +112,41 @@ class BM25Index:
                         id=chunk.chunk_id,
                         content=chunk.content,
                         metadata=chunk.metadata,
-                        bm25_score=float(scores[idx]),
+                        lexical_score=float(scores[idx]),
+                        sparse_rank=rank,
                     )
                 )
         return results
+
+
+def _merge_path_ranks(
+    existing: ChunkResult | None,
+    incoming: ChunkResult,
+    *,
+    dense_rank: int | None = None,
+    sparse_rank: int | None = None,
+) -> ChunkResult:
+    """把一路的名次合并进已有结果。
+
+    位置名次兜底（生产者未填时用融合时的位置），生产者已填的值优先；
+    同一 id 出现在另一路时，把那一侧的排名携带过来 —— 融合只按 RRF 重排，
+    不得抹掉任一路的排名（来源可辨）。
+    """
+    if existing is None:
+        if dense_rank is not None and incoming.dense_rank is None:
+            incoming.dense_rank = dense_rank
+        if sparse_rank is not None and incoming.sparse_rank is None:
+            incoming.sparse_rank = sparse_rank
+        return incoming
+    if dense_rank is not None and existing.dense_rank is None:
+        existing.dense_rank = dense_rank
+    if sparse_rank is not None and existing.sparse_rank is None:
+        existing.sparse_rank = sparse_rank
+    if existing.dense_rank is None:
+        existing.dense_rank = incoming.dense_rank
+    if existing.sparse_rank is None:
+        existing.sparse_rank = incoming.sparse_rank
+    return existing
 
 
 def rrf_fusion(
@@ -124,6 +156,9 @@ def rrf_fusion(
     top_n: int = 50,
 ) -> list[ChunkResult]:
     """RRF 融合 Dense 语义检索和 BM25 词法检索结果。
+
+    融合只按 RRF 得分重排；每个结果的 dense_rank / sparse_rank 按路保留，
+    某条结果未出现在某一路时该路排名为 None。
 
     Args:
         dense: 向量检索（Dense）结果列表
@@ -135,21 +170,18 @@ def rrf_fusion(
         融合后的结果列表，按 RRF 得分降序排列，长度不超过 top_n
     """
     scores: dict[str, float] = {}
-    data: dict[str, ChunkResult] = {}
+    merged: dict[str, ChunkResult] = {}
 
     for rank, doc in enumerate(dense):
-        doc_id = doc.id
-        scores[doc_id] = scores.get(doc_id, 0) + 1.0 / (k + rank + 1)
-        data[doc_id] = doc
+        scores[doc.id] = scores.get(doc.id, 0) + 1.0 / (k + rank + 1)
+        merged[doc.id] = _merge_path_ranks(merged.get(doc.id), doc, dense_rank=rank)
 
     for rank, doc in enumerate(bm25_res):
-        doc_id = doc.id
-        scores[doc_id] = scores.get(doc_id, 0) + 1.0 / (k + rank + 1)
-        if doc_id not in data:
-            data[doc_id] = doc
+        scores[doc.id] = scores.get(doc.id, 0) + 1.0 / (k + rank + 1)
+        merged[doc.id] = _merge_path_ranks(merged.get(doc.id), doc, sparse_rank=rank)
 
     ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-    return [data[doc_id] for doc_id, _ in ranked[:top_n]]
+    return [merged[doc_id] for doc_id, _ in ranked[:top_n]]
 
 
 def rrf_fusion_multi(
@@ -160,6 +192,8 @@ def rrf_fusion_multi(
     """任意路 RRF 融合多组检索结果。
 
     每路按排名贡献 1/(k+rank+1)，跨路累加后按得分降序取 top_n。
+    此函数不区分 dense / 词法，排名按融合时的位置兜底写入 dense_rank，
+    sparse_rank 保持生产者已填的值（缺省为 None）。
 
     Args:
         results_groups: 多组检索结果（每组一个查询的 dense 或 bm25 结果）
@@ -170,12 +204,10 @@ def rrf_fusion_multi(
         融合结果列表，按 RRF 得分降序，长度不超过 top_n
     """
     scores: dict[str, float] = {}
-    data: dict[str, ChunkResult] = {}
+    merged: dict[str, ChunkResult] = {}
     for group in results_groups:
         for rank, doc in enumerate(group):
-            doc_id = doc.id
-            scores[doc_id] = scores.get(doc_id, 0) + 1.0 / (k + rank + 1)
-            if doc_id not in data:
-                data[doc_id] = doc
+            scores[doc.id] = scores.get(doc.id, 0) + 1.0 / (k + rank + 1)
+            merged[doc.id] = _merge_path_ranks(merged.get(doc.id), doc, dense_rank=rank)
     ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-    return [data[doc_id] for doc_id, _ in ranked[:top_n]]
+    return [merged[doc_id] for doc_id, _ in ranked[:top_n]]

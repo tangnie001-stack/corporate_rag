@@ -39,8 +39,8 @@ class TestBM25Index:
             index.build_index("test_kb", chunks)
             results = index.search("test_kb", "营业收入", k=2)
             assert len(results) >= 1
-            # 结果应包含 bm25_score 字段
-            assert results[0].bm25_score is not None
+            # 结果应包含 lexical_score 字段
+            assert results[0].lexical_score is not None
 
     def test_search_unknown_kb(self):
         """搜索不存在的知识库应返回空列表。"""
@@ -65,7 +65,7 @@ class TestBM25Index:
             hits = index.search("test_kb", "营业收入", k=5)
             assert len(hits) >= 1
             assert hits[0].id == "doc1:0"
-            assert hits[0].bm25_score is not None
+            assert hits[0].lexical_score is not None
 
     def test_rebuild_empty_deletes_index(self):
         """空结果重建应删除已有索引（Chroma 空库场景），再检索返回空。"""
@@ -156,3 +156,26 @@ class TestRRFFusionMulti:
         merged = rrf_fusion_multi([g1, g2, g3], k=60, top_n=5)
         assert merged[0].id in ("id1", "id2")  # 两路命中的排前
         assert {c.id for c in merged} == {"id1", "id2", "id3"}
+
+
+def test_fusion_preserves_path_ranks():
+    """融合只按 RRF 重排，不抹掉分路排名（来源可辨）。"""
+    from src.infra.db.vector_store.types import ChunkResult
+    from src.infra.search.bm25_index import rrf_fusion
+
+    dense = [
+        ChunkResult(id="a", content="A", distance=0.1, dense_rank=0),
+        ChunkResult(id="b", content="B", distance=0.2, dense_rank=1),
+    ]
+    sparse = [
+        ChunkResult(id="b", content="B", lexical_score=9.0, sparse_rank=0),
+        ChunkResult(id="c", content="C", lexical_score=8.0, sparse_rank=1),
+    ]
+    fused = rrf_fusion(dense, sparse)
+    by_id = {r.id: r for r in fused}
+    assert by_id["a"].dense_rank == 0
+    assert by_id["b"].dense_rank == 1
+    assert (
+        by_id["b"].sparse_rank == 0
+    )  # 先见的那条即 dense 里的对象，sparse 排名不因融合而丢失
+    assert by_id["c"].sparse_rank == 1

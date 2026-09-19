@@ -34,7 +34,7 @@ def _cr(content, cid="c1") -> ChunkResult:
                 "id": cid,
                 "distance": 0.3,
                 "metadata": {},
-                "bm25_score": None,
+                "lexical_score": None,
             },
         )(),
     )
