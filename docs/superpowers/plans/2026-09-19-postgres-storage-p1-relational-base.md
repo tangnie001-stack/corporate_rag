@@ -2071,17 +2071,18 @@ P1 验收通过前不要 docker compose down -v / docker volume prune。"
 > **⚠ 端点路径以本节为准（Task 10 执行时实测修正；下面各 Step 的 curl 里若与本节冲突，以本节为准）。**
 > 计划初稿里的 `/api/kb`、`/api/documents/upload`、`GET /api/documents`、`DELETE ...` **都不存在**。实测真实路径：
 >
-> | 动作 | 真实端点 |
+> | 动作 | 真实端点（**全部是 `POST`**，已对 `src/api/*.py` 的路由装饰器核实） |
 > |---|---|
 > | 登录（不存在则自动注册） | `POST /api/auth/login`，body `{"account","password"}` → `data.token` |
-> | 建知识库 | `POST /api/kbs` |
-> | 上传文档 | `POST /api/kbs/documents/upload` |
-> | 列文档 / 查状态 | `GET /api/kbs/documents/list`、`GET /api/kbs/documents/status` |
-> | 删文档 | `POST /api/kbs/documents/delete` |
+> | 建知识库 | `POST /api/kbs`（201） |
+> | 列知识库 | `POST /api/kbs/list` |
 > | 删知识库 | `POST /api/kbs/delete` |
+> | 上传文档 | `POST /api/kbs/documents/upload`（202） |
+> | 列文档 / 查状态 / 分块 | `POST /api/kbs/documents/list`、`/status`、`/chunks` |
+> | 删文档 | `POST /api/kbs/documents/delete` |
 > | 提问（流式） | `POST /api/chat/stream`，body 用 **`query`** + `session_id`（**没有** `message` 字段） |
 >
-> 全部经 nginx，前缀 `http://localhost`。
+> 全部经 nginx，前缀 `http://localhost`。**注意这些是 POST 而非 RESTful 的 GET/DELETE** —— 计划初稿按 REST 猜的，全错。
 
 **Files:**
 - 无代码改动（只读验证）；结果记入本任务提交信息
