@@ -15,8 +15,10 @@ import argparse
 import asyncio
 import os
 import sys
+from collections.abc import AsyncIterator, Sequence
+from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import Row, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # 直接以 `python scripts/rewrite_content_seg.py` 运行时 sys.path[0] 是 scripts/，
@@ -46,10 +48,17 @@ def is_stale(content: str, content_seg: str) -> bool:
     return content_seg != to_lexical_text(content)
 
 
-async def check(session: AsyncSession) -> tuple[int, int]:
-    """只读比对，返回 (总行数, 过期行数)。"""
-    total = 0
-    stale = 0
+async def _iter_batches(
+    session: AsyncSession,
+) -> AsyncIterator[Sequence[Row[Any]]]:
+    """按 id 顺序逐批产出待比对的 (id, content, content_seg) 行。
+
+    Args:
+        session: 数据库会话
+
+    Yields:
+        每批至多 BATCH_SIZE 行的行集合，读完为止
+    """
     offset = 0
     while True:
         result = await session.execute(
@@ -61,39 +70,38 @@ async def check(session: AsyncSession) -> tuple[int, int]:
         rows = result.all()
         if not rows:
             break
+        yield rows
+        offset += len(rows)
+
+
+async def check(session: AsyncSession) -> tuple[int, int]:
+    """只读比对，返回 (总行数, 过期行数)。"""
+    total = 0
+    stale = 0
+    async for rows in _iter_batches(session):
         total += len(rows)
         for _id, content, content_seg in rows:
             if is_stale(content, content_seg):
                 stale += 1
-        offset += len(rows)
     return total, stale
 
 
 async def apply(session: AsyncSession) -> int:
     """逐批重写过期行的检索文本，返回改写行数。"""
     rewritten = 0
-    offset = 0
-    while True:
-        result = await session.execute(
-            select(ChunkModel.id, ChunkModel.content, ChunkModel.content_seg)
-            .order_by(ChunkModel.id)
-            .offset(offset)
-            .limit(BATCH_SIZE)
-        )
-        rows = result.all()
-        if not rows:
-            break
+    async for rows in _iter_batches(session):
         for _id, content, content_seg in rows:
-            if not is_stale(content, content_seg):
+            # 每行只分词一次：既用于判定过期，也用于写入值
+            content_seg_new = to_lexical_text(content)
+            if content_seg == content_seg_new:
                 continue
             await session.execute(
                 update(ChunkModel)
                 .where(ChunkModel.id == _id)
-                .values(content_seg=to_lexical_text(content))
+                .values(content_seg=content_seg_new)
             )
             rewritten += 1
         await session.commit()
-        offset += len(rows)
     return rewritten
 
 
@@ -120,7 +128,10 @@ def main() -> None:
     group.add_argument("--check", action="store_true", help="只读比对，过期则退出码 1")
     group.add_argument("--apply", action="store_true", help="逐批重写过期行")
     args = parser.parse_args()
-    mode = "check" if args.check else "apply"
+    if args.check:
+        mode = "check"
+    else:
+        mode = "apply"
     code = asyncio.run(run_and_dispose(_main(mode)))
     sys.exit(code)
 
