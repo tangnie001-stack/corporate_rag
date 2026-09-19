@@ -143,6 +143,12 @@ def build_rows(
 
 def row_to_chunk_row(model) -> ChunkRow:
     """把 ChunkModel（或任何具备同名属性的对象）转成 ChunkRow。"""
+    embedding = None
+    if model.embedding is not None:
+        embedding = list(model.embedding)
+    extra = {}
+    if model.extra is not None:
+        extra = dict(model.extra)
     return ChunkRow(
         id=model.id,
         kb_id=model.kb_id,
@@ -151,10 +157,10 @@ def row_to_chunk_row(model) -> ChunkRow:
         chunk_total=model.chunk_total,
         content=model.content,
         content_seg=model.content_seg,
-        embedding=list(model.embedding) if model.embedding is not None else None,
+        embedding=embedding,
         source=model.source,
         page=model.page,
-        extra=dict(model.extra or {}),
+        extra=extra,
     )
 
 

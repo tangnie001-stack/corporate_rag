@@ -1,11 +1,14 @@
 """metadata 回填契约的单测 —— 不碰数据库、不碰 Chroma。"""
 
+import pytest
+
 from src.chunking.validator import ChunkData
 from src.infra.db.vector_store.mapping import (
     CONTRACT_KEYS,
     ChunkRow,
     build_rows,
     row_to_chunk_result,
+    row_to_chunk_row,
     split_metadata,
 )
 
@@ -121,3 +124,68 @@ def test_row_to_chunk_result_column_wins_on_conflict():
     assert result.metadata["source"] == "列里的.pdf"
     assert result.metadata["page"] == 1
     assert result.metadata["doc_id"] == "doc1"
+
+
+class _FakeChunkModel:
+    """鸭子类型的 ChunkModel 替身：只需具备同名属性。"""
+
+    def __init__(self, **kwargs):
+        self.id = kwargs.get("id", "doc1:0")
+        self.kb_id = kwargs.get("kb_id", "kb1")
+        self.doc_id = kwargs.get("doc_id", "doc1")
+        self.chunk_index = kwargs.get("chunk_index", 0)
+        self.chunk_total = kwargs.get("chunk_total", 1)
+        self.content = kwargs.get("content", "正文")
+        self.content_seg = kwargs.get("content_seg", "正文")
+        self.embedding = kwargs.get("embedding", [0.0] * 1024)
+        self.source = kwargs.get("source", "a.pdf")
+        self.page = kwargs.get("page", 1)
+        self.extra = kwargs.get("extra", {"parent_content": "P"})
+
+
+def test_row_to_chunk_row_maps_all_fields():
+    """ORM 模型 → ChunkRow：11 个字段逐个对上（鸭子类型，属性名即契约）。"""
+    row = row_to_chunk_row(_FakeChunkModel())
+    assert isinstance(row, ChunkRow)
+    assert (row.id, row.kb_id, row.doc_id) == ("doc1:0", "kb1", "doc1")
+    assert (row.chunk_index, row.chunk_total) == (0, 1)
+    assert (row.content, row.content_seg) == ("正文", "正文")
+    assert (row.source, row.page) == ("a.pdf", 1)
+    assert row.extra == {"parent_content": "P"}
+    assert row.embedding is not None and len(row.embedding) == 1024
+
+
+def test_row_to_chunk_row_handles_none_embedding_and_none_extra():
+    """两个 None 分支：embedding 为 None 时保持 None；extra 为 None 时给空 dict。"""
+    row = row_to_chunk_row(_FakeChunkModel(embedding=None, extra=None))
+    assert row.embedding is None
+    assert row.extra == {}
+
+
+def test_build_rows_rejects_length_mismatch():
+    """chunks 与 embeddings 数量不一致必须抛 ValueError（docstring 已声明的 Raises）。"""
+    chunks = [ChunkData(content="只有一个", metadata={}, chunk_id="a:0")]
+    with pytest.raises(ValueError):
+        build_rows("kb1", "doc1", chunks, [])
+
+
+def test_split_metadata_drops_all_five_contract_keys():
+    """5 个契约键全部从 extra 剔除（doc_id/chunk_index/chunk_total 以参数为准）。"""
+    split = split_metadata(
+        {
+            "doc_id": "x",
+            "chunk_index": 1,
+            "chunk_total": 2,
+            "source": "a.pdf",
+            "page": 3,
+            "keep": "me",
+        }
+    )
+    assert split.extra == {"keep": "me"}
+
+
+def test_split_metadata_page_none_and_bool_become_zero():
+    """page 为 None / bool 时归零（bool 是 int 子类，必须先判）。"""
+    assert split_metadata({"page": None}).page == 0
+    assert split_metadata({"page": True}).page == 0
+    assert split_metadata({"page": False}).page == 0
