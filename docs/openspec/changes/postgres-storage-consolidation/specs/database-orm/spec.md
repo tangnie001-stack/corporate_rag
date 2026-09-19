@@ -50,7 +50,7 @@
 #### Scenario: 所有引用方同步更新
 
 - **WHEN** 完成搬迁
-- **THEN** `rag/retrieval.py`、`infra/db/vector_store/__init__.py`、`infra/db/vector_store/search.py`、`agents/graph/state.py`、`services/app_service.py` 的 import 路径 SHALL 同步更新
+- **THEN** `rag/retrieval.py`、`infra/search/bm25_index.py`、`infra/db/vector_store/__init__.py`、`infra/db/vector_store/pg_store.py`、`agents/graph/state.py`、`services/app_service.py` 的 import 路径 SHALL 同步更新
 
 #### Scenario: 分路排名字段可读
 

@@ -50,9 +50,9 @@
 
 ### 入库前过滤 null / 非标量实体值
 
-**现象**：null 或 list/dict 等非标量实体值写入分块 metadata（现为 `chunks.metadata` jsonb 列）时，写入或读取失败。
+**现象**：null 或 list/dict 等非标量实体值写入分块 metadata（`chunks.metadata` jsonb 列）时，写入或读取失败。
 
-**规则**：实体值写入向量库 metadata 前，过滤 null 与非标量值；抽取侧也要容错（抽取失败时优雅降级，不阻塞入库）。
+**规则**：实体值写入分块 metadata（`chunks.metadata` jsonb 列）前，过滤 null 与非标量值；抽取侧也要容错（抽取失败时优雅降级，不阻塞入库）。
 
 ### 标题/实体解析必须有 fallback 链
 
