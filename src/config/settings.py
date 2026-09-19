@@ -240,6 +240,10 @@ HYBRID_SEARCH_ENABLED: bool = (
 )
 # BM25 索引持久化根目录（每个知识库独立子目录）
 BM25_INDEX_DIR: str = os.getenv("BM25_INDEX_DIR", "data/bm25_index")
+# RRF 融合的平滑常数：控制排名权重衰减速度（沿用替换前的取值）
+RRF_K: int = int(os.getenv("RRF_K", "60"))
+# RRF 融合后保留条数：交给下游按 doc_id 去重与 rerank 截断
+RRF_TOP_N: int = int(os.getenv("RRF_TOP_N", "50"))
 
 # ====== 对话管理 ======
 # 对话历史窗口大小：取最近 N 条消息作为 LLM 的上下文，避免 token 溢出

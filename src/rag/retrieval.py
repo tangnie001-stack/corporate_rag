@@ -7,6 +7,8 @@ from src.config import (
     RETRY_BACKOFF_FACTOR,
     RETRY_INITIAL_INTERVAL,
     RETRY_MAX_ATTEMPTS,
+    RRF_K,
+    RRF_TOP_N,
     TOP_K_RERANK,
     TOP_K_RETRIEVAL,
     settings,
@@ -22,9 +24,10 @@ from src.core.logging import log_event
 from src.infra.db.vector_store import VectorStore
 from src.infra.db.vector_store.types import ChunkResult
 from src.infra.llm.chat_message import ChatMessage
-from src.infra.search.bm25_index import BM25Index, rrf_fusion
+from src.infra.search.bm25_index import BM25Index
 from src.models import with_retry
 from src.rag.context import RAGContext
+from src.rag.fusion import rrf_fusion
 
 # 全部实体键（核心 + 可选），rerank 透传时从 chunk.metadata 读取
 _ALL_ENTITY_KEYS: tuple[str, ...] = tuple(ENTITY_TYPES) + tuple(ENTITY_OPTIONAL_TYPES)
@@ -83,7 +86,7 @@ async def search(
         dense_coro = vector_store.dense_search(kb_id, query, TOP_K_RETRIEVAL)
         bm25_coro = asyncio.to_thread(bm25.search, kb_id, query, TOP_K_RETRIEVAL)
         d, b = await asyncio.gather(dense_coro, bm25_coro)
-        results = rrf_fusion(d or [], b or [])
+        results = rrf_fusion(d or [], b or [], k=RRF_K, top_n=RRF_TOP_N)
         log_event(
             Event.HYBRID_DONE,
             kb_id=kb_id,
