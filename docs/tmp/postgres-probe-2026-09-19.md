@@ -49,9 +49,11 @@
 - pgvector `default_version` = **0.8.6**，`CREATE EXTENSION vector` 后 `extversion` = **0.8.6**
 - `pg_available_extensions` 中与本变更相关者**只有两个**：`vector` 0.8.6、`pg_trgm` 1.6
   → **无** `zhparser` / `pg_jieba` / `pg_bigm` / `pg_search`
-- 推论：**本地 dev 无法验证任何 PG 分词扩展**。若探针要对照 `zhparser`/`pg_bigm`，只能在 RDS 上做；`pg_trgm` 是本地唯一可对照项。
+- 推论：**本地 dev 无法验证任何 PG 分词扩展**；`pg_trgm` 是本地唯一可对照项。`zhparser`/`pg_bigm` 的对照验证落在生产 RDS，属**遗留项**（本轮不执行）。
 
-**RDS（待用户执行）**
+**RDS（遗留项，本轮不执行）**
+
+RDS 侧的扩展清单核查与 `ALTER EXTENSION vector UPDATE` 升级，按用户 2026-09-19 决定**移出本轮范围、登记为遗留项**；本轮只做本地，不连接 RDS、不执行下列 SQL。
 
 ```sql
 SELECT name, default_version FROM pg_available_extensions
@@ -60,7 +62,7 @@ SELECT name, default_version FROM pg_available_extensions
 SELECT extversion FROM pg_extension WHERE extname='vector';
 ```
 
-版本对照基线：pgvector 当前 **0.8.6**；HNSW 需 ≥0.5，`hnsw.iterative_scan` 需 ≥0.8。若 RDS 已装则可直接 `ALTER EXTENSION vector UPDATE;` 升级。
+版本对照基线：pgvector 当前 **0.8.6**；HNSW 需 ≥0.5，`hnsw.iterative_scan` 需 ≥0.8。
 
 ## 1.1 `vector` 扩展能否创建 —— 机制与本地权限均已确证
 
@@ -82,7 +84,7 @@ SELECT extversion FROM pg_extension WHERE extname='vector';   -- 0.8.6
 → 值域 0~2，与 Chroma cosine distance 一致；`rag_tools.py:168` / `retrieval.py:157-158` 的
 `score = 1 - distance` 契约**无需修改即成立**。
 
-**RDS 侧**：按用户 2026-09-19 的决定，RDS 本项**移出本轮范围、登记为遗留项**（本轮只做本地）。
+**RDS 侧**：本仓库无 RDS 连接配置，故未验证（`.env` 仅有 `MYSQL_*` 与 `LANGFUSE_POSTGRES_PASS`）。按用户 2026-09-19 的决定，RDS 本项**移出本轮范围、登记为遗留项**（本轮只做本地）。
 本地权限结论见下方「扩展创建权限归属（本地，2026-09-19）」小节。
 
 ### 扩展创建权限归属（本地，2026-09-19）
@@ -116,7 +118,7 @@ docker rm -f pgcheck
 
 - **扩展只能由超级用户创建**：`vector` 未声明 trusted，应用账号即使拥有业务库、且库已装扩展，也不能自行 `CREATE EXTENSION`。
 - **迁移不建扩展、只做前置断言**：应用账号执行迁移时只校验 `vector` 已存在（查 `pg_extension`），不执行 `CREATE EXTENSION`；扩展由 compose 初始化脚本以超级用户（`POSTGRES_USER`）建立（Task 4）。
-- **RDS 侧同项已改为遗留项**：本轮范围只做本地，RDS 的扩展权限与清单不再阻塞本计划。
+- **RDS 本项为遗留项**：本轮只做本地；RDS 的扩展权限与清单不阻塞本计划。
 
 ## 1.4 prod 与 dev 是否不同机 —— 比"互污"更硬的结论
 
