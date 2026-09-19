@@ -13,7 +13,7 @@
 |------|------|
 | `src/` | 后端 Python 源码（分层见下） |
 | `tests/` | 单元测试，与 `src/` 模块一一对应 |
-| `deploy/` | 部署件：`nginx/`（反向代理 + 前端静态文件）、各中间件 Dockerfile（postgres/chroma/clickhouse） |
+| `deploy/` | 部署件：`nginx/`（反向代理 + 前端静态文件）、`chroma/Dockerfile`、`postgres/init/` 建库脚本、`clickhouse/` 集群配置、`wait-for-it.sh` |
 | `deploy/nginx/html/` | **前端页面静态文件**（chat.html / index.html / login.html 等） |
 | `skills/` | 运行时 skill 内容库（`<name>/SKILL.md`，业务侧管理，compose volume 挂载进容器 `/app/skills`） |
 | `agents/` | **智能体预设内容库**（`<name>.md` 平坦文件，业务侧管理；见下方「三个 `agents` 的区别」） |

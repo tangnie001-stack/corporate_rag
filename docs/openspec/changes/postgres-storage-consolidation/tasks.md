@@ -4,7 +4,7 @@
 >
 > | 阶段 | 计划文件 | 范围 | 状态 |
 > |---|---|---|---|
-> | **P1** | `docs/superpowers/plans/2026-09-19-postgres-storage-p1-relational-base.md` | PostgreSQL 关系型底座：配置 → compose PG 服务 → alembic baseline（8 表 + pgvector 扩展）→ 合并 ORM → 统一 `ChunkData` → 引擎切 asyncpg → repo 幂等写入 → 退役 MySQL → 文档收尾 | **已完成**（收口 commit `0535c56`） |
+> | **P1** | `docs/superpowers/plans/2026-09-19-postgres-storage-p1-relational-base.md` | PostgreSQL 关系型底座：配置 → compose PG 服务 → alembic baseline（8 表 + pgvector 扩展）→ 合并 ORM → 统一 `ChunkData` → 引擎切 asyncpg → repo 幂等写入 → 退役 MySQL → 文档收尾 | **已完成**（收口 `0535c56`，hash 回填与补正见其后续提交） |
 > | P2 | （待 P1 落地后编写） | `vector_store/` 换 pgvector、`ChunkResult.metadata` 回填契约、删除 `similarity_search_all`、Chroma→PG 数据搬迁、dense 迁移等价性验收 | 未编写 |
 > | P3 | （待 P2 落地后编写） | jieba 分词入口 + 查询串构造与转义 + `tsv` 生成列 + 词项命中探针选型 + `rrf_fusion` 迁移 + 删除 `bm25_index.py` | 未编写 |
 > | P4 | （待 P3 落地后编写） | 入库/删除两条路径同事务 + 故障注入验收 + 依赖与卷清理 + prod compose 与 dev 同构（**不指向 RDS、不安装**）+ 文档与 ADR + 归档 | 未编写 |

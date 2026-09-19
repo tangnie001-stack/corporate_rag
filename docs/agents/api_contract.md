@@ -716,16 +716,22 @@ Success:
 
 ## 3. 接口层：AppService ↔ Repo 层
 
-### 3.1 `Repo 层.get_all_kb() → list[tuple[str, str]]`
+### 3.1 `KbRepo.get_all_kb() → list[KbModel]`
 
-| 元组位置 | 列名 | 类型 |
-|----------|------|------|
-| `[0]` | `kb_id` | UUID 字符串 |
-| `[1]` | `kb_name` | VARCHAR(255) |
+| 属性 | 类型 | 说明 |
+|------|------|------|
+| `id` | str | 知识库 UUID |
+| `user_id` | str | 所属用户 UUID |
+| `name` | str | 知识库名称 |
+| `description` | str | 描述，可为空字符串 |
+| `doc_count` | int | 未删除文档数；**每次查询由子查询实时统计并覆盖**，不读静态列（该列无维护逻辑） |
+| `is_deleted` | int | 软删除标志：`0` 活跃 / `1` 已删 |
+| `created_at` | datetime | 创建时间（UTC） |
+| `updated_at` | datetime | 更新时间（UTC） |
 
 ⚠️ 返回顺序按 `created_at DESC`。调用方不要假设按名称排序。
 
-### 3.2 `Repo 层.get_documents(kb_id) → list[dict]`
+### 3.2 `DocumentRepo.get_documents(kb_id) → list[dict]`
 
 | 键 | 类型 | 说明 |
 |----|------|------|
@@ -738,18 +744,18 @@ Success:
 | `error_msg` | str \| None | 处理失败时的错误信息 |
 | `meta_info` | str \| None | JSON 字符串，含 `eval` 评估数据 |
 
-### 3.3 `Repo 层.delete_kb(kb_id) → bool`
+### 3.3 `KbRepo.delete_kb(kb_id) → bool`
 
 CASCADE 级联删除：知识库 → 文档 → 对话历史。
 
 ⚠️ 调用方必须同时调用 `VectorStore.delete_collection()` 清理向量数据，
 Repo 层不感知 ChromaDB。
 
-### 3.4 `Repo 层.update_document_status(doc_id, status, chunk_count=0, error_msg="") → None`
+### 3.4 `DocumentRepo.update_document_status(doc_id, status, chunk_count=0, error_msg="") → None`
 
 更新文档处理状态。由 `_process_document` 后台任务调用。
 
-### 3.5 `Repo 层.update_document_meta_info(doc_id, meta_info) → None`
+### 3.5 `DocumentRepo.update_document_meta_info(doc_id, meta_info) → None`
 
 更新文档的 `meta_info` JSON 列（存储分块评估结果）。由 `_process_document_task` 在分块质量评估后调用。
 
@@ -757,7 +763,7 @@ Repo 层不感知 ChromaDB。
 |------|------|------|
 | `meta_info` | dict | 写入 JSON 列的字典，评估结果放在 `{"eval": {...}}` 下 |
 
-### 3.6 `Repo 层.insert_eval_report(report) → None`
+### 3.6 `EvalRepo.insert_eval_report(report) → None`
 
 插入一条 RAGAS 评估报告。表结构由 alembic baseline 统一创建（`alembic/versions/0001_pg_baseline.py`），插入路径不再自动建表。
 
@@ -775,7 +781,7 @@ Repo 层不感知 ChromaDB。
 | `report.report_path` | str\|null | CSV 报告路径 |
 | `report.detail_json` | list\|null | 逐条 QA 得分 `[{"q_index":0, "faithfulness":0.95}, ...]` |
 
-### 3.7 `Repo 层.get_latest_eval_report(kb_id) → dict | None`
+### 3.7 `EvalRepo.get_latest_eval_report(kb_id) → dict | None`
 
 获取知识库最新的 RAGAS 评估报告。按 `eval_date DESC LIMIT 1` 查询。
 
