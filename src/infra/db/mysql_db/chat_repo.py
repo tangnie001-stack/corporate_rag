@@ -3,7 +3,7 @@
 import json
 
 from sqlalchemy import delete, func, select, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from src.infra.db.models.chat import MessageModel, SessionModel
 from src.infra.db.models.feedback import FeedbackModel
@@ -20,28 +20,27 @@ class ChatRepo:
         """session: 带 .id .user_id .title .kb_id .agent 属性的对象。
 
         幂等：同一 session_id 已存在（多轮对话重复持久化）时静默跳过，
-        不抛主键冲突异常。
+        不再依赖捕获主键冲突异常。
         """
+        agent = session.agent
+        if agent is None:
+            agent = ""
+
         async with self._sf() as s:
-            try:
-                agent = session.agent
-                if agent is None:
-                    agent = ""
-                s_obj = SessionModel(
+            stmt = (
+                pg_insert(SessionModel)
+                .values(
                     id=session.id,
                     user_id=session.user_id,
                     title=session.title,
                     kb_id=session.kb_id,
                     agent=agent,
                 )
-                s.add(s_obj)
-                await s.commit()
-            except IntegrityError:
-                await s.rollback()
-                existing = await s.get(SessionModel, session.id)
-                if existing is None:
-                    raise
-                # 已存在 → 幂等跳过（首轮已创建，多轮对话不重复插入）
+                # 已存在 → 保留原行，不改任何列（与改写前"静默跳过"等价）
+                .on_conflict_do_nothing(index_elements=[SessionModel.id])
+            )
+            await s.execute(stmt)
+            await s.commit()
 
     async def bind_session_agent(self, session_id: str, agent: str) -> bool:
         """首次绑定会话智能体（bind-once）：仅当当前绑定为空时写入。
@@ -89,7 +88,15 @@ class ChatRepo:
                 stmt = stmt.where(SessionModel.user_id == user_id)
 
             stmt = (
-                stmt.group_by(SessionModel.id)
+                stmt.group_by(
+                    SessionModel.id,
+                    SessionModel.title,
+                    SessionModel.kb_id,
+                    SessionModel.agent,
+                    SessionModel.created_at,
+                    SessionModel.updated_at,
+                    KbModel.name,
+                )
                 .order_by(SessionModel.updated_at.desc())
                 .limit(50)
             )

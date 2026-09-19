@@ -16,6 +16,17 @@ class KbRepo:
     async def get_or_create_kb(
         self, user_id: str, name: str, description: str = ""
     ) -> tuple[str, bool]:
+        """按 (user_id, name) 取或建知识库。
+
+        三态语义（返回值被 kb_service 消费，不可随意改）：
+        - 新建 → (新 id, True)
+        - 同名但被软删 → 复活原记录，返回 (原 id, True)
+        - 同名且活跃 → (原 id, False)
+
+        实现仍走"插入撞唯一键 → 回滚 → 回读"：三态用 ON CONFLICT DO UPDATE 表达不了
+        （RETURNING 只能看到更新后的行，无法区分"原本活跃"与"刚被复活"），
+        强行改写会改掉返回值语义。
+        """
         async with self._sf() as session:
             try:
                 kb = KbModel(user_id=user_id, name=name, description=description)
