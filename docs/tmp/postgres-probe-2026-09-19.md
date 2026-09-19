@@ -85,6 +85,39 @@ SELECT extversion FROM pg_extension WHERE extname='vector';   -- 0.8.6
 **RDS 侧仍未确认**：`CREATE EXTENSION` 通常要求高权限账号。仓库内**没有任何 RDS 连接配置**
 （`.env` 只有 `MYSQL_*` 与该实例相关的 `LANGFUSE_POSTGRES_PASS`），故无法代理验证。
 
+### 扩展创建权限归属（本地，2026-09-19）
+
+本地（`pgvector/pgvector:pg15`，docker）一次性容器复现确证：
+
+| 项 | 实测 |
+|---|---|
+| `vector` 的 `trusted`（`pg_available_extension_versions`） | **f**（非 trusted） |
+| 应用账号（业务库属主、非超级用户）`CREATE EXTENSION vector` | `ERROR: permission denied to create extension "vector"` / `HINT: Must be superuser to create this extension.` |
+| compose 的 `POSTGRES_USER`（`langfuse`）`rolsuper` | **t**；可 `CREATE EXTENSION vector`，`extversion` = **0.8.6** |
+| 建后应用账号使用扩展 | 可建含 `vector(1024)` 列的表、插入、`<=>` 排序并返回距离 |
+
+复现（本地一次性容器，`probe`/`x` 为该容器临时占位值；`langfuse` 的建角色/建库须分两条 `-c` 执行，同一 `-c` 内的多语句会包在事务里导致 `CREATE DATABASE` 报错）：
+
+```bash
+docker run -d --name pgcheck -e POSTGRES_USER=langfuse -e POSTGRES_PASSWORD=probe \
+  pgvector/pgvector:pg15
+sleep 3
+docker exec pgcheck psql -U langfuse -d langfuse -c "SELECT rolname, rolsuper FROM pg_roles WHERE rolname='langfuse';"
+docker exec pgcheck psql -U langfuse -d langfuse -c "CREATE ROLE app LOGIN PASSWORD 'x';"
+docker exec pgcheck psql -U langfuse -d langfuse -c "CREATE DATABASE appdb OWNER app;"
+docker exec pgcheck psql -U app -d appdb -c "CREATE EXTENSION vector;"        # 预期被拒
+docker exec pgcheck psql -U langfuse -d appdb -c "CREATE EXTENSION vector;"
+docker exec pgcheck psql -U app -d appdb -c \
+  "CREATE TABLE t (id int, e vector(1024));"                                  # 预期成功
+docker rm -f pgcheck
+```
+
+结论：
+
+- **扩展只能由超级用户创建**：`vector` 未声明 trusted，应用账号即使拥有业务库、且库已装扩展，也不能自行 `CREATE EXTENSION`。
+- **迁移不建扩展、只做前置断言**：应用账号执行迁移时只校验 `vector` 已存在（查 `pg_extension`），不执行 `CREATE EXTENSION`；扩展由 compose 初始化脚本以超级用户（`POSTGRES_USER`）建立（Task 4）。
+- **RDS 侧同项已改为遗留项**：本轮范围只做本地，RDS 的扩展权限与清单不再阻塞本计划。
+
 ## 1.4 prod 与 dev 是否不同机 —— 比"互污"更硬的结论
 
 两份 compose 的以下标识**完全相同**：
