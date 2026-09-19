@@ -500,6 +500,7 @@ def main() -> None:
 
     from src.agents.graph.workflow import build_graph
     from src.config import BM25_INDEX_DIR, HYBRID_SEARCH_ENABLED
+    from src.infra.db.engine import run_and_dispose
     from src.infra.db.vector_store import VectorStore
     from src.infra.llm.prompt_manager import PromptManager
     from src.infra.search.bm25_index import BM25Index
@@ -549,7 +550,7 @@ def main() -> None:
 
     core_logging.log_event(Event.VECTOR_STORE_CHECK, kb_id=kb_id)
     core_logging.log_event(Event.ANSWERS_GENERATION, count=len(questions))
-    generated = asyncio.run(_ensure_store_and_generate())
+    generated = asyncio.run(run_and_dispose(_ensure_store_and_generate()))
     if generated is None:
         core_logging.log_event(Event.VECTOR_STORE_EMPTY, kb_id=kb_id)
         print("Knowledge base is empty")
@@ -625,6 +626,7 @@ def _save_eval_report(
             传入后并入对应 detail_json 条目，供低分 query 下钻检索环节
     """
     try:
+        from src.infra.db.engine import run_and_dispose
         from src.infra.db.models.eval_report import EvalReportModel as EvalReportEntity
         from src.services.app_service import AppService
 
@@ -690,7 +692,7 @@ def _save_eval_report(
             )
             await svc.insert_eval_report(entity)
 
-        asyncio.run(_do_insert())
+        asyncio.run(run_and_dispose(_do_insert()))
         core_logging.log_event(Event.EVAL_REPORT_SAVED, kb_id=kb_id)
     except Exception as e:  # noqa: BLE001
         core_logging.log_event(Event.EVAL_SAVE_FAILED, err=str(e))

@@ -312,3 +312,39 @@ class TestAppServiceDeleteDocument:
         svc = AppService(vector_store=vs)
         result = await svc.delete_document("kb", "d1", "user")
         assert result == {"doc_id": "d1", "filename": "t.pdf", "status": "deleted"}
+
+    @pytest.mark.asyncio
+    @patch("src.services.app_service.VectorStore")
+    @patch("src.services.app_service.DocRouter")
+    @patch("src.services.app_service.ChatManager")
+    @patch("src.services.app_service.AgentService")
+    @patch("src.services.app_service.KbRepo")
+    @patch("src.services.app_service.DocumentRepo")
+    @patch("src.services.app_service.ChatRepo")
+    @patch("src.services.app_service.UserRepo")
+    @patch("src.services.app_service.EvalRepo")
+    async def test_delete_document_propagates_vector_failure(
+        self,
+        mock_eval_repo,
+        mock_user_repo,
+        mock_chat_repo,
+        mock_doc_repo,
+        mock_kb_repo,
+        mock_agent,
+        mock_chat_mgr,
+        mock_router,
+        mock_vs,
+    ):
+        """删分块失败必须向上传播，且不得继续软删文档（否则产生永久孤儿分块）。"""
+        mock_doc_repo.return_value.get_document = AsyncMock(
+            return_value=DocEntity(
+                id="d1", kb_id="kb", user_id="user", filename="t.pdf", status="ready"
+            )
+        )
+        mock_doc_repo.return_value.soft_delete_document = AsyncMock(return_value=True)
+        vs = AsyncMock()
+        vs.delete_document.side_effect = RuntimeError("boom")
+        svc = AppService(vector_store=vs)
+        with pytest.raises(RuntimeError):
+            await svc.delete_document("kb", "d1", "user")
+        mock_doc_repo.return_value.soft_delete_document.assert_not_awaited()
