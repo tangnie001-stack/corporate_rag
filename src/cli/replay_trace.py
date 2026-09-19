@@ -17,9 +17,8 @@ import json
 import os
 import re
 
-from src.config import BM25_INDEX_DIR, HYBRID_SEARCH_ENABLED, TOP_K_RERANK, settings
+from src.config import TOP_K_RERANK, settings
 from src.infra.db.vector_store import VectorStore
-from src.infra.search.bm25_index import BM25Index
 from src.models import get_rerank
 from src.rag.context import RAGContext
 from src.rag.retrieval import rerank_results, search
@@ -106,10 +105,10 @@ def _print_snippets(fields: dict, contexts: list[RAGContext]) -> None:
         )
 
 
-async def _replay_all(rows: list[dict], vector_store, bm25, reranker) -> None:
+async def _replay_all(rows: list[dict], vector_store, reranker) -> None:
     """对当前 KB/配置逐行重放检索（Q4：search/rerank 内部读模块常量）。"""
     for fields in rows:
-        results = await search(fields["query"], fields["kb_id"], vector_store, bm25)
+        results = await search(fields["query"], fields["kb_id"], vector_store)
         contexts = rerank_results(fields["query"], results, reranker)
         _print_snippets(fields, contexts)
 
@@ -130,9 +129,8 @@ def main(argv: list[str] | None = None) -> None:
 
     # store/reranker 构造沿用 cli 既有先例（eval_ragas.py 构造段）
     vector_store = VectorStore()
-    bm25 = BM25Index(index_dir=BM25_INDEX_DIR) if HYBRID_SEARCH_ENABLED else None
     reranker = get_rerank()
-    asyncio.run(_replay_all(rows, vector_store, bm25, reranker))
+    asyncio.run(_replay_all(rows, vector_store, reranker))
 
 
 if __name__ == "__main__":

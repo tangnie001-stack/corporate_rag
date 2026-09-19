@@ -499,11 +499,9 @@ def main() -> None:
     )
 
     from src.agents.graph.workflow import build_graph
-    from src.config import BM25_INDEX_DIR, HYBRID_SEARCH_ENABLED
     from src.infra.db.engine import run_and_dispose
     from src.infra.db.vector_store import VectorStore
     from src.infra.llm.prompt_manager import PromptManager
-    from src.infra.search.bm25_index import BM25Index
     from src.models import get_embeddings, get_llm, get_rerank
 
     core_logging.log_event(Event.RAG_COMPONENT_INIT)
@@ -529,8 +527,7 @@ def main() -> None:
 
     # 构建 LangGraph
     prompt_manager = PromptManager()
-    bm25 = BM25Index(index_dir=BM25_INDEX_DIR) if HYBRID_SEARCH_ENABLED else None
-    graph = build_graph(vector_store, bm25, llm, reranker, prompt_manager)
+    graph = build_graph(vector_store, llm, reranker, prompt_manager)
 
     async def _ensure_store_and_generate():
         """空库检查与答案生成共用一个事件循环。

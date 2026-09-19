@@ -170,12 +170,10 @@ async def main() -> None:
     args = parser.parse_args()
 
     from src.agents.graph.workflow import build_graph
-    from src.config import BM25_INDEX_DIR, HYBRID_SEARCH_ENABLED
     from src.infra.db.engine import session_factory
     from src.infra.db.mysql_db import KbRepo
     from src.infra.db.vector_store import VectorStore
     from src.infra.llm.prompt_manager import PromptManager
-    from src.infra.search.bm25_index import BM25Index
     from src.models import get_llm, get_rerank
 
     repo = KbRepo(session_factory)
@@ -192,8 +190,7 @@ async def main() -> None:
     llm = get_llm()
     reranker = get_rerank()
     prompt_manager = PromptManager()
-    bm25 = BM25Index(index_dir=BM25_INDEX_DIR) if HYBRID_SEARCH_ENABLED else None
-    graph = build_graph(vector_store, bm25, llm, reranker, prompt_manager)
+    graph = build_graph(vector_store, llm, reranker, prompt_manager)
 
     print("=" * 90)
     print(f"难样本验收（KB: {args.kb_name}）")
