@@ -406,7 +406,9 @@ to_tsvector('simple','营业收入 同比 增长') @@ plainto_tsquery('simple','
 - **[DSN 在导入期构造 → 缺 `POSTGRES_PASSWORD` 表现为"导入即崩"]** → `engine.py` 是模块级 `DSN = build_postgres_dsn()`，`build_postgres_dsn()` 在密码为空时抛 `RuntimeError`；而该模块在 4 个 CLI、repos、services、存储侧测试的链上。缓解：`.env` 必须先补该变量（`settings.py:22` 的 `load_dotenv()` 使其在仓库根运行时生效）；不改惰性初始化，因为 `engine`/`session_factory` 是模块级单例、5 个 repo 与 4 个 CLI 直接 import，改惰性等于重构装配层，超出本变更范围。
 - **[必填环境变量没有清单]** → 仓库**没有 `.env.example`**，而本变更新增了强制必填的 `POSTGRES_PASSWORD`（compose 用 `${POSTGRES_PASSWORD:?}`）。后果：新克隆的人 `docker compose config` 直接失败且不知道缺什么。缓解：新建 `.env.example` 只列键名（**不含任何真值**），并标注哪些必填。
 - **[`tests/reset_data.py` 是"三合一重置"，易被误改成单库]** → `reset_all()` 同时清 MySQL + 删 Chroma persist 目录 + Redis FLUSHALL。P1 之后 Chroma 与 Redis **仍在使用**（Chroma 到 P4 才退役），只能替换 MySQL 那一段。
-- **[`reset_data.py` 的 TRUNCATE 范围被"顺手扩大"]** → 现状只清 `conversation_history` / `document` / `knowledge_base`，**刻意不碰 `users`**（清了就没法登录，测试依赖 `.env` 的 `TEST_ACCOUNT`）。缓解：范围保持不变，只补新增的 `chunks`（同域派生数据）；并借机修掉 `__main__` 块里那个早已过时的容器名（`financial-qa-mysql`）。
+- **[`reset_data.py` 的 TRUNCATE 范围被"顺手扩大"]** → 现状只清 `conversation_history` / `document` / `knowledge_base`，**刻意不碰 `users`** —— 清了就登不进 dev 界面（凭据是 `.env` 的 `TEST_ACCOUNT`/`TEST_PASSWORD`，`docs/agents/cookbook.md:92` 用它做手工 API 调试；**全仓 `.py` 零引用，不是自动化测试依赖**）。缓解：范围保持不变，只补新增的 `chunks`（同域派生数据）；并借机修掉 `__main__` 块里那个早已过时的容器名（`financial-qa-mysql`）。
+- **["测试全绿"被当成"链路通了"]** → 11 个存储侧测试只覆盖 **repo 层**；登录、建库、上传、检索、引用渲染是跨层路径，而换引擎的残余风险正是"某个没被测到的查询依赖了 MySQL 的语义差异"（`is_deleted` 整数比较、时间戳精度、`ORDER BY` 空值位置、`LIKE` 大小写、`onupdate` 由 ORM 而非数据库触发器提供）。缓解：Migration Plan 第 8b 步强制一次真实 E2E 冒烟，并逐条核对上述嫌疑点。
+- **[P1 后 dev 环境"看起来变空"被误判为迁移失败]** → PG 是全新库：知识库/文档/会话历史都为空；`users` 也为空但**登录会自动注册**（`src/api/auth.py:38-41`），因此不需要 seed 账号；注册会分配新的 `user_id`，旧归属关系本就不再适用。缓解：在实施计划里写一段"P1 结束时你会看到什么"，把预期与故障区分开；并明确"检索结果若与 P1 之前不同，那是回归"（P1 不改检索逻辑，Chroma 与 BM25 原样）。
 - **[prod 的 Chroma 无持久化挂载]**（1.4 顺带发现，既有缺陷）→ prod 的 `app` 只挂 `app_logs`/`chroma_onnx_cache`/`./skills`/`./agents`，**没有 `./data`** → prod 的 Chroma 落在容器可写层，容器重建即丢。本变更"删除 Chroma"会一并消除它；须在 proposal/ADR 里写明这是**既有缺陷被本变更顺带修掉**，以免被误认为新引入。
 - **[双套 ORM 合并时漏字段]** → `agent`/`process` 两列只存在于运行时那套。缓解：以 `src/infra/db/models/` 为准，合并后用一条断言对照两张表的列集合。
 - **[切换无并行验证]** → 数据可丢，故不设双写/影子读；但 **Chroma 数据须保留到 dense 等价性验证通过**（冻结只读、不再写入）。"数据可丢"指不需要为业务连续性保留，不是要提前删。
@@ -435,6 +437,9 @@ to_tsvector('simple','营业收入 同比 增长') @@ plainto_tsquery('simple','
 6. **compose 改造**：dev 的 `postgres` 去 profile 门、换镜像、上调内存、`app` 加 `depends_on: postgres(service_healthy)`；退役 MySQL 服务与 Chroma/BM25 的卷。
 7. **事务化验收（故障注入）**：在 `INSERT chunks` 与 `UPDATE document` 之间注入异常，确认**两者都不落库**；同法验证删除路径（删分块失败时文档 SHALL NOT 被软删）。
 8. **prod compose 与 dev 同构（本轮只改文件，不安装）**：`docker-compose.prod.yml` 换 pgvector 镜像、去 MySQL 服务、加应用库与账号、`app` 依赖 postgres、补 `POSTGRES_*`；**继续用本地 PG 实例，不指向 RDS**。写入"prod 与 dev 不同机"前置（两份 compose 的项目名/容器名/卷名全同，同机不可共存）。**RDS 托管化、RDS 扩展清单与权限、连接预算作为实例规格输入 —— 全部登记为遗留，另案处理。**
+8b. **在 PostgreSQL 上跑一次真实 E2E 冒烟（不可省）**：登录 → 建知识库 → 上传文档并到 `ready` → 提一个只有该文档能回答的问题 → 看到引用与来源。随后逐条核对**换引擎最可能改变的语义点**：`is_deleted` 的整数比较、消息按 `created_at` 的时序（PG 是微秒、MySQL 是秒）、`ORDER BY` 的空值位置（PG `ASC` 默认 NULLS LAST）、`LIKE` 的大小写敏感性、`updated_at` 的 `onupdate`（PG 靠 ORM 侧，不是数据库触发器）。
+   **为什么这条不能由测试替代**：11 个存储侧测试只覆盖 **repo 层**；登录、建库、上传、检索、引用渲染是**跨层**路径，而本变更的残余风险恰好是"某个没被测到的查询依赖了 MySQL 的语义差异"。**这类缺陷只有走完整链路才会暴露。**
+   **不需要 seed 账号**：`/auth/login` 在账号不存在时会先自动注册（`src/api/auth.py:38-41`），空 `users` 表下用 `TEST_ACCOUNT` 直接登录即可。
 9. **清理收尾**：删依赖（`chromadb` / `rank_bm25` / `aiomysql`）、删 `data/chroma_persist` 与 `data/bm25_index`、删 `deploy/chroma/Dockerfile`（未被任何 compose 引用）、`deploy/mysql/init` → `deploy/postgres/init`；更新 `code-map.md` / `api_contract.md` / `data-flow.md` / `glossary.md` / `defensive-patterns.md`；写 ADR（存储收敛 + 融合位置 + **共享实例的四条运维后果**，见 D1）。
 
 **回滚**

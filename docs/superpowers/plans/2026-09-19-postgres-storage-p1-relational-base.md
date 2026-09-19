@@ -36,7 +36,7 @@
 | **T3** | `vector` 扩展**不是 trusted 扩展** → 应用账号建不了 | `vector.control` 无 `trusted = true`；应用账号得 `ERROR: permission denied ... HINT: Must be superuser`；`langfuse`（`POSTGRES_USER`）实测 `rolsuper = t` 可建，建后应用账号能正常用 `vector(1024)` | 扩展由**超级用户一次性创建**：全新卷走 Task 4 的 init 脚本、既有卷走 Task 4 的一次性命令 |
 | **T4** | 迁移里写 `CREATE EXTENSION` 会失败；用 try/except 吞掉会把权限问题**伪装成成功** | 同 T3（迁移用的是应用账号） | 迁移**不建扩展**，只在建 `chunks` 前断言存在并抛**带命令的** `RuntimeError`（Task 5 Step 5/9） |
 | **T5** | `reset_data.py` 是**三合一重置**，不是单库重置 | `reset_all()` 同时清 MySQL + **删 Chroma persist 目录** + Redis FLUSHALL | P1 只替换 MySQL 那一段，**保留** `reset_vector_store()` 与 Redis 逻辑（Chroma 要到 P4 才退役）（Task 8） |
-| **T6** | `reset_data.py` 的 TRUNCATE 列表**不得含 `users`** | 现有实现只清 3 张表（`conversation_history`/`document`/`knowledge_base`），**刻意保留 `users`** —— 清了就没法登录（`.env` 的 `TEST_ACCOUNT`/`TEST_PASSWORD`） | TRUNCATE 列表与现状**保持一致**，不要顺手扩到 8 张表（Task 8） |
+| **T6** | `reset_data.py` 的 TRUNCATE 列表**不得含 `users`** | 现有实现只清 3 张表（`conversation_history`/`document`/`knowledge_base`），**刻意保留 `users`** —— 清了就登不进 dev 界面（登录凭据是 `.env` 的 `TEST_ACCOUNT`/`TEST_PASSWORD`，`docs/agents/cookbook.md:92` 用它做手工 API 调试；**全仓 `.py` 零引用，不是自动化测试依赖**） | TRUNCATE 列表与现状**保持一致**，不要顺手扩到 8 张表（Task 8） |
 | **T7** | `reset_data.py` 的 `__main__` 块**本来就走不通** | 它 `docker exec financial-qa-mysql`，而实际容器名是 `corporate-rag-mysql`（早已过时），且整段 MySQL 专有 | 该块一并改成 PG；**不要**以为它能用来验证重置逻辑（Task 8） |
 | **T8** | `engine.py` 在 **import 期**就构造 DSN → 缺 `POSTGRES_PASSWORD` 时**导入即抛错** | `engine.py` 模块级 `DSN = build_postgres_dsn()`；4 个 CLI、repos、services、`tests/infra/db/*` 都在这条链上（全仓**无** `create_all`，所以只有这一处导入期副作用） | Task 3 Step 5 **先**把 `POSTGRES_PASSWORD` 写进 `.env`；牢记"任何导入 engine 的进程都需要它" |
 | **T9** | Task 9 之后**不要** `docker compose down -v` / `docker volume prune` | MySQL 卷 `corporate_rag_mysql_data` 是回滚的**唯一依据**；只从 compose 删服务/卷**声明**不会删实际卷（实测卷与容器都还在） | 记下 pre-P1 commit 作回滚锚点；**P1 验收通过前不动 MySQL 卷**（Task 9 有「回滚锚点」段） |
@@ -45,6 +45,46 @@
 | **T12** | 下列不属于 P1，但**别在 P1 里顺手改** | — | `min(k,100)` 是 Chroma 硬限（`search.py:44`）、`score = 1 - distance` 契约、分块 id 格式 —— P1 全部不碰；P3 的 jieba 三处硬缺陷（H1/H2/H3）见 `design.md` D4 |
 
 > P2–P4 的陷阱（Chroma/HNSW、H1 无效兜底、H2 词形不一致、H3 tsquery 解析面、9p 文件系统）记录在 `design.md` 与 `docs/tmp/postgres-probe-2026-09-19.md`，不在本表重复。
+
+## P1 完成标准（DoD）
+
+**P1 完成的判据是下面全部成立，而不是"Task 1–11 的 checkbox 都打了勾"。** 最后一条尤其不能被前几条替代。
+
+| # | 判据 | 怎么验 |
+|---|---|---|
+| D1 | 应用库里 8 张表 + `vector` 扩展都在 | Task 5 的 `test_pg_baseline.py` |
+| D2 | `chunks` **可用**（不只是存在）：生成列自动填充、词法可命中、`<=>` 可排序、外键生效 | Task 5 的 `test_chunks_is_writable_and_searchable` / `test_chunks_kb_id_foreign_key_is_enforced` |
+| D3 | 查询路径索引真的被建出来（5 个 + `chunks` 的 3 个），且 `tsv` 索引是 GIN | Task 5 的索引断言 |
+| D4 | `pytest tests/` 全绿 | Task 11 Step 5 |
+| D5 | `ruff check .` 无错、`pyright src/` 不新增 error、无 `print()`/TODO | Task 11 Step 5 |
+| D6 | 仓库内不再有 MySQL 依赖、配置、init 脚本与 compose 服务 | Task 9 的 `test_no_mysql_leftovers.py` |
+| D7 | Chroma 与 BM25 **未受影响**（P1 不动检索链路） | Task 10 Step 4/5 的 E2E 冒烟（上传会写 Chroma、提问会走 BM25） |
+| D8 | **在 PostgreSQL 上跑通一次真实 E2E 冒烟**：登录 → 建库 → 上传并 ready → 检索命中 → 引用渲染 | **Task 10 全程** |
+| D9 | 变更文档已同步（`code-map` / `data-flow` / `api_contract` / `glossary` / `cookbook`），修正记录已更新 | Task 11 |
+| D10 | 回滚依据仍完好：MySQL 卷在，且两条禁令已写进 compose 注释 | Task 9 的「回滚锚点」段 |
+
+> **D8 为什么不能省**：D4 全绿只证明 **repo 层**在 PG 上可用。11 个存储侧测试覆盖不到登录、建库、上传、检索、引用渲染这些**跨层**路径，而 P1 的残余风险恰好是"某个没被测到的查询依赖了 MySQL 的语义差异"。**这类缺陷只有一个办法能发现：走完整链路。**
+
+## 运行中的 dev 栈（改代码怎么生效）
+
+**dev 的 app 容器是源码挂载，不是镜像内代码。** 实测运行中容器的挂载：
+
+```
+./src    -> /app/src        （来自 docker-compose.override.yml，compose 自动合并）
+./tests  -> /app/tests
+./skills -> /app/skills
+./agents -> /app/agents
+```
+
+因此：
+
+| 改了什么 | 怎么让它生效 |
+|---|---|
+| `src/` 下的 `.py`（Task 2–8 的大部分改动） | `docker compose restart app` —— **不需要 rebuild** |
+| `pyproject.toml` 的依赖（Task 9） | `docker compose build --no-cache app && docker compose up -d --force-recreate app` |
+| 环境变量（Task 3 的 `.env`、Task 4 的 compose environment） | `docker compose up -d --force-recreate app` |
+
+**一个容易误判的现象**：Task 6 改完 `engine.py` 之后，**任意一次 app 重启都会切到 PG**（Task 5 已建表，所以顺序安全）。这不是"还没生效需要 rebuild"，而是已经生效了 —— 判断依据是日志里不再有 MySQL 连接、连的是 `postgres`。
 
 ## 本 plan 覆盖的 spec requirement（自查表）
 
@@ -1652,7 +1692,7 @@ Expected: 多数通过（SQLAlchemy 屏蔽了方言差异），少数因 MySQL �
 
 **① 不要把它变成"单库重置"。** 现状 `reset_all()` 清**三件事**：MySQL + **删 Chroma persist 目录**（`reset_vector_store()`）+ Redis FLUSHALL。P1 之后 Chroma 与 Redis **仍在使用**（Chroma 要到 P4 才退役），所以只替换 MySQL 那一段，另两段原样保留。
 
-**② TRUNCATE 列表不要扩到 8 张表。** 现状只清 3 张表，**刻意不碰 `users`**（清了就没法登录，`.env` 里有 `TEST_ACCOUNT`/`TEST_PASSWORD`）；`sessions` / `eval_report` / `feedback` 也不在现状列表里。新增的 `chunks` 属于同一域（随文档与知识库派生），**要一起清**。
+**② TRUNCATE 列表不要扩到 8 张表。** 现状只清 3 张表，**刻意不碰 `users`** —— 清了就登不进 dev 界面（凭据是 `.env` 的 `TEST_ACCOUNT`/`TEST_PASSWORD`，`docs/agents/cookbook.md:92` 用它做手工 API 调试；**全仓 `.py` 零引用，不是自动化测试依赖**）；`sessions` / `eval_report` / `feedback` 也不在现状列表里。新增的 `chunks` 属于同一域（随文档与知识库派生），**要一起清**。
 
 ```python
 async def _reset_pg_async() -> None:
@@ -1668,7 +1708,8 @@ def reset_pg() -> None:
     与改造前的 MySQL 版保持同一范围：只清会话历史、文档、知识库，
     以及随它们派生的分块表。
 
-    ⚠ 刻意不清 users —— 清了本地就没法登录（测试依赖 .env 的 TEST_ACCOUNT）。
+    ⚠ 刻意不清 users —— 清了就登不进 dev 界面（凭据在 .env 的 TEST_ACCOUNT，
+    供 cookbook.md 的手工 API 调试使用；全仓 .py 无引用）。
     现状亦不清 sessions / eval_report / feedback，此处保持现状，不在本变更扩大范围。
     本函数只连应用库，不会误删同实例上的 Langfuse 库。
     """
@@ -1910,14 +1951,18 @@ pytest tests/config/test_no_mysql_leftovers.py -v
 
 Expected: PASS（4 条全绿）。
 
-- [ ] **Step 7: 重建镜像并端到端验证**
+- [ ] **Step 7: 重建镜像并让 app 切到 PG**
 
 ```bash
-docker compose build app && docker compose up -d --force-recreate app
+# 本步必须 rebuild：pyproject.toml 的依赖变了（删 MySQL 驱动、加 asyncpg）。
+# 用 --no-cache —— 与 CLAUDE.md「改依赖后 docker compose build --no-cache app」一致。
+docker compose build --no-cache app && docker compose up -d --force-recreate app
 docker compose logs --tail=80 app
 ```
 
-Expected: 应用启动无报错；日志里没有 MySQL 连接失败。
+Expected: 应用启动无报错；日志里没有 MySQL 连接失败，也没有 `POSTGRES_PASSWORD 未配置`。
+
+> 为什么本步才 rebuild：`docker-compose.override.yml` 把 `./src` 与 `./tests` 挂进容器，所以 Task 2–8 的**代码**改动只需 `docker compose restart app` 就生效；只有**依赖**变更才需要重建镜像。详见顶部「运行中的 dev 栈」。
 
 - [ ] **Step 8: 跑全量测试与门禁**
 
@@ -1931,12 +1976,138 @@ Expected: 全绿。
 
 ```bash
 git add -A
-git commit -m "chore(db): 退役 MySQL（服务/卷/init 脚本/驱动/配置）"
+git commit -m "chore(db): 退役 MySQL（服务/卷/init 脚本/驱动/配置）
+
+回滚锚点（pre-retire）：$(cat /tmp/p1_pre_retire_commit.txt)
+MySQL 卷 corporate_rag_mysql_data 仍保留，作为回滚依据；
+P1 验收通过前不要 docker compose down -v / docker volume prune。"
 ```
 
 ---
 
-## Task 10: 文档同步与收尾
+## Task 10: 在 PostgreSQL 上跑一次真实 E2E 冒烟
+
+**Files:**
+- 无代码改动（只读验证）；结果记入本任务提交信息
+
+**Interfaces:**
+- Consumes: Task 9（MySQL 已退役、app 镜像已重建并切到 PG）
+- Produces: 一条「整链路在 PG 上真的通了」的证据 —— **这是 `pytest` 给不了的东西**
+
+**为什么必须单列一个 Task：** `pytest tests/` 全绿只证明 **repo 层**在 PG 上可用；11 个存储侧测试不会覆盖登录、建库、上传、检索、引用渲染这些**跨层**路径。而 P1 的残余风险恰恰在这里：某个没被测到的查询若依赖了 MySQL 的语义差异（`is_deleted` 的整数比较、`ORDER BY` 的空值排序、时间戳精度、`LIKE` 大小写敏感性……），只有走完整链路才会暴露。
+
+**前提：不需要 seed 账号。** `/auth/login` 的实现在登录前会先尝试 `register`（`src/api/auth.py:38-41`，账号已存在则吞掉 `BusinessError`）→ **空 `users` 表下用 `.env` 的 `TEST_ACCOUNT`/`TEST_PASSWORD` 直接登录即可，账号自动创建**。不要为此写额外的 seed 脚本。
+
+- [ ] **Step 1: 确认栈就绪**
+
+```bash
+docker compose ps
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost/          # 期望 200/30x
+docker compose logs --tail=30 app | grep -iE "error|traceback" || echo "app 日志无错误"
+```
+
+- [ ] **Step 2: 登录（首次会自动注册）**
+
+```bash
+set -a; . ./.env; set +a
+TOKEN=$(curl -s -X POST http://localhost/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d "{\"account\":\"$TEST_ACCOUNT\",\"password\":\"$TEST_PASSWORD\"}" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['token'])")
+echo "token 长度: ${#TOKEN}"
+```
+
+Expected: token 非空。**若这里失败 → 说明 PG 上的 `users` 写入路径有问题**（`UserRepo.add_user`），而不是"数据没迁移"。
+
+- [ ] **Step 3: 建一个知识库**
+
+```bash
+KB=$(curl -s -X POST http://localhost/api/kb \
+  -H "Content-Type: application/json" -H "Cookie: token=$TOKEN" \
+  -d '{"name":"p1-e2e-probe","description":"P1 E2E 冒烟"}' \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['id'])")
+echo "kb_id=$KB"
+```
+
+Expected: 返回一个 kb 的 id。**若失败 → 查 `KbRepo.get_or_create_kb`**（它是 Task 7 里唯一保留了异常兜底路径、且带三态语义的方法，最值得怀疑）。
+
+- [ ] **Step 4: 上传一个小文档并等到 ready**
+
+```bash
+printf 'P1 E2E 冒烟文档。\n\n本公司 2024 年营业收入为 123 亿元，同比增加 45%%。\n' > /tmp/p1-e2e-probe.txt
+curl -s -X POST http://localhost/api/documents/upload \
+  -H "Cookie: token=$TOKEN" -F "file=@/tmp/p1-e2e-probe.txt" -F "kb_id=$KB"
+# 轮询状态直到 ready（上传是异步的）
+for i in $(seq 1 30); do
+  S=$(curl -s "http://localhost/api/documents?kb_id=$KB" -H "Cookie: token=$TOKEN" \
+      | python3 -c "import sys,json; d=json.load(sys.stdin)['data']; print(d[0]['status'] if d else 'none')")
+  echo "第 ${i} 次: status=$S"; [ "$S" = "ready" ] && break; sleep 2
+done
+```
+
+Expected: 最终 `status=ready`。**若卡在 `pending`/`processing` → 查 `DocumentRepo` 的状态更新**（`document` 表的 `is_deleted` / `chunk_count` / `processing_state` 都是 P1 新落到 PG 的列）。
+
+> 注：本步会写入 Chroma（分块仍走 Chroma）与 PG（`document` 行）。这正是我们要的 —— **它同时验证了"PG 的关系型路径"与"Chroma 未受影响"**。
+
+- [ ] **Step 5: 提一个只有该文档能回答的问题**
+
+```bash
+curl -s -N -X POST http://localhost/api/chat/stream \
+  -H "Content-Type: application/json" -H "Cookie: token=$TOKEN" \
+  -d "{\"kb_id\":\"$KB\",\"message\":\"公司 2024 年营业收入是多少？\"}" \
+  | tee /tmp/p1-e2e-stream.txt | tail -40
+```
+
+Expected（四条都要有）：
+1. 流正常结束（出现 `done` 事件），没有 5xx / 异常栈
+2. 回答里出现 `123`（或等价表述）
+3. **出现引用/来源**（`citation` 或 sources）—— 这验证 `metadata` 与 `source`/`page` 从 PG 读回没丢
+4. 日志里该 trace 没有 MySQL 相关报错
+
+- [ ] **Step 6: 逐条核对「MySQL 专有语义」的嫌疑点**
+
+上面跑通 ≠ 没问题，再针对性看一遍日志与响应：
+
+```bash
+TRACE=$(grep -oE "trace_[0-9a-f]+" /tmp/p1-e2e-stream.txt | tail -1)
+docker exec corporate-rag-app grep "$TRACE" /data/logs/app_$(date +%F).log | tail -60
+```
+
+逐条确认（这些是 11 个 repo 测试**不覆盖**、而换了引擎最可能变的点）：
+
+| 嫌疑点 | 换引擎后的差异 | 看什么 |
+|---|---|---|
+| `is_deleted` 是 `Integer` 不是 Boolean | PG 不会把 `1` 当 `true` 隐式处理，但 `== 0` / `== 1` 写法两边都对 | 知识库/文档列表里**软删的记录没有出现**，未删的都在 |
+| `ORDER BY created_at` | PG 的 `now()` 是**微秒**（MySQL DATETIME 默认秒）→ 同秒插入的排序会**变准** | 会话消息顺序正确（user 在 assistant 前） |
+| 空值排序 | PG 默认 `NULLS LAST`（`ASC`），MySQL 把 NULL 排最前 | 文档/知识库列表排序没有异常跳变 |
+| `LIKE` 大小写 | PG 的 `LIKE` **大小写敏感**，MySQL 默认不敏感（collation 决定） | 若用到模糊搜索，大小写不同的同名文档是否仍能被找到 |
+| `func.now()` 的 `onupdate` | PG 靠 SQLAlchemy 侧 `onupdate`，不是数据库触发器 | 改一次文档后 `updated_at` 确实变了 |
+
+- [ ] **Step 7: 清理冒烟数据**
+
+```bash
+curl -s -X DELETE "http://localhost/api/documents/<doc_id>?kb_id=$KB" -H "Cookie: token=$TOKEN"
+curl -s -X DELETE "http://localhost/api/kb/$KB" -H "Cookie: token=$TOKEN"
+rm -f /tmp/p1-e2e-probe.txt /tmp/p1-e2e-stream.txt
+```
+
+（也可用 `python tests/reset_data.py` 走 `reset_pg`，它只清会话历史/文档/知识库/分块，**不动 users**。）
+
+- [ ] **Step 8: 提交（把结果写进提交信息）**
+
+```bash
+git commit --allow-empty -m "test(db): P1 在 PostgreSQL 上的 E2E 冒烟通过
+
+登录（首次自动注册）/ 建库 / 上传并 ready / 检索命中 / 引用渲染 全通。
+逐条核对 MySQL 专有语义嫌疑点：软删过滤、消息时序、空值排序、LIKE 大小写、updated_at。
+"
+```
+
+> **若任一步失败**：不要在这里改代码修 —— **先定位它属于哪个 Task**，回到那个 Task 修（可能是 Task 2 的索引/类型、Task 5 的表结构、Task 6 的连接配置、Task 7 的 repo 语义）。这个 Task 的价值是**发现**问题，不是消化问题。
+
+---
+
+## Task 11: 文档同步与收尾
 
 **Files:**
 - Modify: `docs/agents/code-map.md`、`docs/agents/data-flow.md`、`docs/agents/api_contract.md`、`docs/agents/glossary.md`
@@ -1960,6 +2131,19 @@ git commit -m "chore(db): 退役 MySQL（服务/卷/init 脚本/驱动/配置）
 
 `data-flow.md`：把 MySQL 相关链路改为 PostgreSQL。
 `api_contract.md`：P1 **不改任何 API 与公共方法签名**（repo 的签名与语义保持不变），因此只需确认无遗留引用；如发现文档里写着 MySQL 专有行为（如「靠唯一键冲突回滚」），改为 `ON CONFLICT` 的实际语义。
+
+- [ ] **Step 2b: 清理 `cookbook.md` 里已失效的 MySQL 配方**
+
+`docs/agents/cookbook.md` 是"操作记录协议"的载体，里面至少有两处 MySQL 专有内容在 P1 后不再成立：
+
+```bash
+grep -nE "MEDIUMTEXT|JSON_TABLE|JSON_UNQUOTE|FOREIGN_KEY_CHECKS|SHOW COLUMNS|mysql -u" docs/agents/cookbook.md
+```
+
+- 形如 `:81` 的 `ALTER TABLE conversation_history ADD COLUMN process MEDIUMTEXT` —— 那条是**一次性操作的记录**，改成 PostgreSQL 等价的 `TEXT` 写法（或标注"该操作用于已退役的 MySQL，保留作历史"）。
+- 形如 `:122` 的 `JSON_UNQUOTE(CAST(... AS JSON))` + `JSON_TABLE` —— MySQL 专有 JSON 解包；PG 的 `sources` 列是 `TEXT`，写 PG 等价写法（`::jsonb` + `jsonb_array_elements`）。
+
+**判据**：改完后 `grep` 上述模式不应再有"看起来是现行操作步骤"的条目；纯历史记录要显式标注，避免下一个人照抄。
 
 - [ ] **Step 3: 登记遗留项 L1–L4 到需求池**
 
@@ -2013,6 +2197,20 @@ git commit -m "docs: 同步 PostgreSQL 迁移后的代码结构与归属（P1 �
 - **不处置** `--workers 4` 与连接预算（→ 需求池 / 托管化遗留项）
 - **不做** Chroma → PG 数据搬迁（→ P2）
 
+## P1 结束时你会看到什么（避免把预期当故障）
+
+P1 是**换引擎 + 空库重建**，所以界面上的状态变化是预期行为，不是迁移失败：
+
+| 现象 | 是不是问题 | 说明 |
+|---|---|---|
+| 知识库列表变空 | **不是** | PG 是全新库；旧数据在 MySQL 里（卷还在，仅用于回滚，应用已不读它）。按"业务数据可丢"的既定前提，重新建库/重传即可 |
+| 需要重新登录 | **不是** | PG 的 `users` 是空的；但 **`/auth/login` 在账号不存在时会先自动注册**（`src/api/auth.py:38-41`），所以直接用 `.env` 的 `TEST_ACCOUNT`/`TEST_PASSWORD` 登录即可 —— **不需要任何 seed 脚本**。注册会自动创建一个新的 `user_id`，因此旧的 session/知识库归属关系不再适用（本来也该重建） |
+| 旧的会话历史看不了 | **不是** | 同上，`sessions` / `conversation_history` 在 PG 里是空的 |
+| `docker compose ps` 里没有 `mysql` | **是预期的** | Task 9 已退役。但**卷 `corporate_rag_mysql_data` 仍在**（`docker volume ls` 能看到），这是回滚依据，见 Task 9 的「回滚锚点」 |
+| `docker volume ls` 里多出一个"没人用"的 mysql 卷 | **是预期的** | 它正是两条禁令要保护的对象（不要 `prune`） |
+| 应用启动日志里出现 `POSTGRES_PASSWORD` | 要立刻查 | 若报 `POSTGRES_PASSWORD 未配置`，说明 `.env` 没补（Task 3 Step 5），或 compose 没重创（`up -d --force-recreate app`） |
+| 检索结果与 P1 之前不同 | **要区分** | P1 **不改检索逻辑**（Chroma 与 BM25 原样），所以 dense/词法行为应当一致；若有变化，那是**回归**，回查改动 |
+
 ## 遗留项（本轮明确不做，需登记）
 
 | # | 遗留 | 归属 |
@@ -2022,4 +2220,4 @@ git commit -m "docs: 同步 PostgreSQL 迁移后的代码结构与归属（P1 �
 | L3 | prod 的 `--workers 4` 与 `CLAUDE.md`「生产单 worker」冲突；4 × (10+10) ≈ 80 连接 + Langfuse 对 RDS `max_connections` 的挤压 | 托管化另案（作为 RDS 规格输入） |
 | L4 | `src/infra/db/mysql_db/` 包改名（P1 后包名名不副实） | 需求池 |
 
-Task 10 要把 L1–L4 登记进 `docs/agents/requirements_pool.md`。
+Task 11 要把 L1–L4 登记进 `docs/agents/requirements_pool.md`。
