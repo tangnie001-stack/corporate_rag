@@ -16,7 +16,9 @@ pytestmark = pytest.mark.asyncio
 
 _DOCS = [
     # 取自 design.md D4 的实测 jieba 输出：content_seg 为「营业 收入 同比 增长率 保持稳定」，
-    # 因此查询「营业收入」被切成「营业」+「收入」后仍能靠前缀通配召回（H2）
+    # 含整词元「营业」与「收入」。查询「营业收入」被切成「营业」+「收入」后，
+    # 整词 AND 亦能命中 —— 该用例钉的是查询侧切词，并非 `:*` 前缀通配；
+    # `:*` 真正由下面「增长」→「增长率」的用例钉住。
     ("d1", "营业收入同比增长率保持稳定"),
     # 实测输出含单字被滤掉的「5」与「月」，是 H1 的子串兜底用例
     ("d2", "公司资产负债率上升，研发费用 5 月增加"),
@@ -77,7 +79,12 @@ async def test_prefix_wildcard_recalls_longer_document_token(lexical_kb):
 
 
 async def test_rank_is_descending_and_reproducible(lexical_kb):
-    """ts_rank 排序：得分单调不增，且同一查询两次结果一致。"""
+    """ts_rank 排序：得分单调不增，且同一查询两次结果一致。
+
+    可复现性依赖 `order_by` 尾部的 `ChunkModel.id` tiebreaker（d2/d4 同分时定序）。
+    本用例在 4 行语料下无法单独证伪该 tiebreaker 的缺失 —— PG 通常按物理顺序
+    返回等分行，删掉尾部 `id` 也可能两次一致；该断言只覆盖「顺序不自发漂移」。
+    """
     repo, _store, kb_id = lexical_kb
     plan = build_lexical_query("公司")
     first = await repo.search_lexical(kb_id, plan, 10)
@@ -122,6 +129,9 @@ async def test_store_lexical_search_fills_rank_and_score(lexical_kb):
     assert {r.metadata["doc_id"] for r in results} == {"d2", "d4"}
     assert all(r.metadata["source"] == "r.pdf" for r in results)
     assert all(r.metadata["page"] == 1 for r in results)
+    # metadata 契约的 5 个键必须齐备（doc_id/source/page 之外还有分块序号）
+    assert all(r.metadata["chunk_index"] == 0 for r in results)
+    assert all(r.metadata["chunk_total"] == 1 for r in results)
 
 
 async def test_store_lexical_search_empty_for_unknown_kb(lexical_kb):
@@ -139,11 +149,18 @@ async def test_blank_query_returns_empty_without_hitting_db(lexical_kb):
         assert await repo.search_lexical(kb_id, plan, 10) == []
 
 
-async def test_store_lexical_search_respects_max_query_k(lexical_kb):
-    """k 上限仍是 100（MAX_QUERY_K），与 dense_search 一致。"""
+async def test_store_lexical_search_clamps_k_to_max_query_k(lexical_kb, monkeypatch):
+    """k 的上限 MAX_QUERY_K 必须真的夹紧：命中 2 行时请求 500 只能拿 1 行。
+
+    patch 的是 `pg_store` 模块级名字（`from src.config.const import MAX_QUERY_K`），
+    patch 到 `src.config.const` 上不会生效。
+    """
+    from src.infra.db.vector_store import pg_store
+
     _repo, store, kb_id = lexical_kb
-    results = await store.lexical_search(kb_id, "公司", 500)
-    assert len(results) <= 100
+    monkeypatch.setattr(pg_store, "MAX_QUERY_K", 1)
+    results = await store.lexical_search(kb_id, "资产负债率", 500)
+    assert len(results) == 1
 
 
 async def test_store_lexical_search_handles_tsquery_syntax_chars(lexical_kb):
