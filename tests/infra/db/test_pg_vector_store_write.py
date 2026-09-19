@@ -130,3 +130,20 @@ async def test_add_chunks_without_embeddings_computes_them(store_and_kb):
             {"k": kb_id},
         )
     assert n == 2  # 兜底补算的向量必须真的落库
+
+
+async def test_written_chunk_is_immediately_lexically_searchable(store_and_kb):
+    """写入后 tsv 生成列自动填充，词法路立即可命中（不需要额外重建索引）。"""
+    from src.chunking.validator import ChunkData
+
+    store, kb_id = store_and_kb
+    chunks = [
+        ChunkData(
+            content="公司资产负债率上升，研发费用 5 月增加，净利润同比下降。",
+            metadata={"source": "r.pdf", "page": 3},
+        )
+    ]
+    await store.add_chunks(kb_id, chunks, "d-lex", [[0.1] * 1024])
+    results = await store.lexical_search(kb_id, "资产负债率", 10)
+    assert [r.metadata["doc_id"] for r in results] == ["d-lex"]
+    assert results[0].metadata["source"] == "r.pdf"

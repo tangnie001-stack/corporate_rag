@@ -189,3 +189,18 @@ def test_split_metadata_page_none_and_bool_become_zero():
     assert split_metadata({"page": None}).page == 0
     assert split_metadata({"page": True}).page == 0
     assert split_metadata({"page": False}).page == 0
+
+
+def test_content_seg_is_tokenized_not_raw():
+    """写入检索文本必须是分词输出，不得是正文原值（P2 的占位已过期）。"""
+    from src.chunking.validator import ChunkData
+    from src.infra.db.vector_store.mapping import build_rows
+    from src.infra.search.tokenizer import to_lexical_text
+
+    content = "公司资产负债率上升，研发费用 5 月增加"
+    rows = build_rows(
+        "kb1", "doc1", [ChunkData(content=content, metadata={})], [[0.0] * 1024]
+    )
+    assert rows[0].content == content
+    assert rows[0].content_seg == to_lexical_text(content)
+    assert rows[0].content_seg != content

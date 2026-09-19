@@ -13,6 +13,7 @@ from dataclasses import dataclass
 
 from src.chunking.validator import ChunkData
 from src.infra.db.vector_store.types import ChunkResult
+from src.infra.search.tokenizer import to_lexical_text
 
 CONTRACT_KEYS: tuple[str, ...] = (
     "doc_id",
@@ -52,7 +53,7 @@ class ChunkRow:
     content: str
     """分块正文原文。"""
     content_seg: str
-    """词法检索文本；P2 写正文原值作占位，P3 换成分词输出并全量重写。"""
+    """词法检索文本 = jieba 词项以空格连接（与查询侧共用 tokenizer）。"""
     embedding: list[float] | None
     """1024 维向量；None 表示尚未算好（不应入库）。"""
     source: str
@@ -130,8 +131,9 @@ def build_rows(
                 chunk_index=i,
                 chunk_total=total,
                 content=chunk.content,
-                # P2 占位：content_seg 写正文原值，P3 换成 jieba 分词输出并全量重写
-                content_seg=chunk.content,
+                # 检索文本 = jieba 词项以空格连接；与查询侧共用 tokenizer，
+                # 两侧口径不一致不会报错、只会静默降召回
+                content_seg=to_lexical_text(chunk.content),
                 embedding=embeddings[i],
                 source=split.source,
                 page=split.page,

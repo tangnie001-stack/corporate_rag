@@ -106,7 +106,9 @@ class PgVectorStore:
             embeddings = await asyncio.to_thread(
                 self._embed_fn.embed_documents, [c.content for c in chunks]
             )
-        rows = build_rows(kb_id, doc_id, chunks, embeddings)
+        # 分词是 CPU 工作且 jieba 首次调用要加载词典（约 0.5–1 s）→ offload，
+        # 否则阻塞事件循环（单 worker 下会冻住所有请求与 SSE）
+        rows = await asyncio.to_thread(build_rows, kb_id, doc_id, chunks, embeddings)
         await self._repo.upsert_chunks(rows)
         # 分块数变少时删掉尾部残留（upsert 只覆盖 [0, len(rows)) 区间）
         await self._repo.delete_tail(kb_id, doc_id, len(rows))
