@@ -5,6 +5,10 @@
 #   2. 调大 mem_limit 适配生产数据量
 #   3. 内部服务不暴露端口，仅 nginx 对外
 #   4. 重启策略改为 always
+#
+# ⚠ prod 与 dev 必须在不同机器上运行：两份 compose 的 project name、容器名与
+# 全部卷名完全相同，同机执行会因容器名冲突直接失败（--force-recreate 还会拆掉先起的那套）。
+# 本轮 prod 不部署：RDS 托管化另案（见 postgres-storage-consolidation 的遗留项）。
 name: corporate_rag
 services:
   mysql:
@@ -47,7 +51,7 @@ services:
       - app-network
 
   postgres:
-    image: postgres:15-alpine
+    image: pgvector/pgvector:pg15
     mem_limit: 4g
     container_name: corporate-rag-postgres
     restart: always
@@ -55,8 +59,11 @@ services:
       POSTGRES_DB: langfuse
       POSTGRES_USER: langfuse
       POSTGRES_PASSWORD: ${LANGFUSE_POSTGRES_PASS:?LANGFUSE_POSTGRES_PASS is required}
+      # 应用库的应用账号密码，供 init 脚本使用
+      POSTGRES_APP_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./deploy/postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U langfuse"]
       interval: 10s
@@ -207,6 +214,10 @@ services:
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:?}
       REDIS_HOST: redis
       REDIS_PASSWORD: ${REDIS_PASSWORD:?}
+      POSTGRES_HOST: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_USER: corporate_rag
+      POSTGRES_DATABASE: corporate_rag
     volumes:
       - app_logs:/data/logs
       - chroma_onnx_cache:/root/.cache/chroma
@@ -216,6 +227,8 @@ services:
       mysql:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     networks:
       - app-network
