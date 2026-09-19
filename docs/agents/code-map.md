@@ -75,7 +75,7 @@ tools/             工具基类（base.py）
   `src/infra/db/mysql_db/chunk_repo.py` 的 `ChunkRepo`（含 `Vector.cosine_distance` dense 检索）。
   ORM 属性名 `extra` 映射列名 `metadata`（避开 `Base.metadata` 命名冲突），列名不变。
 - **向量存储**：`src/infra/db/vector_store/` —— `__init__.py`（公开入口 `VectorStore`，别名导出 PG 实现）、
-  `pg_store.py`（`PgVectorStore` + `QueryEmbedder` + `MAX_QUERY_K`）、`mapping.py`（行↔`ChunkResult`
+  `pg_store.py`（`PgVectorStore` + `QueryEmbedder`；k 上限 `MAX_QUERY_K` 定义在 `src/config/const.py`）、`mapping.py`（行↔`ChunkResult`
   映射与 metadata 回填）、`types.py`（`ChunkResult` / `ChunkQueryResult`）。后端为 PostgreSQL +
   pgvector，IO 方法全为 `async`；契约见 `docs/agents/api_contract.md` §4。
 - **迁移唯一链**：根 `alembic/`（`alembic.ini` 的 `script_location` 指向它），当前唯一

@@ -828,7 +828,7 @@ dense 路 top-k，按余弦距离（pgvector `<=>`）升序。`similarity_search
 | `dense_rank` | int \| None | dense 路排名（0 起）；未出现在 dense 路时为 None |
 | `sparse_rank` | int \| None | 词法路排名（0 起）；未出现在词法路时为 None |
 
-**已知限制：** `k` 最大 100（`pg_store.MAX_QUERY_K`）。
+**已知限制：** `k` 最大 100（`src/config/const.py` 的 `MAX_QUERY_K`；`pg_store` 为导入方）。
 
 > **全局检索路径已移除。** `rag_tools` 在 `kb_id` 为空时直接返回空结果，不再有「不指定知识库」的检索入口。
 
