@@ -27,12 +27,24 @@ def test_all_single_char_query_falls_back_to_substring():
     """H1：词元全被滤掉时必须走原文子串，不得提交空条件。"""
     plan = build_lexical_query("涨了吗")
     assert plan.use_substring is True
+    assert plan.is_blank is False
     assert plan.tsquery == ""
     assert plan.raw == "涨了吗"
 
     plan = build_lexical_query("5 月")
     assert plan.use_substring is True
+    assert plan.is_blank is False
     assert plan.raw == "5 月"
+
+
+@pytest.mark.parametrize("query", ["", "   ", "\t\n"])
+def test_blank_query_is_signalled_and_never_matches_everything(query):
+    """空/纯空白原文必须被显式标记，不得退化成匹配一切的条件（LIKE '%%'）。"""
+    plan = build_lexical_query(query)
+    assert plan.is_blank is True
+    assert plan.use_substring is False
+    assert plan.tsquery == ""
+    assert plan.raw == ""
 
 
 @pytest.mark.parametrize(
@@ -47,6 +59,7 @@ def test_all_single_char_query_falls_back_to_substring():
         "报告<->期",
         "50%-100%",
         "a_b",
+        "研发&费用",
     ],
 )
 def test_special_chars_never_raise_and_never_leak_operators(query):

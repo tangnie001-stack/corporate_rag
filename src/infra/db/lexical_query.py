@@ -9,6 +9,10 @@
 `词元:*`（前缀通配，词形不一致时的唯一救回手段），以 ` & ` 连接。
 剔除后不剩词元时降级为**原文子串匹配** —— 写入侧已把单字从 `content_seg`
 剔除，tsv 里没有单字 lexeme，"回退为不过滤"命中不了任何东西。
+
+有空/纯空白两种边界状态：原文为空或纯空白由 `is_blank` 标记，调用方据此
+直接返回空结果 —— 不得提交 tsquery，也不得退化为子串兜底（`LIKE '%%'`
+会命中全库）。
 """
 
 import re
@@ -37,6 +41,9 @@ class LexicalQuery:
     """用户原文，作为原文子串匹配（LIKE）的匹配串。"""
     use_substring: bool
     """True = 词元全被滤掉，改走原文子串匹配。"""
+    is_blank: bool
+    """True = 原文为空或纯空白，无任何可检内容。调用方 SHALL 直接返回空结果：
+    不得提交 tsquery，也不得走子串兜底（`LIKE '%%'` 会命中全库）。"""
 
 
 def build_lexical_query(query: str) -> LexicalQuery:
@@ -46,18 +53,29 @@ def build_lexical_query(query: str) -> LexicalQuery:
         query: 用户原始查询文本
 
     Returns:
-        LexicalQuery；`use_substring` 为 True 时只有 `raw` 有意义
+        LexicalQuery；`use_substring` 为 True 时只有 `raw` 有意义；
+        `is_blank` 为 True 时其余字段均无意义，调用方须直接返回空结果。
     """
+    if not query.strip():
+        return LexicalQuery(
+            terms=(), tsquery="", raw="", use_substring=False, is_blank=True
+        )
     terms: list[str] = []
     for token in tokenize(query):
         safe = _UNSAFE_RE.sub("", token)
         if safe:
             terms.append(safe)
     if not terms:
-        return LexicalQuery(terms=(), tsquery="", raw=query, use_substring=True)
+        return LexicalQuery(
+            terms=(), tsquery="", raw=query, use_substring=True, is_blank=False
+        )
     tsquery = _JOINER.join(f"{t}:*" for t in terms)
     return LexicalQuery(
-        terms=tuple(terms), tsquery=tsquery, raw=query, use_substring=False
+        terms=tuple(terms),
+        tsquery=tsquery,
+        raw=query,
+        use_substring=False,
+        is_blank=False,
     )
 
 
