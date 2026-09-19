@@ -191,7 +191,7 @@
 
 | 术语 | 定义 | 常见错误 |
 |------|------|---------|
-| `存储收敛（storage consolidation）` | 把存储从 MySQL + ChromaDB 收敛到 PostgreSQL 的变更方向。P1 换关系型后端；P2 把 dense 向量检索换到 PostgreSQL + pgvector；P3 把词法检索从进程内 `rank_bm25` 换到 PostgreSQL 全文检索（`tsv @@ to_tsquery('simple', …)` + `ts_rank`，query 侧由 jieba 预分词）。替换不改**融合参数**与 **dense 路**的行为；**词法侧的算法与分词替换是独立事项**（必然改变行为，见 `design.md` D7） | ❌ 以为存储替换必然改变 dense 路行为，或以为词法路换算法也算"只改存储" |
+| `存储收敛（storage consolidation）` | 把存储从 MySQL + ChromaDB 收敛到 PostgreSQL 的变更方向。P1 换关系型后端；P2 把 dense 向量检索换到 PostgreSQL + pgvector；P3 把词法检索从进程内 `rank_bm25` 换到 PostgreSQL 全文检索（`tsv @@ to_tsquery('simple', …)` + `ts_rank`，query 侧由 jieba 预分词）。替换不改**融合参数**与 **dense 路**的行为；**词法侧的算法与分词替换是独立事项**（必然改变行为，见 `design.md` D6） | ❌ 以为存储替换必然改变 dense 路行为，或以为词法路换算法也算"只改存储" |
 | `DSN 单一来源` | 应用 DSN 只由 `src/config/settings.py:build_postgres_dsn()` 产出（`postgresql+asyncpg://`，`POSTGRES_PASSWORD` 缺失即抛 `RuntimeError`），`src/infra/db/engine.py` 在模块级消费它。宿主侧跑 alembic / pytest 时用 `POSTGRES_HOST=localhost` 覆盖 `.env` 里的 compose 服务名（`python-dotenv` 默认 `override=False`，已存在的环境变量优先） | ❌ 各处自行拼连接串；❌ 宿主侧忘了加 `POSTGRES_HOST=localhost` |
 | `chunks 表` | 单一张分块表，以 `kb_id` 列表达知识库归属（取代「每库一 collection」）。由 `ChunkModel` 映射（`src/infra/db/models/chunk.py`，ORM 属性名 `extra` → 列名 `metadata`），SQL 访问层是 `ChunkRepo`。`content_seg` 是词法检索文本列（P2 写正文原值作占位，P3 起为 jieba 分词输出并全量重写）；`tsv` 是 `to_tsvector('simple', content_seg)` 的持久化生成列（GIN 索引）；`embedding` 为 `vector(1024)`。列清单、索引与迁移链见 code-map.md「关系型存储（PostgreSQL）」 | ❌ 以为 `chunks` 无 ORM 模型；❌ 把 `content_seg`/`tsv` 当成应用层字段名；❌ 以为还按知识库分 collection |
 
