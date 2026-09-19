@@ -9,7 +9,7 @@
 | `kb_id` | 知识库唯一标识，UUID 字符串；`""` 表示"不检索"（未绑定 KB，纯对话） | ❌ 传 `kb_name` |
 | `doc_id` | 文档唯一标识，UUID | ❌ 传数据库自增 ID（doc_id 是 UUID） |
 | `session_id` | 会话标识，用于关联对话历史 | ❌ 传空字符串 |
-| `chunk_id` | 向量库中的分块 ID，格式 `"{doc_id}:{index}"` | — |
+| `chunk_id` | 分块 ID，`chunks` 表主键，格式 `"{doc_id}:{chunk_index}"` | ❌ 与 `doc_id` 混用（同一文档有多个 chunk） |
 | `trace_id` | 请求追踪 ID，格式 `trace_<uuid>` | — |
 
 ## 响应与追踪
@@ -29,10 +29,14 @@
 ## RAG 流水线
 
 - **chunk**：文档切分后的最小检索单元，由 `src/chunking/` 分块策略产生
-- **retrieval**：检索，从 ChromaDB 按 kb 召回相关 chunk
+- **retrieval**：检索，从 `chunks` 表按 `kb_id` 召回相关 chunk（dense 路走 pgvector 余弦距离）
 - **rerank**：精排，对召回结果重排，产出 `contexts` 进入 LLM
 - **contexts**：精排后拼入 LLM prompt 的上下文片段
 - **kb**：知识库（knowledge base），文档与向量的隔离单位
+- **dense 路 / 词法路（sparse）**：混合检索的两条支路；dense 路按向量余弦距离召回（PostgreSQL + pgvector），词法路按词项命中召回（当前是 BM25，P3 换 PostgreSQL 全文检索）。两路结果由 RRF 融合后携带各自名次
+- **`lexical_score`**：`ChunkResult` 的词法路得分字段，**与引擎无关的命名**（取代 `bm25_score`）——P3 后它来自 PostgreSQL 全文检索而非 BM25；dense 检索与分页查询时为 None。字段契约见 api_contract.md §4.4
+- **`dense_rank` / `sparse_rank`**：结果在 dense 路 / 词法路的排名（0 起），未出现在该路时为 None；融合后仍按路保留（`hybrid-retrieval` 要求「融合结果的来源可辨」）
+- **`metadata 回填契约`**：`ChunkResult.metadata` 由「列值 + jsonb 平铺合并」得到（冲突以列为准），至少含 `doc_id` / `chunk_index` / `chunk_total` / `source` / `page` 五个契约键，jsonb 侧原样承载 chunker 全部自定义键（如 `parent_content`）。唯一实现是 `src/infra/db/vector_store/mapping.py::row_to_chunk_result()`；防复发规则见 defensive-patterns.md「派生副本与权威来源分离」
 - **dedup（按 doc_id 去重）**：`src/rag/retrieval.py::_dedup_by_doc_id` 对召回结果按文档分组，每文档至多保留前 N 条，提升上下文多样性；N 取 `RETRIEVAL_MAX_PER_DOC`（`src/config/settings.py`，环境变量可覆盖，默认 1 与旧行为一致）
 - **RETRIEVAL_MAX_PER_DOC**：检索去重上限配置项，含义见「dedup」；为 A/B 实验变量（N=1 vs N=2/3，结论待真实 KB 评估后写入 change 记录）
 
@@ -158,18 +162,18 @@
 ## 基础设施
 
 - **PostgreSQL**：关系型存储后端（用户 / 知识库 / 文档 / 会话 / 消息 / 反馈 / 评估报告 7 张表，外加检索底座表 `chunks`），经 `postgresql+asyncpg` 访问。结构、引擎归属与迁移链见 `docs/agents/code-map.md`「关系型存储（PostgreSQL）」
-- **ChromaDB**：向量数据库，按 kb 分 collection
+- **ChromaDB**：**遗留向量库**，dense 检索已由 PostgreSQL + pgvector 承载；`chromadb` 依赖、`data/chroma_persist` 与 `deploy/chroma/` 仍在仓库中，唯一用途是搬迁 / 等价性脚本读取旧语料，待 P4 清理
 - **MinIO**：文档对象存储
 - **LiteLLM**：LLM 代理，`LLM_BASE_URL` 指向（默认 `http://litellm-proxy:4000`）
 - **DashScope**：通义千问系列模型的提供商（Embedding / LLM / Rerank）
 
-## 关系型存储（P1 落地）
+## 关系型存储（PostgreSQL）
 
 | 术语 | 定义 | 常见错误 |
 |------|------|---------|
-| `存储收敛（storage consolidation）` | 把关系型存储从 MySQL 迁到 PostgreSQL 的变更方向。P1 只换关系型后端；向量仍走 ChromaDB、词法仍走 `rank_bm25`，检索链路行为不变（Chroma/词法的收敛属后续阶段） | ❌ 以为 P1 同时改了检索路径 |
+| `存储收敛（storage consolidation）` | 把存储从 MySQL + ChromaDB 收敛到 PostgreSQL 的变更方向。P1 换关系型后端；P2 把 dense 向量检索换到 PostgreSQL + pgvector（词法仍走 `rank_bm25`，P3 换 PostgreSQL 全文检索）。替换只改存储、不改检索算法与融合参数 | ❌ 以为一次变更同时改了检索算法/融合权重 |
 | `DSN 单一来源` | 应用 DSN 只由 `src/config/settings.py:build_postgres_dsn()` 产出（`postgresql+asyncpg://`，`POSTGRES_PASSWORD` 缺失即抛 `RuntimeError`），`src/infra/db/engine.py` 在模块级消费它。宿主侧跑 alembic / pytest 时用 `POSTGRES_HOST=localhost` 覆盖 `.env` 里的 compose 服务名（`python-dotenv` 默认 `override=False`，已存在的环境变量优先） | ❌ 各处自行拼连接串；❌ 宿主侧忘了加 `POSTGRES_HOST=localhost` |
-| `chunks 表` | P1 baseline 手写建出的检索底座表，**没有对应 ORM 模型**。`content_seg` 是供分词/生成列使用的正文文本列；`tsv` 是 `to_tsvector('simple', content_seg)` 的持久化生成列（GIN 索引）；`embedding` 为 `vector(1024)`。P1 只建表并用冒烟测试证明可写可检索，不接线 | ❌ 以为 `chunks` 有 ORM 模型可直接查询；❌ 把 `content_seg`/`tsv` 当成应用层字段名 |
+| `chunks 表` | 单一张分块表，以 `kb_id` 列表达知识库归属（取代「每库一 collection」）。由 `ChunkModel` 映射（`src/infra/db/models/chunk.py`，ORM 属性名 `extra` → 列名 `metadata`），SQL 访问层是 `ChunkRepo`。`content_seg` 是词法检索文本列（P2 写正文原值作占位，P3 起为 jieba 分词输出并全量重写）；`tsv` 是 `to_tsvector('simple', content_seg)` 的持久化生成列（GIN 索引）；`embedding` 为 `vector(1024)`。列清单、索引与迁移链见 code-map.md「关系型存储（PostgreSQL）」 | ❌ 以为 `chunks` 无 ORM 模型；❌ 把 `content_seg`/`tsv` 当成应用层字段名；❌ 以为还按知识库分 collection |
 
 ## 如何更新
 

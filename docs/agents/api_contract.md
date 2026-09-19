@@ -748,8 +748,8 @@ Success:
 
 CASCADE 级联删除：知识库 → 文档 → 对话历史。
 
-⚠️ 调用方必须同时调用 `VectorStore.delete_collection()` 清理分块数据，
-Repo 层不感知向量存储。
+⚠️ 调用方必须同时调用 `VectorStore.delete_collection()` 清理分块数据
+（方法名为兼容保留，语义 = 按 `kb_id` 删 `chunks` 行，见 §4.5），Repo 层不感知向量存储。
 
 ### 3.4 `DocumentRepo.update_document_status(doc_id, status, chunk_count=0, error_msg="") → None`
 
@@ -929,7 +929,7 @@ agent（LLM + bind_tools）← entry_point
 | `source` | str | 文件名（用户上传时的原始名称） |
 | `page` | int | 所在页码（TXT 固定为 1） |
 | `doc_id` | str | 文档 UUID |
-| `chunk_id` | str | ChromaDB chunk ID |
+| `chunk_id` | str | 分块 ID（`chunks` 表主键，格式 `{doc_id}:{chunk_index}`） |
 | `score` | float | Reranker 相关性分数（越高越相关） |
 | `entities` | dict | 业务实体（来自 chunk.metadata，如 `{"company": "xx", "report_period": "2024"}`） |
 
@@ -1066,7 +1066,7 @@ agent（LLM + bind_tools）← entry_point
     → 后台 asyncio.create_task(_process_document):
       1. parsing — 调用 parser 提取文本
       2. chunking — ParentChildChunker 分层切分 + 质量校验
-      3. indexing — ChromaDB PersistentClient.add_chunks()
+      3. indexing — 写 chunks 表（`await VectorStore.add_chunks()`，embedding 列）
       4. ready — 更新 PostgreSQL 状态
     → 前端轮询 POST /api/kbs/documents/status 直至 ready/failed
 ```

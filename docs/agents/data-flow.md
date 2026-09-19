@@ -5,11 +5,15 @@
 ```
 用户上传 → MinIO 存储 → 文档解析(parse) → 策略检测
 → 智能分块(chunk) → 分块质量校验 → [可选]分块质量评估
-→ ChromaDB 向量入库 → PostgreSQL 元数据更新(ready)
+→ PostgreSQL 分块入库(chunks 表：content + embedding) → PostgreSQL 文档状态更新(ready)
 ```
 
 入口: `POST /api/kbs/documents/upload` → 后台 `asyncio.create_task(_process_document_task)`
 文件类型: `.pdf` / `.docx` / `.txt`，异步返回 `202` + `doc_id`
+
+分块与向量同写一张 `chunks` 表（`kb_id` 列表达知识库归属，向量存 `embedding` 列）；
+`VectorStore.add_chunks` 按 `(kb_id, doc_id, chunk_index)` 幂等覆盖并删尾部残留。
+检索底座的表结构、访问层与 ORM 归属见 code-map.md「关系型存储（PostgreSQL）」。
 
 ## 链路 2：用户问答 — 绑 KB 检索问答 与 未绑 KB 纯对话 ★
 
@@ -137,6 +141,8 @@ api_contract.md「task 事件详情」）：
 ```
 agent（bind_tools）
   ├ retrieve_kb：hybrid 混合检索 + rerank 精排 → ctx.tool_contexts（kind=kb）
+  │   dense 路：chunks 表按 kb_id 过滤 + pgvector `<=>` 余弦距离 top-k
+  │   词法路：BM25（现状；P3 换 PostgreSQL 全文检索，读 chunks.tsv）
   │   query 含时间词且 TEMPORAL_PARSE_ENABLED 时先 parse_temporal →
   │   ctx.temporal_years / missing_years（完整性校验数据源，rag_tools.py:109-122）
   ├ search_web：KB 检索不达标时 agent 自主降级联网（web_guided=False → TO_WEB 信号）；
@@ -267,7 +273,7 @@ SSE 消费侧按事件类型接线（`agent_service._convert_event`，src/servic
 ```
 创建知识库 → PostgreSQL get_or_create（名称去重）→ 返回 kb_id
 列出知识库 → PostgreSQL 查询 + 文档计数
-删除知识库 → 软删文档 → ChromaDB 删集合 → 软删 KB 记录
+删除知识库 → 软删文档 → 按 kb_id 删 chunks 行 → 软删 KB 记录
 ```
 
 入口: `POST /api/kbs` / `POST /api/kbs/list` / `POST /api/kbs/delete`
@@ -297,7 +303,7 @@ SSE 消费侧按事件类型接线（`agent_service._convert_event`，src/servic
 
 **子链路 6a — 测试集生成**：
 ```
-PostgreSQL 查元信息 → ChromaDB 取分块 → 脱敏 → 构建 KnowledgeGraph
+PostgreSQL 查元信息 → PostgreSQL 取 chunks 分块 → 脱敏 → 构建 KnowledgeGraph
 → transforms → 生成测试集 QA → 保存 JSON
 ```
 命令: `python -m src.cli.eval_ragas --kb-id xxx --generate --size 20`
