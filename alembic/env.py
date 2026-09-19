@@ -16,9 +16,14 @@ target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
-    url = config.get_main_option("sqlalchemy.url")
+    """离线生成 SQL 脚本（不连库）。
+
+    也需要 DSN：改用与应用同一处拼装，避免与 alembic.ini 漂移。
+    """
+    from src.config.settings import build_postgres_dsn
+
     context.configure(
-        url=url,
+        url=build_postgres_dsn(),
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -34,13 +39,10 @@ def do_run_migrations(connection):
 
 
 async def run_async_migrations() -> None:
-    db_url = config.get_main_option("sqlalchemy.url")
-    if db_url is None:
-        raise RuntimeError("alembic 配置缺少 sqlalchemy.url")
-    connectable = create_async_engine(
-        db_url,
-        poolclass=pool.NullPool,
-    )
+    """用应用自己的 DSN 跑迁移，避免 alembic.ini 与引擎配置漂移。"""
+    from src.config.settings import build_postgres_dsn
+
+    connectable = create_async_engine(build_postgres_dsn(), poolclass=pool.NullPool)
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)
     await connectable.dispose()
