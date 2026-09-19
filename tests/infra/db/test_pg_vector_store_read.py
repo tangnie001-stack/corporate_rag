@@ -115,6 +115,52 @@ async def test_get_chunks_by_doc_id_and_paginated(store_and_kb):
     assert [c.id for c in page.items] == [f"{doc_id}:2", f"{doc_id}:3"]
 
 
+async def test_get_all_chunks_returns_sorted_rows(store_and_kb):
+    """get_all_chunks 覆盖 ChunkRepo.get_by_kb：全量性 + 确定性顺序 + 分路字段缺席。
+
+    该方法是 BM25 全量重建的数据源，顺序不确定会让索引不可复现。
+    """
+    store, kb_id = store_and_kb
+    doc_a = uuid.uuid4().hex
+    doc_b = uuid.uuid4().hex
+    # 交错写入：先 b 的两段、再 a 的一段，确保返回顺序不是「插入顺序碰巧正确」
+    await store.add_chunks(
+        kb_id,
+        [
+            ChunkData(content="b0", metadata={"source": "b.pdf"}, chunk_id="x:0"),
+            ChunkData(
+                content="b1",
+                metadata={"source": "b.pdf", "parent_content": "P"},
+                chunk_id="x:1",
+            ),
+        ],
+        doc_b,
+        store._embed_fn.embed_documents(["b0", "b1"]),
+    )
+    await store.add_chunks(
+        kb_id,
+        [ChunkData(content="a0", metadata={"source": "a.pdf"}, chunk_id="y:0")],
+        doc_a,
+        store._embed_fn.embed_documents(["a0"]),
+    )
+
+    rows = await store.get_all_chunks(kb_id)
+    assert len(rows) == 3
+    # 全量且不混入别的 kb
+    assert {r.metadata["doc_id"] for r in rows} == {doc_a, doc_b}
+    # 确定性顺序：按 (doc_id, chunk_index)
+    order = [(r.metadata["doc_id"], r.metadata["chunk_index"]) for r in rows]
+    assert order == sorted(order)
+    # 不是检索 → 分路字段与得分全为 None
+    assert all(r.distance is None and r.lexical_score is None for r in rows)
+    assert all(r.dense_rank is None and r.sparse_rank is None for r in rows)
+    # metadata 回填契约键必须在（去重/引用/实体透传依赖它们）
+    for r in rows:
+        for key in ("doc_id", "chunk_index", "chunk_total", "source", "page"):
+            assert key in r.metadata
+    assert any(r.metadata.get("parent_content") == "P" for r in rows)
+
+
 async def test_list_collections_returns_kbs_with_chunks_without_side_effects(
     store_and_kb,
 ):
@@ -146,6 +192,18 @@ async def test_delete_document_and_collection(store_and_kb):
     assert await store.delete_document(kb_id, doc_id) == 3
     assert await store.get_chunks_by_doc_id(doc_id, kb_id) == []
     assert await store.delete_collection(kb_id) is False  # 已无行
+
+
+async def test_delete_collection_true_when_rows_exist(store_and_kb):
+    """delete_collection 的布尔语义 = 是否删掉了行（正向分支）。"""
+    store, kb_id = store_and_kb
+    doc_id = uuid.uuid4().hex
+    chunks = [ChunkData(content="段0", metadata={"source": "a.pdf"}, chunk_id="x:0")]
+    await store.add_chunks(
+        kb_id, chunks, doc_id, store._embed_fn.embed_documents(["段0"])
+    )
+    assert await store.delete_collection(kb_id) is True
+    assert await store.delete_collection(kb_id) is False  # 再删已无行
 
 
 async def test_get_or_create_collection_is_side_effect_free(store_and_kb):
