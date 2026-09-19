@@ -19,7 +19,7 @@ class ExplicitCaseResult:
     """单条显式失效用例的实测结果。"""
 
     query: str  # 显式用例查询串（`EXPLICIT_CASES` 成员）
-    mode: str  # 实际走的检索路径：`substring` / `prefix-AND` / `corpus-absent`
+    mode: str  # 实际走的检索路径：`substring` / `prefix-OR` / `corpus-absent`
     verdict: str  # 命中列展示文本：`✅` / `❌` / `未验证（语料不含该串）`
     kb_id: str | None  # 命中所在知识库 id；语料不含该串时为 None
 
@@ -256,7 +256,7 @@ def render_report(
 
     # ---- 选型结论 ----
     conclusion_construction = (
-        f"- 查询构造：**prefix-AND**（分组 B 命中数/总数：prefix-AND = "
+        f"- 查询构造：**prefix-OR**（分组 B 命中数/总数：prefix-AND = "
         f"{_count_cell(and_count, term_total)} / prefix-OR = "
         f"{_count_cell(or_count, term_total)} / plainto-AND = "
         f"{_count_cell(plainto_count, term_total)} / substring = "
@@ -273,10 +273,16 @@ def render_report(
         f"{_count_cell(jieba_count, term_total)}）"
     )
     conclusion_joiner = (
-        f"- **连接符不翻转**：`prefix-OR` 高出 `prefix-AND` 恰为 {delta_pp:.1f} 个"
-        "百分点，判据字面是「**超过** 10 个百分点」，未触发；且 OR 是超集谓词、"
-        "集合成员口径近饱和，+10pp 是机械后果而非质量证据。故保持 "
-        '`_JOINER = " & "`。'
+        '- **连接符取 prefix-OR**（`_JOINER = " | "`）。依据分两层：'
+        "（1）探针分组 B 显示 OR 的命中覆盖面**不低于** AND"
+        f"（{_count_cell(or_count, term_total)} vs "
+        f"{_count_cell(and_count, term_total)}，高 {delta_pp:.1f} 个百分点）—— "
+        "但 OR 是 AND 的**超集谓词**，在「集合成员」口径近饱和时该差值是其**机械"
+        "后果、不能读作质量证据**（三张表的测量数字是那次对比的记录）；（2）"
+        "**决定性的依据来自服务路径实测**：前缀 AND 下，多词自然查询（如「资产负债率 "
+        "变化 趋势」）因补词不在语料而整条谓词为空 ⇒ `sparse_count=0`、词法路对典型"
+        "查询零贡献（混合检索退化为纯 dense）；翻转为 OR 后同一查询 `sparse_count=1`。"
+        "精度交由下游 RRF / 去重 / rerank 承担。"
     )
     conclusion_scoring = (
         "- **打分函数不翻转**：分组 C 零差来自「该口径对排序不敏感」，非质量证据，"

@@ -209,8 +209,11 @@ async def _probe_group_construction(session, corpus, k) -> dict[str, int]:
         if kb_id is None:
             continue
         plan = build_lexical_query(term)
-        and_tsq = plan.tsquery
-        or_tsq = " | ".join(plan.tsquery.split(" & "))
+        # 两臂各自显式构造：生产构造器 `build_lexical_query` 只产出当前选定的
+        # 连接符（` | `），从它反推另一臂会退化成空操作（两臂发出同一条谓词，
+        # 重跑无法复现 A/B 差异）；`plan.terms` 已是安全化后的词元，直接拼装。
+        and_tsq = " & ".join(f"{t}:*" for t in plan.terms)
+        or_tsq = " | ".join(f"{t}:*" for t in plan.terms)
         table = {
             "prefix-AND": (
                 (
@@ -315,7 +318,7 @@ async def _probe_explicit_cases(session, corpus, k) -> list[ExplicitCaseResult]:
                 " ORDER BY ts_rank(tsv, to_tsquery('simple', :tsq)) DESC, id LIMIT :k"
             )
             params = {"kb_id": kb_id, "tsq": plan.tsquery}
-            mode = "prefix-AND"
+            mode = "prefix-OR"
         contents = await _sql_top_contents(session, sql, params, k)
         if hit_rate(contents, case):
             verdict = "✅"
