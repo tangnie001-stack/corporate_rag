@@ -19,6 +19,7 @@ from src.config.const import MAX_QUERY_K
 from src.core import logging as core_logging
 from src.core.log_events import Event
 from src.core.logging import LOG_MAX_BODY
+from src.infra.db.lexical_query import build_lexical_query
 from src.infra.db.vector_store.mapping import build_rows, row_to_chunk_result
 from src.infra.db.vector_store.types import ChunkQueryResult, ChunkResult
 from src.models import get_embeddings
@@ -153,6 +154,39 @@ class PgVectorStore:
             "[PG] method=dense_search | kb_id={} | rows={} | data={}",
             kb_id,
             len(results),
+            str(results)[:LOG_MAX_BODY],
+        )
+        return results
+
+    async def lexical_search(
+        self, kb_id: str, query: str, k: int = 5
+    ) -> list[ChunkResult]:
+        """词法路取 top-k（ts_rank 降序），并填充 sparse_rank。
+
+        与 dense_search 对称：分词（含首次加载 jieba 词典，CPU 约 0.5–1 s）
+        放在线程池，避免阻塞事件循环。
+
+        Args:
+            kb_id: 知识库 ID
+            query: 用户查询文本
+            k: 返回条数上限（内部再按 MAX_QUERY_K 截断）
+
+        Returns:
+            按词法得分降序的 ChunkResult；每项 lexical_score 有值、
+            sparse_rank 为 0 起的名次、distance 为 None
+        """
+        effective_k = min(k, MAX_QUERY_K)
+        plan = await asyncio.to_thread(build_lexical_query, query)
+        pairs = await self._repo.search_lexical(kb_id, plan, effective_k)
+        results = [
+            row_to_chunk_result(row, lexical_score=score, sparse_rank=rank)
+            for rank, (row, score) in enumerate(pairs)
+        ]
+        logger.debug(
+            "[PG] method=lexical_search | kb_id={} | rows={} | substring={} | data={}",
+            kb_id,
+            len(results),
+            plan.use_substring,
             str(results)[:LOG_MAX_BODY],
         )
         return results

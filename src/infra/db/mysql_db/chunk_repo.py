@@ -1,12 +1,13 @@
-"""分块 Repo — chunks 表 CRUD 与 dense 检索。
+"""分块 Repo — chunks 表 CRUD、dense 与词法取数。
 
-本模块是 chunks 表的唯一 SQL 访问层：向量排序、jsonb 读写、按 doc/kb 的增删
-都在这里，向量存储层（vector_store）只做编排与结果映射。
+本模块是 chunks 表的唯一 SQL 访问层：向量排序、词法匹配、jsonb 读写、按 doc/kb
+的增删都在这里，向量存储层（vector_store）只做编排与结果映射。
 """
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, literal, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+from src.infra.db.lexical_query import LexicalQuery, escape_like
 from src.infra.db.models.chunk import ChunkModel
 from src.infra.db.vector_store.mapping import ChunkRow, row_to_chunk_row
 
@@ -96,6 +97,58 @@ class ChunkRepo:
             )
             result = await session.execute(stmt)
             return [(row_to_chunk_row(m), float(dist)) for m, dist in result.all()]
+
+    async def search_lexical(
+        self, kb_id: str, plan: LexicalQuery, k: int
+    ) -> list[tuple[ChunkRow, float]]:
+        """按词法相关性取 top-k。
+
+        词元非空时走 `tsv @@ to_tsquery(...)` 并按 `ts_rank` 降序；词元全被滤掉时
+        （见 lexical_query 的 H1）降级为正文子串匹配，此时得分恒为 0.0。
+        两种路径都以 `id` / `(doc_id, chunk_index)` 作 tiebreaker，保证同查询可复现
+        （融合是纯 Python 排序，上游结果顺序不定会让 RRF 输出漂移）。
+
+        Args:
+            kb_id: 知识库 ID
+            plan: 查询条件（由调用方构造，见 lexical_query.build_lexical_query）
+            k: 返回条数上限
+
+        Returns:
+            (行, 词法得分) 列表；tsquery 路径按得分降序，子串兜底路径按文档与序号升序
+        """
+        # 空/纯空白原文没有任何可检内容，直接短路：既不开数据库会话，也不得提交
+        # tsquery 或退化为子串匹配（`LIKE '%%'` 会命中全库）
+        if plan.is_blank:
+            return []
+        async with self._sf() as session:
+            if plan.use_substring:
+                stmt = (
+                    select(ChunkModel, literal(0.0).label("lexical_score"))
+                    .where(
+                        ChunkModel.kb_id == kb_id,
+                        ChunkModel.content.like(
+                            f"%{escape_like(plan.raw)}%", escape="\\"
+                        ),
+                    )
+                    .order_by(ChunkModel.doc_id, ChunkModel.chunk_index)
+                    .limit(k)
+                )
+            else:
+                tsquery = func.to_tsquery("simple", plan.tsquery)
+                lexical_score = func.ts_rank(ChunkModel.tsv, tsquery).label(
+                    "lexical_score"
+                )
+                stmt = (
+                    select(ChunkModel, lexical_score)
+                    .where(
+                        ChunkModel.kb_id == kb_id,
+                        ChunkModel.tsv.op("@@")(tsquery),
+                    )
+                    .order_by(lexical_score.desc(), ChunkModel.id)
+                    .limit(k)
+                )
+            result = await session.execute(stmt)
+            return [(row_to_chunk_row(m), float(score)) for m, score in result.all()]
 
     async def get_by_doc(self, doc_id: str, kb_id: str) -> list[ChunkRow]:
         """取某文档的全部分块，按 chunk_index 升序。"""
