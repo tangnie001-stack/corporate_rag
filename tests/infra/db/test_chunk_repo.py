@@ -70,3 +70,48 @@ async def test_upsert_then_read_back(kb_row):
     assert got[0].extra["parent_content"] == "母公司"
     assert got[0].source == "a.pdf"
     assert got[0].page == 3
+    # content_seg 必须真的落了库（P2 是正文原值占位；P3 换 jieba 输出）
+    assert got[0].content_seg == "贵州茅台2024年营业收入1741亿元"
+
+
+async def test_chunks_server_defaults_match_baseline():
+    """D1 对 server_default 是盲的（Alembic 默认 compare_server_default=False），
+    故单独断言这三列的默认值与 baseline 的 sa.text(...) 逐字一致。"""
+    async with session_factory() as s:
+        result = await s.execute(
+            text(
+                "SELECT column_name, column_default FROM information_schema.columns"
+                " WHERE table_name = 'chunks' AND column_name IN ('source', 'page', 'metadata')"
+            )
+        )
+        defaults = {name: value for name, value in result.all()}
+    assert defaults["source"] == "''::text"
+    assert defaults["page"] == "0"
+    assert defaults["metadata"] == "'{}'::jsonb"
+
+
+async def test_tsv_is_generated_from_content_seg(kb_row):
+    """tsv 是生成列：不写入也应自动有值（且不为 NULL）。"""
+    repo = ChunkRepo(session_factory)
+    doc = uuid.uuid4().hex
+    rows = [
+        ChunkRow(
+            id=f"{doc}:0",
+            kb_id=kb_row,
+            doc_id=doc,
+            chunk_index=0,
+            chunk_total=1,
+            content="营业收入同比增长",
+            content_seg="营业 收入 同比 增长",
+            embedding=[0.5] * 1024,
+            source="a.pdf",
+            page=1,
+            extra={},
+        ),
+    ]
+    assert await repo.upsert_chunks(rows) == 1
+    async with session_factory() as s:
+        value = await s.scalar(
+            text("SELECT tsv IS NOT NULL FROM chunks WHERE id = :i"), {"i": f"{doc}:0"}
+        )
+    assert value is True

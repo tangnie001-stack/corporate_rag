@@ -107,7 +107,14 @@ class ChunkRepo:
     async def get_paginated(
         self, doc_id: str, kb_id: str, page: int, page_size: int
     ) -> tuple[list[ChunkRow], int]:
-        """分页取某文档的分块，返回 (当页行, 总数)。"""
+        """分页取某文档的分块，返回 (当页行, 总数)。
+
+        Args:
+            doc_id: 文档 ID
+            kb_id: 知识库 ID
+            page: 页码，**1-based**（调用方保证 >= 1；<= 0 会产生负 OFFSET 并被 PG 拒绝）
+            page_size: 每页条数
+        """
         async with self._sf() as session:
             total = await session.scalar(
                 select(func.count())
