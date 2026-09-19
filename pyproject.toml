@@ -32,7 +32,9 @@ dependencies = [
     "redis==8.0.0",
     "dashscope>=1.26.3",
     "rank_bm25>=0.2.2",
-    "jieba>=0.42.1",
+    # pin 精确版本：分词结果随 chunks.tsv 生成列固化落库，版本漂移会让存量与新
+    # 查询侧口径不一致（静默降召回），变更必须配 scripts/rewrite_content_seg.py --apply
+    "jieba==0.42.1",
     "minio>=7.2.0,<8.0.0",
     "pymupdf4llm==1.28.2",
     # PostgreSQL 关系型存储：asyncpg 为 SQLAlchemy 异步驱动，pgvector 提供向量类型，

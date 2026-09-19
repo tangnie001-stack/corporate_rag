@@ -172,6 +172,13 @@ DELEGATE_TASK_TITLE_TMPL = "{skill} · 领域专家分析"
 MAX_QUERY_K = 100
 
 
+# ── 词法检索分词 ──
+# 词项长度下限：中文高频虚词与量词本身就是单字（本/及/不/年/月/了/吗），
+# 文档频率接近 1，纳入检索文本会淹没精确词项的排序；该过滤同时去掉空格与
+# 中文标点（长度均为 1），因此不需要另建停用词表
+LEXICAL_MIN_TOKEN_LEN = 2
+
+
 # ── 检索精排超时 ──
 # Reranker 精排总超时秒数：rerank 为同步 HTTP 调用（dashscope 无默认超时），
 # 在事件循环内直连会永久挂起阻塞整个 worker，故经 to_thread + wait_for 兜底；
