@@ -50,7 +50,8 @@
 #### Scenario: 所有引用方同步更新
 
 - **WHEN** 完成搬迁
-- **THEN** `rag/retrieval.py`、`infra/search/bm25_index.py`、`infra/db/vector_store/__init__.py`、`infra/db/vector_store/pg_store.py`、`agents/graph/state.py`、`services/app_service.py` 的 import 路径 SHALL 同步更新
+- **THEN** 以下**引用被搬迁类型（`ChunkResult` / `ChunkQueryResult`）、且 import 路径需同步更新**的文件的 import 路径 SHALL 同步更新 —— `rag/retrieval.py`、`infra/search/bm25_index.py`、`infra/db/vector_store/__init__.py`、`infra/db/vector_store/pg_store.py`、`infra/db/vector_store/mapping.py`、`services/app_service.py`
+- **AND** 未引用被搬迁类型的模块（如 `agents/graph/state.py`）SHALL NOT 出现在此清单中
 
 #### Scenario: 分路排名字段可读
 
