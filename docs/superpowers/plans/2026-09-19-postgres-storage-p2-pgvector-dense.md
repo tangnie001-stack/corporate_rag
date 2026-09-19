@@ -1415,12 +1415,14 @@ P2 期间并存；等价性验收通过后由 Task 9 切换装配并删除 Chrom
   PG 无此限制，这里保留它是为了不把「能力提升」混进迁移等价性验收。
 """
 
+import asyncio
+
 from loguru import logger
 
 from src.chunking.validator import ChunkData
-from src.config import LOG_MAX_BODY
-from src.config.const import Event
-from src.core.logging import log_event as core_logging_log_event
+from src.core import logging as core_logging
+from src.core.log_events import Event
+from src.core.logging import LOG_MAX_BODY
 from src.infra.db.mysql_db.chunk_repo import ChunkRepo
 from src.infra.db.vector_store.mapping import build_rows
 from src.models import get_embeddings
@@ -1475,7 +1477,9 @@ class PgVectorStore:
 
             chunk_repo = ChunkRepo(session_factory)
         self._repo = chunk_repo
-        self._embed_fn = embed_fn or QueryEmbedder()
+        if embed_fn is None:
+            embed_fn = QueryEmbedder()
+        self._embed_fn = embed_fn
 
     async def add_chunks(
         self,
@@ -1499,12 +1503,15 @@ class PgVectorStore:
         if not chunks:
             return 0
         if embeddings is None:
-            embeddings = await self._embed_fn.embed_documents([c.content for c in chunks])
+            # 向量化是同步的 HTTP 调用 → 必须 offload，否则阻塞事件循环（单 worker 下会冻住所有请求与 SSE）
+            embeddings = await asyncio.to_thread(
+                self._embed_fn.embed_documents, [c.content for c in chunks]
+            )
         rows = build_rows(kb_id, doc_id, chunks, embeddings)
         await self._repo.upsert_chunks(rows)
         # 分块数变少时删掉尾部残留（upsert 只覆盖 [0, len(rows)) 区间）
         await self._repo.delete_tail(kb_id, doc_id, len(rows))
-        core_logging_log_event(
+        core_logging.log_event(
             Event.CHUNKS_ADDED, kb_id=kb_id, doc_id=doc_id, count=len(rows)
         )
         logger.debug(
@@ -1704,7 +1711,7 @@ Expected: FAIL —— `AttributeError: 'PgVectorStore' object has no attribute '
             row_to_chunk_result(row, distance=distance, dense_rank=rank)
             for rank, (row, distance) in enumerate(pairs)
         ]
-        core_logging_log_event(
+        core_logging.log_event(
             Event.SEARCH_RESULT,
             kb_id=kb_id,
             query_len=len(query),
@@ -1745,7 +1752,7 @@ Expected: FAIL —— `AttributeError: 'PgVectorStore' object has no attribute '
     async def get_all_chunks(self, kb_id: str) -> list[ChunkResult]:
         """取整个知识库的全部分块（BM25 全量重建用）。"""
         rows = await self._repo.get_by_kb(kb_id)
-        core_logging_log_event(Event.CHUNKS_READ, kb_id=kb_id, count=len(rows))
+        core_logging.log_event(Event.CHUNKS_READ, kb_id=kb_id, count=len(rows))
         return [row_to_chunk_result(row) for row in rows]
 
     async def list_collections(self) -> list[str]:
