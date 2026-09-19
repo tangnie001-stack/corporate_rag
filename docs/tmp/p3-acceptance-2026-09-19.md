@@ -388,4 +388,4 @@ All checks passed!
 
 ### ⑤ commit hash
 
-- **`<SHA>`**（`fix(p3): 查询构造翻转为前缀 OR（服务路径实测 AND 使词法路零贡献）+ 恢复语料`）
+- **`d2bbc5df033fd89d651ef1b40a1dd21f1d1cf178`**（`d2bbc5d`，`fix(p3): 查询构造翻转为前缀 OR（服务路径实测 AND 使词法路零贡献）+ 恢复语料`）
