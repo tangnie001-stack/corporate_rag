@@ -14,7 +14,7 @@ confidence 与改写字段（medium → standalone_query，complex → sub_queri
     python -m src.cli.compare_rewrite --kb-name test123
 
 前提：
-  - 目标 KB 已入库，ChromaDB 中已有向量
+  - 目标 KB 已入库，分块存储中已有向量
   - .env 配置了 DashScope API Key（LLM / Embedding / Rerank）
 """
 
@@ -371,9 +371,7 @@ async def _score_queries(
     seen: set[str] = set()
     for q in queries:
         try:
-            results = await asyncio.to_thread(
-                store.similarity_search, kb_id, q, TOP_K_RETRIEVAL
-            )
+            results = await store.similarity_search(kb_id, q, TOP_K_RETRIEVAL)
         except Exception as e:  # noqa: BLE001
             core_logging.log_event(Event.SEARCH_FAILED, query=q, err=str(e))
             continue

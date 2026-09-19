@@ -180,7 +180,7 @@ def test_delete_document_success(mock_app_service, auth_client):
     mock_svc = mock_app_service
     mock_svc.document._doc_repo = MagicMock()
     mock_svc.document._doc_repo.soft_delete_document = AsyncMock(return_value=True)
-    mock_svc.vector_store = MagicMock()
+    mock_svc.vector_store = AsyncMock()
 
     response = auth_client.post(
         "/api/kbs/documents/delete", json={"kb_id": "kb-1", "doc_id": "doc-1"}

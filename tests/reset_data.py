@@ -1,4 +1,4 @@
-"""数据重置工具 — 一键清除 PostgreSQL、ChromaDB、Redis 的全部数据。
+"""数据重置工具 — 一键清除 PostgreSQL、BM25 索引、Redis 的全部数据。
 
 用法（独立运行）：
     source .venv/bin/activate
@@ -18,7 +18,7 @@ from pathlib import Path
 from loguru import logger
 from sqlalchemy import text
 
-from src.config import CHROMA_PERSIST_DIR, REDIS_URL
+from src.config import BM25_INDEX_DIR, REDIS_URL
 from src.infra.db.engine import engine
 from src.infra.db.models import *
 from src.services.app_service import AppService
@@ -49,17 +49,19 @@ def reset_pg() -> None:
     asyncio.run(_reset_pg_async())
 
 
-def reset_vector_store() -> None:
-    """清空 ChromaDB 持久目录（删除整个 persist 目录后重建空目录）。
+def reset_bm25_index() -> None:
+    """清空 BM25 索引目录（词法索引仍是磁盘文件，P3 由 PG 全文检索取代）。
 
-    不初始化 VectorStore 客户端，直接操作文件系统，速度快且无外部依赖。
+    注意：**不再删除 Chroma 的 persist 目录** —— 自 P2 起 dense 数据由
+    chunks 表承载（reset_pg 已清），而 data/chroma_persist 是 dense 等价性
+    验收与回滚的依据，删除它会使两者同时失效。
     """
-    path = Path(CHROMA_PERSIST_DIR)
+    path = Path(BM25_INDEX_DIR)
     if path.exists():
         shutil.rmtree(path)
-        logger.info("ChromaDB: 已删除 persist 目录 '{}'", CHROMA_PERSIST_DIR)
+        logger.info("BM25: 已删除索引目录 '{}'", BM25_INDEX_DIR)
     path.mkdir(parents=True, exist_ok=True)
-    logger.info("ChromaDB: 已重建空目录")
+    logger.info("BM25: 已重建空目录")
 
 
 def reset_redis() -> None:
@@ -83,7 +85,7 @@ def reset_redis() -> None:
 def reset_all(
     service: AppService | None = None,
 ) -> None:
-    """一键重置全部数据存储（PostgreSQL + ChromaDB + Redis）。
+    """一键重置全部数据存储（PostgreSQL + BM25 索引 + Redis）。
 
     Args:
         service: 已有的 AppService 实例（可选，用于通过其 chat_manager 清 Redis）
@@ -97,8 +99,8 @@ def reset_all(
     # PostgreSQL
     reset_pg()
 
-    # ChromaDB（直接删目录，不和客户端交互）
-    reset_vector_store()
+    # BM25 索引（直接删目录，不和客户端交互）
+    reset_bm25_index()
 
     # Redis
     if service is not None:
@@ -156,15 +158,15 @@ if __name__ == "__main__":
         logger.error("PostgreSQL: 清空失败: {}", r.stderr)
         sys.exit(1)
 
-    # ChromaDB
+    # BM25 索引
     import shutil as _su
     from pathlib import Path as _P
 
-    p = _P(CHROMA_PERSIST_DIR)
+    p = _P(BM25_INDEX_DIR)
     if p.exists():
         _su.rmtree(p)
     p.mkdir(parents=True, exist_ok=True)
-    logger.info("ChromaDB: 已重置")
+    logger.info("BM25: 已重置")
 
     # Redis
     r2 = subprocess.run(

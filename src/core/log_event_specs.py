@@ -183,12 +183,6 @@ EVENT_SPECS: dict[str, EventSpec] = {
     "search result": EventSpec(
         "search result", "db", "info", ("kb_id", "query_len", "result_count", "model")
     ),
-    "search all done": EventSpec(
-        "search all done", "db", "info", ("collections", "query_len", "result_count")
-    ),
-    "search collection failed": EventSpec(
-        "search collection failed", "db", "warning", ("kb_id", "err")
-    ),
     # [llm] Langfuse 追踪 / prompt 拉取 / LLM 内容深日志（3.4 批）
     "trace ready": EventSpec("trace ready", "llm", "info"),
     "trace init failed": EventSpec("trace init failed", "llm", "warning", ("err",)),
@@ -278,12 +272,6 @@ EVENT_SPECS: dict[str, EventSpec] = {
     # [app] 应用边界（3.5 批：main.py 生命周期 + 全局异常兜底）
     "app starting": EventSpec("app starting", "app", "info"),
     "app stopping": EventSpec("app stopping", "app", "info"),
-    "chroma warmup done": EventSpec(
-        "chroma warmup done", "app", "info", ("collections",)
-    ),
-    "chroma warmup failed": EventSpec(
-        "chroma warmup failed", "app", "warning", ("err",)
-    ),
     "stale locks cleared": EventSpec("stale locks cleared", "app", "info", ("count",)),
     "locks clear failed": EventSpec("locks clear failed", "app", "warning", ("err",)),
     "biz error": EventSpec("biz error", "app", "error", ("code", "message")),

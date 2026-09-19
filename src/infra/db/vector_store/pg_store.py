@@ -1,12 +1,9 @@
-"""dense 检索的 PostgreSQL + pgvector 后端。
-
-与 Chroma 后端（client.py / store.py / search.py）的关系：二者接口相同，
-P2 期间并存；等价性验收通过后由 Task 9 切换装配并删除 Chroma 实现。
+"""dense 检索的 PostgreSQL + pgvector 后端（公开入口 VectorStore 的实现）。
 
 契约要点：
 - distance 是**余弦距离**（pgvector `<=>`），消费方用 score = 1 - distance；
-- k 的上限仍是 100 —— 该上限源自 Chroma（vector_store/search.py:43），
-  PG 无此限制，这里保留它是为了不把「能力提升」混进迁移等价性验收。
+- k 的上限是 MAX_QUERY_K=100：PG 本身无此限制，保留它是为了不把
+  「检索条数的能力提升」混进迁移等价性验收。
 """
 
 import asyncio
@@ -23,9 +20,8 @@ from src.infra.db.vector_store.mapping import build_rows, row_to_chunk_result
 from src.infra.db.vector_store.types import ChunkQueryResult, ChunkResult
 from src.models import get_embeddings
 
-# Chroma 后端沿用的硬上限（vector_store/search.py:43 的 n_results=min(k, 100)）。
-# PG 本身没有这个限制；保留它是为了让等价性验收只度量「存储替换」，
-# 不把检索条数的能力变化混进来（Task 6 dense_search 与 Task 8 会 import 它）。
+# 查询条数硬上限：PG 本身没有这个限制，保留它是为了让等价性验收只度量
+# 「存储替换」，不把检索条数的能力变化混进来（Task 6 dense_search 与 Task 8 会 import 它）。
 MAX_QUERY_K = 100
 
 

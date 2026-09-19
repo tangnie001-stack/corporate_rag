@@ -96,13 +96,13 @@ class AppService:
         return await self.kb.create_knowledge_base(name, description, user_id)
 
     async def delete_knowledge_base(self, kb_id: str) -> tuple[bool, str]:
-        """删除知识库：软删文档 → 删 ChromaDB 集合 → 软删 KB。"""
+        """删除知识库：软删文档 → 删分块 → 软删 KB。"""
         await self._doc_repo.soft_delete_documents_by_kb(kb_id)
         try:
-            await asyncio.to_thread(self.vector_store.delete_collection, kb_id)
-            logger.info("ChromaDB delete_collection: kb_id={}", kb_id)
+            deleted = await self.vector_store.delete_collection(kb_id)
+            logger.info("chunks deleted for kb_id={} deleted={}", kb_id, deleted)
         except Exception:  # noqa: BLE001
-            logger.warning("ChromaDB delete collection failed for kb={}", kb_id)
+            logger.warning("chunk delete failed for kb={}", kb_id)
         if self.bm25 is not None:
             try:
                 await asyncio.to_thread(self.bm25.delete_index, kb_id)
@@ -338,8 +338,7 @@ class AppService:
         self, doc_id: str, kb_id: str, page: int = 1, page_size: int = 50
     ):
         """分页查询文档的分块内容。"""
-        result: ChunkQueryResult = await asyncio.to_thread(
-            self.vector_store.get_chunks_paginated,
+        result: ChunkQueryResult = await self.vector_store.get_chunks_paginated(
             doc_id,
             kb_id,
             page=page,

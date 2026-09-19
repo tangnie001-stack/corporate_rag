@@ -15,7 +15,7 @@ from src.services.document_service import DocumentService
 def _make_service() -> tuple[DocumentService, AsyncMock]:
     """构造最小 DocumentService（repo 用 AsyncMock，不触数据库）。"""
     doc_repo = AsyncMock()
-    svc = DocumentService(doc_repo, vector_store=MagicMock(), router=MagicMock())
+    svc = DocumentService(doc_repo, vector_store=AsyncMock(), router=MagicMock())
     return svc, doc_repo
 
 
@@ -136,7 +136,7 @@ class TestEntityInjectionFailure:
         parse_result.encoding = "utf-8"
         parse_result.heading_tree = []
         parse_result.chunks = [ChunkData(content="内容A", metadata={"page": 1})]
-        svc.router.parse.return_value = parse_result
+        svc.router.parse.return_value = parse_result  # type: ignore[reportAttributeAccessIssue]  # svc.router 运行时是 mock
 
         tmp = MagicMock()
         tmp.name = "/tmp/fake.pdf"
@@ -157,6 +157,7 @@ class TestEntityInjectionFailure:
             ),
             patch("src.services.document_service.validate_chunks") as mock_validate,
             patch("src.services.document_service.CHUNK_EVAL_ENABLED", False),
+            patch("src.services.document_service.get_embeddings") as mock_embed,
             patch.object(
                 svc,
                 "_inject_document_entities",
@@ -170,14 +171,15 @@ class TestEntityInjectionFailure:
                 chunk=MagicMock(return_value=chunks)
             )
             mock_validate.return_value = MagicMock(tiny_chunks=[], garbled_chunks=[])
-            svc.vector_store.add_chunks.return_value = 1
+            mock_embed.return_value.embed_documents.return_value = [[0.0] * 1024]
+            svc.vector_store.add_chunks.return_value = 1  # type: ignore[reportAttributeAccessIssue]  # 运行时是 mock
 
             await svc.process_document(
                 "kb-1", "doc-1", "minio/fake.pdf", "fake.pdf", ".pdf"
             )
 
         # 入库流程不中断：add_chunks 被调用、文档标记 ready
-        svc.vector_store.add_chunks.assert_called_once()
+        svc.vector_store.add_chunks.assert_called_once()  # type: ignore[reportAttributeAccessIssue]  # 运行时是 mock
         ready_calls = [
             c
             for c in doc_repo.update_document_status.call_args_list

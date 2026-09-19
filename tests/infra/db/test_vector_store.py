@@ -1,20 +1,35 @@
-"""VectorStore 向量存储的单元测试。
+"""公开入口 VectorStore（PG 后端）的冒烟测试。
 
-测试目标：
-- ChromaDB collection 的创建 / 幂等性 / 删除 / 列表
-- 文档分块添加与相似度搜索
-- collection 名称格式（kb_ 前缀）
+覆盖两件事：
+- 公开入口确实指向 `pg_store.PgVectorStore`，且 Chroma 的四个实现模块已不存在；
+- 装配后的增删查基本行为（打真实 PG，embedding 用假实现，不发网络）。
 
-注意：使用临时目录作为 ChromaDB 持久化路径，
-测试结束后自动清理，不影响生产数据。
+写库用例必须先建 `knowledge_base` 行（`chunks.kb_id` 有外键），
+统一复用 p2_fakes 的 `store_and_kb`（含建库与测后清理）。
 """
 
+import asyncio
 import uuid
 
 import pytest
 
+from src.chunking.validator import ChunkData
 from src.infra.db.vector_store import VectorStore
-from src.parsers.base import ChunkData
+
+# 共享 fixture（store_and_kb）定义在 p2_fakes，以插件方式加载：
+# 直接 import fixture 名会与测试函数的同名参数冲突（ruff F811）。
+pytest_plugins = ["tests.infra.db.p2_fakes"]
+
+
+def test_public_vector_store_is_pg_backed():
+    """公开入口 VectorStore 背后必须是 PG 实现，且不再有 Chroma 的模块。"""
+    import importlib
+
+    module = importlib.import_module("src.infra.db.vector_store")
+    assert module.VectorStore.__module__ == "src.infra.db.vector_store.pg_store"
+    for gone in ("client", "embedding", "store", "search"):
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module(f"src.infra.db.vector_store.{gone}")
 
 
 def test_global_retrieval_entries_are_gone():
@@ -34,115 +49,90 @@ def test_search_source_has_no_global_branch():
     assert "similarity_search_all" not in src
 
 
-@pytest.fixture
-def vs():
-    """临时目录 fixture：创建隔离的 VectorStore 实例。"""
-    import tempfile
-
-    tmpdir = tempfile.mkdtemp()  # 创建临时目录
-    store = VectorStore(persist_dir=tmpdir)
-    yield store
-    # 测试结束后清理临时文件
-    import shutil
-
-    shutil.rmtree(tmpdir, ignore_errors=True)
+@pytest.mark.asyncio
+async def test_get_or_create_collection_is_side_effect_free(store_and_kb):
+    """get_or_create_collection 是兼容方法：返回 kb_id 且不写库。"""
+    store, kb_id = store_and_kb
+    assert await store.get_or_create_collection(kb_id) == kb_id
+    assert await store.get_all_chunks(kb_id) == []
 
 
-@pytest.fixture
-def kb_id():
-    """生成随机知识库 ID，避免测试间冲突。"""
-    return uuid.uuid4().hex
+@pytest.mark.asyncio
+async def test_add_chunks_and_dense_search(store_and_kb):
+    """写入分块后可被 dense 检索取回，结果带距离与 0 起连续排名。"""
+    store, kb_id = store_and_kb
+    doc_id = uuid.uuid4().hex
+    chunks = [
+        ChunkData(
+            content="贵州茅台2024年营业收入1,741亿元",
+            metadata={"source": "test.txt", "page": 1},
+            chunk_id="test:0",
+        ),
+        ChunkData(
+            content="贵州茅台2024年净利润857亿元",
+            metadata={"source": "test.txt", "page": 1},
+            chunk_id="test:1",
+        ),
+    ]
+    count = await store.add_chunks(kb_id, chunks, doc_id)
+    assert count == 2
+    results = await store.similarity_search(kb_id, "营业收入", k=5)
+    assert len(results) == 2
+    assert all(r.distance is not None for r in results)
+    assert [r.dense_rank for r in results] == [0, 1]
 
 
-class TestVectorStore:
-    """ChromaDB 向量存储测试套件。"""
+@pytest.mark.asyncio
+async def test_delete_collection(store_and_kb):
+    """删除知识库全部分块：删后无分块，再次删除返回 False。"""
+    store, kb_id = store_and_kb
+    doc_id = uuid.uuid4().hex
+    await store.add_chunks(
+        kb_id,
+        [ChunkData(content="内容", metadata={"source": "t.txt"}, chunk_id="t:0")],
+        doc_id,
+    )
+    assert await store.delete_collection(kb_id) is True
+    assert await store.get_all_chunks(kb_id) == []
+    assert await store.delete_collection(kb_id) is False
 
-    def test_get_or_create_collection(self, vs, kb_id):
-        """创建 collection：名称必须为 kb_{kb_id} 格式。"""
-        coll = vs.get_or_create_collection(kb_id)
-        assert coll is not None
-        assert coll.name == f"kb_{kb_id}"  # kb_ 前缀隔离不同知识库
 
-    def test_get_or_create_collection_idempotent(self, vs, kb_id):
-        """幂等性：多次创建同一 kb_id 返回相同 collection。"""
-        coll1 = vs.get_or_create_collection(kb_id)
-        coll2 = vs.get_or_create_collection(kb_id)
-        assert coll1.name == coll2.name
+@pytest.mark.asyncio
+async def test_delete_nonexistent_collection(store_and_kb):
+    """删除无分块的知识库返回 False。"""
+    store, _kb_id = store_and_kb
+    assert await store.delete_collection("nonexistent_kb_id") is False
 
-    def test_add_chunks_and_search(self, vs, kb_id):
-        """添加分块并搜索：验证写入 + 相似度搜索全流程。"""
-        vs.get_or_create_collection(kb_id)
-        # 构造两个金融数据分块
-        chunks = [
-            ChunkData(
-                content="贵州茅台2024年营业收入1,741亿元",
-                metadata={"source": "test.txt", "page": 1},
-                chunk_id="test:0",
-            ),
-            ChunkData(
-                content="贵州茅台2024年净利润857亿元",
-                metadata={"source": "test.txt", "page": 1},
-                chunk_id="test:1",
-            ),
-        ]
-        doc_id = uuid.uuid4().hex
-        count = vs.add_chunks(kb_id, chunks, doc_id)
-        assert count == 2  # 成功写入 2 个分块
 
-        # 相似度搜索：“营业收入” 应与第一个 chunk 更相关
-        results = vs.similarity_search(kb_id, "营业收入", k=5)
-        assert isinstance(results, list)
+@pytest.mark.asyncio
+async def test_list_collections_reflects_kbs_with_chunks(store_and_kb):
+    """list_collections 语义是「含分块的知识库 ID」：无分块不出现、有分块出现。"""
+    store, kb_id = store_and_kb
+    assert kb_id not in await store.list_collections()
+    await store.add_chunks(
+        kb_id,
+        [ChunkData(content="内容", metadata={"source": "t.txt"}, chunk_id="t:0")],
+        uuid.uuid4().hex,
+    )
+    assert kb_id in await store.list_collections()
 
-    def test_delete_collection(self, vs, kb_id):
-        """删除 collection：删除后重新创建应得到空 collection。"""
-        vs.get_or_create_collection(kb_id)
-        assert vs.delete_collection(kb_id) is True
-        # 删除后重新创建，验证幂等性
-        coll = vs.get_or_create_collection(kb_id)
-        assert coll is not None
 
-    def test_delete_nonexistent_collection(self, vs):
-        """删除不存在的 collection：返回 False。"""
-        result = vs.delete_collection("nonexistent_kb_id")
-        assert result is False
+@pytest.mark.asyncio
+async def test_concurrent_dense_search_safe(store_and_kb):
+    """并发 dense 检索不抛异常：PG 连接池可并发，无 Chroma 的线程锁约束。"""
+    store, kb_id = store_and_kb
+    doc_id = uuid.uuid4().hex
+    chunks = [
+        ChunkData(content=f"文本{i}", metadata={"source": "a.pdf"}, chunk_id=f"x:{i}")
+        for i in range(4)
+    ]
+    # 非零 one-hot 向量：pgvector 对零向量的余弦距离是 NaN，会破坏使用性判断
+    embeddings = [[0.0] * 1024 for _ in chunks]
+    for i, emb in enumerate(embeddings):
+        emb[i] = 1.0
+    await store.add_chunks(kb_id, chunks, doc_id, embeddings)
 
-    def test_collection_name_format(self, vs, kb_id):
-        """名称格式检查：必须以 kb_ 开头且长度 > 3。"""
-        coll = vs.get_or_create_collection(kb_id)
-        assert coll.name.startswith("kb_")  # 前缀检查
-        assert len(coll.name) > 3
-
-    def test_list_collections_empty(self, vs):
-        """空存储：未创建任何 collection 时返回列表。"""
-        names = vs.list_collections()
-        assert names == []
-
-    def test_list_collections_with_data(self, vs, kb_id):
-        """有数据：创建一个 collection 后列表长度为 1。"""
-        vs.get_or_create_collection(kb_id)
-        names = vs.list_collections()
-        assert len(names) == 1
-        assert names[0] == f"kb_{kb_id}"
-
-    def test_concurrent_similarity_search_safe(self, vs, kb_id):
-        """并发相似度检索不抛异常：chromadb PersistentClient 非线程安全，
-        须由 ChromaClient._lock 串行化（回归验证 Task 11 并行检索引入的崩溃）。"""
-        import concurrent.futures
-        from unittest.mock import MagicMock
-
-        vs.get_or_create_collection(kb_id)
-        # mock 掉 embedding 模型调用（测试不发真实网络）
-        vs._chroma._embed_fn = MagicMock()
-        vs._chroma._embed_fn.embed_query.return_value = [0.1] * 10
-
-        errors = []
-
-        def _search(_):
-            try:
-                vs.similarity_search(kb_id, "营收", k=3)
-            except Exception as e:  # noqa: BLE001
-                errors.append(e)
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-            list(pool.map(_search, range(8)))
-        assert not errors, f"并发检索抛异常: {errors}"
+    results = await asyncio.gather(
+        *[store.dense_search(kb_id, "查询", k=3) for _ in range(8)]
+    )
+    assert all(len(r) == 3 for r in results)

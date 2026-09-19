@@ -748,8 +748,8 @@ Success:
 
 CASCADE 级联删除：知识库 → 文档 → 对话历史。
 
-⚠️ 调用方必须同时调用 `VectorStore.delete_collection()` 清理向量数据，
-Repo 层不感知 ChromaDB。
+⚠️ 调用方必须同时调用 `VectorStore.delete_collection()` 清理分块数据，
+Repo 层不感知向量存储。
 
 ### 3.4 `DocumentRepo.update_document_status(doc_id, status, chunk_count=0, error_msg="") → None`
 
@@ -789,48 +789,76 @@ Repo 层不感知 ChromaDB。
 
 ## 4. 接口层：AppService ↔ VectorStore
 
-### 4.1 Collection 命名规则
+后端是 PostgreSQL + pgvector（`chunks` 表 + `kb_id` 列，无 collection 概念）。
+公开入口名仍是 `VectorStore`，实现是 `src/infra/db/vector_store/pg_store.py` 的 `PgVectorStore`。
+**所有 IO 方法都是 `async`，调用方必须 `await`。**
 
-```
-name = f"kb_{kb_id.replace('-', '')}"
-示例：kb_53890512f25245bf948525b4253cb4f1
-```
+### 4.1 分块 ID
 
-⚠️ 调用方不应直接构造 collection 名称，始终通过 `get_or_create_collection()`。
+分块 ID = `f"{doc_id}:{chunk_index}"`，与 PG 行 `(kb_id, doc_id, chunk_index)` 一一对应，用于按文档删除。
 
 ### 4.2 VectorStore 初始化
 
-使用 `PersistentClient`（内嵌模式），持久化路径通过 `CHROMA_PERSIST_DIR` 配置。
+`VectorStore(chunk_repo=None, embed_fn=None)`：`chunk_repo` 缺省用应用 `session_factory` 构造 `ChunkRepo`；
+`embed_fn` 缺省为 DashScope 的 `QueryEmbedder`（`embed_query` / `embed_documents`）。
 
-### 4.3 `VectorStore.add_chunks(kb_id, chunks, doc_id) → int`
+### 4.3 `async VectorStore.add_chunks(kb_id, chunks, doc_id, embeddings=None) → int`
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
 | `chunks` | `list[ChunkData]` | 解析器产出的分块数据（Parent-Child 格式） |
 | `doc_id` | `str` | 文档 UUID |
+| `embeddings` | `list[list[float]] \| None` | 预计算向量；`document_service` 恒预计算，None 分支仅为兼容保留 |
 
-每个 chunk 的 ChromaDB ID = `f"{doc_id}:{index}"`，用于后续按文档删除。
+按 `(kb_id, doc_id, chunk_index)` 幂等覆盖，并删除尾部残留。返回实际写入行数。
 
-### 4.4 `VectorStore.similarity_search(kb_id, query, k=5) → list[dict]`
+### 4.4 `async VectorStore.dense_search(kb_id, query, k=5) → list[ChunkResult]`
 
-| 返回键 | 类型 | 说明 |
-|--------|------|------|
-| `id` | str | ChromaDB chunk ID（`doc_id:index`） |
+dense 路 top-k，按余弦距离（pgvector `<=>`）升序。`similarity_search` 是它的别名（保留既有方法名与语义）。
+
+`ChunkResult` 字段：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | str | 分块 ID（`doc_id:chunk_index`） |
 | `content` | str | 分块原文 |
-| `metadata` | dict | 含 `source`、`page`、`doc_id`、`chunk_index`、`chunk_total` |
-| `distance` | float | 余弦距离，越小越相似 |
+| `metadata` | dict | 含 `source`、`page`、`doc_id`、`chunk_index`、`chunk_total` 及 chunker 自定义键 |
+| `distance` | float \| None | 余弦距离，仅 dense 路有值（越小越相似） |
+| `lexical_score` | float \| None | 词法路得分，仅词法检索时有值 |
+| `dense_rank` | int \| None | dense 路排名（0 起）；未出现在 dense 路时为 None |
+| `sparse_rank` | int \| None | 词法路排名（0 起）；未出现在词法路时为 None |
 
-**已知限制：** `k` 最大 100。
+**已知限制：** `k` 最大 100（`pg_store.MAX_QUERY_K`）。
 
 > **全局检索路径已移除。** `rag_tools` 在 `kb_id` 为空时直接返回空结果，不再有「不指定知识库」的检索入口。
 
-### 4.5 `VectorStore.delete_collection(kb_id) → bool`
+### 4.5 `async VectorStore.delete_collection(kb_id) → bool`
 
-删除整个知识库的 collection（包括所有向量数据）。
+删除知识库的全部分块；有删除行返回 True，否则 False。
 
-### 4.6 `VectorStore.get_chunks_by_doc_id(doc_id, kb_id) → list[dict]`
+### 4.6 `async VectorStore.get_chunks_by_doc_id(doc_id, kb_id) → list[ChunkResult]`
 
 按文档 ID 查询所有分块。由分块预览端点调用。
+
+### 4.7 `async VectorStore.get_chunks_paginated(doc_id, kb_id, page=1, page_size=50) → ChunkQueryResult`
+
+分页查询文档分块，`page` 为 **1-based**。`ChunkQueryResult` 含 `items` / `total` / `page` / `page_size`。
+
+### 4.8 `async VectorStore.get_all_chunks(kb_id) → list[ChunkResult]`
+
+取整个知识库的全部分块，供 BM25 索引全量重建。
+
+### 4.9 `async VectorStore.delete_document(kb_id, doc_id) → int`
+
+删除某文档的全部分块，返回删除行数。
+
+### 4.10 `async VectorStore.list_collections() → list[str]`
+
+语义为「**含分块的知识库 ID**」列表（PG 无 collection），只读、不创建任何东西。
+
+### 4.11 `async VectorStore.get_or_create_collection(kb_id) → str`
+
+PG 无 collection 概念：无副作用，直接返回 `kb_id`，仅作既有方法名的兼容入口。
 
 ---
 

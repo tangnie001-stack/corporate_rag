@@ -99,8 +99,6 @@ class Event(str, Enum):
     COLLECTION_DELETE_FAILED = "collection delete failed"
     SEARCH_STATS = "search stats"
     SEARCH_RESULT = "search result"
-    SEARCH_ALL_DONE = "search all done"
-    SEARCH_COLLECTION_FAILED = "search collection failed"
 
     # [llm] LLM 调用层事件（3.4 批迁移登记：langfuse / prompt / LLM 内容深日志）
     TRACE_READY = "trace ready"
@@ -164,8 +162,6 @@ class Event(str, Enum):
     # [app] 应用边界事件（3.5 批迁移登记：main.py 生命周期 + 全局异常兜底）
     APP_STARTING = "app starting"
     APP_STOPPING = "app stopping"
-    CHROMA_WARMUP_DONE = "chroma warmup done"
-    CHROMA_WARMUP_FAILED = "chroma warmup failed"
     STALE_LOCKS_CLEARED = "stale locks cleared"
     STALE_LOCKS_CLEAR_FAILED = "locks clear failed"
     BIZ_ERROR = "biz error"

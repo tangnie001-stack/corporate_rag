@@ -2,7 +2,7 @@
 
 本模块被 eval_ragas.py 的 --generate 模式调用，包含：
   - vertexai stub 自动修复（ragas 兼容性）
-  - 从 ChromaDB 读取已有分块数据
+  - 从分块存储读取已有分块数据
   - 分步构建 KG + DiskCacheBackend 缓存（支持中断恢复）
   - TestsetGenerator 编排
   - 测试集版本管理与 JSON 写入
@@ -220,12 +220,12 @@ def run_generate(
     model: str = "",
     use_filter: bool = False,
 ) -> None:
-    """运行测试集生成流程：从 ChromaDB 取 chunk → 构建 KG → 生成 → 保存 JSON.
+    """运行测试集生成流程：从分块存储取 chunk → 构建 KG → 生成 → 保存 JSON.
 
     流程：
-      0. 从 MySQL 查询 kb_name 和 doc_names
+      0. 从数据库查询 kb_name 和 doc_names
       1. 从白名单获取 doc_ids
-      2. 从 ChromaDB 按 doc_id 取出已有分块
+      2. 从分块存储按 doc_id 取出已有分块
       3. 脱敏后构建 KnowledgeGraph
       4. 应用 transforms（SummaryExtractor / NERExtractor 等）
       5. 保存 KG 到磁盘（支持中断恢复时跳过 transforms）
@@ -239,25 +239,38 @@ def run_generate(
         use_filter: 是否启用 LLM 节点过滤（关闭可节省约 70 次 LLM 调用）
 
     Raises:
-        SystemExit: ChromaDB 中无数据 / 生成失败时退出进程
+        SystemExit: 分块存储中无数据 / 生成失败时退出进程
     """
     _ensure_vertexai_stub()
 
     from src.infra.db.engine import session_factory
     from src.infra.db.mysql_db import DocumentRepo, KbRepo
+    from src.infra.db.vector_store import VectorStore
 
-    # ---- 0. 从 MySQL 查询 kb_name 和 doc_names ----
-    async def _query_meta() -> tuple[str, dict[str, str]]:
+    # ---- 0. 查询 kb_name / doc_names，并按白名单读取分块 ----
+    # 两件事合并到一次 asyncio.run：引擎连接池不可跨事件循环复用
+    async def _load_meta_and_chunks() -> tuple[str, dict[str, str], list[tuple]]:
+        """读 kb 元信息与白名单文档的全部分块。
+
+        Returns:
+            (kb_name, doc_names, loaded)：loaded 为 (doc_id, 分块列表) 序列，
+            与 RAGAS_DOC_WHITELIST 同序。
+        """
         repo = KbRepo(session_factory)
         name = await repo.get_kb_name_by_id(kb_id)
         if not name:
             raise ValueError(f"知识库 {kb_id} 不存在")
         doc_repo = DocumentRepo(session_factory)
         doc_names = await doc_repo.get_doc_names(RAGAS_DOC_WHITELIST)
-        return name, doc_names
+        store = VectorStore()
+        loaded: list[tuple] = []
+        for whitelist_doc_id in RAGAS_DOC_WHITELIST:
+            chunks = await store.get_chunks_by_doc_id(whitelist_doc_id, kb_id)
+            loaded.append((whitelist_doc_id, chunks))
+        return name, doc_names, loaded
 
     try:
-        kb_name, doc_names_map = asyncio.run(_query_meta())
+        kb_name, doc_names_map, loaded_chunks = asyncio.run(_load_meta_and_chunks())
     except ValueError as e:
         core_logging.log_event(Event.KB_META_FAILED, err=str(e))
         print(f"✗ {e}")
@@ -272,24 +285,21 @@ def run_generate(
     from ragas.testset.synthesizers.generate import TestsetGenerator
 
     from src.config import settings
-    from src.infra.db.vector_store import VectorStore
     from src.models import get_embeddings
     from src.utils.desensitize import desensitize
 
-    # ---- 1. 从 ChromaDB 按白名单 doc_id 取 chunk ----
+    # ---- 1. 装载白名单文档的分块（已在上面的单次事件循环内读出）----
     core_logging.log_event(
         Event.CHUNK_LOAD_START, kb_id=kb_id, whitelist=RAGAS_DOC_WHITELIST
     )
-    vector_store = VectorStore()
     langchain_chunks: list[LCDocument] = []
     doc_ids: list[str] = []
     success_count = 0
 
-    for doc_id in RAGAS_DOC_WHITELIST:
-        chunks_data = vector_store.get_chunks_by_doc_id(doc_id, kb_id)
+    for doc_id, chunks_data in loaded_chunks:
         if not chunks_data:
             core_logging.log_event(Event.CHUNKS_NOT_FOUND, doc_id=doc_id)
-            print(f"  ⚠ doc_id={doc_id} 在 ChromaDB 中无数据，已跳过")
+            print(f"  ⚠ doc_id={doc_id} 在知识库中无数据，已跳过")
             continue
 
         for c in chunks_data:
@@ -308,7 +318,7 @@ def run_generate(
 
     if success_count == 0:
         core_logging.log_event(Event.NO_CHUNK_DATA)
-        print("✗ 白名单中所有文档在 ChromaDB 中均无数据")
+        print("✗ 白名单中所有文档在分块存储中均无数据")
         sys.exit(1)
 
     core_logging.log_event(

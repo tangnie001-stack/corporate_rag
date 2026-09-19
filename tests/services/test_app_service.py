@@ -133,14 +133,14 @@ class TestAppServiceKBs:
         """删除知识库应软删除文档、清理向量、软删除 KB。"""
         mock_doc_repo.return_value.soft_delete_documents_by_kb = AsyncMock()
         mock_kb_repo.return_value.soft_delete_kb = AsyncMock(return_value=True)
-        vs = MagicMock()
+        vs = AsyncMock()
         svc = AppService(vector_store=vs)
         ok, _msg = await svc.delete_knowledge_base("kb_id")
         assert ok is True
         mock_doc_repo.return_value.soft_delete_documents_by_kb.assert_called_once_with(
             "kb_id"
         )
-        # delete_collection is called via asyncio.to_thread, so it's a bit trickier to verify
+        # delete_collection 现在是直接 await 的协程，由 AsyncMock 承接
         mock_kb_repo.return_value.soft_delete_kb.assert_called_once_with("kb_id")
 
     @pytest.mark.asyncio
@@ -308,7 +308,7 @@ class TestAppServiceDeleteDocument:
             )
         )
         mock_doc_repo.return_value.soft_delete_document = AsyncMock(return_value=True)
-        vs = MagicMock()
+        vs = AsyncMock()
         svc = AppService(vector_store=vs)
         result = await svc.delete_document("kb", "d1", "user")
         assert result == {"doc_id": "d1", "filename": "t.pdf", "status": "deleted"}

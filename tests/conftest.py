@@ -36,7 +36,7 @@ def service() -> Generator[AppService, None, None]:
 
 @pytest.fixture(scope="session")
 def vector_store() -> Generator[VectorStore, None, None]:
-    """提供 VectorStore 实例，用于验证 ChromaDB 状态。"""
+    """提供 VectorStore 实例（PG 后端），用于验证分块存储状态。"""
     vs = VectorStore()
     yield vs
 
@@ -51,7 +51,7 @@ def test_kb_name() -> Generator[str, None, None]:
     每次调用生成形如 __test__<uuid6> 的唯一名称，
     确保并发测试时不会撞名。
 
-    删除时同时清理 MySQL 记录和 ChromaDB 向量数据。
+    删除时同时清理数据库记录和分块数据。
     """
     unique_id = uuid.uuid4().hex[:8]
     name = f"__test__{unique_id}"
@@ -71,7 +71,7 @@ def _cleanup_kb(name: str) -> None:
             for kb in all_kbs:
                 if kb.name == name:
                     await svc._kb_repo.delete_kb(kb.id)
-                    svc.vector_store.delete_collection(kb.id)
+                    await svc.vector_store.delete_collection(kb.id)
                     logger.info("Cleaned up test KB: {} ({})", name, kb.id)
                     return
 

@@ -6,9 +6,9 @@
 
 ### 共享资源并发访问必须串行化
 
-**现象**：并行检索时多个线程/协程同时操作同一 ChromaDB 客户端，导致崩溃或数据错乱。
+**现象**：并行检索时多个线程/协程同时操作同一共享资源，而该资源本身不可并发安全，导致崩溃或数据错乱。
 
-**规则**：对不可并发安全的共享资源（如 VectorStore 的 ChromaDB 客户端），用 `threading.RLock` 串行化访问（`src/infra/db/vector_store/client.py`）。新增共享客户端时先判断是否线程安全。
+**规则**：对不可并发安全的共享资源，用锁（`threading.Lock` / `asyncio.Lock`）串行化访问；新增共享客户端时先判断是否线程安全。向量存储现为 PostgreSQL 连接池（并发安全），其 IO 方法为 `async`，并发检索直接 `asyncio.gather` 调用即可，回归用例在 `tests/infra/db/test_vector_store.py`。
 
 ### 每请求上下文的活跃状态必须按调用分槽
 

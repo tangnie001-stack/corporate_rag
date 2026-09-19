@@ -1,6 +1,6 @@
-"""存量文档清除重建脚本 — 清 ChromaDB chunks + 重置 status + 重触发入库。
+"""存量文档清除重建脚本 — 清分块 + 重置 status + 重触发入库。
 
-策略：保留 document 记录（含 MinIO file_path），只清 ChromaDB chunks 并重置
+策略：保留 document 记录（含 MinIO file_path），只清分块存储中的 chunks 并重置
 status=pending，重新触发 process_document 跑新链路（pymupdf4llm + 实体抽取），
 使存量文档的 chunk metadata 带上实体字段（company / report_period / sec_code）
 并聚合到 document.meta_info["entities"]。
@@ -10,8 +10,8 @@ status=pending，重新触发 process_document 跑新链路（pymupdf4llm + 实�
   python -m scripts.rebuild_kb_data --all             # 重建所有有文档的 KB
 
 注意:
-  - 破坏性操作：会清空指定 KB 的 ChromaDB chunks，执行前确认目标。
-  - 必须在 app 容器内执行（宿主机无法解析 minio/chroma 容器名）：
+  - 破坏性操作：会清空指定 KB 的全部分块，执行前确认目标。
+  - 必须在 app 容器内执行（宿主机无法解析 postgres/minio 容器名）：
       docker compose exec app python -m scripts.rebuild_kb_data --kb-id <kb_id>
 """
 
@@ -27,28 +27,27 @@ from src.parsers.router import DocRouter
 from src.services.document_service import DocumentService
 
 
-def _clear_chromadb(vector_store: VectorStore, kb_id: str) -> int:
-    """清空指定 KB 的 ChromaDB chunks。
+async def _clear_chunks(vector_store: VectorStore, kb_id: str) -> int:
+    """清空指定 KB 的全部分块（分块存储后端）。
 
     Args:
         vector_store: 向量存储实例
         kb_id: 知识库 ID
 
     Returns:
-        删除的 chunk 数量
+        删除的分块数量
     """
-    collection = vector_store.get_or_create_collection(kb_id)
-    ids = collection.get(include=[])["ids"]
-    if not ids:
+    chunks = await vector_store.get_all_chunks(kb_id)
+    if not chunks:
         return 0
-    collection.delete(ids=ids)
-    return len(ids)
+    await vector_store.delete_collection(kb_id)
+    return len(chunks)
 
 
 async def _rebuild_kb(
     vector_store: VectorStore, svc: DocumentService, kb_id: str
 ) -> None:
-    """重建单个 KB：清 ChromaDB + 重置 status + 重触发 process_document。
+    """重建单个 KB：清分块 + 重置 status + 重触发 process_document。
 
     Args:
         vector_store: 向量存储实例
@@ -61,12 +60,12 @@ async def _rebuild_kb(
         print(f"KB {kb_id}: no documents, skip")
         return
 
-    # 1. 清 ChromaDB chunks（先清空，确保重跑入库时无旧 chunk 残留）
+    # 1. 清空分块（先清空，确保重跑入库时无旧 chunk 残留）
     try:
-        deleted = await asyncio.to_thread(_clear_chromadb, vector_store, kb_id)
-        print(f"ChromaDB: deleted {deleted} chunks in kb_{kb_id}")
+        deleted = await _clear_chunks(vector_store, kb_id)
+        print(f"chunks: deleted {deleted} chunks in kb {kb_id}")
     except Exception as e:  # noqa: BLE001
-        print(f"ChromaDB: clear failed for kb_{kb_id}: {e}")
+        print(f"chunks: clear failed for kb {kb_id}: {e}")
 
     # 2. 重置 status=pending（保留 document 记录与 MinIO 文件，不丢数据），
     #    顺带清空上次处理的错误/进度/分块数，避免旧状态残留误导

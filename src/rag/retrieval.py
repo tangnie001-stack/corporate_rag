@@ -80,11 +80,9 @@ async def search(
         检索结果列表，按相关性降序排列；混合模式为 RRF 融合结果
     """
     if HYBRID_SEARCH_ENABLED and bm25 and kb_id:
-        dense_t = asyncio.to_thread(
-            vector_store.similarity_search, kb_id, query, TOP_K_RETRIEVAL
-        )
-        bm25_t = asyncio.to_thread(bm25.search, kb_id, query, TOP_K_RETRIEVAL)
-        d, b = await asyncio.gather(dense_t, bm25_t)
+        dense_coro = vector_store.dense_search(kb_id, query, TOP_K_RETRIEVAL)
+        bm25_coro = asyncio.to_thread(bm25.search, kb_id, query, TOP_K_RETRIEVAL)
+        d, b = await asyncio.gather(dense_coro, bm25_coro)
         results = rrf_fusion(d or [], b or [])
         log_event(
             Event.HYBRID_DONE,
@@ -95,9 +93,7 @@ async def search(
         results = _dedup_by_doc_id(results)
         return results
 
-    results = await asyncio.to_thread(
-        vector_store.similarity_search, kb_id, query, k=TOP_K_RETRIEVAL
-    )
+    results = await vector_store.dense_search(kb_id, query, k=TOP_K_RETRIEVAL)
     if results:
         result_count = len(results)
     else:

@@ -61,11 +61,11 @@ async def main() -> None:
             print(f"  - {kb.name} ({kb.id})")
         sys.exit(1)
 
-    # ====== Step 2: 在 ChromaDB 中执行语义检索 ======
+    # ====== Step 2: 在分块存储中执行语义检索 ======
     core_logging.log_event(Event.SEARCH_START, query=args.query, top_k=args.top_k)
     store = VectorStore()
     try:
-        results = store.similarity_search(kb_id, args.query, k=args.top_k)
+        results = await store.similarity_search(kb_id, args.query, k=args.top_k)
     except Exception as e:  # noqa: BLE001
         logger.exception("[cli] search failed query={} err={}", args.query, e)
         print("Hint: Ensure DASHSCOPE_API_KEY is set and documents have been added.")

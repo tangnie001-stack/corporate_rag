@@ -508,12 +508,6 @@ def main() -> None:
     core_logging.log_event(Event.RAG_COMPONENT_INIT)
     vector_store = VectorStore()
 
-    core_logging.log_event(Event.VECTOR_STORE_CHECK, kb_id=kb_id)
-    if vector_store.get_or_create_collection(kb_id).count() == 0:
-        core_logging.log_event(Event.VECTOR_STORE_EMPTY, kb_id=kb_id)
-        print("Knowledge base is empty")
-        sys.exit(1)
-
     if not settings.RAGAS_LLM_MODEL:
         core_logging.log_event(Event.RAGAS_MODEL_MISSING)
         sys.exit(1)
@@ -537,15 +531,30 @@ def main() -> None:
     bm25 = BM25Index(index_dir=BM25_INDEX_DIR) if HYBRID_SEARCH_ENABLED else None
     graph = build_graph(vector_store, bm25, llm, reranker, prompt_manager)
 
-    core_logging.log_event(Event.ANSWERS_GENERATION, count=len(questions))
-    answers, contexts, trace_ids, retrieval_details = asyncio.run(
-        generate_answers_and_contexts(
+    async def _ensure_store_and_generate():
+        """空库检查与答案生成共用一个事件循环。
+
+        引擎连接池不可跨事件循环复用，故把两次存储访问（分块读取 + 图内检索）
+        放在同一次 asyncio.run 内；返回 None 表示知识库无分块。
+        """
+        chunks = await vector_store.get_all_chunks(kb_id)
+        if not chunks:
+            return None
+        return await generate_answers_and_contexts(
             graph,
             kb_id,
             session_id,
             questions,
         )
-    )
+
+    core_logging.log_event(Event.VECTOR_STORE_CHECK, kb_id=kb_id)
+    core_logging.log_event(Event.ANSWERS_GENERATION, count=len(questions))
+    generated = asyncio.run(_ensure_store_and_generate())
+    if generated is None:
+        core_logging.log_event(Event.VECTOR_STORE_EMPTY, kb_id=kb_id)
+        print("Knowledge base is empty")
+        sys.exit(1)
+    answers, contexts, trace_ids, retrieval_details = generated
 
     result = run_evaluation(
         questions,

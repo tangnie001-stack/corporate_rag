@@ -65,18 +65,22 @@ tools/             工具基类（base.py）
   DSN 由 `src/config/settings.py:build_postgres_dsn()` 提供（`postgresql+asyncpg://` 形式，
   `POSTGRES_PASSWORD` 缺失时抛 `RuntimeError`）。连接池参数（`pool_size` / `max_overflow`）
   也在 `engine.py`，与 Langfuse 共享同一实例，见 `docs/agents/defensive-patterns.md`。
-- **ORM 模型唯一来源**：`src/infra/db/models/`（`chat` / `document` / `eval_report` /
+- **ORM 模型唯一来源**：`src/infra/db/models/`（`chat` / `chunk` / `document` / `eval_report` /
   `feedback` / `kb` / `user`），声明式基类与通用 Mixin 在 `src/infra/db/base.py`。
-- **Repo 层**：`src/infra/db/mysql_db/`（`chat_repo` / `document_repo` / `eval_repo` /
-  `kb_repo` / `user_repo`）。⚠ **包名在 P1 迁移后已名不副实** —— 里面全是 PostgreSQL repo，
+- **Repo 层**：`src/infra/db/mysql_db/`（`chat_repo` / `chunk_repo` / `document_repo` /
+  `eval_repo` / `kb_repo` / `user_repo`）。⚠ **包名在 P1 迁移后已名不副实** —— 里面全是 PostgreSQL repo，
   `mysql_db` 只是历史包名；改名（如改为 `repos/`）是独立事项，见需求池 L4。
+- **`chunks` 表由 `ChunkModel` 映射**（`src/infra/db/models/chunk.py`）：baseline 手写建表
+  （`content_seg` 文本列 + `tsv` 生成列 + `embedding vector(1024)` + 3 个索引），SQL 访问层是
+  `src/infra/db/mysql_db/chunk_repo.py` 的 `ChunkRepo`（含 `Vector.cosine_distance` dense 检索）。
+  ORM 属性名 `extra` 映射列名 `metadata`（避开 `Base.metadata` 命名冲突），列名不变。
+- **向量存储**：`src/infra/db/vector_store/` —— `__init__.py`（公开入口 `VectorStore`，别名导出 PG 实现）、
+  `pg_store.py`（`PgVectorStore` + `QueryEmbedder` + `MAX_QUERY_K`）、`mapping.py`（行↔`ChunkResult`
+  映射与 metadata 回填）、`types.py`（`ChunkResult` / `ChunkQueryResult`）。后端为 PostgreSQL +
+  pgvector，IO 方法全为 `async`；契约见 `docs/agents/api_contract.md` §4。
 - **迁移唯一链**：根 `alembic/`（`alembic.ini` 的 `script_location` 指向它），当前唯一
   revision 是 `alembic/versions/0001_pg_baseline.py`，从零建 8 张表 —— 7 张由 ORM metadata
   生成，`chunks` 为手写增补。
-- **`chunks` 表没有对应 ORM 模型**：由上述 baseline 手写建出（`content_seg` 文本列 +
-  `tsv` 生成列 + `embedding vector(1024)` + 3 个索引），P2 决定是否补 ORM 模型。若补，
-  属性名不能用 `metadata`（与 `Base.metadata` 冲突），须 `mapped_column("metadata", …)`
-  映射、列名不变。
 
 **分层调用规则**（改代码前必守，详见 `CLAUDE.md`）：`api/` 不得直接调 `infra/`、`config/`，
 必须经 `services/`；`api/chat.py` 不含 SSE 格式化函数。前端只经 Nginx `/api/*` 打到后端，

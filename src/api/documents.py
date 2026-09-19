@@ -243,6 +243,6 @@ async def delete_document(
     """
     ok = await svc.document._doc_repo.soft_delete_document(body.doc_id)
     if ok:
-        svc.vector_store.delete_document(body.kb_id, body.doc_id)
+        await svc.vector_store.delete_document(body.kb_id, body.doc_id)
         logger.info("Document deleted: kb_id={} doc_id={}", body.kb_id, body.doc_id)
     return ResponseModel(data=DocumentDeleteResponse(success=ok))

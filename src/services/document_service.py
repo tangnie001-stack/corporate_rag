@@ -104,7 +104,7 @@ class DocumentService:
         ]
 
     async def delete_document(self, kb_id: str, doc_id: str, user_id: str) -> dict:
-        """删除文档（合法性校验 + ChromaDB 清理 + MySQL 软删除）。"""
+        """删除文档（合法性校验 + 分块清理 + 数据库软删除）。"""
         doc = await self._doc_repo.get_document(doc_id)
         if not doc:
             raise BusinessError(Code.DOC_NOT_FOUND, Code.DOC_NOT_FOUND_MSG, 404)
@@ -120,10 +120,7 @@ class DocumentService:
                 Code.DOC_STATUS_CONFLICT_MSG,
                 409,
             )
-        try:
-            await asyncio.to_thread(self.vector_store.delete_document, kb_id, doc_id)
-        except Exception:  # noqa: BLE001
-            logger.warning("ChromaDB delete failed for doc_id={}, will retry", doc_id)
+        await self.vector_store.delete_document(kb_id, doc_id)
         deleted = await self._doc_repo.soft_delete_document(doc_id)
         if not deleted:
             raise BusinessError(Code.DOC_NOT_FOUND, Code.DOC_NOT_FOUND_MSG, 404)
@@ -132,7 +129,7 @@ class DocumentService:
         return {"doc_id": doc_id, "filename": doc.filename, "status": "deleted"}
 
     async def _rebuild_kb_index(self, kb_id: str) -> None:
-        """重建知识库的 BM25 索引（文档入库/删除后全量重建，与 Chroma 保持一致）。
+        """重建知识库的 BM25 索引（文档入库/删除后全量重建，与分块存储保持同源）。
 
         Args:
             kb_id: 知识库 ID
@@ -143,7 +140,7 @@ class DocumentService:
         if self.bm25 is None:
             return
         try:
-            results = await asyncio.to_thread(self.vector_store.get_all_chunks, kb_id)
+            results = await self.vector_store.get_all_chunks(kb_id)
             await asyncio.to_thread(self.bm25.rebuild_from_results, kb_id, results)
             logger.info("BM25 index rebuilt: kb_id={} chunks={}", kb_id, len(results))
         except Exception as e:  # noqa: BLE001
@@ -344,7 +341,7 @@ class DocumentService:
     ) -> None:
         """抽取文档级实体并注入每个 chunk.metadata + meta_info 聚合。
 
-        实体抽取一次，扁平键注入每个 chunk.metadata（ChromaDB 兼容），
+        实体抽取一次，扁平键注入每个 chunk.metadata，
         并聚合到 document.meta_info["entities"]
         （update_document_meta_info 是合并更新，不覆盖 eval）。
 
@@ -362,9 +359,9 @@ class DocumentService:
         doc_entities = await asyncio.to_thread(
             extractor.extract, filename, heading_tree, full_text, file_type
         )
-        # LLM 兜底可能返回 null/非标量值，ChromaDB metadata 只接受标量
-        # （str/int/float/bool），过滤后避免 add_chunks 报 Cannot convert to
-        # MetadataValue；float 需为有限值（nan/inf 同样不可序列化）
+        # LLM 兜底可能返回 null/非标量值，metadata 只保留标量
+        # （str/int/float/bool），过滤后避免写入时序列化失败；
+        # float 需为有限值（nan/inf 同样不可序列化）
         doc_entities = {
             k: v
             for k, v in doc_entities.items()
@@ -505,15 +502,15 @@ class DocumentService:
                         len(quality.garbled_chunks),
                     )
 
+                # embedding 无条件预计算：写入事务只接收已算好的向量，
+                # 避免外网调用落在事务内（开关只决定是否额外做分块质量评估）。
+                chunk_embeddings = await asyncio.to_thread(
+                    get_embeddings().embed_documents,
+                    [c.content for c in chunks],
+                )
                 # 分块质量评估 — 开关控制，只记录不拦截
-                chunk_embeddings = None
                 if CHUNK_EVAL_ENABLED:
                     try:
-                        # 预计算 embedding，一次计算两处复用（评估 SBR + ChromaDB 入库）
-                        chunk_embeddings = await asyncio.to_thread(
-                            get_embeddings().embed_documents,
-                            [c.content for c in chunks],
-                        )
                         scorer = ChunkQualityScorer()
                         eval_result = await asyncio.to_thread(
                             scorer.evaluate,
@@ -536,10 +533,9 @@ class DocumentService:
                             "Chunk eval failed for '{}': {}", filename, eval_err
                         )
 
-                # ChromaDB — 同步库，to_thread
+                # 分块写入 — PG 后端为 async，直接 await
                 t2 = time.perf_counter()
-                count = await asyncio.to_thread(
-                    self.vector_store.add_chunks,
+                count = await self.vector_store.add_chunks(
                     kb_id,
                     chunks,
                     doc_id,
@@ -568,7 +564,7 @@ class DocumentService:
                     t3 - t2,
                     t3 - t0,
                 )
-                # BM25 词法索引随 Chroma 入库后全量重建，保持两路检索一致
+                # BM25 词法索引随分块入库后全量重建，保持两路检索一致
                 await self._rebuild_kb_index(kb_id)
 
             except Exception as e:  # noqa: BLE001

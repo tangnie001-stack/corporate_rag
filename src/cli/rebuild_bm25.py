@@ -11,7 +11,7 @@
     python -m src.cli.rebuild_bm25 --kb <kb_id>     # 指定知识库
 
 前提条件：
-  - 知识库已创建且文档已入库（Chroma 中已有分块）
+  - 知识库已创建且文档已入库（分块存储中已有分块）
   - .env 中配置 DASHSCOPE_API_KEY（VectorStore 初始化用）
 """
 
@@ -56,7 +56,7 @@ async def main() -> None:
     rebuilt = skipped = failed = 0
     for kb_id in kb_ids:
         try:
-            chunks = await asyncio.to_thread(vector_store.get_all_chunks, kb_id)
+            chunks = await vector_store.get_all_chunks(kb_id)
             if not chunks:
                 core_logging.log_event(Event.KB_CHUNKS_MISSING, kb_id=kb_id)
                 skipped += 1
