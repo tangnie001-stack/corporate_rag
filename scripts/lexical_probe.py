@@ -13,9 +13,10 @@
 - 报告只报命中数与词项总数及完整词项清单，**仅供相对比较**。渲染由
   `scripts/lexical_probe_report.py` 承担（本模块只测量并交出计数器）。
 
-**小语料限制（必须写进报告）**：176 分块、k=30 时单词项的命中集合可能已占语料
-17%–28%，多数词项会平凡通过。探针的用途是**在同一语料上横向比配置**，
-`SHALL NOT` 作为质量基线或发布判据。
+**小语料限制（必须写进报告）**：本探针词项按 `(df 升序, 词项)` 取**最稀有**项，
+且每个词项被钉在单个库上，故各臂命中率是**偏保守（偏病态）的下界**；
+「平凡通过」只在词项 df 较大、或池规模接近 k 时才成立。探针的用途是
+**在同一语料上横向比配置**，`SHALL NOT` 作为质量基线或发布判据。
 
 用法：
     POSTGRES_HOST=localhost .venv/bin/python scripts/lexical_probe.py \
@@ -283,8 +284,8 @@ async def _probe_explicit_cases(session, corpus, k) -> list[ExplicitCaseResult]:
 
     语料不含该串的用例**不得静默跳过**（`retrieval-quality` 要求两类失效用例
     显式包含且不得静默 0 命中）：转入 mode = `corpus-absent` 的行，命中列写
-    「未验证（语料不含该串）」，使「某用例被跳过」成为可见事实。函数末尾断言
-    每条 `EXPLICIT_CASES` 成员都出表，缺失即抛错（进程非零退出）。
+    「未验证（语料不含该串）」，使「某用例被跳过」成为可见事实。函数末尾按
+    `EXPLICIT_CASES` 顺序核对每条 `query`，重复或遗漏即抛错（进程非零退出）。
     """
     rows: list[ExplicitCaseResult] = []
     for case in EXPLICIT_CASES:
@@ -323,9 +324,10 @@ async def _probe_explicit_cases(session, corpus, k) -> list[ExplicitCaseResult]:
         rows.append(
             ExplicitCaseResult(query=case, mode=mode, verdict=verdict, kb_id=kb_id)
         )
-    if len(rows) != len(EXPLICIT_CASES):
+    if [row.query for row in rows] != list(EXPLICIT_CASES):
         raise RuntimeError(
-            f"explicit cases incomplete: {len(rows)} != {len(EXPLICIT_CASES)}"
+            f"explicit cases mismatch: {[row.query for row in rows]}"
+            f" != {list(EXPLICIT_CASES)}"
         )
     return rows
 
