@@ -118,7 +118,7 @@ async def test_get_chunks_by_doc_id_and_paginated(store_and_kb):
 async def test_get_all_chunks_returns_sorted_rows(store_and_kb):
     """get_all_chunks 覆盖 ChunkRepo.get_by_kb：全量性 + 确定性顺序 + 分路字段缺席。
 
-    该方法是 BM25 全量重建的数据源，顺序不确定会让索引不可复现。
+    该方法的调用方是评测脚本的空库检查，顺序不确定会让结果不可复现。
     """
     store, kb_id = store_and_kb
     doc_a = uuid.uuid4().hex

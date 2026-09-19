@@ -234,12 +234,10 @@ ENTITY_LLM_FALLBACK: str = os.getenv("ENTITY_LLM_FALLBACK", "auto")
 ENTITY_TEXT_PREFIX_LEN: int = int(os.getenv("ENTITY_TEXT_PREFIX_LEN", "600"))
 
 # ====== Hybrid Search ======
-# 是否启用 BM25 + Dense 混合检索（通过 RRF 融合）
+# 是否启用 dense + 词法两路混合检索（RRF 融合，两路同源于 PostgreSQL）
 HYBRID_SEARCH_ENABLED: bool = (
     os.getenv("HYBRID_SEARCH_ENABLED", "true").lower() == "true"
 )
-# BM25 索引持久化根目录（每个知识库独立子目录）
-BM25_INDEX_DIR: str = os.getenv("BM25_INDEX_DIR", "data/bm25_index")
 # RRF 融合的平滑常数：控制排名权重衰减速度（沿用替换前的取值）
 RRF_K: int = int(os.getenv("RRF_K", "60"))
 # RRF 融合后保留条数：交给下游按 doc_id 去重与 rerank 截断

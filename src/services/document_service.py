@@ -18,7 +18,6 @@ from src.infra.db.file_store import FileStore
 from src.infra.db.models.document import DocModel as DocEntity
 from src.infra.db.mysql_db import DocumentRepo
 from src.infra.db.vector_store import VectorStore
-from src.infra.search.bm25_index import BM25Index
 from src.models import get_classify_llm, get_embeddings
 from src.parsers.router import DocRouter
 from src.rag.heading_locator import build_heading_segments, locate_heading_path
@@ -70,12 +69,10 @@ class DocumentService:
         doc_repo: DocumentRepo,
         vector_store: VectorStore,
         router: DocRouter,
-        bm25: BM25Index | None = None,
     ) -> None:
         self._doc_repo = doc_repo
         self.vector_store = vector_store
         self.router = router
-        self.bm25 = bm25
 
     async def get_documents(self, kb_id: str) -> list[dict]:
         """获取知识库下的文档列表。"""
@@ -124,27 +121,8 @@ class DocumentService:
         deleted = await self._doc_repo.soft_delete_document(doc_id)
         if not deleted:
             raise BusinessError(Code.DOC_NOT_FOUND, Code.DOC_NOT_FOUND_MSG, 404)
-        await self._rebuild_kb_index(kb_id)
         logger.info("Document deleted: {} ({})", doc.filename, doc_id)
         return {"doc_id": doc_id, "filename": doc.filename, "status": "deleted"}
-
-    async def _rebuild_kb_index(self, kb_id: str) -> None:
-        """重建知识库的 BM25 索引（文档入库/删除后全量重建，与分块存储保持同源）。
-
-        Args:
-            kb_id: 知识库 ID
-
-        Returns:
-            None（BM25 未启用或重建失败时仅记日志，不阻断业务）
-        """
-        if self.bm25 is None:
-            return
-        try:
-            results = await self.vector_store.get_all_chunks(kb_id)
-            await asyncio.to_thread(self.bm25.rebuild_from_results, kb_id, results)
-            logger.info("BM25 index rebuilt: kb_id={} chunks={}", kb_id, len(results))
-        except Exception as e:  # noqa: BLE001
-            logger.warning("BM25 index rebuild failed for kb_id={}: {}", kb_id, e)
 
     async def store_and_process(
         self,
@@ -564,8 +542,6 @@ class DocumentService:
                     t3 - t2,
                     t3 - t0,
                 )
-                # BM25 词法索引随分块入库后全量重建，保持两路检索一致
-                await self._rebuild_kb_index(kb_id)
 
             except Exception as e:  # noqa: BLE001
                 error_msg = str(e)[:1024]

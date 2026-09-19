@@ -1,4 +1,4 @@
-"""数据重置工具 — 一键清除 PostgreSQL、BM25 索引、Redis 的全部数据。
+"""数据重置工具 — 一键清除 PostgreSQL、Redis 的全部数据。
 
 用法（独立运行）：
     source .venv/bin/activate
@@ -12,13 +12,11 @@
 from __future__ import annotations
 
 import asyncio
-import shutil
-from pathlib import Path
 
 from loguru import logger
 from sqlalchemy import text
 
-from src.config import BM25_INDEX_DIR, REDIS_URL
+from src.config import REDIS_URL
 from src.infra.db.engine import engine
 from src.infra.db.models import *
 from src.services.app_service import AppService
@@ -49,21 +47,6 @@ def reset_pg() -> None:
     asyncio.run(_reset_pg_async())
 
 
-def reset_bm25_index() -> None:
-    """清空 BM25 索引目录（词法索引仍是磁盘文件，P3 由 PG 全文检索取代）。
-
-    注意：**不再删除 Chroma 的 persist 目录** —— 自 P2 起 dense 数据由
-    chunks 表承载（reset_pg 已清），而 data/chroma_persist 是 dense 等价性
-    验收与回滚的依据，删除它会使两者同时失效。
-    """
-    path = Path(BM25_INDEX_DIR)
-    if path.exists():
-        shutil.rmtree(path)
-        logger.info("BM25: 已删除索引目录 '{}'", BM25_INDEX_DIR)
-    path.mkdir(parents=True, exist_ok=True)
-    logger.info("BM25: 已重建空目录")
-
-
 def reset_redis() -> None:
     """清空 Redis 全部数据。
 
@@ -85,7 +68,7 @@ def reset_redis() -> None:
 def reset_all(
     service: AppService | None = None,
 ) -> None:
-    """一键重置全部数据存储（PostgreSQL + BM25 索引 + Redis）。
+    """一键重置全部数据存储（PostgreSQL + Redis）。
 
     Args:
         service: 已有的 AppService 实例（可选，用于通过其 chat_manager 清 Redis）
@@ -98,9 +81,6 @@ def reset_all(
 
     # PostgreSQL
     reset_pg()
-
-    # BM25 索引（直接删目录，不和客户端交互）
-    reset_bm25_index()
 
     # Redis
     if service is not None:
@@ -157,16 +137,6 @@ if __name__ == "__main__":
     else:
         logger.error("PostgreSQL: 清空失败: {}", r.stderr)
         sys.exit(1)
-
-    # BM25 索引
-    import shutil as _su
-    from pathlib import Path as _P
-
-    p = _P(BM25_INDEX_DIR)
-    if p.exists():
-        _su.rmtree(p)
-    p.mkdir(parents=True, exist_ok=True)
-    logger.info("BM25: 已重置")
 
     # Redis
     r2 = subprocess.run(

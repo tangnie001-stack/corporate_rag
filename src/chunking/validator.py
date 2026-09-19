@@ -17,8 +17,7 @@ class ChunkData:
     content: str  # 分块正文文本，解析侧产出、写入侧消费
     metadata: dict  # 来源元数据（source / page / doc_id / block_type 等）
     # 来源标识：解析阶段按 "{source}:{index}" 或 "{source}:p{page}:{index}" 生成，
-    # 入库写入侧不填、默认空串；
-    # BM25 重建索引时以 Chroma id（"{doc_id}:{index}"）覆盖写入，并读回作词法检索的文档 id
+    # 入库写入侧不填、默认空串
     chunk_id: str = ""
     # 分块后的 token 数，由分块质量评估填充；解析阶段不填，默认 0
     tokens: int = 0

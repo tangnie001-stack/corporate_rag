@@ -227,7 +227,7 @@ class PgVectorStore:
         )
 
     async def get_all_chunks(self, kb_id: str) -> list[ChunkResult]:
-        """取整个知识库的全部分块（BM25 全量重建用）。"""
+        """取整个知识库的全部分块（空库检查 / 全量读取用）。"""
         rows = await self._repo.get_by_kb(kb_id)
         core_logging.log_event(Event.CHUNKS_READ, kb_id=kb_id, count=len(rows))
         return [row_to_chunk_result(row) for row in rows]
