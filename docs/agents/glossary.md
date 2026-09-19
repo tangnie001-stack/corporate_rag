@@ -33,12 +33,32 @@
 - **rerank**：精排，对召回结果重排，产出 `contexts` 进入 LLM
 - **contexts**：精排后拼入 LLM prompt 的上下文片段
 - **kb**：知识库（knowledge base），文档与向量的隔离单位
-- **dense 路 / 词法路（sparse）**：混合检索的两条支路；dense 路按向量余弦距离召回（PostgreSQL + pgvector），词法路按词项命中召回（当前是 BM25，P3 换 PostgreSQL 全文检索）。两路结果由 RRF 融合后携带各自名次
-- **`lexical_score`**：`ChunkResult` 的词法路得分字段，**与引擎无关的命名**（取代 `bm25_score`）——P3 后它来自 PostgreSQL 全文检索而非 BM25；dense 检索与分页查询时为 None。字段契约见 api_contract.md §4.4
+- **dense 路 / 词法路（sparse）**：混合检索的两条支路；dense 路按向量余弦距离召回（PostgreSQL + pgvector），词法路按词项命中召回（PostgreSQL 全文检索：`chunks.tsv @@ to_tsquery('simple', …)`，按 `ts_rank` 降序）。两路结果由 RRF 融合后携带各自名次
+- **`lexical_score`**：`ChunkResult` 的词法路得分字段，**与引擎无关的命名**（取代 `bm25_score`）——它来自 PostgreSQL 全文检索的 `ts_rank`（子串兜底时为 0.0），不是 BM25；dense 检索与分页查询时为 None。字段契约见 api_contract.md §4.4
 - **`dense_rank` / `sparse_rank`**：结果在 dense 路 / 词法路的排名（0 起），未出现在该路时为 None；融合后仍按路保留（`hybrid-retrieval` 要求「融合结果的来源可辨」）
 - **`metadata 回填契约`**：`ChunkResult.metadata` 由「列值 + jsonb 平铺合并」得到（冲突以列为准），至少含 `doc_id` / `chunk_index` / `chunk_total` / `source` / `page` 五个契约键，jsonb 侧原样承载 chunker 全部自定义键（如 `parent_content`）。唯一实现是 `src/infra/db/vector_store/mapping.py::row_to_chunk_result()`；防复发规则见 defensive-patterns.md「派生副本与权威来源分离」
 - **dedup（按 doc_id 去重）**：`src/rag/retrieval.py::_dedup_by_doc_id` 对召回结果按文档分组，每文档至多保留前 N 条，提升上下文多样性；N 取 `RETRIEVAL_MAX_PER_DOC`（`src/config/settings.py`，环境变量可覆盖，默认 1 与旧行为一致）
 - **RETRIEVAL_MAX_PER_DOC**：检索去重上限配置项，含义见「dedup」；为 A/B 实验变量（N=1 vs N=2/3，结论待真实 KB 评估后写入 change 记录）
+
+### 词法检索（lexical retrieval）
+
+与 dense 路并列的第二路取数，由 PostgreSQL 全文检索承担：`chunks.tsv`（`content_seg` 的生成列）
+用 `@@ to_tsquery('simple', …)` 匹配，按 `ts_rank` 降序取 top-k。
+**不叫 BM25** —— `ts_rank` 是 cover-density 排名，不是 BM25（沿用 `bm25_score` 的命名会误导）。
+本地与托管的 PostgreSQL 都能用 `simple` 配置，不依赖任何中文分词扩展。
+
+### 分词口径（tokenization contract）
+
+写入侧（`content_seg`）与查询侧（tsquery 词元）必须调用同一个 `tokenize()`
+（`src/infra/search/tokenizer.py`），并过滤长度 < 2 的词项。两侧不一致**不会报错**，
+只会静默降召回；分词结果随 `tsv` 生成列固化落库，因此 **jieba 版本或词典变更必须触发
+存量全量重写**（`scripts/rewrite_content_seg.py --apply`，`--check` 是那条不变量的检查）。
+
+### RRF 融合（Reciprocal Rank Fusion）
+
+把两路已排序结果按 `1/(k+rank+1)` 累加后重排，融合在**应用层**（`src/rag/fusion.py`），
+参数 `RRF_K` / `RRF_TOP_N` 来自配置，**两路等权**（不引入权重）。融合只重排，
+不得抹掉任一结果的 `dense_rank` / `sparse_rank` —— 那正是"某一路其实没有贡献"的观测手段。
 
 ## Agent 状态图（LangGraph）
 
@@ -171,7 +191,7 @@
 
 | 术语 | 定义 | 常见错误 |
 |------|------|---------|
-| `存储收敛（storage consolidation）` | 把存储从 MySQL + ChromaDB 收敛到 PostgreSQL 的变更方向。P1 换关系型后端；P2 把 dense 向量检索换到 PostgreSQL + pgvector（词法仍走 `rank_bm25`，P3 换 PostgreSQL 全文检索）。替换只改存储、不改检索算法与融合参数 | ❌ 以为一次变更同时改了检索算法/融合权重 |
+| `存储收敛（storage consolidation）` | 把存储从 MySQL + ChromaDB 收敛到 PostgreSQL 的变更方向。P1 换关系型后端；P2 把 dense 向量检索换到 PostgreSQL + pgvector；P3 把词法检索从进程内 `rank_bm25` 换到 PostgreSQL 全文检索（`tsv @@ to_tsquery('simple', …)` + `ts_rank`，query 侧由 jieba 预分词）。替换只改存储、不改检索算法与融合参数 | ❌ 以为一次变更同时改了检索算法/融合权重 |
 | `DSN 单一来源` | 应用 DSN 只由 `src/config/settings.py:build_postgres_dsn()` 产出（`postgresql+asyncpg://`，`POSTGRES_PASSWORD` 缺失即抛 `RuntimeError`），`src/infra/db/engine.py` 在模块级消费它。宿主侧跑 alembic / pytest 时用 `POSTGRES_HOST=localhost` 覆盖 `.env` 里的 compose 服务名（`python-dotenv` 默认 `override=False`，已存在的环境变量优先） | ❌ 各处自行拼连接串；❌ 宿主侧忘了加 `POSTGRES_HOST=localhost` |
 | `chunks 表` | 单一张分块表，以 `kb_id` 列表达知识库归属（取代「每库一 collection」）。由 `ChunkModel` 映射（`src/infra/db/models/chunk.py`，ORM 属性名 `extra` → 列名 `metadata`），SQL 访问层是 `ChunkRepo`。`content_seg` 是词法检索文本列（P2 写正文原值作占位，P3 起为 jieba 分词输出并全量重写）；`tsv` 是 `to_tsvector('simple', content_seg)` 的持久化生成列（GIN 索引）；`embedding` 为 `vector(1024)`。列清单、索引与迁移链见 code-map.md「关系型存储（PostgreSQL）」 | ❌ 以为 `chunks` 无 ORM 模型；❌ 把 `content_seg`/`tsv` 当成应用层字段名；❌ 以为还按知识库分 collection |
 

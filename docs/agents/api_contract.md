@@ -749,7 +749,7 @@ Success:
 CASCADE 级联删除：知识库 → 文档 → 对话历史。
 
 ⚠️ 调用方必须同时调用 `VectorStore.delete_collection()` 清理分块数据
-（方法名为兼容保留，语义 = 按 `kb_id` 删 `chunks` 行，见 §4.5），Repo 层不感知向量存储。
+（方法名为兼容保留，语义 = 按 `kb_id` 删 `chunks` 行，见 §4.6），Repo 层不感知向量存储。
 
 ### 3.4 `DocumentRepo.update_document_status(doc_id, status, chunk_count=0, error_msg="") → None`
 
@@ -828,35 +828,48 @@ dense 路 top-k，按余弦距离（pgvector `<=>`）升序。`similarity_search
 | `dense_rank` | int \| None | dense 路排名（0 起）；未出现在 dense 路时为 None |
 | `sparse_rank` | int \| None | 词法路排名（0 起）；未出现在词法路时为 None |
 
-**已知限制：** `k` 最大 100（`src/config/const.py` 的 `MAX_QUERY_K`；`pg_store` 为导入方）。
+**已知限制：** `k` 最大 100（`src/config/const.py` 的 `MAX_QUERY_K`；`pg_store` 为导入方）。`lexical_search` 同样按其截断。
 
 > **全局检索路径已移除。** `rag_tools` 在 `kb_id` 为空时直接返回空结果，不再有「不指定知识库」的检索入口。
 
-### 4.5 `async VectorStore.delete_collection(kb_id) → bool`
+### 4.5 `async VectorStore.lexical_search(kb_id, query, k=5) → list[ChunkResult]`
+
+词法路取 top-k，按 `ts_rank` 降序。与 `dense_search` 对称：
+
+| 字段 | 值 |
+|---|---|
+| `distance` | `None`（词法路无距离） |
+| `lexical_score` | 词法得分（`ts_rank`；子串兜底时为 `0.0`） |
+| `sparse_rank` | 该结果在词法路的排名（0 起） |
+| `dense_rank` | `None` |
+
+**查询条件在应用层构造**（`src/infra/db/lexical_query.py`）：每个词元先按安全字符集（中日韩字符 / 字母 / 数字 / 下划线）剔除，再拼成 `词元:*` 并以 ` & ` 连接；词元全被滤掉时降级为 `content LIKE '%原文%'`（LIKE 通配符已转义）。**用户原文不得直接交给 `to_tsquery`** —— 含空格会抛语法错误。
+
+### 4.6 `async VectorStore.delete_collection(kb_id) → bool`
 
 删除知识库的全部分块；有删除行返回 True，否则 False。
 
-### 4.6 `async VectorStore.get_chunks_by_doc_id(doc_id, kb_id) → list[ChunkResult]`
+### 4.7 `async VectorStore.get_chunks_by_doc_id(doc_id, kb_id) → list[ChunkResult]`
 
 按文档 ID 查询所有分块。由分块预览端点调用。
 
-### 4.7 `async VectorStore.get_chunks_paginated(doc_id, kb_id, page=1, page_size=50) → ChunkQueryResult`
+### 4.8 `async VectorStore.get_chunks_paginated(doc_id, kb_id, page=1, page_size=50) → ChunkQueryResult`
 
 分页查询文档分块，`page` 为 **1-based**。`ChunkQueryResult` 含 `items` / `total` / `page` / `page_size`。
 
-### 4.8 `async VectorStore.get_all_chunks(kb_id) → list[ChunkResult]`
+### 4.9 `async VectorStore.get_all_chunks(kb_id) → list[ChunkResult]`
 
-取整个知识库的全部分块，供 BM25 索引全量重建。
+取整个知识库的全部分块（空库检查 / 全量读取用）。调用方：`src/cli/eval_ragas.py`（空库检查）、`scripts/rebuild_kb_data.py`（清空前的存在性读取）。
 
-### 4.9 `async VectorStore.delete_document(kb_id, doc_id) → int`
+### 4.10 `async VectorStore.delete_document(kb_id, doc_id) → int`
 
 删除某文档的全部分块，返回删除行数。
 
-### 4.10 `async VectorStore.list_collections() → list[str]`
+### 4.11 `async VectorStore.list_collections() → list[str]`
 
 语义为「**含分块的知识库 ID**」列表（PG 无 collection），只读、不创建任何东西。
 
-### 4.11 `async VectorStore.get_or_create_collection(kb_id) → str`
+### 4.12 `async VectorStore.get_or_create_collection(kb_id) → str`
 
 PG 无 collection 概念：无副作用，直接返回 `kb_id`，仅作既有方法名的兼容入口。
 
@@ -1018,7 +1031,7 @@ agent（LLM + bind_tools）← entry_point
   → POST /api/chat/stream（body: ChatStreamRequest，kb_id = 前端绑定；空 kb_id → 纯对话不检索）
     → agent 循环（图 entry 直连 agent，无路由节点）:
         1. agent: LLM 思考 → 调用 retrieve_kb
-        2. tools: 检索（hybrid Dense + BM25 + RRF 融合 → rerank 精排 → format_context）
+        2. tools: 检索（dense + 词法两路同源于 PostgreSQL；RRF 融合 → rerank 精排 → format_context）
         3. agent: 基于检索上下文生成回答（含引用编号 [n]）
            （检索不达标时可在循环内调用 search_web 联网兜底，产出 kind=web 引用）
            （信息不足时可在循环内调用 ask_user 追问，见 6.2）

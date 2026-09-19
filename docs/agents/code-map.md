@@ -45,13 +45,13 @@ agents/            LangGraph agent 循环
   ├─ tools/        retrieve_kb、ask_user、search_web、task、registry( + readonly 声明表)
   ├─ skills/       主从委派运行时：loader/registry/executor/delegate_task/models/invocation/prefix(/xxx 解析与清洗纯函数) + fork 执行层 fork_stream/fork_tools/delegate_run
   └─ presets/      智能体预设：models / loader / registry
-rag/               检索与知识库路由：retrieval / context / prompt / stream / temporal
+rag/               检索与知识库路由：retrieval / fusion(RRF 纯函数) / context / prompt / stream / temporal
 chat/              对话管理：manager(Redis) / persistence(PostgreSQL) / streaming / task_registry / process_log
 chunking/          分块：router(策略路由) / strategies(4 种) / validator / scorer
 parsers/           文档解析：pdf / docx / txt + base / router
 core/              日志：logging / log_events / log_event_specs
 config/            settings(环境变量) / prompts(提示词) / const(常量/文案/枚举) / response_codes
-infra/             基础设施：db(engine/DSN + models + mysql_db repos + vector_store) / llm / search / auth / redis_client
+infra/             基础设施：db(engine/DSN + models + mysql_db repos + vector_store + lexical_query) / llm / search(tokenizer 为唯一 jieba 分词入口) / auth / redis_client
 middleware/        auth / trace_id / response_processor（统一响应包装）
 cli/               RAGAS 评估、检索对比、trace 回放等命令行工具
 models.py          LLM / Embedding / Rerank 工厂（get_llm / get_embedding / get_rerank）
@@ -72,10 +72,14 @@ tools/             工具基类（base.py）
   `mysql_db` 只是历史包名；改名（如改为 `repos/`）是独立事项，见需求池 L4。
 - **`chunks` 表由 `ChunkModel` 映射**（`src/infra/db/models/chunk.py`）：baseline 手写建表
   （`content_seg` 文本列 + `tsv` 生成列 + `embedding vector(1024)` + 3 个索引），SQL 访问层是
-  `src/infra/db/mysql_db/chunk_repo.py` 的 `ChunkRepo`（含 `Vector.cosine_distance` dense 检索）。
-  ORM 属性名 `extra` 映射列名 `metadata`（避开 `Base.metadata` 命名冲突），列名不变。
+  `src/infra/db/mysql_db/chunk_repo.py` 的 `ChunkRepo`（含 `Vector.cosine_distance` dense 检索与
+  `search_lexical` 词法检索：`tsv @@ to_tsquery` + `ts_rank` 降序，词元全被滤掉时降级为 `content LIKE`）。
+  `content_seg` 存 jieba 词项（空格连接，见 `src/infra/search/tokenizer.py`），`tsv = to_tsvector('simple', content_seg)`
+  是它的持久化生成列；分词结果随之固化，**分词器变更必须跑 `scripts/rewrite_content_seg.py --apply`**
+  （`--check` 退出码 1 = 存量过期）。ORM 属性名 `extra` 映射列名 `metadata`（避开 `Base.metadata` 命名冲突），列名不变。
 - **向量存储**：`src/infra/db/vector_store/` —— `__init__.py`（公开入口 `VectorStore`，别名导出 PG 实现）、
-  `pg_store.py`（`PgVectorStore` + `QueryEmbedder`；k 上限 `MAX_QUERY_K` 定义在 `src/config/const.py`）、`mapping.py`（行↔`ChunkResult`
+  `pg_store.py`（`PgVectorStore` + `QueryEmbedder`；含 `dense_search` 与 `lexical_search` 两路取数，
+  后者按 `ts_rank` 降序；两者都按 k 上限 `MAX_QUERY_K`（`src/config/const.py`）截断）、`mapping.py`（行↔`ChunkResult`
   映射与 metadata 回填）、`types.py`（`ChunkResult` / `ChunkQueryResult`）。后端为 PostgreSQL +
   pgvector，IO 方法全为 `async`；契约见 `docs/agents/api_contract.md` §4。
 - **迁移唯一链**：根 `alembic/`（`alembic.ini` 的 `script_location` 指向它），当前唯一

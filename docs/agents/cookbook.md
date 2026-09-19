@@ -178,6 +178,23 @@
 **验证**：—（记录性条目）
 **注意事项**：对应 design 文档 Risks 项；label 只增上下文长度不改变事实内容，预期影响幅度小但不可忽略。
 
+## 检索（retrieval）
+
+### 词法检索的分词器变更（jieba 升级 / 词典调整）
+
+**何时用**：升级 `jieba` 版本、调整 `tokenizer.py` 的分词配置或过滤规则之后。
+
+**步骤**：
+1. 改 `pyproject.toml`（pin 到新版本）并重建镜像：`docker compose build --no-cache app`；
+2. 宿主侧跑检查：`POSTGRES_HOST=localhost .venv/bin/python scripts/rewrite_content_seg.py --check`
+   —— 退出码 1 且打印 `stale=N` 表示存量已过期；
+3. 重写：`POSTGRES_HOST=localhost .venv/bin/python scripts/rewrite_content_seg.py --apply`；
+4. 复验：`--check` 退出码 0；再跑一次 `--apply` 应为 `rewritten=0`（幂等）；
+5. 重启应用：`docker compose restart app`。
+
+**为什么不能省**：`content_seg` 是 `tsv` 生成列的输入，落库即固化；不重写会静默降召回，
+没有任何日志或异常提示。
+
 ## 分区命名
 
 按操作主题分区，例如：`## 评估`、`## 分块`、`## 部署`。新主题首次出现时新建分区。

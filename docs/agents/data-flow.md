@@ -142,7 +142,8 @@ api_contract.md「task 事件详情」）：
 agent（bind_tools）
   ├ retrieve_kb：hybrid 混合检索 + rerank 精排 → ctx.tool_contexts（kind=kb）
   │   dense 路：chunks 表按 kb_id 过滤 + pgvector `<=>` 余弦距离 top-k
-  │   词法路：BM25（现状；P3 换 PostgreSQL 全文检索，读 chunks.tsv）
+  │   词法路：PostgreSQL 全文检索（chunks.tsv @@ to_tsquery('simple', 词元:* & …)，
+  │            按 ts_rank 降序；词元全被滤掉时降级为 content 子串匹配）
   │   query 含时间词且 TEMPORAL_PARSE_ENABLED 时先 parse_temporal →
   │   ctx.temporal_years / missing_years（完整性校验数据源，rag_tools.py:109-122）
   ├ search_web：KB 检索不达标时 agent 自主降级联网（web_guided=False → TO_WEB 信号）；
@@ -164,6 +165,9 @@ verify（态 B，verify/node.py:42-62）按序：
   C. 护栏通过 → 直通 format（在线忠实度 judge 已移除，质量评估转离线另行规划）
 → 通过 → format（nodes.py，[n] → citations 去重，kind=kb/web）
 ```
+
+- 两路同源于同一个 PostgreSQL 实例的 `chunks` 表（`pg_store.dense_search` / `lexical_search`）；
+  融合（RRF）在应用层 `src/rag/fusion.py`，不下推数据库
 
 关键代码：态 B 分派 src/agents/graph/verify/node.py:42-62；联网询问
 src/agents/graph/verify/ask_confirm.py:17-72；决策化 src/agents/graph/verify/regen_decision.py:49-168；
