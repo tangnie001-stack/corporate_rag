@@ -1,6 +1,6 @@
 """Agent 工具集 — retrieve_kb（知识库检索）与 ask_user（澄清追问）。
 
-工具工厂 make_rag_tools 经闭包注入共享依赖（vector_store/bm25/reranker）；
+工具工厂 make_rag_tools 经闭包注入共享依赖（vector_store/reranker）；
 per-request 对象（tool_contexts 收集器、ask_count 计数、clarify_channel）经
 current_request_ctx 读取，不进闭包。工具不能写 state：检索上下文累积到
 RequestContext.tool_contexts，由后续节点读入 state；ask_user 的挂起 Future
@@ -28,7 +28,6 @@ from src.core import logging as core_logging
 from src.core.log_events import Event, Signal
 from src.infra.db.vector_store import VectorStore
 from src.infra.llm.request_context import current_request_ctx
-from src.infra.search.bm25_index import BM25Index
 from src.infra.search.query_router import aggregate_kb_entities
 from src.rag import retrieval
 from src.rag.context import RAGContext
@@ -62,7 +61,6 @@ class RetrieveKBArgs(BaseModel):
 
 def make_rag_tools(
     vector_store: VectorStore,
-    bm25: BM25Index | None,
     reranker,
     prompt_manager,
     delegate_task: BaseTool | None = None,
@@ -70,8 +68,7 @@ def make_rag_tools(
     """构建工具列表：注册表管理；retrieve_kb 始终注册（KB=RAG 开关在工具内实现）。
 
     Args:
-        vector_store: 向量存储实例（闭包注入，search 使用）
-        bm25: BM25 检索引擎实例（闭包注入，混合检索时使用）
+        vector_store: 向量存储实例（闭包注入；dense 与词法两路同源于它）
         reranker: Reranker 模型实例（闭包注入，rerank_results 使用）
         prompt_manager: 提示词管理器（闭包注入，当前工具未直接使用，保留签名）
         delegate_task: 可选 delegate_task 工具（skill 库有内容时由调用方注入并注册；
@@ -133,7 +130,7 @@ def make_rag_tools(
         # kb_id 非空 → 检索该库；kb_id 为空（未绑定 KB）→ 不检索
         # （KB=RAG 开关硬保证：即便被调也返回空，废弃 _semantic_select_kb 语义选库 = 隐式跨库）
         if kb_id:
-            results = await retrieval.search(query, kb_id, vector_store, bm25)
+            results = await retrieval.search(query, kb_id, vector_store)
         else:
             results = []
 

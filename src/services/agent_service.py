@@ -45,7 +45,6 @@ from src.infra.llm.chat_message import ChatMessage
 from src.infra.llm.langfuse_tracing import LangfuseTracer
 from src.infra.llm.prompt_manager import PromptManager
 from src.infra.llm.request_context import RequestContext
-from src.infra.search.bm25_index import BM25Index
 from src.services.capability_service import CapabilityService
 from src.utils.sse import (
     SSEAbstentionEvent,
@@ -734,7 +733,6 @@ class AgentService:
     def __init__(
         self,
         vector_store: VectorStore,
-        bm25: BM25Index | None,
         chat_manager: ChatManager,
         llm=None,
         reranker=None,
@@ -751,7 +749,6 @@ class AgentService:
         from src.models import get_llm, get_rerank
 
         self._vector_store = vector_store
-        self._bm25 = bm25
         self._llm = llm or get_llm()
         self._reranker = reranker or get_rerank()
         self._chat_manager = chat_manager
@@ -810,7 +807,6 @@ class AgentService:
 
         self._graph: CompiledStateGraph = build_graph(
             vector_store,
-            bm25,
             self._llm,
             self._reranker,
             self._prompt_manager,

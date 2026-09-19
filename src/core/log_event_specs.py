@@ -31,7 +31,10 @@ EVENT_SPECS: dict[str, EventSpec] = {
         "search done", "retrieval", "info", ("kb_id", "query_len", "result_count")
     ),
     "hybrid done": EventSpec(
-        "hybrid done", "retrieval", "info", ("kb_id", "query_len", "result_count")
+        "hybrid done",
+        "retrieval",
+        "info",
+        ("kb_id", "query_len", "dense_count", "sparse_count", "result_count"),
     ),
     "rerank skip": EventSpec("rerank skip", "retrieval", "info", ("reason",)),
     "rerank done": EventSpec(

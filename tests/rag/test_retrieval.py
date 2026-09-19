@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.config import TOP_K_RERANK
+from src.infra.db.vector_store import VectorStore
 from src.infra.db.vector_store.types import ChunkResult
 from src.infra.llm.chat_message import ChatMessage
 from src.rag import retrieval
@@ -328,3 +329,93 @@ def test_to_prompt_text_web_ctx_with_tier_label():
     )
     text = ctx.to_prompt_text()
     assert text == ("来源: https://www.tencent.com/a (第0页, 官方一手)\n内容: 网页内容")
+
+
+# ==================== 两路同源并发检索（P3 Task 8）====================
+
+
+@pytest.mark.asyncio
+async def test_hybrid_runs_both_paths_concurrently_on_same_store(monkeypatch):
+    """两路并发、同源于一个 VectorStore，且各带各的排名与得分。"""
+    from src.infra.db.vector_store.types import ChunkResult
+    from src.rag import retrieval
+
+    started: list[str] = []
+
+    class _Store:
+        async def dense_search(self, kb_id, query, k):
+            started.append("dense")
+            return [
+                ChunkResult(
+                    id="a", content="A", metadata={}, distance=0.1, dense_rank=0
+                ),
+                ChunkResult(
+                    id="b", content="B", metadata={}, distance=0.2, dense_rank=1
+                ),
+            ]
+
+        async def lexical_search(self, kb_id, query, k):
+            started.append("sparse")
+            return [
+                ChunkResult(
+                    id="b", content="B", metadata={}, lexical_score=0.9, sparse_rank=0
+                ),
+            ]
+
+    monkeypatch.setattr(retrieval, "HYBRID_SEARCH_ENABLED", True)
+    results = await retrieval.search("资产负债率", "kb1", cast(VectorStore, _Store()))
+
+    assert set(started) == {"dense", "sparse"}
+    by_id = {r.id: r for r in results}
+    assert by_id["b"].dense_rank == 1
+    assert by_id["b"].sparse_rank == 0
+    assert by_id["a"].sparse_rank is None
+
+
+@pytest.mark.asyncio
+async def test_hybrid_logs_both_path_contributions(monkeypatch, capsys):
+    """两路贡献必须都进日志：任一路为 0 时可被直接看出。"""
+    from src.infra.db.vector_store.types import ChunkResult
+    from src.rag import retrieval
+
+    class _Store:
+        async def dense_search(self, kb_id, query, k):
+            return [ChunkResult(id="a", content="A", metadata={}, distance=0.1)]
+
+        async def lexical_search(self, kb_id, query, k):
+            return []
+
+    monkeypatch.setattr(retrieval, "HYBRID_SEARCH_ENABLED", True)
+    logged: dict = {}
+    monkeypatch.setattr(
+        retrieval,
+        "log_event",
+        lambda event, **fields: logged.update({"event": event, **fields}),
+    )
+    await retrieval.search("资产负债率", "kb1", cast(VectorStore, _Store()))
+
+    assert logged["dense_count"] == 1
+    assert logged["sparse_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_dense_only_when_hybrid_disabled(monkeypatch):
+    """混合关闭时只走 dense，不调词法路。"""
+    from src.infra.db.vector_store.types import ChunkResult
+    from src.rag import retrieval
+
+    called: list[str] = []
+
+    class _Store:
+        async def dense_search(self, kb_id, query, k):
+            return [ChunkResult(id="a", content="A", metadata={}, distance=0.1)]
+
+        async def lexical_search(self, kb_id, query, k):
+            called.append("sparse")
+            return []
+
+    monkeypatch.setattr(retrieval, "HYBRID_SEARCH_ENABLED", False)
+    results = await retrieval.search("资产负债率", "kb1", cast(VectorStore, _Store()))
+
+    assert called == []
+    assert [r.id for r in results] == ["a"]

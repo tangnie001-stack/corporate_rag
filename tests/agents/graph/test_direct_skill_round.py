@@ -83,7 +83,6 @@ def _graph(fake_executor, record, **kwargs):
     node = make_skill_direct_node(_FakeRegistry(record), fake_executor)
     return build_graph(
         vector_store=MagicMock(),
-        bm25=None,
         llm=MagicMock(),
         reranker=MagicMock(),
         prompt_manager=_StubPromptManager(),

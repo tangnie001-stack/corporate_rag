@@ -4,13 +4,11 @@
 对外提供统一的业务接口。
 """
 
-import asyncio
 import json
 
 from loguru import logger
 
 from src.chat.manager import ChatManager
-from src.config import BM25_INDEX_DIR, HYBRID_SEARCH_ENABLED
 from src.infra.db.mysql_db import (
     ChatRepo,
     DocumentRepo,
@@ -20,7 +18,6 @@ from src.infra.db.mysql_db import (
 )
 from src.infra.db.vector_store import VectorStore
 from src.infra.db.vector_store.types import ChunkQueryResult
-from src.infra.search.bm25_index import BM25Index
 from src.parsers.router import DocRouter
 from src.services.agent_service import AgentService
 from src.services.auth_service import AuthService
@@ -46,9 +43,6 @@ class AppService:
         self.vector_store = vector_store or VectorStore()
         self.router = router or DocRouter()
         self.chat_manager = chat_manager or ChatManager()
-        self.bm25 = (
-            BM25Index(index_dir=BM25_INDEX_DIR) if HYBRID_SEARCH_ENABLED else None
-        )
 
         # Create repos from pool
         self._kb_repo = KbRepo(session_factory)
@@ -59,13 +53,10 @@ class AppService:
 
         self.agent_service = agent_service or AgentService(
             vector_store=self.vector_store,
-            bm25=self.bm25,
             chat_manager=self.chat_manager,
         )
         self.kb = KBService(self._kb_repo)
-        self.document = DocumentService(
-            self._doc_repo, self.vector_store, self.router, self.bm25
-        )
+        self.document = DocumentService(self._doc_repo, self.vector_store, self.router)
         self._auth_service: AuthService | None = None
 
     # ==================== 认证 ====================
@@ -103,11 +94,6 @@ class AppService:
             logger.info("chunks deleted for kb_id={} deleted={}", kb_id, deleted)
         except Exception:  # noqa: BLE001
             logger.warning("chunk delete failed for kb={}", kb_id)
-        if self.bm25 is not None:
-            try:
-                await asyncio.to_thread(self.bm25.delete_index, kb_id)
-            except Exception:  # noqa: BLE001
-                logger.warning("BM25 index delete failed for kb={}", kb_id)
         ok = await self._kb_repo.soft_delete_kb(kb_id)
         if ok:
             logger.info("Knowledge base soft-deleted: {}", kb_id)

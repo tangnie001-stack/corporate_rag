@@ -24,7 +24,6 @@ from src.core.logging import log_event
 from src.infra.db.vector_store import VectorStore
 from src.infra.db.vector_store.types import ChunkResult
 from src.infra.llm.chat_message import ChatMessage
-from src.infra.search.bm25_index import BM25Index
 from src.models import with_retry
 from src.rag.context import RAGContext
 from src.rag.fusion import rrf_fusion
@@ -69,28 +68,35 @@ async def search(
     query: str,
     kb_id: str,
     vector_store: VectorStore,
-    bm25: BM25Index | None = None,
 ) -> list[ChunkResult]:
-    """执行语义检索（混合模式可选）。
+    """执行检索：dense + 词法两路同源并发取数，融合与去重在应用层。
+
+    两路都经同一个 VectorStore（背后是同一个 PostgreSQL 实例的 chunks 表）——
+    「某一支路半死而整体正常」的结构性原因由此消失。
 
     Args:
         query: 用户查询文本
         kb_id: 知识库 ID（调用方保证非空：`rag_tools.py` 在 kb_id 为空时直接返回空结果）
-        vector_store: 向量数据库实例
-        bm25: BM25 ���法检索引擎实例，启用混合检索时传入
+        vector_store: 向量存储实例（dense 与词法两路的共同入口）
 
     Returns:
         检索结果列表，按相关性降序排列；混合模式为 RRF 融合结果
     """
-    if HYBRID_SEARCH_ENABLED and bm25 and kb_id:
+    if HYBRID_SEARCH_ENABLED:
         dense_coro = vector_store.dense_search(kb_id, query, TOP_K_RETRIEVAL)
-        bm25_coro = asyncio.to_thread(bm25.search, kb_id, query, TOP_K_RETRIEVAL)
-        d, b = await asyncio.gather(dense_coro, bm25_coro)
-        results = rrf_fusion(d or [], b or [], k=RRF_K, top_n=RRF_TOP_N)
+        lexical_coro = vector_store.lexical_search(kb_id, query, TOP_K_RETRIEVAL)
+        dense, sparse = await asyncio.gather(dense_coro, lexical_coro)
+        dense_results = dense or []
+        sparse_results = sparse or []
+        results = rrf_fusion(dense_results, sparse_results, k=RRF_K, top_n=RRF_TOP_N)
+        # 两路各自的贡献必须可见：任一路为 0 时该字段就是 0。
+        # 只记融合后的总数会让"某一路长期失效"不可发现（trace_c54ce259 的教训）。
         log_event(
             Event.HYBRID_DONE,
             kb_id=kb_id,
             query_len=len(query),
+            dense_count=len(dense_results),
+            sparse_count=len(sparse_results),
             result_count=len(results),
         )
         results = _dedup_by_doc_id(results)
@@ -120,7 +126,7 @@ def rerank_results(
 
     Args:
         query: 用户原始查询（用于 reranker 的相关性计算）
-        results: 检索结果列表（已融合 Dense + BM25）
+        results: 检索结果列表（dense 与词法两路已融合）
         reranker: Reranker 模型实例
 
     Returns:

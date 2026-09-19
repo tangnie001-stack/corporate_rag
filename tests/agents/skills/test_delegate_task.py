@@ -369,9 +369,7 @@ def test_make_rag_tools_registers_delegate_when_provided(tmp_path):
     reg = SkillRegistry(SkillLoader(tmp_path / "skills"))
     reg.reload_if_changed()
     tool = make_delegate_task(reg, SkillExecutor(main_llm=MagicMock()))
-    tools = make_rag_tools(
-        MagicMock(), None, MagicMock(), MagicMock(), delegate_task=tool
-    )
+    tools = make_rag_tools(MagicMock(), MagicMock(), MagicMock(), delegate_task=tool)
     names = [t.name for t in tools]
     assert "delegate_task" in names
 
@@ -380,6 +378,6 @@ def test_make_rag_tools_without_delegate_keeps_fixed_set():
     """未传 delegate_task → 工具列表保持既有集合（无 delegate_task）。"""
     from src.agents.tools.rag_tools import make_rag_tools
 
-    tools = make_rag_tools(MagicMock(), None, MagicMock(), MagicMock())
+    tools = make_rag_tools(MagicMock(), MagicMock(), MagicMock())
     names = [t.name for t in tools]
     assert "delegate_task" not in names

@@ -21,7 +21,6 @@ def test_graph_topology():
     """图结构断言：agent 循环 → verify → format，不含固定流水线节点。"""
     graph = build_graph(
         MagicMock(),
-        None,
         MagicMock(),
         MagicMock(),
         MagicMock(),
@@ -276,7 +275,6 @@ def _build_test_graph(llm, tools=None) -> object:
         tools = [fake_search_web]
     return build_graph(
         MagicMock(),  # vector_store
-        None,  # bm25
         llm,  # agent LLM（fake，按序响应）
         MagicMock(),  # reranker
         StubPromptManager(),
@@ -738,14 +736,13 @@ def test_build_graph_passes_delegate_task_to_rag_tools(monkeypatch):
 
     captured = {}
 
-    def fake_make_rag_tools(vector_store, bm25, reranker, prompt_manager, **kwargs):
+    def fake_make_rag_tools(vector_store, reranker, prompt_manager, **kwargs):
         captured["delegate_task"] = kwargs.get("delegate_task")
         return []  # 空工具列表即可（本测试只验证透传，不跑图）
 
     monkeypatch.setattr(wf, "make_rag_tools", fake_make_rag_tools)
     wf.build_graph(
         MagicMock(),
-        None,
         MagicMock(),
         MagicMock(),
         MagicMock(),

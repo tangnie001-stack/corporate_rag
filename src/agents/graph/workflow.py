@@ -19,7 +19,6 @@ from src.agents.tools.rag_tools import make_rag_tools
 from src.core import logging as core_logging
 from src.core.log_events import Event
 from src.infra.db.vector_store import VectorStore
-from src.infra.search.bm25_index import BM25Index
 
 
 def route_verify(state: AgentState) -> str:
@@ -40,7 +39,6 @@ def route_verify(state: AgentState) -> str:
 
 def build_graph(
     vector_store: VectorStore,
-    bm25: BM25Index | None,
     llm,
     reranker,
     prompt_manager,
@@ -78,7 +76,6 @@ def build_graph(
     else:
         base_tools = make_rag_tools(
             vector_store,
-            bm25,
             reranker,
             prompt_manager,
             delegate_task=delegate_task,

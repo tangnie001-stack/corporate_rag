@@ -42,7 +42,7 @@ def _fixed_contexts() -> list[RAGContext]:
 def retrieve_kb(monkeypatch):
     """工厂构建的 retrieve_kb 工具，search/rerank_results 已 mock 为固定返回两条上下文。"""
 
-    async def fake_search(query, kb_id, vector_store, bm25):
+    async def fake_search(query, kb_id, vector_store):
         """mock search：返回空列表，结果由 fake_rerank 决定。"""
         return []
 
@@ -56,7 +56,6 @@ def retrieve_kb(monkeypatch):
     # 依赖传 None：search/rerank_results 已被 mock，闭包内依赖不会被真实调用
     return make_rag_tools(
         vector_store=cast(VectorStore, None),
-        bm25=None,
         reranker=None,
         prompt_manager=None,
     )[0]
@@ -101,7 +100,7 @@ async def test_retrieve_kb_unbound_returns_empty(monkeypatch):
     """未绑定 KB（kb_id=""）→ 不检索，返回空字符串（KB=RAG 开关硬保证）。"""
     search_called = []
 
-    async def fake_search(query, kb_id, vector_store, bm25):
+    async def fake_search(query, kb_id, vector_store):
         search_called.append(kb_id)
         return []
 
@@ -110,7 +109,6 @@ async def test_retrieve_kb_unbound_returns_empty(monkeypatch):
 
     tool = make_rag_tools(
         vector_store=cast(VectorStore, None),
-        bm25=None,
         reranker=None,
         prompt_manager=None,
     )[0]
@@ -128,7 +126,7 @@ async def test_retrieve_kb_rerank_timeout_falls_back_raw_order(monkeypatch):
     from src.agents.tools import rag_tools as rag_tools_mod
     from src.infra.db.vector_store.types import ChunkResult
 
-    async def fake_search(query, kb_id, vector_store, bm25):
+    async def fake_search(query, kb_id, vector_store):
         """mock search：返回两条带 distance 的 ChunkResult（distance 越小越相似）。"""
         return [
             ChunkResult(
@@ -154,7 +152,6 @@ async def test_retrieve_kb_rerank_timeout_falls_back_raw_order(monkeypatch):
 
     tool = make_rag_tools(
         vector_store=cast(VectorStore, None),
-        bm25=None,
         reranker=None,
         prompt_manager=None,
     )[0]
@@ -178,7 +175,7 @@ async def test_retrieve_kb_timeout_fallback_assigns_tier_zero(monkeypatch):
     from src.agents.tools import rag_tools as rag_tools_mod
     from src.infra.db.vector_store.types import ChunkResult
 
-    async def fake_search(query, kb_id, vector_store, bm25):
+    async def fake_search(query, kb_id, vector_store):
         """mock search：返回一条带 metadata 的 ChunkResult。"""
         return [
             ChunkResult(
@@ -198,7 +195,6 @@ async def test_retrieve_kb_timeout_fallback_assigns_tier_zero(monkeypatch):
 
     tool = make_rag_tools(
         vector_store=cast(VectorStore, None),
-        bm25=None,
         reranker=None,
         prompt_manager=None,
     )[0]
@@ -338,7 +334,7 @@ async def test_retrieve_kb_emits_empty_result_signal(monkeypatch):
 
     monkeypatch.setattr("src.core.logging.retrieval_signal", _fake_signal)
 
-    async def fake_search(query, kb_id, vector_store, bm25):
+    async def fake_search(query, kb_id, vector_store):
         """mock search：返回空列表（检索空）。"""
         return []
 
@@ -347,7 +343,6 @@ async def test_retrieve_kb_emits_empty_result_signal(monkeypatch):
 
     tool = make_rag_tools(
         vector_store=cast(VectorStore, None),
-        bm25=None,
         reranker=None,
         prompt_manager=None,
     )[0]
@@ -375,7 +370,7 @@ async def test_retrieve_kb_no_signal_unbound(monkeypatch):
 
     monkeypatch.setattr("src.core.logging.retrieval_signal", _fake_signal)
 
-    async def fake_search(query, kb_id, vector_store, bm25):
+    async def fake_search(query, kb_id, vector_store):
         """mock search：记录调用（态 A 不应触发搜索）。"""
         return []
 
@@ -384,7 +379,6 @@ async def test_retrieve_kb_no_signal_unbound(monkeypatch):
 
     tool = make_rag_tools(
         vector_store=cast(VectorStore, None),
-        bm25=None,
         reranker=None,
         prompt_manager=None,
     )[0]
