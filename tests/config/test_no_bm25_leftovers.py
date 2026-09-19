@@ -24,6 +24,10 @@ PATTERNS = (
     re.compile(r"from\s+src\.infra\.search\.bm25_index"),
     re.compile(r"\bBM25Index\b"),
     re.compile(r"\bBM25_INDEX_DIR\b"),
+    # 实际 re-import rank_bm25（换模块名重建组件）；要求行首 import，prose 提及不误伤
+    re.compile(r"^\s*(from|import)\s+rank_bm25", re.MULTILINE),
+    # 裸名 bm25_index：`import src.infra.search.bm25_index` 不走上一条 `from` 前缀
+    re.compile(r"\bbm25_index\b"),
 )
 
 

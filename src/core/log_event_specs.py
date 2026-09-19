@@ -197,7 +197,7 @@ EVENT_SPECS: dict[str, EventSpec] = {
     "prompt fallback": EventSpec("prompt fallback", "llm", "info", ("name",)),
     "content start": EventSpec("content start", "llm", "info", ("model", "prompt")),
     "content end": EventSpec("content end", "llm", "info", ("model", "output")),
-    # [cli] 离线工具（3.5 批：eval_ragas / eval_ragas_generate / rebuild_bm25 / check_retrieval / compare_rewrite）
+    # [cli] 离线工具（3.5 批：eval_ragas / eval_ragas_generate / check_retrieval / compare_rewrite）
     "testset loaded": EventSpec("testset loaded", "cli", "info", ("count",)),
     "evaluation run": EventSpec("evaluation run", "cli", "info", ("kb_id",)),
     "evaluation start": EventSpec("evaluation start", "cli", "info", ("samples",)),
@@ -257,13 +257,6 @@ EVENT_SPECS: dict[str, EventSpec] = {
     ),
     "testset saved": EventSpec(
         "testset saved", "cli", "info", ("file", "count", "version")
-    ),
-    "bm25 rebuild skip": EventSpec("bm25 rebuild skip", "cli", "info"),
-    "kbs found": EventSpec("kbs found", "cli", "info", ("count",)),
-    "kb chunks missing": EventSpec("kb chunks missing", "cli", "warning", ("kb_id",)),
-    "bm25 rebuilt": EventSpec("bm25 rebuilt", "cli", "info", ("kb_id", "chunks")),
-    "bm25 rebuild done": EventSpec(
-        "bm25 rebuild done", "cli", "info", ("rebuilt", "skipped", "failed")
     ),
     "kb lookup": EventSpec("kb lookup", "cli", "info", ("name",)),
     "kb not found": EventSpec("kb not found", "cli", "error", ("name",)),

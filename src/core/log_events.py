@@ -111,7 +111,7 @@ class Event(str, Enum):
     CONTENT_END = "content end"
 
     # [cli] 离线工具事件（3.5 批迁移登记：eval_ragas / eval_ragas_generate /
-    # rebuild_bm25 / check_retrieval / compare_rewrite）
+    # check_retrieval / compare_rewrite）
     TESTSET_LOADED = "testset loaded"
     EVALUATION_RUN = "evaluation run"
     EVALUATION_START = "evaluation start"
@@ -146,11 +146,6 @@ class Event(str, Enum):
     KNOWLEDGE_GRAPH_SAVED = "knowledge graph saved"
     TESTSET_GENERATION_START = "testset generation start"
     TESTSET_SAVED = "testset saved"
-    BM25_REBUILD_SKIP = "bm25 rebuild skip"
-    KBS_FOUND = "kbs found"
-    KB_CHUNKS_MISSING = "kb chunks missing"
-    BM25_REBUILT = "bm25 rebuilt"
-    BM25_REBUILD_DONE = "bm25 rebuild done"
     KB_LOOKUP = "kb lookup"
     KB_NOT_FOUND = "kb not found"
     SEARCH_START = "search start"

@@ -191,7 +191,7 @@ class ChunkRepo:
             )
 
     async def get_by_kb(self, kb_id: str) -> list[ChunkRow]:
-        """取整个知识库的全部分块（BM25 全量重建用）。"""
+        """取整个知识库的全部分块（空库检查 / 全量读取用）。"""
         async with self._sf() as session:
             stmt = (
                 select(ChunkModel)
