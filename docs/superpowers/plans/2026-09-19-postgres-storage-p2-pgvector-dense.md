@@ -1420,6 +1420,7 @@ import asyncio
 from loguru import logger
 
 from src.chunking.validator import ChunkData
+from src.config import EMBEDDING_MODEL
 from src.core import logging as core_logging
 from src.core.log_events import Event
 from src.core.logging import LOG_MAX_BODY
@@ -1716,6 +1717,7 @@ Expected: FAIL —— `AttributeError: 'PgVectorStore' object has no attribute '
             kb_id=kb_id,
             query_len=len(query),
             result_count=len(results),
+            model=EMBEDDING_MODEL,
         )
         logger.debug(
             "[PG] method=dense_search | kb_id={} | rows={} | data={}",
@@ -1740,7 +1742,14 @@ Expected: FAIL —— `AttributeError: 'PgVectorStore' object has no attribute '
     async def get_chunks_paginated(
         self, doc_id: str, kb_id: str, page: int = 1, page_size: int = 50
     ) -> ChunkQueryResult:
-        """分页取某文档的分块。"""
+        """分页取某文档的分块。
+
+        Args:
+            doc_id: 文档 ID
+            kb_id: 知识库 ID
+            page: 页码，**1-based**（调用方保证 >= 1；<= 0 会被 PG 拒绝）
+            page_size: 每页条数
+        """
         rows, total = await self._repo.get_paginated(doc_id, kb_id, page, page_size)
         return ChunkQueryResult(
             items=[row_to_chunk_result(row) for row in rows],
