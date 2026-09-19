@@ -15,6 +15,7 @@ from loguru import logger
 
 from src.chunking.validator import ChunkData
 from src.config import EMBEDDING_MODEL
+from src.config.const import MAX_QUERY_K
 from src.core import logging as core_logging
 from src.core.log_events import Event
 from src.core.logging import LOG_MAX_BODY
@@ -26,10 +27,6 @@ if TYPE_CHECKING:
     # 仅在类型检查期导入，避免在导入期与 chunk_repo 形成循环依赖
     # （chunk_repo → vector_store 父包 __init__ → pg_store → chunk_repo）。
     from src.infra.db.mysql_db.chunk_repo import ChunkRepo
-
-# 查询条数硬上限：PG 本身没有这个限制，保留它是为了让等价性验收只度量
-# 「存储替换」，不把检索条数的能力变化混进来（Task 6 dense_search 与 Task 8 会 import 它）。
-MAX_QUERY_K = 100
 
 
 class QueryEmbedder:

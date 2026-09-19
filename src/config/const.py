@@ -166,6 +166,12 @@ class TaskStatus:
 DELEGATE_TASK_TITLE_TMPL = "{skill} · 领域专家分析"
 
 
+# ── 检索条数上限 ──
+# 查询条数硬上限：源自 Chroma 时代的 100 上限，PG 本身无此限制；保留它是为了
+# 不把「检索条数的能力提升」混进 dense 迁移等价性验收
+MAX_QUERY_K = 100
+
+
 # ── 检索精排超时 ──
 # Reranker 精排总超时秒数：rerank 为同步 HTTP 调用（dashscope 无默认超时），
 # 在事件循环内直连会永久挂起阻塞整个 worker，故经 to_thread + wait_for 兜底；

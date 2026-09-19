@@ -39,16 +39,16 @@ class BM25Index:
             pickle.dump({"bm25": bm25, "chunks": chunks}, f)
 
     def rebuild_from_results(self, kb_id: str, results: list) -> None:
-        """从 Chroma 读回的全部分块重建 KB 的 BM25 索引（全量覆盖写）。
+        """从分块存储读回的全部分块重建 KB 的 BM25 索引（全量覆盖写）。
 
-        Chroma get_all_chunks 返回的是 ChunkResult（id/content/metadata），
+        get_all_chunks 返回的是 ChunkResult（id/content/metadata），
         BM25 持久化需要 ChunkData（content/metadata/chunk_id），此处做适配：
-        chunk_id 复用 Chroma id（格式 {doc_id}:{index}），保证 search 侧
+        chunk_id 复用分块 id（格式 {doc_id}:{index}），保证 search 侧
         chunk.chunk_id 能还原。空结果视为删除索引（无语料可建）。
 
         Args:
             kb_id: 知识库 ID
-            results: Chroma 全量分块（ChunkResult 列表）
+            results: 全量分块（ChunkResult 列表）
         """
         if not results:
             self.delete_index(kb_id)

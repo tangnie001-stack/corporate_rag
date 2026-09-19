@@ -31,13 +31,13 @@ from sqlalchemy import text
 # 重复插入无副作用。
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from src.config.const import MAX_QUERY_K
 from src.config.settings import (
     CHROMA_COLLECTION_PREFIX,
     CHROMA_PERSIST_DIR,
     TOP_K_RETRIEVAL,
 )
 from src.infra.db.vector_store.pg_store import (
-    MAX_QUERY_K,
     PgVectorStore,
     QueryEmbedder,
 )
@@ -300,6 +300,20 @@ def _write_report(outcomes: list[QueryOutcome], k: int, sizes: dict[str, int]) -
         f"- 重合率最小值：{minimum:.4f}",
         f"- 未达 {PASS_THRESHOLD} 的查询数：{len(below)}",
         f"- 结论：{verdict}",
+        "",
+        "> **灵敏度披露（判据的覆盖边界，勿读作「迁移零风险」）**",
+        (
+            "> 1. 判据是**重合率均值 ≥ 0.9 且不逐条设闸** —— 本语料 24 条下，"
+            "均值口径最多允许 2 条查询完全错位。"
+        ),
+        (
+            "> 2. 指标**只比 id 集合、不比 distance/score** —— 向量单位化时 "
+            "cosine / L2 / 内积的排序等价，**distance 语义回归会被漏检**。"
+        ),
+        (
+            "> 3. 两侧共用同一 embedder —— **查询向量层面的不等价不在覆盖内**"
+            "（这是为隔离「存储」而定的设计）。"
+        ),
         "",
     ]
     lines.extend(_composition_lines(outcomes, k, sizes))

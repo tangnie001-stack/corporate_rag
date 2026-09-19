@@ -20,6 +20,10 @@ class ChunkRepo:
     async def upsert_chunks(self, rows: list[ChunkRow]) -> int:
         """按 (kb_id, doc_id, chunk_index) 幂等写入，冲突时整行覆盖。
 
+        隐含前提：同一 `doc_id` 不得跨 `kb_id` 出现 —— 主键 `id = {doc_id}:{chunk_index}`
+        由本层之外生成，而 `ON CONFLICT` 只面向唯一约束 `uq_chunks_kb_doc_idx`、
+        不覆盖 PK `id`；跨 kb 复用同一 `doc_id` 会撞 PK 抛 `IntegrityError`。
+
         Args:
             rows: 待写入的分块行（形状见 mapping.ChunkRow）
 
