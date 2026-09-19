@@ -5,6 +5,7 @@ from scripts.migrate_chroma_to_pg import (
     chroma_record_to_row,
     collection_name_to_kb_id,
 )
+from src.infra.search.tokenizer import to_lexical_text
 
 
 def test_collection_name_to_kb_id_strips_prefix():
@@ -15,9 +16,10 @@ def test_collection_name_to_kb_id_strips_prefix():
 
 def test_record_to_row_splits_contract_keys_and_keeps_custom_keys():
     """契约键升列、自定义键整包进 jsonb（parent_content 必须活下来）。"""
+    document = "贵州茅台2024年营业收入1741亿元"
     record = ChromaRecord(
         id="docabc:7",
-        document="贵州茅台2024年营业收入1741亿元",
+        document=document,
         metadata={
             "doc_id": "docabc",
             "chunk_index": 7,
@@ -37,7 +39,9 @@ def test_record_to_row_splits_contract_keys_and_keeps_custom_keys():
     assert row.source == "茅台2024.pdf"
     assert row.page == 3
     assert row.extra == {"parent_content": "母公司报表", "block_type": "table"}
-    assert row.content_seg == "贵州茅台2024年营业收入1741亿元"  # P2 占位：原文
+    assert row.content == document
+    assert row.content_seg == to_lexical_text(document)
+    assert row.content_seg != document
     assert row.embedding is not None
     assert len(row.embedding) == 1024
 

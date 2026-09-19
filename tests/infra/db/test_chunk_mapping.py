@@ -11,6 +11,7 @@ from src.infra.db.vector_store.mapping import (
     row_to_chunk_row,
     split_metadata,
 )
+from src.infra.search.tokenizer import to_lexical_text
 
 
 def test_contract_keys_are_the_five_agreed_names():
@@ -50,14 +51,16 @@ def test_split_metadata_defaults_and_coercion():
     assert isinstance(split2.page, int)
 
 
-def test_build_rows_sets_columns_and_placeholder_segment():
-    """行形状：id 格式、chunk_total、content_seg 占位（P2 写原文）。"""
+def test_build_rows_sets_columns():
+    """行形状：id 格式、chunk_index / chunk_total、content_seg 为分词输出。"""
+    first = "公司资产负债率上升，研发费用 5 月增加"
+    second = "贵州茅台2024年营业收入1741亿元"
     chunks = [
         ChunkData(
-            content="第一段", metadata={"source": "a.pdf", "page": 1}, chunk_id="a:0"
+            content=first, metadata={"source": "a.pdf", "page": 1}, chunk_id="a:0"
         ),
         ChunkData(
-            content="第二段",
+            content=second,
             metadata={"source": "a.pdf", "page": 2, "parent_content": "P"},
             chunk_id="a:1",
         ),
@@ -66,7 +69,12 @@ def test_build_rows_sets_columns_and_placeholder_segment():
     assert [r.id for r in rows] == ["doc1:0", "doc1:1"]
     assert [r.chunk_index for r in rows] == [0, 1]
     assert all(r.chunk_total == 2 for r in rows)
-    assert [r.content_seg for r in rows] == ["第一段", "第二段"]
+    assert [r.content for r in rows] == [first, second]
+    assert [r.content_seg for r in rows] == [
+        to_lexical_text(first),
+        to_lexical_text(second),
+    ]
+    assert all(r.content_seg != r.content for r in rows)
     assert rows[1].extra == {"parent_content": "P"}
     assert rows[1].source == "a.pdf"
     assert rows[1].page == 2
@@ -192,11 +200,7 @@ def test_split_metadata_page_none_and_bool_become_zero():
 
 
 def test_content_seg_is_tokenized_not_raw():
-    """写入检索文本必须是分词输出，不得是正文原值（P2 的占位已过期）。"""
-    from src.chunking.validator import ChunkData
-    from src.infra.db.vector_store.mapping import build_rows
-    from src.infra.search.tokenizer import to_lexical_text
-
+    """写入检索文本必须是分词输出，不得是正文原值。"""
     content = "公司资产负债率上升，研发费用 5 月增加"
     rows = build_rows(
         "kb1", "doc1", [ChunkData(content=content, metadata={})], [[0.0] * 1024]

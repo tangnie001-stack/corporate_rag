@@ -41,6 +41,7 @@ from src.config.settings import (
 from src.infra.db.engine import session_factory
 from src.infra.db.mysql_db.chunk_repo import ChunkRepo
 from src.infra.db.vector_store.mapping import ChunkRow, split_metadata
+from src.infra.search.tokenizer import to_lexical_text
 
 # 本次验收语料的期望口径 —— 任一不符即中止（Task 8 等价性判据的前提）
 EXPECTED_COLLECTIONS = 691
@@ -105,6 +106,9 @@ def _chunk_index_from_id(chunk_id: str) -> int:
 def chroma_record_to_row(record: ChromaRecord) -> ChunkRow:
     """把一条 Chroma 记录转成 chunks 行（契约键升列、自定义键进 jsonb）。
 
+    `content_seg` 由 `to_lexical_text` 从正文生成，与写入侧
+    `build_rows` 同源 —— 两侧口径一致，tsv 生成列才是词项级 lexeme。
+
     Args:
         record: Chroma 记录
 
@@ -131,7 +135,7 @@ def chroma_record_to_row(record: ChromaRecord) -> ChunkRow:
         chunk_index=chunk_index,
         chunk_total=chunk_total,
         content=record.document,
-        content_seg=record.document,  # P2 占位：原文（P3 换分词输出并全量重写）
+        content_seg=to_lexical_text(record.document),
         embedding=embedding,
         source=split.source,
         page=split.page,
