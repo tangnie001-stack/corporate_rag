@@ -8,16 +8,18 @@ from dataclasses import dataclass, field
 
 @dataclass
 class ChunkData:
-    """文档分块数据结构。
+    """分块数据的唯一标准类型。
 
-    Attributes:
-        content: 分块文本内容
-        metadata: 分块元数据（source / page / doc_id 等）
-        tokens: 分块 token 估算数
+    content/metadata 是解析与写入两侧共用的载荷；chunk_id 供解析阶段标识来源位置，
+    tokens 供分块质量评估使用（解析阶段不填，默认 0）。
     """
 
     content: str
     metadata: dict
+    # 解析阶段生成的来源标识（形如 "{source}:{index}" 或 "{source}:p{page}:{index}"）；
+    # 写入侧不填，默认空串
+    chunk_id: str = ""
+    # 分块后的 token 数，由分块质量评估填充；解析阶段不填，默认 0
     tokens: int = 0
 
 

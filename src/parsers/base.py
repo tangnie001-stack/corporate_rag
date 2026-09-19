@@ -13,22 +13,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
-
-@dataclass
-class ChunkData:
-    """单个文档分块 — 解析器输出的最小语义单元。
-
-    Attributes:
-        content: 分块的文本内容
-        metadata: 元数据字典，至少包含：
-            - source: 原始文件名
-            - page: 页码（TXT 为 1，PDF 为实际页码）
-        chunk_id: 分块的唯一标识（格式："{source}:{index}" 或 "{source}:p{page}:{index}"）
-    """
-
-    content: str
-    metadata: dict
-    chunk_id: str
+from src.chunking.validator import ChunkData
 
 
 @dataclass
