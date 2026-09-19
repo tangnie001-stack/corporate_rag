@@ -512,10 +512,13 @@ git commit -m "fix(db): ORM metadata 备妥 PG 迁移——去 MEDIUMTEXT、补 
 
 ---
 
-## Task 3: `src/config` 增加 PostgreSQL 连接配置（单一 DSN 来源）
+## Task 3: `src/config` 增加 PostgreSQL 连接配置 + PG 驱动依赖（单一 DSN 来源）
+
+> **本任务同时承载 PG 驱动依赖的引入** —— 预检发现的跨任务冲突：`asyncpg` 与 `pgvector` 原先只在 Task 9 加入，但 Task 5 的 baseline 迁移 `import pgvector.sqlalchemy`、且 `build_postgres_dsn()` 产出 `postgresql+asyncpg://` 需要 asyncpg 才能建引擎 → **Task 5/6/7/8 都会因缺依赖而跑不起来**。故把「**加入** PG 驱动」前移到本任务，「**移除** MySQL 驱动」仍留在 Task 9。
 
 **Files:**
 - Modify: `src/config/settings.py:145-149`（新增 PG 变量，`MYSQL_*` 暂时保留）
+- Modify: `pyproject.toml`（**加入** `asyncpg` / `pgvector` / 显式 `sqlalchemy[asyncio]`）
 - Modify: `.env`（新增 PG 变量；已 gitignore，不进提交）
 - Create: `.env.example`（仅键名，不含真值 —— 仓库当前没有这个文件）
 - Test: `tests/config/test_pg_settings.py`（新建）
@@ -526,7 +529,30 @@ git commit -m "fix(db): ORM metadata 备妥 PG 迁移——去 MEDIUMTEXT、补 
 
 **为什么要有 `build_postgres_dsn()`：** DSN 目前有**两个来源** —— `src/infra/db/engine.py:16` 拼一个、`alembic.ini:89` 硬编码一个。二者漂移会让迁移与运行指着不同的库。P1 起改为**一处拼装、两处引用**。
 
-- [ ] **Step 1: 写会失败的测试**
+- [ ] **Step 1: 引入 PostgreSQL 驱动依赖（本任务必须最先做）**
+
+**为什么最先做**：`build_postgres_dsn()` 产出 `postgresql+asyncpg://`，SQLAlchemy 只有在 **asyncpg 已安装**时才能创建该引擎；Task 5 的 baseline 迁移还直接 `import pgvector.sqlalchemy`。所以在写任何 PG 代码之前必须先把驱动装上，否则 Task 5/6/7/8 全部跑不起来。
+
+`pyproject.toml` 的 `dependencies` 里**加入**（`sqlalchemy` 目前只是传递依赖，我们直接 import 它，必须显式声明）：
+
+```toml
+"asyncpg>=0.30.0,<1.0.0",
+"pgvector>=0.3.6,<1.0.0",
+"sqlalchemy[asyncio]>=2.0.36,<3.0.0",
+```
+
+安装（**本项目没有 uv、没有 uv.lock**，`.venv` 是 pip 管理的 editable 安装，与 `Dockerfile:13` 的 `pip install ".[dev]"` 一致）：
+
+```bash
+.venv/bin/pip install -e ".[dev]"
+.venv/bin/python -c "import asyncpg, pgvector; print('asyncpg', asyncpg.__version__)"
+```
+
+Expected: 打印 asyncpg 版本，无 `ModuleNotFoundError`。
+
+> ⚠ **不要用 `uv sync`** —— 本机没有 `uv` 可执行文件，仓库里也没有 `uv.lock`。
+
+- [ ] **Step 2: 写会失败的测试**
 
 新建 `tests/config/test_pg_settings.py`：
 
@@ -572,12 +598,12 @@ def test_missing_password_fails_fast(monkeypatch):
         settings.build_postgres_dsn()
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 3: 跑测试确认失败**
 
 Run: `pytest tests/config/test_pg_settings.py -v`
 Expected: FAIL —— `AttributeError: module 'src.config.settings' has no attribute 'POSTGRES_HOST'`。
 
-- [ ] **Step 3: 在 `src/config/settings.py` 新增 PG 变量与 DSN 拼装**
+- [ ] **Step 4: 在 `src/config/settings.py` 新增 PG 变量与 DSN 拼装**
 
 在 `MYSQL_*` 那段（`:145-149`）之后追加：
 
@@ -612,12 +638,12 @@ def build_postgres_dsn() -> str:
 
 在 `settings.py` 顶部补 `import urllib.parse`。
 
-- [ ] **Step 4: 跑测试确认通过**
+- [ ] **Step 5: 跑测试确认通过**
 
 Run: `pytest tests/config/test_pg_settings.py -v`
 Expected: PASS（3 条全绿）。
 
-- [ ] **Step 5: 在 `.env` 补上 PG 变量（顺序很重要 —— 陷阱 T8）**
+- [ ] **Step 6: 在 `.env` 补上 PG 变量（顺序很重要 —— 陷阱 T8）**
 
 ```bash
 POSTGRES_HOST=postgres
@@ -631,7 +657,7 @@ POSTGRES_DATABASE=corporate_rag
 
 **不要**在日志或提交里出现明文密码。
 
-- [ ] **Step 6: 新建 `.env.example`（记录"需要哪些环境变量"）**
+- [ ] **Step 7: 新建 `.env.example`（记录"需要哪些环境变量"）**
 
 仓库**当前没有** `.env.example`（`ls .env.example` → No such file）。本变更新增了一个**强制必填**的变量（compose 里写的是 `${POSTGRES_PASSWORD:?}`），却没有地方记录"这个项目需要哪些键" —— 下一个人 clone 下来 `docker compose config` 直接失败且不知道缺什么。**这是本变更的直接后果，所以要顺手补上。**
 
@@ -665,12 +691,12 @@ grep -nE "pass|key|secret" .env.example | grep -vE "=$" && echo "❌ 有非空�
 
 把 `.env.example` 加进提交（它在 .gitignore 里吗？先确认：`git check-ignore -v .env.example`，若被忽略则加 `!.env.example` 例外）。
 
-- [ ] **Step 7: 跑门禁并提交**
+- [ ] **Step 8: 跑门禁并提交**
 
 ```bash
 ruff check src/config && pyright src/config
-git add src/config/settings.py tests/config/test_pg_settings.py .env.example
-git commit -m "feat(config): 新增 PostgreSQL 连接配置与单一 DSN 拼装入口；补 .env.example 键名清单"
+git add src/config/settings.py pyproject.toml tests/config/test_pg_settings.py .env.example
+git commit -m "feat(config): 新增 PostgreSQL 连接配置与单一 DSN 拼装入口；引入 asyncpg/pgvector 驱动；补 .env.example 键名清单"
 ```
 
 ---
@@ -1661,9 +1687,10 @@ git commit -m "refactor(db): create_session 改用 ON CONFLICT DO NOTHING（kb_r
 
 > ⚠ **本任务最容易出的错不是"测试挂了"，而是"测试悄悄变弱了"** —— 改写 273 行代码时删掉一条断言，测试照样全绿。所以 Step 1 先做基线快照，Step 5 再做机械化对照。
 
-- [ ] **Step 1: 改写前先做基线快照（此时 MySQL 仍在跑，Task 9 还没执行）**
+- [ ] **Step 1: 改写前先做基线快照**
 
-`reset_data.py` 现在仍是"三合一"，`test_mysql_db.py` 现在仍能连 MySQL —— **这是唯一能同时跑旧实现与新实现的机会**。
+> **注意基线跑在哪个库上**：Task 6 已把 `engine.py` 切到 PG，所以此刻 `test_mysql_db.py` 经由 `session_factory` 连的是 **PostgreSQL**（不是 MySQL —— MySQL 容器虽在跑，但引擎已不指向它）。这是**预期的**：我们要的就是"旧测试文件在 PG 上"的基线，它比 MySQL 基线更有用（能提前暴露"旧测试在 PG 上本来就不通过"的情况）。
+> 其中**测试名清单**与**assert 条数**与数据库无关，是后面 Step 5 防"悄悄变弱"的主要依据。
 
 ```bash
 # ① 测试名清单（用于 Step 5 对照有没有漏搬）
@@ -1806,7 +1833,7 @@ git commit -m "test(db): 存储侧测试与重置脚手架改为真实 PostgreSQ
 - Delete: `deploy/mysql/`
 - Modify: `docker-compose.yml:3-25`（mysql 服务）、`:16`（`mysql_data` 挂载）、`:256-257`（卷声明）、app 的 `MYSQL_*` 环境变量与 `depends_on`
 - Modify: `docker-compose.prod.yml:10-29`、`:19-20`、`:224-225`、app 的 `MYSQL_*`
-- Modify: `pyproject.toml:31,33,34`（删 MySQL 驱动）、新增 `asyncpg` / `pgvector` / `sqlalchemy`
+- Modify: `pyproject.toml`（**只删** MySQL 驱动；PG 驱动已在 Task 3 加入）
 - Modify: `src/config/settings.py:145-149`（删 `MYSQL_*`）
 - Test: `tests/config/test_no_mysql_leftovers.py`（新建）
 
@@ -1902,8 +1929,10 @@ Expected: FAIL（驱动还在、`MYSQL_HOST` 还在、目录还在）。
 - [ ] **Step 3: 删 MySQL 服务、卷与 init 脚本**
 
 - `git rm -r deploy/mysql`
-- `docker-compose.yml`：删 `mysql` 服务块（`:3-25`）、app 的 `mysql:` 依赖与 `MYSQL_HOST`/`MYSQL_PASSWORD` 环境变量、`volumes` 段里的 `mysql_data`（`:256-257`）。
-- `docker-compose.prod.yml`：同上（`:10-29`、`:19-20`、`:224-225`、app 的 `MYSQL_*`）。
+- `docker-compose.yml`：删 `mysql` 服务块、app 的 `mysql:` 依赖与 `MYSQL_HOST`/`MYSQL_PASSWORD` 环境变量、`volumes` 段里的 `mysql_data`。
+- `docker-compose.prod.yml`：同上，再加上 app 的 `MYSQL_*`。
+
+> ⚠ **下面引用的行号是写计划时（Task 4 之前）的行号，Task 4 已改过这两个文件 → 行号可能已漂移。按内容定位，不要按行号跳转。**
 
 **在两个 compose 文件顶部加注释（含上面两条禁令）**：
 
@@ -1927,27 +1956,20 @@ grep -rn "MYSQL_\|deploy/mysql" --include="*.py" --include="*.yml" --include="*.
 
 逐处清理。`scripts/rebuild_kb_data.py` 只 import repo，不受影响（P4 会整体删它）。
 
-- [ ] **Step 5: 换依赖**
+- [ ] **Step 5: 换依赖（只做删除）**
 
-`pyproject.toml`：
+`pyproject.toml`：删 `aiomysql>=0.2.0,<1.0.0`（`:34`）、`mysql-connector-python`（`:31`）、`pymysql`（`:33`）。
 
-- 删 `aiomysql>=0.2.0,<1.0.0`（`:34`）、`mysql-connector-python`（`:31`）、`pymysql`（`:33`）
-- 加：
-
-```toml
-"asyncpg>=0.30.0,<1.0.0",
-"pgvector>=0.3.6,<1.0.0",
-"sqlalchemy[asyncio]>=2.0.36,<3.0.0",
-```
-
-> `sqlalchemy` 目前**未直接声明**（是传递依赖）—— 我们直接 import 它，必须显式声明。
+> **`asyncpg` / `pgvector` / `sqlalchemy[asyncio]` 的加入已在 Task 3 完成** —— 见那里的说明（Task 5 起就需要它们，不能等到这一步）。本步只负责移除 MySQL 驱动。
 
 - [ ] **Step 6: 重装依赖并跑测试**
 
 ```bash
-uv sync --all-extras   # 或项目实际使用的安装方式
+.venv/bin/pip install -e ".[dev]"
 pytest tests/config/test_no_mysql_leftovers.py -v
 ```
+
+> **不要用 `uv sync`** —— 本机没有 `uv`，仓库里也没有 `uv.lock`；本项目是 pip 管理的 editable 安装（与 `Dockerfile:13` 一致）。
 
 Expected: PASS（4 条全绿）。
 
