@@ -169,8 +169,8 @@ def build_postgres_dsn() -> str:
     """
     if not POSTGRES_PASSWORD:
         raise RuntimeError("POSTGRES_PASSWORD 未配置，无法构造 PostgreSQL DSN")
-    user = urllib.parse.quote_plus(POSTGRES_USER)
-    password = urllib.parse.quote_plus(POSTGRES_PASSWORD)
+    user = urllib.parse.quote(POSTGRES_USER, safe="")
+    password = urllib.parse.quote(POSTGRES_PASSWORD, safe="")
     return (
         f"postgresql+asyncpg://{user}:{password}"
         f"@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DATABASE}"

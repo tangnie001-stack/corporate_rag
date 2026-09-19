@@ -579,16 +579,20 @@ def test_dsn_scheme_is_asyncpg(monkeypatch):
 
 
 def test_password_with_special_chars_is_quoted(monkeypatch):
-    """密码含 @ / : 时必须按 URL 规则转义，否则 DSN 会被解析错。"""
+    """密码含 @ / : 与空格时必须按 URL 规则转义，否则 DSN 会被解析错。"""
     monkeypatch.setattr(settings, "POSTGRES_HOST", "h")
     monkeypatch.setattr(settings, "POSTGRES_PORT", 5432)
     monkeypatch.setattr(settings, "POSTGRES_USER", "u")
-    monkeypatch.setattr(settings, "POSTGRES_PASSWORD", "p@ss:word")
+    monkeypatch.setattr(settings, "POSTGRES_PASSWORD", "p@ss:wo rd/x")
     monkeypatch.setattr(settings, "POSTGRES_DATABASE", "d")
 
     dsn = settings.build_postgres_dsn()
 
-    assert "p%40ss%3Aword" in dsn
+    assert "p%40ss%3Awo%20rd%2Fx" in dsn
+    # SQLAlchemy 用 unquote（非 unquote_plus）解析 userinfo，空格必须编成 %20；
+    # "+" 不会被还原成空格，故 userinfo 段不得出现 "+"。
+    userinfo = dsn.split("://", 1)[1].split("@", 1)[0]
+    assert "+" not in userinfo
 
 
 def test_missing_password_fails_fast(monkeypatch):
@@ -628,8 +632,10 @@ def build_postgres_dsn() -> str:
     """
     if not POSTGRES_PASSWORD:
         raise RuntimeError("POSTGRES_PASSWORD 未配置，无法构造 PostgreSQL DSN")
-    user = urllib.parse.quote_plus(POSTGRES_USER)
-    password = urllib.parse.quote_plus(POSTGRES_PASSWORD)
+    # SQLAlchemy 用 unquote（非 unquote_plus）解析 userinfo，故必须用 quote(safe="")：
+    # quote_plus 会把空格编成 "+"，而 "+" 不会被还原成空格。
+    user = urllib.parse.quote(POSTGRES_USER, safe="")
+    password = urllib.parse.quote(POSTGRES_PASSWORD, safe="")
     return (
         f"postgresql+asyncpg://{user}:{password}"
         f"@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DATABASE}"
