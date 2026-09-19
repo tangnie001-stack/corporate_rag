@@ -13,7 +13,7 @@
 **实测环境事实（2026-09-18/19）**
 
 > §1 前置核查（1.1–1.4）的完整实测记录见 `docs/tmp/postgres-probe-2026-09-19.md`。
-> 结论摘要：1.2 **通过**（embeddings 可原样读出）；1.3 本地得 pgvector **0.8.6**；1.1 机制已证、RDS 权限未证（**阻塞**）；1.4 结论比初稿更硬（见 D1）。
+> 结论摘要：1.2 **通过**（embeddings 可原样读出）；1.3 本地得 pgvector **0.8.6**；1.1 本地机制已证，但**扩展必须由超级用户创建**（实测证伪了"放进迁移"的写法，见 D3 与 D1 的范围边界）；1.4 结论比初稿更硬（见 D1）。**本轮只做本地，RDS 与 prod 安装不在范围。**
 
 - 未删除知识库 **1340** 个；Chroma 有 **691** 个 collection、**176** 条向量，其中**只有 5 个 collection 含分块**。单库最大 121 分块；`b9e74e82…` 51 分块 / 31,881 字符。
 - **embeddings 可原样读出**（5 个 collection / 176 分块全部可读，维度 1024，无 `None` 行）→ 数据搬迁与 dense 等价性验收成立。
@@ -53,7 +53,7 @@
 - 分块写入与文档状态在**同一事务**内提交，孤儿类缺陷结构性消失。
 - 空 collection 这一类缺陷结构性消失（`kb_id` 列 + 外键取代 collection-per-KB）。
 - 中文词法检索**真正可用**，且**不依赖任何 PG 扩展**（用 Python 侧 jieba 预分词）。
-- 生产可托管化：向量与词法检索挂到已是高可用的 RDS PostgreSQL，消掉最后一个可托管的派生单点。
+- 生产可托管化（**路径而非本轮交付**）：向量与词法检索收敛到 PostgreSQL 后，将来可整体挂到已是高可用的 RDS，消掉最后一个可托管的派生单点。**本轮不执行**（见 D1 范围边界）。
 - 清理四类既有烂账：双套 ORM 模型、双套 alembic、双套 `ChunkData`、Chroma/BM25 的持久化与依赖。
 
 **Non-Goals**
@@ -78,15 +78,19 @@
 
 **dev 侧**：`postgres` 服务去掉 `profiles: ["langfuse"]`（应用现在依赖它，不能再挂在 Langfuse profile 下）、`mem_limit` 从 256m 上调（256m 对一个跑业务表 + 向量 + 全文索引的库偏紧）、增建应用 database。`app` 增加 `depends_on: postgres(service_healthy)`。
 
-**prod 侧**：指向阿里云 RDS，不再本地起库。**前提**：prod 与 dev 不同机 —— 两份 compose 的 `name`（`corporate_rag`）、postgres 的 `container_name`（`corporate-rag-postgres`）与**全部卷名**（`corporate_rag_postgres_data` 等）**完全相同**，同机不是"数据互相污染"，而是**容器名冲突、第二个 `up` 直接失败**（`--force-recreate` 还会把先起的那套拆掉）。这条要写进 compose 注释与部署文档。
+**prod 侧（本轮不执行，见下方"范围边界"）**：最终形态是指向阿里云 RDS，不再本地起库。**前提**：prod 与 dev 不同机 —— 两份 compose 的 `name`（`corporate_rag`）、postgres 的 `container_name`（`corporate-rag-postgres`）与**全部卷名**（`corporate_rag_postgres_data` 等）**完全相同**，同机不是"数据互相污染"，而是**容器名冲突、第二个 `up` 直接失败**（`--force-recreate` 还会把先起的那套拆掉）。这条要写进 compose 注释与部署文档。
 
-**镜像**：dev 现在用的 `postgres:15-alpine` **不自带 pgvector**（官方 postgres 镜像不含第三方扩展）。改用 pgvector 官方镜像 `pgvector/pgvector:pg15`（或 pin 到 `pgvector/pgvector:0.8.6-pg15`），且**大版本必须与 RDS 对齐**，否则本地绿、上线行为不同。
+**镜像**：dev 现在用的 `postgres:15-alpine` **不自带 pgvector**（官方 postgres 镜像不含第三方扩展）。改用 pgvector 官方镜像 `pgvector/pgvector:pg15`（本地实测 = PG 15.19 + pgvector 0.8.6，也可 pin 到 `pgvector/pgvector:0.8.6-pg15`）。**将来是指向 RDS 时，大版本必须与 RDS 对齐**，否则本地绿、上线行为不同 —— 本轮不涉及。
 
 **应用 database 与账号的创建（初稿想当然了，评审 F2）**：`postgres` 镜像只在**数据目录首次初始化**时执行 `docker-entrypoint-initdb.d` 下的脚本。因此：
 
 - **dev**：既有卷 `corporate_rag_postgres_data` 不会重跑 init 脚本 → 必须显式一次性 `CREATE DATABASE`（或删卷重建并挂载 `./deploy/postgres/init`）。这是两条不同的动作，`tasks.md` 不得只写"改路径"。
-- **prod**：RDS 由控制台/SQL 预建应用库与**最小权限账号**，init 脚本根本不参与。
-- `vector` 扩展的创建**不依赖 initdb**（见 D3）：放进 alembic 首版迁移，幂等且两条路径都生效。
+- **prod（本轮不执行）**：最终形态是 RDS 由控制台/SQL 预建应用库与**最小权限账号**，init 脚本根本不参与。
+- **范围边界（用户 2026-09-19 决定）**：**本轮只做本地**。远程 RDS 不处理、prod 不进行安装。因此：
+  - prod 的 `docker-compose.prod.yml` **只做与 dev 同构的结构调整**（换 pgvector 镜像、去 MySQL 服务、应用库与账号、`app` 依赖 postgres、`POSTGRES_*` 环境变量），**继续使用本地 PG 实例**，**不指向 RDS**。
+  - 本地的扩展创建由 `langfuse`（`POSTGRES_USER`，实测 `rolsuper = t`）执行。
+  - RDS 侧的扩展清单 / 权限 / 账号、prod 的 worker 数与连接预算、托管化切换，全部**登记为遗留**，另案处理。「1.1 的 RDS 权限」因此**不再是本轮阻塞项**。
+- `vector` 扩展的创建**不能靠 alembic 迁移**（见 D3 的实测更正）：迁移用的是应用运行账号，而 `vector` 不是 trusted 扩展 → 非超级用户会被拒绝。因此改由**超级用户账号一次性创建**（全新卷走初始化脚本的超级用户上下文，既有卷走文档里的一次性命令），迁移只做**前置断言 + 可操作的失败**。
 
 **共享实例的运维后果（初稿只写了"故障域共享"，不完整，评审 F11）——以下四条为显式接受项，须记入 ADR**：
 
@@ -142,7 +146,23 @@ chunks
 索引      (kb_id) btree  ·  tsv GIN  ·  (doc_id) btree
 ```
 
-**DDL 前置**：该表依赖 `vector` 扩展，创建表之前 SHALL 执行 `CREATE EXTENSION IF NOT EXISTS vector;`。**该语句放在 alembic 首版迁移里，不放在 `deploy/postgres/init/`** —— initdb 脚本只在数据目录首次初始化时执行（见 D8 与 tasks 2.6），dev 的既有数据卷不会重跑、prod 指向 RDS 时脚本根本不参与；只有放进迁移才幂等且两条路径都生效。
+**DDL 前置（本段在 2026-09-19 被实测更正）**：该表依赖 `vector` 扩展，创建表之前必须有 `CREATE EXTENSION vector`。
+
+⚠ **初稿写「放进 alembic 首版迁移，幂等且 dev/prod 两条路径都生效」—— 不成立，已实测证伪。** 2026-09-19 在 `pgvector/pgvector:pg15` 上实测：
+
+| 事实 | 实测结果 |
+|---|---|
+| `vector.control` 是否 `trusted` | **否**（文件里只有 `comment` / `default_version` / `module_pathname` / `relocatable`，无 `trusted = true`） |
+| 应用账号（业务库属主、非超级用户）执行 `CREATE EXTENSION vector` | `ERROR: permission denied to create extension "vector"` / `HINT: Must be superuser to create this extension.` |
+| 同一账号能否在应用库建表 | **能**（`CREATE TABLE` 成功 —— 它拥有库与 `public` schema） |
+| 超级用户在应用库建扩展后，应用账号能否用 `vector(1024)` 列 | **能**（建表、插入、`<=>` 排序全部成功） |
+| compose 的 `POSTGRES_USER`（`langfuse`）是否超级用户 | **是**（`rolsuper = t`）→ 本地扩展由它创建 |
+
+**因此落地方案改为：**
+
+- 扩展由**超级用户一次性创建**：全新数据目录走 `deploy/postgres/init/` 的脚本（在超级用户上下文中 `\c` 进应用库执行 `CREATE EXTENSION IF NOT EXISTS vector`）；**既有数据卷**走部署文档里的一次性命令（脚本不重跑）。
+- **迁移不创建扩展**，只在建 `chunks` 之前**断言它已存在**，缺失时抛可操作的错误（指明"需由具备超级用户权限的账号先创建扩展"），而不是让 `vector(1024)` 报一个难以归因的类型错误。
+- 迁移仍是**表结构**的唯一建立入口；扩展是它**外部的、有权限门槛的前置条件** —— 这个不对称不能靠"迁移里写 `IF NOT EXISTS`"抹平。
 
 **读取契约（必须显式约定，否则静默破坏去重与引用）**：`ChunkResult.metadata` SHALL 在读取时由**列值 + jsonb 平铺合并**回填（冲突以列为准），至少包含 `doc_id` / `chunk_index` / `chunk_total` / `source` / `page`。
 
@@ -389,15 +409,17 @@ to_tsvector('simple','营业收入 同比 增长') @@ plainto_tsquery('simple','
 
 **前置（不阻塞设计，但不做就不能开工）**
 
-0. **RDS 侧三件事（评测 1.1/1.3；本地无法代理，**仍未完成、阻塞**）**：① 扩展清单 `SELECT name, default_version FROM pg_available_extensions WHERE name IN ('vector','zhparser','pg_jieba','pg_bigm','pg_trgm','pg_search');`；② **`vector` 是否可直接 `CREATE EXTENSION`（需要什么权限/账号）** —— RDS 的扩展创建通常要求高权限账号，这条不确认会在建表时卡住；③ 已装版本 `SELECT extversion FROM pg_extension WHERE extname='vector';`（对照 pgvector 当前 **0.8.6**：HNSW 需 ≥0.5、`hnsw.iterative_scan` 需 ≥0.8；升级用 `ALTER EXTENSION vector UPDATE;`）。**本变更的机制不依赖扩展清单**（走 jieba+simple），但 `vector` 是硬依赖。仓库内**没有任何 RDS 连接配置**（`.env` 只有 `MYSQL_*`），故无法代理验证。
+0. **RDS 侧三件事 —— 本轮不做**（用户 2026-09-19：远程 RDS 不处理、prod 不进行安装）：① 扩展清单；② `CREATE EXTENSION` 的账号/权限；③ 已装版本。**已改为遗留项**，随托管化另案处理。本地所需的权限事实**已实测清楚**（见下表），不再是阻塞。
 0b. **Chroma → PG 向量能否原样搬迁 —— ✅ 已实测通过（2026-09-19）**：5 个 collection / 176 分块的 `documents`/`metadatas`/`embeddings` **全部可读**，维度 1024，无 `None` 行。**第 2 步与 dense 等价性验收成立**，不需要降级判据。记录见 `docs/tmp/postgres-probe-2026-09-19.md`。
+0c. **本地扩展创建的权限归属 —— ✅ 已实测（2026-09-19）**：`vector` 不是 trusted 扩展 → 应用账号建不了；`langfuse`（compose 的 `POSTGRES_USER`）是超级用户、能建；建好后应用账号可正常建表与用 `vector` 列。因此扩展由超级用户一次性创建，**迁移只做前置断言**（见 D3）。
 
 **步骤**
 
 1. **建 PG 与 schema**：
-   - 镜像换 `pgvector/pgvector:pg15`（pin 版本更好），大版本与 RDS 对齐
-   - dev：`postgres` 去掉 langfuse profile 门、上调内存；**显式一次性创建应用 database + 最小权限账号**（既有卷不会重跑 initdb 脚本）
-   - 首版迁移内含 `CREATE EXTENSION IF NOT EXISTS vector;`（幂等，dev 与 prod 都生效）
+   - 镜像换 `pgvector/pgvector:pg15`（本地实测 = PG 15.19 + pgvector 0.8.6）
+   - `postgres` 去掉 langfuse profile 门、上调内存；**显式一次性创建应用 database + 非超级用户应用账号**（既有卷不会重跑 initdb 脚本）
+   - **扩展由超级用户创建**：全新卷走 `deploy/postgres/init/` 脚本（超级用户上下文 `\c` 进应用库）；既有卷走一次性命令
+   - 首版迁移**不建扩展**，只在建 `chunks` 前断言扩展存在并给出可操作的失败
    - 合并双套 models 与双套 alembic
 2. **数据搬迁（仅用于验收）**：一次性脚本从 Chroma 读出全部 176 个分块的 `documents`/`metadatas`/`embeddings`，原样写入 `chunks`。**目的是让 dense 等价性成为可判定的差分** —— 若走"重新入库"，分块与 embedding 都会变，等价性就失去依据。**前提是前置 0b 通过**；不通过则 dense 侧改用与词法相同的探针。
 3. **dense 等价性验证**：≥20 条固定查询 × 单 `kb_id` 路径，top-k 重合率 ≥ 0.9（见 D6）。不达标则先查 distance 语义与 WHERE 条件，不进入下一步。
@@ -405,7 +427,7 @@ to_tsvector('simple','营业收入 同比 增长') @@ plainto_tsquery('simple','
 5. **切代码**：`engine.py` → repos → `vector_store/`（含**删除 `similarity_search_all` 与其分支、测试**）→ 删除 `bm25_index.py` 并迁移 `rrf_fusion` → `retrieval.py` → `document_service.py`（**入库与删除两条路径事务化** + 去 BM25 重建 + embedding 无条件预计算）→ `app_service.py` 装配 → `src/main.py`（删 Chroma warmup 及其事件）→ `rag_tools.py`（`search()` 去 bm25 形参）→ 5 个 CLI 脚本。
 6. **compose 改造**：dev 的 `postgres` 去 profile 门、换镜像、上调内存、`app` 加 `depends_on: postgres(service_healthy)`；退役 MySQL 服务与 Chroma/BM25 的卷。
 7. **事务化验收（故障注入）**：在 `INSERT chunks` 与 `UPDATE document` 之间注入异常，确认**两者都不落库**；同法验证删除路径（删分块失败时文档 SHALL NOT 被软删）。
-8. **prod 指向 RDS**：改 `docker-compose.prod.yml`，写入"不同机"前置；在 RDS 上预建应用库与最小权限账号、确认 `CREATE EXTENSION vector` 可执行；把连接预算作为实例规格输入。
+8. **prod compose 与 dev 同构（本轮只改文件，不安装）**：`docker-compose.prod.yml` 换 pgvector 镜像、去 MySQL 服务、加应用库与账号、`app` 依赖 postgres、补 `POSTGRES_*`；**继续用本地 PG 实例，不指向 RDS**。写入"prod 与 dev 不同机"前置（两份 compose 的项目名/容器名/卷名全同，同机不可共存）。**RDS 托管化、RDS 扩展清单与权限、连接预算作为实例规格输入 —— 全部登记为遗留，另案处理。**
 9. **清理收尾**：删依赖（`chromadb` / `rank_bm25` / `aiomysql`）、删 `data/chroma_persist` 与 `data/bm25_index`、删 `deploy/chroma/Dockerfile`（未被任何 compose 引用）、`deploy/mysql/init` → `deploy/postgres/init`；更新 `code-map.md` / `api_contract.md` / `data-flow.md` / `glossary.md` / `defensive-patterns.md`；写 ADR（存储收敛 + 融合位置 + **共享实例的四条运维后果**，见 D1）。
 
 **回滚**
@@ -429,10 +451,10 @@ to_tsvector('simple','营业收入 同比 增长') @@ plainto_tsquery('simple','
 
 **仍需在实施前解决**
 
-1. **（Blocking 事实）RDS 上 `vector` 能否直接 `CREATE EXTENSION`、需要什么权限？** 以及 RDS 是否预置 `zhparser` / `pg_jieba` / `pg_bigm` / `pg_trgm`。**推荐**：扩展清单只影响探针的对照候选（本变更不依赖），但 `vector` 的创建权限是**硬前置** —— 若需高权限账号，必须在部署文档里写明由谁执行。**本地已证机制可行**（超级用户路径 `CREATE EXTENSION IF NOT EXISTS vector` 成功，`<=>` 返回余弦距离 0~2，与 Chroma 一致），未证的只有 RDS 权限模型。
+1. ~~**（Blocking 事实）RDS 上 `vector` 能否直接 `CREATE EXTENSION`、需要什么权限？**~~ → **本轮不再阻塞（范围变更）**：用户 2026-09-19 决定本轮只做本地、不处理远程 RDS、不进行 prod 安装。**本地侧的权限事实已实测清楚**：`vector` 不是 trusted 扩展，应用账号被拒（`Must be superuser`），`langfuse`（`POSTGRES_USER`）是超级用户可建，建好后应用账号可正常建表与用 `vector` 列 → 扩展由超级用户一次性创建，迁移只做前置断言。RDS 侧的扩展清单 / 权限 / 账号改为**遗留项**，随托管化另案处理。
 2. ~~**（Blocking 事实）Chroma 能否原样读出 176 条分块的 embeddings？**~~ → **已解决（1.2 通过）**，dense 侧按迁移等价性验收，不需降级判据。
 3. **`ts_rank` 还是 `ts_rank_cd`？** **推荐**：用探针实测决定（与分词配置分开测，保持可归因性）。实测量纲差异大（同一查询同一文档：`ts_rank` 0.0985 / `ts_rank_cd` 0.05）→ 横向比较必须固定打分算法。
 4. **`VectorStore` 新增方法的命名与签名？** 倾向 `dense_rank` / `sparse_rank` 作为 `ChunkResult` 可选字段 + 一个返回两路并集的方法（名字待定）。**该项是契约变更**，须同步 `api_contract.md`。属实现局部，可留到编码时定。
 5. **单字 token 之外是否还要过滤停用词？** 实测已确认（1.3 真实 `jieba.lcut`）：`率` **不会**被单独切出（`增长率` 成词）；被切出的单字是 `本`/`及`/`不`/`年`/`月`/`了`/`吗` 这类虚词与量词，且 `len>=2` 过滤顺带干掉空格与中文标点。**推荐**：本变更只做"长度 ≥ 2"这一条硬规则（可解释、可测试）；停用词表会引入一份需要维护的配置，等探针显示它在拖累排序再引入。
 6. **prod 与 dev 是否部署在不同机器？** 两份 compose 的 `name`、`container_name`、**全部卷名**完全相同 → 同机**不可共存**（容器名冲突，第二个 `up` 直接失败；`--force-recreate` 会拆掉先起的那套）。**推荐**：不同机；若同机则必须先做命名隔离（不只是路径隔离）。这仍是一个**需要用户确认的事实**。
-7. **prod 的 worker 数与连接预算**：`CLAUDE.md` 要求单 worker（进程内流式状态），`docker-compose.prod.yml:202` 实为 `--workers 4`；4 × (10+10) ≈ 80 连接 + Langfuse。**推荐**：本变更**只登记不处置**（不属存储替换），但在 ADR 里写成 RDS 规格的输入约束与既有冲突项。
+7. **prod 的 worker 数与连接预算**：`CLAUDE.md` 要求单 worker（进程内流式状态），`docker-compose.prod.yml:202` 实为 `--workers 4`；4 × (10+10) ≈ 80 连接 + Langfuse。**推荐**：本变更**只登记不处置**，且因**本轮不安装 prod**，它同时是**遗留项**（将来托管化时作为 RDS 规格的输入约束）。

@@ -3,7 +3,7 @@
 **1. 三套存储 = 三个独立故障域，失败不原子 —— 这是根本病根。**
 关系型在 MySQL、分块与向量在 Chroma（嵌入式，落 `data/chroma_persist`）、词法索引在进程内 `rank_bm25` 且落 `data/bm25_index`。三者可各自半死：BM25 挂了而 MySQL 完好，于是系统一边静默降级一边照打 `hybrid done` —— `trace_c54ce259` 那条缺陷活了半个月无人发现，就是这么来的。**根治办法不是给 BM25 再加观测与自愈**（那正是 `bm25-index-durability` 的 38 个任务），**而是让三者在同一个故障域内**：存储要么整体可用，要么整体不可用，不存在"半活"状态可供伪装。
 
-**2. 托管化。** 生产 MySQL/Redis 已是阿里云托管高可用，真单点只剩向量库与文件存储。Chroma 没有托管形态，pgvector 有 → 收敛到 RDS PostgreSQL 能让「最后一个可托管的派生单点」交给云托管。
+**2. 托管化（路径，非本轮交付）。** 生产 MySQL/Redis 已是阿里云托管高可用，真单点只剩向量库与文件存储。Chroma 没有托管形态，pgvector 有 → 收敛到 PostgreSQL 后，将来可整体挂到已是高可用的 RDS，消掉最后一个可托管的派生单点。**本轮只做本地迁移与收敛，不处理远程 RDS、不进行 prod 安装**（用户 2026-09-19 决定）。
 
 **3. 分块与文档状态没有事务。** `document_service.py:541` 写 Chroma、`:551` 更新 MySQL 状态、`:572` 重建 BM25，三步跨三店。进程死在中间就产生「有分块、文档未 ready」的孤儿。
 
@@ -20,7 +20,7 @@
 - **不再需要词法索引文件的持久化、原子写、损坏自愈与降级观测** —— 这些问题的载体消失。
 - **BREAKING**：`VectorStore` 契约扩展取数入口（新增按支路取 top-k 的方法）；`bm25_index.py` 删除（其纯函数 `rrf_fusion` / `rrf_fusion_multi` 保留并迁移）；`ChunkResult` 增加分路排名字段使融合前来源可辨。
 - **依赖增减**：删 `chromadb`、`rank_bm25`、`aiomysql`；加 `asyncpg`、`pgvector`；`jieba`（已在 `pyproject.toml:38` 声明但全局零调用）**终于接线**。
-- **部署**：dev 的 `postgres` 服务去掉 `profiles: ["langfuse"]`（它不能再挂在 Langfuse profile 下——应用现在依赖它）、扩容、增建应用 database，`app` 增加 `depends_on: postgres(service_healthy)`；prod 指向阿里云 RDS PostgreSQL（一个实例两个 database：应用 + Langfuse）。数据目录继续用 docker named volume（**不绑 `/mnt/d`**，9p 的 fsync/原子性弱）。
+- **部署（本轮只做本地）**：dev 的 `postgres` 服务去掉 `profiles: ["langfuse"]`（它不能再挂在 Langfuse profile 下——应用现在依赖它）、扩容、增建应用 database 与**非超级用户应用账号**，`app` 增加 `depends_on: postgres(service_healthy)`。**pgvector 扩展由超级用户账号一次性创建**（`vector` 不是 trusted 扩展 —— 实测应用账号会得到 `Must be superuser`；全新卷走初始化脚本、既有卷走一次性命令），**迁移只做前置断言**。prod 的 compose 只做与 dev 同构的结构调整（继续本地 PG 实例，两个 database），**不指向 RDS** —— RDS 托管化另案。数据目录继续用 docker named volume（**不绑 `/mnt/d`**，9p 的 fsync/原子性弱）。
 - **作废 change `bm25-index-durability`**：其 38 个任务的靶子（索引文件的持久化、原子写、损坏自愈、缺失/不可读降级）在新形态下不存在。
 - **与在途 change `retrieval-fetch-and-dedup` 重叠**：两者都改 `retrieval-quality` / `retrieval-judgment` / `observability-logging`。详见下方顺序声明。
 
@@ -45,7 +45,7 @@
 - `database-orm`（MODIFIED）: 「ORM 模型定义」的 `MySQL 表` → PostgreSQL，并写入「模型与迁移脚本的**单一事实源**」（消除两套模型、两套 alembic）；「搜索类型搬迁」的引用方列表移除 `bm25_index.py`。
 - `typed-data-layer`（MODIFIED）: 「检索结果统一类型」的链路名（`ChromaDB / BM25` → 同一 PostgreSQL 的两路），`ChunkResult` 增加分路排名字段与 **`metadata` 回填契约**；「MySQL 实体类型」→ 关系型实体类型；**另补「mysql_db.py 拆为 Repo」与「ChatManager 改用 ChatRepo」两条**（正文点名 `MySQLDB` 类，初稿遗漏）。该 capability 的「api/documents.py 走 service」**不改** —— 其正文不含引擎/组件命名，本变更不影响它。
 - `architecture-tidy`（MODIFIED）: 「AppService 直接持有全局依赖」不再持有 `BM25Index`（该组件退役）。
-- `database-migrations`（MODIFIED）: 「第一版迁移」写死了 6 张表与 `scripts/clean_all_data.py`；**且现存"第一版迁移"实为针对已存在表的 MySQL 增量 diff、且假定 `eval_report` 已存在**。本变更必须把它换成**从零建表的新 baseline**（建全 8 张表：7 张关系表 + `chunks`，含 `CREATE EXTENSION IF NOT EXISTS vector`），该 requirement 必须同步。
+- `database-migrations`（MODIFIED）: 「第一版迁移」写死了 6 张表与 `scripts/clean_all_data.py`；**且现存"第一版迁移"实为针对已存在表的 MySQL 增量 diff、且假定 `eval_report` 已存在**。本变更必须把它换成**从零建表的新 baseline**（建全 8 张表：7 张关系表 + `chunks`）。**扩展创建的归属也被实测推翻并更正**：`vector` 不是 trusted 扩展，迁移用的应用账号建不了（`Must be superuser`）→ 扩展改由超级用户一次性创建，迁移只做**前置断言 + 可操作的失败**。该 requirement 必须同步。
 
 **纯命名同步（7，行为不变，只是组件名不再成立）**
 
@@ -83,7 +83,7 @@
 **部署与运维**
 
 - `docker-compose.yml` — `postgres` 去 `profiles: ["langfuse"]`、扩容、增建应用库；`app` 依赖 `postgres`；MySQL 服务退役
-- `docker-compose.prod.yml` — 同上，并改为指向阿里云 RDS（不再本地起库）
+- `docker-compose.prod.yml` — 与 dev 同构（pgvector 镜像、去 MySQL 服务、应用库与账号、`app` 依赖 postgres）；**本轮继续用本地 PG 实例，不指向 RDS、不做 prod 安装**
 - Chroma 与 BM25 的持久化目录、ONNX 缓存卷、`deploy/chroma/Dockerfile` 退役
 
 **测试**
@@ -104,6 +104,7 @@
 
 **明确不在本变更范围**
 
+- **远程 RDS 与 prod 安装（2026-09-19 用户决定）** —— 本轮只做本地。具体不做：RDS 侧的扩展清单查询与 `CREATE EXTENSION` 权限确认、RDS 上的应用库/账号预建、`docker-compose.prod.yml` 指向 RDS、prod 的任何安装与部署验证。**连带遗留**：RDS 托管化切换、prod 的 `--workers 4` 与连接预算作为 RDS 规格输入。prod 的 compose 本轮**只做与 dev 同构的结构调整**，防止「依赖里删了 `aiomysql` 而 prod compose 还留 MySQL 服务」这种不自洽状态。
 - prompt 载体与分段模型（另见 `prompt-layering-and-domain-binding`）
 - 技能来源获取（另见 `skill-external-sources`）
 - Langfuse 的服务端版本选择（v2 与"仅 PG"的决议另有评估，不在本变更）

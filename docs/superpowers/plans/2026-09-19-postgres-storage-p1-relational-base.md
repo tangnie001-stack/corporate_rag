@@ -19,7 +19,9 @@
 | **P1（本文件）** | 依赖/配置 → compose PG 服务 → alembic baseline（8 表）→ 合并 ORM → 统一 `ChunkData` → engine DSN → repo 幂等写入 → 退役 MySQL | 本次 |
 | P2 | `vector_store/` 换 pgvector、`ChunkResult.metadata` 回填契约、`similarity_search_all` 删除、Chroma→PG 数据搬迁、dense 等价性验收（top-k 重合率 ≥ 0.9） | 待 P1 落地后写 |
 | P3 | jieba 分词入口 + 查询串构造与转义 + `tsv` 生成列 + 词项命中探针选型 + `rrf_fusion` 迁移 + 删除 `bm25_index.py` | 待 P2 落地后写 |
-| P4 | 入库/删除两条路径同事务 + 故障注入验收 + 依赖与卷清理 + compose/prod 指向 RDS + 文档与 ADR + 归档 | 待 P3 落地后写 |
+| P4 | 入库/删除两条路径同事务 + 故障注入验收 + 依赖与卷清理 + prod compose 与 dev 同构（**不指向 RDS、不安装**）+ 文档与 ADR + 归档 | 待 P3 落地后写 |
+
+**执行范围（用户 2026-09-19 决定）：本轮只做本地。远程 RDS 不处理，prod 不进行安装。** prod 的 `docker-compose.prod.yml` 只做与 dev 同构的**文件**调整（继续使用本地 PG 实例），不部署、不验证；**RDS 托管化与 RDS 侧的扩展清单/权限是遗留项**（见文末）。
 
 **为什么不一次写完 P2–P4：** 它们要改的正是 P1 改过的文件（`document_service.py` / `vector_store/` / `retrieval.py`），把 P2–P4 的代码级步骤现在写死，会在 P1 落地时全部失准。P1 是唯一设计已完全确定、且不依赖后续阶段的部分。
 
@@ -29,8 +31,8 @@
 |---|---|---|
 | `database-orm` | ORM 模型定义（MySQL 表 → PostgreSQL；模型与迁移的单一事实源） | Task 2、5、7 |
 | `database-orm` | 搜索类型搬迁（引用方列表移除 `bm25_index.py`） | **不在 P1**（P3） |
-| `database-migrations` | 第一版迁移（改为从零建表 baseline，含 `CREATE EXTENSION vector`） | Task 5 |
-| `database-migrations` | 迁移账号前置条件（权限不足时给出可操作的失败） | Task 0（RDS 部分）、Task 5 Step 5 |
+| `database-migrations` | 第一版迁移（改为从零建表 baseline，8 张表） | Task 5 Step 4–6 |
+| `database-migrations` | 扩展由超级用户创建 + 迁移做可操作的前置断言 | Task 0、Task 4 Step 1/6、Task 5 Step 5/9 |
 | `chunk-data-model` | `ChunkData` 是唯一标准类型（修正既有未满足项） | Task 1 |
 | `typed-data-layer` | 检索结果统一类型 / `ChunkResult` 分路字段 / `metadata` 回填契约 | **不在 P1**（P2） |
 | `hybrid-retrieval` | 两路取数与融合位置 / 来源可辨 / 参数可配 / 分块按知识库归属 / 写入与查询分词同源 / 查询条件构造与转义 | **不在 P1**（P2 覆盖归属与分路，P3 覆盖分词与融合） |
@@ -57,56 +59,48 @@
 
 ---
 
-## Task 0: 前置核查（阻断 prod，不阻断 dev）
+## Task 0: 范围与本地前置确认（不碰 RDS / 不装 prod）
 
 **Files:**
-- 无（只读事实收集）
+- Modify: `docs/tmp/postgres-probe-2026-09-19.md`（追加本地权限实测结论）
 
 **Interfaces:**
 - Consumes: 无
-- Produces: 一份写在 `docs/tmp/postgres-probe-2026-09-19.md` 末尾的「RDS 事实」小节（后续 P4 指 RDS 时依赖它）
+- Produces: 对「本地谁能建扩展」的确证结论，Task 4 与 Task 5 直接依赖它
 
-本任务需要**在阿里云 RDS 上执行 SQL**，仓库内没有任何 RDS 连接配置（`.env` 只有 `MYSQL_*`），因此**必须由能登录 RDS 的人执行**。1.2 / 1.3 / 1.4 已在 2026-09-19 实测完成（见证据文件），本任务只残留 RDS 部分。
+**范围（用户 2026-09-19 决定）**：**本轮只做本地。远程 RDS 不处理，prod 不进行安装。** 因此原「RDS 三件事」前置核查**整体移出本计划**，降级为遗留项（见文末「遗留项」）。prod 的 `docker-compose.prod.yml` 只做与 dev 同构的**文件**调整，不部署、不验证。
 
-- [ ] **Step 1: 在 RDS 上跑扩展清单查询**
+- [ ] **Step 1: 确证「扩展必须由超级用户创建」这条本地事实**
 
-```sql
-SELECT name, default_version, installed_version
-  FROM pg_available_extensions
- WHERE name IN ('vector','zhparser','pg_jieba','pg_bigm','pg_trgm','pg_search')
- ORDER BY name;
+已实测（2026-09-19，`pgvector/pgvector:pg15`）：`vector.control` **没有 `trusted = true`**；应用账号（业务库属主、非超级用户）执行 `CREATE EXTENSION vector` 得到
+`ERROR: permission denied to create extension "vector"` / `HINT: Must be superuser to create this extension.`；
+而 compose 的 `POSTGRES_USER`（`langfuse`）实测 `rolsuper = t`，能建；建好后应用账号可正常建含 `vector(1024)` 列的表、插入与 `<=>` 排序。
 
-SELECT extversion FROM pg_extension WHERE extname = 'vector';
+复现（可选，3 秒）：
+
+```bash
+docker run -d --name pgcheck -e POSTGRES_USER=langfuse -e POSTGRES_PASSWORD=probe \
+  pgvector/pgvector:pg15
+sleep 3
+docker exec pgcheck psql -U langfuse -d langfuse -c \
+  "SELECT rolname, rolsuper FROM pg_roles WHERE rolname='langfuse';"
+docker exec pgcheck psql -U langfuse -d langfuse -c \
+  "CREATE ROLE app LOGIN PASSWORD 'x'; CREATE DATABASE appdb OWNER app;"
+docker exec pgcheck psql -U app -d appdb -c "CREATE EXTENSION vector;"   # 预期被拒
+docker exec pgcheck psql -U langfuse -d appdb -c \
+  "CREATE EXTENSION vector; SELECT extversion FROM pg_extension WHERE extname='vector';"
+docker rm -f pgcheck
 ```
 
-预期：`vector` 在清单中；`pg_trgm` 基本必有；`zhparser` / `pg_jieba` / `pg_bigm` / `pg_search` 大概率**不在**（本地 stock 镜像只有 `vector` 与 `pg_trgm`）。
+- [ ] **Step 2: 把结论追加到证据文件**
 
-- [ ] **Step 2: 确认 `CREATE EXTENSION vector` 由哪个账号执行**
+在 `docs/tmp/postgres-probe-2026-09-19.md` 的 `## 1.1` 小节末尾追加一段「**扩展创建权限归属（本地，2026-09-19）**」，写清：`vector` 非 trusted → 应用账号不可建；`langfuse` 是超级用户可建；建后应用账号可正常使用；**迁移不建扩展、只做前置断言**；RDS 侧同项改为遗留。
 
-在 RDS 上以候选账号试跑（幂等，安全）：
-
-```sql
-CREATE EXTENSION IF NOT EXISTS vector;
-SELECT extversion FROM pg_extension WHERE extname = 'vector';
-```
-
-- **若成功**：记下账号名，写进部署文档「由 {账号} 执行 `CREATE EXTENSION vector`」。
-- **若报权限不足**：**这是硬阻塞** —— 记录报错原文，并在部署文档写明需由高权限账号（RDS 的 `pg_admin` 或控制台）先执行一次；后续 P4 的迁移步骤依赖它。
-- 版本对照：若 RDS 已装旧版，`ALTER EXTENSION vector UPDATE;` 可升级。当前官方最新 **0.8.6**；HNSW 需 ≥0.5，`hnsw.iterative_scan` 需 ≥0.8。
-
-- [ ] **Step 3: 确认 prod 与 dev 是否不同机**
-
-已实测：两份 compose 的 `name`（`corporate_rag`）、postgres 的 `container_name`（`corporate-rag-postgres`）与**全部卷名**（`corporate_rag_postgres_data` 等）**完全相同** → 同机**不可共存**（容器名冲突，第二个 `up` 直接失败；`--force-recreate` 会拆掉先起的那套）。
-
-向用户确认答案，并记进 `docs/tmp/postgres-probe-2026-09-19.md` 的「1.4」小节末尾。
-
-- [ ] **Step 4: 把三条结果追加到证据文件并提交**
-
-在 `docs/tmp/postgres-probe-2026-09-19.md` 的 `## 1.1` 与 `## 1.3` 小节末尾各加一段「**RDS 实测结果（2026-__-__）**」，写清：账号、`vector` 版本、其余扩展是否可得、prod/dev 是否同机。
+- [ ] **Step 3: 提交**
 
 ```bash
 git add docs/tmp/postgres-probe-2026-09-19.md
-git commit -m "docs: 补记 RDS 侧扩展权限与版本实测结果（tasks 1.1/1.3）"
+git commit -m "docs: 补记本地扩展创建权限实测结论（应用账号不可建，须超级用户）"
 ```
 
 ---
@@ -455,6 +449,7 @@ git commit -m "feat(config): 新增 PostgreSQL 连接配置与单一 DSN 拼装�
 ```bash
 #!/bin/bash
 # 仅在 PG 数据目录首次初始化时执行（既有卷不会重跑）。
+# 本脚本以超级用户（POSTGRES_USER）身份运行，因此是本轮唯一能创建 vector 扩展的地方。
 # 建应用库与应用账号；Langfuse 的库/账号由 compose 的 POSTGRES_DB/POSTGRES_USER 提供。
 set -euo pipefail
 
@@ -468,7 +463,7 @@ psql -v ON_ERROR_STOP=1 \
      -v app_user="$POSTGRES_APP_USER" \
      -v app_password="$POSTGRES_APP_PASSWORD" \
      -v app_db="$POSTGRES_APP_DB" <<'SQL'
--- 建角色（幂等）
+-- 建角色（幂等）。注意是普通 LOGIN 角色，不是超级用户 —— 应用不需要也更不该有超级用户权限。
 SELECT format('CREATE ROLE %I LOGIN PASSWORD %L', :'app_user', :'app_password')
  WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = :'app_user')
 \gexec
@@ -477,15 +472,20 @@ SELECT format('CREATE ROLE %I LOGIN PASSWORD %L', :'app_user', :'app_password')
 SELECT format('CREATE DATABASE %I OWNER %I', :'app_db', :'app_user')
  WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = :'app_db')
 \gexec
-
-SELECT format('GRANT ALL PRIVILEGES ON DATABASE %I TO %I', :'app_db', :'app_user')
-\gexec
 SQL
+
+# 扩展必须在应用库内创建。vector 不是 trusted 扩展（实测：非超级用户会得到
+# "permission denied to create extension / Must be superuser"），所以只能在这里
+# 以超级用户身份做；迁移（用应用账号连库）建不了它，只做前置断言。
+psql -v ON_ERROR_STOP=1 \
+     --username "$POSTGRES_USER" \
+     --dbname "$POSTGRES_APP_DB" \
+     -c "CREATE EXTENSION IF NOT EXISTS vector;"
 ```
 
 加可执行位：`chmod +x deploy/postgres/init/001_app_database.sh`（entrypoint 对 `.sh` 直接执行，对非可执行文件会 `source`；显式加位更稳）。
 
-> ⚠ **不要把 `CREATE EXTENSION vector` 放这里**：initdb 脚本只在首次初始化时执行，既有卷不重跑、托管实例根本不参与。扩展创建放 **alembic baseline 迁移**（Task 5），幂等且 dev/prod 两条路径都生效。
+> ⚠ **为什么扩展放在初始化脚本里，而初稿特意说"不要放这里"？** 初稿的理由是「initdb 脚本只在数据目录首次初始化时执行，既有卷不重跑、托管实例不参与」—— 这个理由**依然成立**，但**迁移里也做不到**（迁移用的是应用账号，而 `vector` 不是 trusted 扩展）。两条路都不完美，实际落地是**两者都用**：初始化脚本覆盖全新卷，一次性命令覆盖既有卷，迁移做断言兜住"两者都没做"的情况。详见 `design.md` D3 的实测更正。
 
 - [ ] **Step 2: 改 `docker-compose.yml` 的 postgres 服务**
 
@@ -531,13 +531,18 @@ SQL
         condition: service_healthy
 ```
 
-- [ ] **Step 4: 同步改 `docker-compose.prod.yml`**
+- [ ] **Step 4: 同步改 `docker-compose.prod.yml`（只改文件，不安装）**
 
-`docker-compose.prod.yml:49-68` 的 `postgres` 与 `:196-222` 的 `app` 做同样修改（`mem_limit` prod 保持 `4g` 不变）。**并在文件顶部加注释**：
+`docker-compose.prod.yml:49-68` 的 `postgres` 与 `:196-222` 的 `app` 做同样修改（`mem_limit` prod 保持 `4g` 不变）。
+
+**范围（用户 2026-09-19 决定）：本轮 prod 只做与 dev 同构的结构调整，继续使用本地 PG 实例，`不指向 RDS`、不部署、不验证。** 之所以仍要改这个文件：Task 9 会从依赖里删掉 `aiomysql` 与 `MYSQL_*` 配置，若 prod compose 还留着 MySQL 服务与 `MYSQL_HOST`，仓库就处于自相矛盾的状态。
+
+**并在文件顶部加注释**：
 
 ```yaml
-# ⚠ prod 与 dev 必须部署在不同机器：两份 compose 的 project name、容器名与
+# ⚠ prod 与 dev 必须在不同机器上运行：两份 compose 的 project name、容器名与
 # 全部卷名完全相同，同机执行会因容器名冲突直接失败（--force-recreate 还会拆掉先起的那套）。
+# 本轮 prod 不部署：RDS 托管化另案（见 postgres-storage-consolidation 的遗留项）。
 ```
 
 - [ ] **Step 5: 校验 compose 语法**
@@ -545,7 +550,7 @@ SQL
 Run: `docker compose config >/dev/null && docker compose -f docker-compose.prod.yml config >/dev/null`
 Expected: 无输出、exit 0。
 
-- [ ] **Step 6: 起 PG 并建应用库**
+- [ ] **Step 6: 起 PG 并建应用库 + 建扩展**
 
 先起服务：
 
@@ -555,14 +560,14 @@ docker compose up -d postgres
 
 然后**二选一**。
 
-**路 A（推荐，不动既有卷）—— 手工一次性建库：**
+**路 A（推荐，不动既有卷）—— 手工一次性建库 + 建扩展：**
 
 ```bash
 # 从 .env 取密码到环境变量，不打印
 set -a; . ./.env; set +a
 : "${POSTGRES_PASSWORD:?请在 .env 配置 POSTGRES_PASSWORD}"
 
-# 建角色（幂等）
+# 建角色（幂等，普通 LOGIN 角色、非超级用户）
 docker compose exec -T postgres psql -U langfuse -d langfuse <<SQL
 DO \$\$
 BEGIN
@@ -578,28 +583,49 @@ docker compose exec -T postgres psql -U langfuse -d langfuse -tAc \
   "SELECT 1 FROM pg_database WHERE datname='corporate_rag'" | grep -q 1 || \
 docker compose exec -T postgres psql -U langfuse -d langfuse -c \
   "CREATE DATABASE corporate_rag OWNER corporate_rag"
+
+# ⚠ 关键一步：在【应用库】里以超级用户创建扩展。
+# 应用账号建不了它（vector 不是 trusted 扩展，实测 Must be superuser），
+# 而 alembic 迁移用的正是应用账号 —— 所以这一步漏掉，Task 5 的迁移会按设计报"扩展缺失"。
+docker compose exec -T postgres psql -U langfuse -d corporate_rag \
+  -c "CREATE EXTENSION IF NOT EXISTS vector;"
 ```
 
-**路 B（数据可丢时更彻底）—— 删卷重建，让 `deploy/postgres/init/` 脚本生效：**
+**路 B（数据可丢时更彻底）—— 删卷重建，让 `deploy/postgres/init/` 脚本一次性做完建库 + 建扩展：**
 
 ```bash
 docker compose down
 docker volume rm corporate_rag_postgres_data
 docker compose up -d postgres
+docker compose logs postgres | grep -i "app_database\|CREATE EXTENSION" || true
 ```
 
 ⚠ 路 B 会**同时清掉 dev 的 Langfuse 数据**（同一个实例）。若 dev 上有想留的 trace，走路 A。
 
-> 本步骤就是 design.md D1 里"评审 F2"指出的两条不同动作 —— **`tasks.md` 不得只写"改文件路径"**。改完 compose 后必须真的执行其中一条，否则应用库不存在。
+> 本步骤就是 design.md D1 里"评审 F2"指出的两条不同动作 —— **不得只写"改文件路径"**。改完 compose 后必须真的执行其中一条，否则应用库不存在。
 
-- [ ] **Step 7: 验证连接与扩展可用性**
+- [ ] **Step 7: 验证连接与扩展已装在应用库里**
 
 ```bash
-docker compose exec postgres psql -U corporate_rag -d corporate_rag -c "SELECT current_database(), current_user;"
-docker compose exec postgres psql -U langfuse -d langfuse -c "SELECT name, default_version FROM pg_available_extensions WHERE name='vector';"
+# 1) 应用账号能连上自己的库
+docker compose exec postgres psql -U corporate_rag -d corporate_rag \
+  -c "SELECT current_database(), current_user;"
+
+# 2) 扩展已装在【应用库】里（注意：连的是 corporate_rag，不是 langfuse）
+docker compose exec postgres psql -U langfuse -d corporate_rag \
+  -c "SELECT extname, extversion FROM pg_extension WHERE extname='vector';"
+
+# 3) 应用账号确认自己【没有】超级用户权限（证明最小权限落到位）
+docker compose exec postgres psql -U corporate_rag -d corporate_rag \
+  -c "SELECT rolsuper FROM pg_roles WHERE rolname='corporate_rag';"
 ```
 
-Expected: 第一条返回 `corporate_rag | corporate_rag`；第二条返回 `vector | 0.8.6`。
+Expected：
+1. `corporate_rag | corporate_rag`
+2. `vector | 0.8.6`
+3. `rolsuper = f`
+
+> 第 3 条不是形式主义：它同时验证了 §"账号前置条件"—— 正因为应用账号不是超级用户，扩展才必须由超级用户预先创建。若这里返回 `t`，说明账号建错了（给了超级用户），应改回普通 LOGIN 角色。
 
 - [ ] **Step 8: 提交**
 
@@ -758,14 +784,29 @@ alembic revision --autogenerate -m "pg baseline" --rev-id 0001
 
 预期：生成 `alembic/versions/0001_pg_baseline.py`，内含 7 张表的 `op.create_table(...)`。
 
-- [ ] **Step 5: 在 baseline 顶部加建扩展、底部追加 `chunks` 表**
+- [ ] **Step 5: 在 baseline 前加扩展前置断言、末尾追加 `chunks` 表**
 
-在 `upgrade()` **最前面**插入：
+**不要**写 `op.execute("CREATE EXTENSION IF NOT EXISTS vector")` —— 迁移用的是应用账号，而 `vector` 不是 trusted 扩展，实测会得到 `Must be superuser to create this extension`（见 Task 0）。也**不要**用 try/except 吞掉它：那会把权限问题伪装成"迁移成功"。
+
+在 `upgrade()` **最前面**插入前置断言：
 
 ```python
-    # 向量类型是 chunks.embedding 的前置；放在迁移里而非 initdb 脚本，
-    # 才能对既有数据卷与托管实例同样生效（幂等）。
-    op.execute("CREATE EXTENSION IF NOT EXISTS vector")
+    # 扩展由超级用户预先创建（见 deploy/postgres/init/001_app_database.sh）。
+    # 迁移账号是应用账号（非超级用户），建不了 vector —— vector 不是 trusted 扩展。
+    # 这里显式断言，使失败可归因，而不是让下面的 vector(1024) 报难以定位的类型错误。
+    conn = op.get_bind()
+    installed = conn.execute(
+        sa.text("SELECT 1 FROM pg_extension WHERE extname = 'vector'")
+    ).scalar()
+    if installed is None:
+        raise RuntimeError(
+            "应用库中未安装 vector 扩展，迁移无法创建 chunks.embedding。\n"
+            "请由具备超级用户权限的账号先执行一次：\n"
+            "    psql -d <应用库> -c \"CREATE EXTENSION IF NOT EXISTS vector;\"\n"
+            "本地 dev 可用 compose 的 POSTGRES_USER（langfuse，超级用户）：\n"
+            "    docker compose exec -T postgres psql -U langfuse -d corporate_rag "
+            "-c 'CREATE EXTENSION IF NOT EXISTS vector;'"
+        )
 ```
 
 在 `upgrade()` **末尾**追加（DDL 已在 PG 15 + pgvector 0.8.6 上实测通过）：
@@ -850,12 +891,32 @@ alembic downgrade base && alembic upgrade head
 
 Expected: 两条都无报错。**若不通过，先修 baseline**，不要带着不可回滚的迁移往下走。
 
-- [ ] **Step 9: 跑门禁并提交**
+- [ ] **Step 9: 验证扩展缺失时的失败是"可操作的"（不是裸报错）**
+
+在一个**没有装扩展**的临时库里跑迁移，确认拿到的是那条带命令的 `RuntimeError`，而不是 `type "vector" does not exist` 之类的难归因错误：
+
+```bash
+docker compose exec -T postgres psql -U langfuse -d langfuse \
+  -c "DROP DATABASE IF EXISTS pg_baseline_guard_probe;"
+docker compose exec -T postgres psql -U langfuse -d langfuse \
+  -c "CREATE DATABASE pg_baseline_guard_probe OWNER corporate_rag;"
+
+POSTGRES_DATABASE=pg_baseline_guard_probe alembic upgrade head 2>&1 | tail -8
+
+docker compose exec -T postgres psql -U langfuse -d langfuse \
+  -c "DROP DATABASE pg_baseline_guard_probe;"
+```
+
+Expected: 输出里出现 `应用库中未安装 vector 扩展` 与该提示命令；**不出现** `type "vector" does not exist`。
+
+> 这一步把 database-migrations spec 的「扩展缺失时给出可操作的失败」scenario 变成可执行验收。若你看到的是裸的 `permission denied` 或类型错误，说明断言位置不对（必须在 `create_table("chunks")` 之前）。
+
+- [ ] **Step 10: 跑门禁并提交**
 
 ```bash
 ruff check alembic && pyright alembic
 git add -A alembic tests/infra/db/test_pg_baseline.py
-git commit -m "feat(db): 重写 alembic 为从零建表的 PG baseline（8 张表 + pgvector 扩展）"
+git commit -m "feat(db): 重写 alembic 为从零建表的 PG baseline（8 张表 + 扩展前置断言）"
 ```
 
 ---
@@ -1425,12 +1486,13 @@ git commit -m "chore(db): 退役 MySQL（服务/卷/init 脚本/驱动/配置）
 `data-flow.md`：把 MySQL 相关链路改为 PostgreSQL。
 `api_contract.md`：P1 **不改任何 API 与公共方法签名**（repo 的签名与语义保持不变），因此只需确认无遗留引用；如发现文档里写着 MySQL 专有行为（如「靠唯一键冲突回滚」），改为 `ON CONFLICT` 的实际语义。
 
-- [ ] **Step 3: 登记需求池两项**
+- [ ] **Step 3: 登记遗留项 L1–L4 到需求池**
 
 在 `docs/agents/requirements_pool.md` 追加（编号沿用现有序列，勿覆盖）：
 
-1. **`src/infra/db/mysql_db/` 包改名**（如 → `src/infra/db/repos/`）。理由：P1 之后该包内全是 PostgreSQL repo，包名会误导 `code-map.md` 与后续读者。P1 未做是因为它触及约 20 个 import 点，属纯命名变更、不在已评审的 change 范围内。
-2. **`docker-compose.prod.yml` 的 `--workers 4` 与 `CLAUDE.md` 的「生产单 worker」规则冲突** —— 4 × (pool_size 10 + max_overflow 10) ≈ 80 连接，与 Langfuse 共享 RDS 的 `max_connections`。属独立变更（涉及流式生成状态在进程内这一前提）。
+1. **（L1+L2）RDS 托管化切换**：RDS 侧的扩展清单与 `CREATE EXTENSION` 权限、RDS 上预建应用库与最小权限账号、`docker-compose.prod.yml` 指向 RDS、prod 安装与部署验证。背景：本轮（2026-09-19 用户决定）只做本地，不处理远程 RDS、不进行 prod 安装；本地已实测 `vector` 不是 trusted 扩展（应用账号会被拒），托管侧须先确认同项权限。
+2. **（L3）`docker-compose.prod.yml` 的 `--workers 4` 与 `CLAUDE.md` 的「生产单 worker」规则冲突** —— 4 × (pool_size 10 + max_overflow 10) ≈ 80 连接，与 Langfuse 共享 RDS 的 `max_connections`。属独立变更（涉及流式生成状态在进程内这一前提），也是托管化时 RDS 规格的输入约束。
+3. **（L4）`src/infra/db/mysql_db/` 包改名**（如 → `src/infra/db/repos/`）。理由：P1 之后该包内全是 PostgreSQL repo，包名会误导 `code-map.md` 与后续读者。P1 未做是因为它触及约 20 个 import 点，属纯命名变更、不在已评审的 change 范围内。
 
 - [ ] **Step 4: 跑文档一致性测试**
 
@@ -1449,13 +1511,12 @@ grep -rn "TODO\|FIXME" src/ || echo "no todo"
 
 Expected: 测试全绿、ruff 无错、pyright 不新增 error、无 `print()`、无 TODO/FIXME。
 
-- [ ] **Step 6: 在 change 的 tasks.md 记录 P1 完成范围**
+- [ ] **Step 6: 更新 change 的 tasks.md 索引与修正记录**
 
-在 `docs/openspec/changes/postgres-storage-consolidation/tasks.md` 里把 §1 / §2 / §3 / §9 中**本阶段已完成的条目**勾选，并在文件头加一行指向本 plan：
+`docs/openspec/changes/postgres-storage-consolidation/tasks.md` 现在是**指针文件**（任务清单已迁到本计划），不要去找 checkbox 勾选。本步骤要做两件事：
 
-```markdown
-> **执行档：** 分阶段实施计划见 `docs/superpowers/plans/2026-09-19-postgres-storage-p1-relational-base.md`（P1）。P2–P4 计划待 P1 落地后编写。
-```
+1. 把顶部阶段表里 **P1 的状态从「待执行」改成「已完成」**（附本次收口的 commit 短 hash）。
+2. 在「§2 实施期修正记录」表里补上执行期发现的新条目（本次已知至少有两条：`vector` 非 trusted 扩展 → 扩展改由超级用户创建、迁移只做断言；`kb_repo.get_or_create_kb` 保持异常兜底）。**若执行中还发现了别的事实偏差，一并登记**。
 
 - [ ] **Step 7: 提交**
 
@@ -1468,9 +1529,22 @@ git commit -m "docs: 同步 PostgreSQL 迁移后的代码结构与归属（P1 �
 
 ## 明确不在 P1 范围（避免越界）
 
+- **不做远程 RDS 相关的一切**：不查 RDS 扩展清单、不在 RDS 上建库/建扩展/建账号、不改任何 RDS 配置（用户 2026-09-19 决定）
+- **不做 prod 安装/部署/验证**：`docker-compose.prod.yml` 本轮只做与 dev 同构的**文件**调整，防止「依赖里删了 `aiomysql` 而 prod compose 还留 MySQL 服务」的不自洽状态
+- **不改** `docker-compose.prod.yml` 指向 RDS（托管化是遗留项，另案）
 - **不改** `src/infra/db/mysql_db/` 的包名（→ 需求池）
 - **不改** `vector_store/`、`retrieval.py`、`bm25_index.py`、`document_service.py` 的检索/事务逻辑（→ P2/P3/P4）
 - **不删** `chromadb` / `rank_bm25` / `data/chroma_persist` / `data/bm25_index`（→ P4）
-- **不改** `docker-compose.prod.yml` 指向 RDS 的行为（本阶段只让 prod compose 结构与 dev 同构 + 加「不同机」注释；指向 RDS 在 P4）
-- **不处置** `--workers 4` 与连接预算（→ 需求池）
+- **不处置** `--workers 4` 与连接预算（→ 需求池 / 托管化遗留项）
 - **不做** Chroma → PG 数据搬迁（→ P2）
+
+## 遗留项（本轮明确不做，需登记）
+
+| # | 遗留 | 归属 |
+|---|---|---|
+| L1 | RDS 侧扩展清单、`CREATE EXTENSION` 的账号与权限、RDS 上预建应用库/账号 | 托管化另案 |
+| L2 | prod 安装与部署验证（含 `docker-compose.prod.yml` 指向 RDS） | 托管化另案 |
+| L3 | prod 的 `--workers 4` 与 `CLAUDE.md`「生产单 worker」冲突；4 × (10+10) ≈ 80 连接 + Langfuse 对 RDS `max_connections` 的挤压 | 托管化另案（作为 RDS 规格输入） |
+| L4 | `src/infra/db/mysql_db/` 包改名（P1 后包名名不副实） | 需求池 |
+
+Task 10 要把 L1–L4 登记进 `docs/agents/requirements_pool.md`。
