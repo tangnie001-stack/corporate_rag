@@ -47,7 +47,7 @@
 
 | # | 判据 | 怎么验 |
 |---|---|---|
-| **D1** | `chunks` 由 ORM 模型映射，且 **ORM metadata 与手写 baseline 无漂移** | `alembic revision --autogenerate` 的产出对 `chunks` **为空**（Task 2） |
+| **D1** | `chunks` 由 ORM 模型映射，且 **ORM metadata 与手写 baseline 无漂移** | `alembic revision --autogenerate` 的产出对 `chunks` **为空**（Task 2）。⚠️ **该门禁对 `server_default` 是盲的**：`alembic/env.py` 未传 `compare_server_default`，Alembic 默认为 `False` → 三处 `server_default`（`source` / `page` / `metadata`）必须另有只读断言（比对 `information_schema.columns.column_default`）才算被证据覆盖 |
 | **D2** | 入库路径写进 PG：上传后 `chunks` 有行、`tsv` 生成列自动填充、`embedding` 为 1024 维 | Task 5、Task 11 的 E2E |
 | **D3** | 读取路径走 PG：`similarity_search` 按余弦距离升序返回 `ChunkResult`，`min(k, 100)` 上限保留 | Task 6 的测试 |
 | **D4** | **`metadata` 回填契约**：每条结果的 `metadata` 都含 `doc_id` / `chunk_index` / `chunk_total` / `source` / `page`，且 jsonb 自定义键（含 `parent_content`）原样可读 | Task 3 单测 + Task 6 集成测试 |
