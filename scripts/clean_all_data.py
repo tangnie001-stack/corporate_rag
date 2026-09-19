@@ -1,4 +1,4 @@
-"""全量清理脚本 — 删库、清 Redis、删 MinIO 文件、清 ChromaDB。
+"""全量清理脚本 — 清 PostgreSQL 应用库、清 Redis、删 MinIO 文件、清 ChromaDB。
 
 适用场景：开发/测试环境重置、表结构大改后重建。
 """
@@ -6,7 +6,6 @@
 import asyncio
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine
 
 from src.config import (
     CHROMA_COLLECTION_PREFIX,
@@ -15,28 +14,32 @@ from src.config import (
     MINIO_DOC_BUCKET,
     MINIO_ENDPOINT,
     MINIO_SECRET_KEY,
-    MYSQL_DATABASE,
-    MYSQL_HOST,
-    MYSQL_PASSWORD,
-    MYSQL_PORT,
-    MYSQL_USER,
     REDIS_URL,
 )
+from src.infra.db.engine import engine
 
 
-async def drop_mysql():
-    dsn = f"mysql+aiomysql://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}:{MYSQL_PORT}"
-    engine = create_async_engine(dsn)
-    async with engine.connect() as conn:
-        await conn.execute(text(f"DROP DATABASE IF EXISTS `{MYSQL_DATABASE}`"))
-        await conn.execute(
-            text(
-                f"CREATE DATABASE `{MYSQL_DATABASE}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
-            )
-        )
-        await conn.commit()
-        print(f"[MySQL] 已删除并重建 database: {MYSQL_DATABASE}")
+async def reset_postgres():
+    """删除应用库 public schema 下的全部表，供 alembic 从零重建。
+
+    只删表、不删 schema —— vector 扩展由超级用户在库初始化时创建，
+    应用账号无权重建，删掉会连带扩展一起丢，导致后续迁移失败。
+    """
+    drop_all_tables = text(
+        """
+        DO $$
+        DECLARE r RECORD;
+        BEGIN
+            FOR r IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' LOOP
+                EXECUTE 'DROP TABLE IF EXISTS public.' || quote_ident(r.tablename) || ' CASCADE';
+            END LOOP;
+        END $$;
+        """
+    )
+    async with engine.begin() as conn:
+        await conn.execute(drop_all_tables)
     await engine.dispose()
+    print("[PostgreSQL] 已删除应用库 public schema 下的全部表")
 
 
 async def flush_redis():
@@ -93,7 +96,7 @@ async def reset_chromadb():
 
 async def main():
     print("即将执行：")
-    print("  1. MySQL — DROP DATABASE + 重建")
+    print("  1. PostgreSQL — 删除应用库全部表（保留 vector 扩展）")
     print("  2. Redis — FLUSHDB")
     print("  3. MinIO — 清空 bucket + 删除后重建")
     print("  4. ChromaDB — 删除所有 collection")
@@ -101,12 +104,12 @@ async def main():
     if confirm != "YES":
         print("已取消。")
         return
-    await drop_mysql()
+    await reset_postgres()
     await flush_redis()
     await clean_minio()
     await reset_chromadb()
     print("\n✅ 全部清理完成。")
-    print("   下一步：alembic upgrade head 重建 MySQL 表结构")
+    print("   下一步：alembic upgrade head 重建 PostgreSQL 表结构")
 
 
 if __name__ == "__main__":

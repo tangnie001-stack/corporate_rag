@@ -5,7 +5,7 @@
 
 主要配置分区：
   - DashScope API：阿里云大模型平台认证与模型选择
-  - MySQL：元数据库连接参数
+  - PostgreSQL：关系型元数据库连接参数
   - Redis：对话历史缓存参数
   - ChromaDB：向量数据库持久化路径
   - 文档处理：分块策略（chunk size/overlap）和检索参数
@@ -141,14 +141,6 @@ RAGAS_DOC_WHITELIST: list[str] = [
     "d5d72d1a-2e47-4765-892e-b1d4787d61a8",  # neusoft_2025_q1.pdf
 ]
 
-# ====== MySQL ======
-# 元数据库，存储 knowledge_base（知识库）和 document（文档）的元信息
-MYSQL_HOST: str = os.getenv("MYSQL_HOST", "localhost")
-MYSQL_PORT: int = int(os.getenv("MYSQL_PORT", "3306"))
-MYSQL_USER: str = os.getenv("MYSQL_USER", "root")
-MYSQL_PASSWORD: str = os.getenv("MYSQL_PASSWORD", "financial_qa_pass")
-MYSQL_DATABASE: str = os.getenv("MYSQL_DATABASE", "financial_qa")
-
 # --- PostgreSQL（应用关系型库；Langfuse 用同实例的另一个 database）---
 POSTGRES_HOST: str = os.getenv("POSTGRES_HOST", "localhost")
 POSTGRES_PORT: int = int(os.getenv("POSTGRES_PORT", "5432"))
@@ -269,7 +261,7 @@ DELEGATE_TOTAL_TIMEOUT_THINKING_S: float = float(
 )
 
 # ====== 重试策略 ======
-# 外部调用（DashScope / MySQL / Redis）失败时的指数退避参数
+# 外部调用（DashScope / PostgreSQL / Redis）失败时的指数退避参数
 # 重试 3 次，初始间隔 1s，每次翻倍：1s → 2s → 4s
 RETRY_MAX_ATTEMPTS: int = int(os.getenv("RETRY_MAX_ATTEMPTS", "3"))
 RETRY_INITIAL_INTERVAL: float = float(os.getenv("RETRY_INITIAL_INTERVAL", "1.0"))

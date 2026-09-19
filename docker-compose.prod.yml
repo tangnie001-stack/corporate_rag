@@ -9,29 +9,16 @@
 # ⚠ prod 与 dev 必须在不同机器上运行：两份 compose 的 project name、容器名与
 # 全部卷名完全相同，同机执行会因容器名冲突直接失败（--force-recreate 还会拆掉先起的那套）。
 # 本轮 prod 不部署：RDS 托管化另案（见 postgres-storage-consolidation 的遗留项）。
+#
+# ⚠ 以下命名卷是 P1 回滚的依据，在 P1 验收通过之前不要删：
+#     corporate_rag_mysql_data  —— 已退役的 MySQL 数据（回滚时旧实现要连它）
+#   具体禁令：
+#     1) 不要 `docker compose down -v`（-v 会真的删命名卷）
+#     2) 不要 `docker volume prune` / `docker system prune --volumes`
+#        （MySQL 卷在退役后恰好处于"未被容器引用"状态，正是 prune 的目标）
+#   回滚锚点 commit: a2b884c3cc2620f3e01637ebf7ca817b8c335059（见本任务提交信息）
 name: corporate_rag
 services:
-  mysql:
-    image: mysql:8.0
-    mem_limit: 4g
-    container_name: corporate-rag-mysql
-    restart: always
-    environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-financial_qa}
-    # 生产不对外暴露端口
-    volumes:
-      - mysql_data:/var/lib/mysql
-      - ./deploy/mysql/init:/docker-entrypoint-initdb.d
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_PASSWORD:?}"]
-      interval: 10s
-      timeout: 5s
-      retries: 15
-      start_period: 30s
-    networks:
-      - app-network
-
   redis:
     image: redis:7-alpine
     mem_limit: 2g
@@ -210,8 +197,6 @@ services:
     env_file:
       - .env
     environment:
-      MYSQL_HOST: mysql
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?}
       REDIS_HOST: redis
       REDIS_PASSWORD: ${REDIS_PASSWORD:?}
       POSTGRES_HOST: postgres
@@ -224,8 +209,6 @@ services:
       - ./skills:/app/skills
       - ./agents:/app/agents
     depends_on:
-      mysql:
-        condition: service_healthy
       redis:
         condition: service_healthy
       postgres:
@@ -234,8 +217,6 @@ services:
       - app-network
 
 volumes:
-  mysql_data:
-    name: corporate_rag_mysql_data
   redis_data:
     name: corporate_rag_redis_data
   postgres_data:

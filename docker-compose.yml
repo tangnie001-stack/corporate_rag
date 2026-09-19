@@ -1,29 +1,12 @@
+# ⚠ 以下命名卷是 P1 回滚的依据，在 P1 验收通过之前不要删：
+#     corporate_rag_mysql_data  —— 已退役的 MySQL 数据（回滚时旧实现要连它）
+#   具体禁令：
+#     1) 不要 `docker compose down -v`（-v 会真的删命名卷）
+#     2) 不要 `docker volume prune` / `docker system prune --volumes`
+#        （MySQL 卷在退役后恰好处于"未被容器引用"状态，正是 prune 的目标）
+#   回滚锚点 commit: a2b884c3cc2620f3e01637ebf7ca817b8c335059（见本任务提交信息）
 name: corporate_rag
 services:
-  mysql:
-    image: mysql:8.0
-    mem_limit: 256m
-    mem_reservation: 128m
-    container_name: corporate-rag-mysql
-    restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD:-corporate_rag_pass}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-financial_qa}
-      TZ: Asia/Shanghai
-    ports:
-      - "3306:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
-      - ./deploy/mysql/init:/docker-entrypoint-initdb.d
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_PASSWORD:-corporate_rag_pass}"]
-      interval: 5s
-      timeout: 3s
-      retries: 15
-      start_period: 30s
-    networks:
-      - app-network
-
   redis:
     image: redis:7-alpine
     mem_limit: 128m
@@ -239,8 +222,6 @@ services:
       - .env
     environment:
       TZ: Asia/Shanghai
-      MYSQL_HOST: mysql
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-corporate_rag_pass}
       REDIS_HOST: redis
       REDIS_PASSWORD: ${REDIS_PASSWORD:-corporate_rag_pass}
       POSTGRES_HOST: postgres
@@ -254,8 +235,6 @@ services:
       - ./data/chroma_persist:/app/data/chroma_persist
       - ./data/ragas:/app/data/ragas
     depends_on:
-      mysql:
-        condition: service_healthy
       redis:
         condition: service_healthy
       postgres:
@@ -264,8 +243,6 @@ services:
       - app-network
 
 volumes:
-  mysql_data:
-    name: corporate_rag_mysql_data
   redis_data:
     name: corporate_rag_redis_data
   postgres_data:
