@@ -30,7 +30,7 @@ _RESET_TABLES = "conversation_history, document, knowledge_base, chunks"
 async def _reset_pg_async() -> None:
     """异步清空 PostgreSQL 的业务数据（见 reset_pg 的范围说明）。"""
     async with engine.begin() as conn:
-        # CASCADE：chunks 与 document 的外键都指向 knowledge_base
+        # CASCADE：chunks.kb_id 外键指向 knowledge_base
         await conn.execute(text(f"TRUNCATE {_RESET_TABLES} CASCADE"))
     logger.info("PostgreSQL: 已清空业务表 {}", _RESET_TABLES)
 
@@ -87,8 +87,10 @@ def reset_all(
 
     Args:
         service: 已有的 AppService 实例（可选，用于通过其 chat_manager 清 Redis）
-    Raises:
-        RuntimeError: PostgreSQL 连接失败
+
+    异常：PostgreSQL 连接失败时，由底层驱动（SQLAlchemy/asyncpg）抛出的异常
+    会原样向上传播，本函数不做捕获或类型转换。Redis 连接失败仅记 warning
+    后跳过，不会向上抛。
     """
     logger.info("========== 开始重置所有数据 ==========")
 

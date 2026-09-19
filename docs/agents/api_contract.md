@@ -763,7 +763,7 @@ Repo 层不感知 ChromaDB。
 |------|------|------|
 | `meta_info` | dict | 写入 JSON 列的字典，评估结果放在 `{"eval": {...}}` 下 |
 
-### 3.6 `EvalRepo.insert_eval_report(report) → None`
+### 3.6 `EvalRepo.insert_report(report) → None`
 
 插入一条 RAGAS 评估报告。表结构由 alembic baseline 统一创建（`alembic/versions/0001_pg_baseline.py`），插入路径不再自动建表。
 
@@ -781,9 +781,9 @@ Repo 层不感知 ChromaDB。
 | `report.report_path` | str\|null | CSV 报告路径 |
 | `report.detail_json` | list\|null | 逐条 QA 得分 `[{"q_index":0, "faithfulness":0.95}, ...]` |
 
-### 3.7 `EvalRepo.get_latest_eval_report(kb_id) → dict | None`
+### 3.7 `EvalRepo.get_latest_report(kb_id) → EvalReportModel | None`
 
-获取知识库最新的 RAGAS 评估报告。按 `eval_date DESC LIMIT 1` 查询。
+获取知识库最新的 RAGAS 评估报告。按 `created_at DESC LIMIT 1` 查询。
 
 ---
 

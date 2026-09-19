@@ -19,8 +19,7 @@ class ChatRepo:
     async def create_session(self, session) -> None:
         """session: 带 .id .user_id .title .kb_id .agent 属性的对象。
 
-        幂等：同一 session_id 已存在（多轮对话重复持久化）时静默跳过，
-        不再依赖捕获主键冲突异常。
+        幂等：同一 session_id 已存在（多轮对话重复持久化）时静默跳过。
         """
         agent = session.agent
         if agent is None:
@@ -36,7 +35,7 @@ class ChatRepo:
                     kb_id=session.kb_id,
                     agent=agent,
                 )
-                # 已存在 → 保留原行，不改任何列（与改写前"静默跳过"等价）
+                # 已存在 → 保留原行，不改任何列
                 .on_conflict_do_nothing(index_elements=[SessionModel.id])
             )
             await s.execute(stmt)
