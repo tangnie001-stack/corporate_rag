@@ -7,7 +7,7 @@
 
 **3. 分块与文档状态没有事务。** `document_service.py:541` 写 Chroma、`:551` 更新 MySQL 状态、`:572` 重建 BM25，三步跨三店。进程死在中间就产生「有分块、文档未 ready」的孤儿。
 
-**4. 顺带清掉四类既有缺陷**：① collection-per-KB + 读路径 `get_or_create` 造就了 691 个 collection / 只有 5 个含分块；② `src/infra/db/models/` 与 `src/infra/db/mysql_db/models/` 是**两套重复且已不一致**的 ORM 定义（前者有 `agent`/`process`，后者没有）；③ 两套 alembic 目录内容不同 —— **实际生效的是根 `alembic/`（`alembic.ini:8` → 根 `env.py:9` 的 `from src.infra.db.models import *`），它只有一条首版迁移，而未被指向的 `src/infra/db/mysql_db/alembic/` 反而多出两条 feedback 迁移**（即生效链缺失这两条）；④ `ChunkData` 两处定义。
+**4. 顺带清掉七类既有缺陷**：① collection-per-KB + 读路径 `get_or_create` 造就了 691 个 collection / 只有 5 个含分块；② `src/infra/db/models/` 与 `src/infra/db/mysql_db/models/` 是两套重复 ORM 定义（后者是**死代码**：除自身与那个不生效的 alembic env 外无人 import）；③ 两套 alembic 目录，**实际生效的是根 `alembic/`**（`alembic.ini:8` → 根 `env.py:9` 的 `from src.infra.db.models import *`），而 `feedback` 表的建表语句只存在于**未被指向**的那套里；④ `ChunkData` 两处定义；⑤ **prod 的 `app` 没有 `./data` 挂载**（只有 dev 有）→ prod 的 Chroma 落在容器可写层，容器重建即丢（前置核查 1.4 顺带发现）；⑥ **`eval_report` 表从未被任何机制创建过** —— 全仓 `CREATE TABLE` 只在 `deploy/mysql/init/001_schema.sql`（5 张表），而根迁移直接 `op.add_column("eval_report", …)` 预设它已存在；⑦ **根迁移是从已存在表出发的 MySQL 增量 diff**，不是从零建表。⑥+⑦ 合起来意味着：**全新部署下 `eval_report` 与 `feedback` 都不存在**，评测与反馈功能在全新环境上是坏的（当前环境能用只是有人手工建过表）。本变更的 PG baseline 迁移建全 8 张表，**一并修掉 ⑥⑦** —— 须写明是既有缺陷被顺带修掉，非新引入。
 
 **5. 参照项目不可照搬。** 同领域的 `financial_rag-main` 用的正是 pgvector + tsvector + 应用层 RRF，其**融合的组织形态值得学**；但它的稀疏侧是 `to_tsvector('simple', content)` + `ts_rank`，字段却叫 `bm25_score` —— **`simple` 对中文不分词、`ts_rank` 也不是 BM25**，该实现在中文上基本失效（`530.sql:585-586`、`search_service.py:629`）。本变更只取其形态，不取其实现。
 
@@ -15,7 +15,7 @@
 
 - **关系型存储 MySQL → PostgreSQL**（7 张表：`users` / `knowledge_base` / `document` / `sessions` / `conversation_history` / `eval_report` / `feedback`），驱动 `aiomysql` → `asyncpg`。
 - **分块与向量 Chroma → PostgreSQL + pgvector**：新建 `chunks` 表（含 `embedding vector(1024)` 与 `kb_id` 外键）。**不再是每个知识库一个 collection**，空 collection 这一类缺陷结构性消失。
-- **词法检索：进程内 `rank_bm25` + pickle 索引文件 → PostgreSQL 全文检索**（`tsvector` 生成列 + GIN 索引）。中文分词由 **Python 侧 jieba 预分词**保证（写入与查询必须同源），因此**不依赖任何 PG 分词扩展**。
+- **词法检索：进程内 `rank_bm25` + pickle 索引文件 → PostgreSQL 全文检索**（`tsvector` 生成列 + GIN 索引）。中文分词由 **Python 侧 jieba 预分词**保证（写入与查询必须同源），因此**不依赖任何 PG 分词扩展**。查询条件在应用层由词元构造（前缀通配 + 安全字符剔除 + 全滤空时回退原文子串）—— 实测已证明"整词 AND 匹配"与"回退为不过滤"两种直觉做法都会静默 0 命中（见 `docs/tmp/postgres-probe-2026-09-19.md`）。
 - **融合仍留在应用层。** pgvector 官方不提供任何融合能力（README 仅一句 "You can use Reciprocal Rank Fusion or a cross-encoder to combine results"），ParadeDB `pg_search` 到 0.25.9 仍把 Native Hybrid Search 标为 coming soon。所谓"下推"在 Postgres 上等于把手写 RRF 搬进 SQL 字符串并自担 tiebreaker 确定性 —— 收益为零、代价明确。两路并行取数 + 应用层 RRF + 应用层去重，与 `financial_rag-main`、WeKnora、Dify、RAGFlow-ES 路径同构。
 - **不再需要词法索引文件的持久化、原子写、损坏自愈与降级观测** —— 这些问题的载体消失。
 - **BREAKING**：`VectorStore` 契约扩展取数入口（新增按支路取 top-k 的方法）；`bm25_index.py` 删除（其纯函数 `rrf_fusion` / `rrf_fusion_multi` 保留并迁移）；`ChunkResult` 增加分路排名字段使融合前来源可辨。
@@ -32,7 +32,7 @@
 
 ### New Capabilities
 
-- `hybrid-retrieval`: 混合检索的取数与融合契约 —— 同一 PostgreSQL 内的两路取数（dense / 词法）各自取 top-k、融合在应用层、结果携带分路排名、写入与查询的分词口径同源（含版本漂移不变量）、融合参数（`k` / `top_n`）可配。**（新建）**
+- `hybrid-retrieval`: 混合检索的取数与融合契约 —— 同一 PostgreSQL 内的两路取数（dense / 词法）各自取 top-k、融合在应用层、结果携带分路排名、写入与查询的分词口径同源（含版本漂移不变量）、**查询条件的构造与转义**（词元安全化 + 前缀通配 + 全滤空时回退原文子串）、融合参数（`k` / `top_n`）可配。**（新建）**
 
 ### Modified Capabilities
 
@@ -45,7 +45,7 @@
 - `database-orm`（MODIFIED）: 「ORM 模型定义」的 `MySQL 表` → PostgreSQL，并写入「模型与迁移脚本的**单一事实源**」（消除两套模型、两套 alembic）；「搜索类型搬迁」的引用方列表移除 `bm25_index.py`。
 - `typed-data-layer`（MODIFIED）: 「检索结果统一类型」的链路名（`ChromaDB / BM25` → 同一 PostgreSQL 的两路），`ChunkResult` 增加分路排名字段与 **`metadata` 回填契约**；「MySQL 实体类型」→ 关系型实体类型；**另补「mysql_db.py 拆为 Repo」与「ChatManager 改用 ChatRepo」两条**（正文点名 `MySQLDB` 类，初稿遗漏）。该 capability 的「api/documents.py 走 service」**不改** —— 其正文不含引擎/组件命名，本变更不影响它。
 - `architecture-tidy`（MODIFIED）: 「AppService 直接持有全局依赖」不再持有 `BM25Index`（该组件退役）。
-- `database-migrations`（MODIFIED）: 「第一版迁移」写死了 6 张表与 `scripts/clean_all_data.py`，本变更新增 `chunks` 表并换引擎（含 `CREATE EXTENSION IF NOT EXISTS vector`），该 requirement 必须同步。
+- `database-migrations`（MODIFIED）: 「第一版迁移」写死了 6 张表与 `scripts/clean_all_data.py`；**且现存"第一版迁移"实为针对已存在表的 MySQL 增量 diff、且假定 `eval_report` 已存在**。本变更必须把它换成**从零建表的新 baseline**（建全 8 张表：7 张关系表 + `chunks`，含 `CREATE EXTENSION IF NOT EXISTS vector`），该 requirement 必须同步。
 
 **纯命名同步（7，行为不变，只是组件名不再成立）**
 
