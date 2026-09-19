@@ -6,9 +6,12 @@
 - 词项按文档频率筛选 `2 <= df <= DF_RATIO * N`（剔除 df=1 的无从判断项与
   高频的平凡通过项），长度 >= 2；
 - 命中以**原始正文的字符串包含**判定，与分词器无关；
-- 跨分词器比较**固定打分算法**（`rank_bm25` 的 BM25Okapi 同时跑在字符级与
-  jieba 词项两套 tokenization 上，即干净的一对）；查询构造单独成一组比较；
-- 报告只报命中数与词项总数及完整词项清单，**仅供相对比较**。
+- 分组 A 分两档：**A1** 只有 `char-bm25` vs `jieba-bm25` 是同口径对比
+  （同 BM25Okapi、同每库全池、同 k），其差值才可归因于分词方式；**A2** 的
+  `jieba-tsrank` / `pg-trgm` 相对 A1 同时改了候选生成或打分，**不可归因于
+  分词质量**，仅供参考；
+- 报告只报命中数与词项总数及完整词项清单，**仅供相对比较**。渲染由
+  `scripts/lexical_probe_report.py` 承担（本模块只测量并交出计数器）。
 
 **小语料限制（必须写进报告）**：176 分块、k=30 时单词项的命中集合可能已占语料
 17%–28%，多数词项会平凡通过。探针的用途是**在同一语料上横向比配置**，
@@ -35,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 # 下仓库根已在 path 中，重复插入无副作用。
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from scripts.lexical_probe_report import ExplicitCaseResult, render_report
 from src.config.const import MAX_QUERY_K
 from src.config.settings import TOP_K_RETRIEVAL
 from src.infra.db.engine import run_and_dispose, session_factory
@@ -142,8 +146,14 @@ async def _term_kb(session: AsyncSession, term: str) -> str | None:
     return row[0]
 
 
-async def _probe_group_tokenizer(session, corpus, k) -> dict[str, float]:
-    """分组 A：分词配置（BM25Okapi 同时跑在字符级与词项级 = 固定打分算法）。"""
+async def _probe_group_tokenizer(session, corpus, k) -> dict[str, int]:
+    """分组 A：分词配置（返回各臂命中计数；比率与总数由渲染侧合成）。
+
+    只有 `char-bm25` 与 `jieba-bm25` 是**唯一同口径对比**（同 BM25Okapi、同在
+    每库全池上排序、同 k）。`jieba-tsrank` 还改了候选生成与打分，`pg-trgm` 还改了
+    打分函数与切分单位 —— 二者渲染时单列为 A2「混合变量行」，**不可归因于
+    分词质量**。
+    """
     terms = derive_terms(corpus["all_contents"], MAX_TERMS)
     hits: dict[str, int] = {
         "char-bm25": 0,
@@ -180,11 +190,16 @@ async def _probe_group_tokenizer(session, corpus, k) -> dict[str, float]:
         )
         if hit_rate(rows, term):
             hits["pg-trgm"] += 1
-    return {name: count / len(terms) if terms else 0.0 for name, count in hits.items()}
+    return hits
 
 
-async def _probe_group_construction(session, corpus, k) -> dict[str, float]:
-    """分组 B：查询构造（固定分词 = jieba，固定打分 = ts_rank）。"""
+async def _probe_group_construction(session, corpus, k) -> dict[str, int]:
+    """分组 B：查询构造（固定分词 = jieba，固定打分 = ts_rank）。
+
+    `substring` 是**定义性**臂（词项由 `_term_kb` 保证在库内存在且 df < k，
+    命中是同义反复），且相对 `prefix-AND` 还改了排序（`ORDER BY doc_id,
+    chunk_index` vs `ts_rank`）—— 渲染时须显式标注，不得读作可选策略。
+    """
     terms = derive_terms(corpus["all_contents"], MAX_TERMS)
     variants = ("prefix-AND", "prefix-OR", "plainto-AND", "substring")
     hits: dict[str, int] = {name: 0 for name in variants}
@@ -233,11 +248,15 @@ async def _probe_group_construction(session, corpus, k) -> dict[str, float]:
             rows = await _sql_top_contents(session, sql, params, k)
             if hit_rate(rows, term):
                 hits[name] += 1
-    return {name: count / len(terms) if terms else 0.0 for name, count in hits.items()}
+    return hits
 
 
-async def _probe_group_scoring(session, corpus, k) -> dict[str, float]:
-    """分组 C：打分算法（固定 jieba + 前缀 AND）。"""
+async def _probe_group_scoring(session, corpus, k) -> dict[str, int]:
+    """分组 C：打分算法（固定 jieba + 前缀 AND）。
+
+    候选集相同且规模 <= k 时，本口径（集合成员判定）对排序不敏感，故两臂零差
+    表示**差异无法在此口径下测出**，不表示两个打分函数同分。
+    """
     terms = derive_terms(corpus["all_contents"], MAX_TERMS)
     hits: dict[str, int] = {"ts_rank": 0, "ts_rank_cd": 0}
     for term in terms:
@@ -256,15 +275,29 @@ async def _probe_group_scoring(session, corpus, k) -> dict[str, float]:
             )
             if hit_rate(rows, term):
                 hits[name] += 1
-    return {name: count / len(terms) if terms else 0.0 for name, count in hits.items()}
+    return hits
 
 
-async def _probe_explicit_cases(session, corpus, k) -> list[tuple[str, str, bool, str]]:
-    """显式失效用例：① 全单字查询 ② 词形与文档词元不一致。"""
-    rows: list[tuple[str, str, bool, str]] = []
+async def _probe_explicit_cases(session, corpus, k) -> list[ExplicitCaseResult]:
+    """显式失效用例：① 全单字查询 ② 词形与文档词元不一致。
+
+    语料不含该串的用例**不得静默跳过**（`retrieval-quality` 要求两类失效用例
+    显式包含且不得静默 0 命中）：转入 mode = `corpus-absent` 的行，命中列写
+    「未验证（语料不含该串）」，使「某用例被跳过」成为可见事实。函数末尾断言
+    每条 `EXPLICIT_CASES` 成员都出表，缺失即抛错（进程非零退出）。
+    """
+    rows: list[ExplicitCaseResult] = []
     for case in EXPLICIT_CASES:
         kb_id = await _term_kb(session, case)
         if kb_id is None:
+            rows.append(
+                ExplicitCaseResult(
+                    query=case,
+                    mode="corpus-absent",
+                    verdict="未验证（语料不含该串）",
+                    kb_id=None,
+                )
+            )
             continue
         plan = build_lexical_query(case)
         if plan.use_substring:
@@ -283,79 +316,18 @@ async def _probe_explicit_cases(session, corpus, k) -> list[tuple[str, str, bool
             params = {"kb_id": kb_id, "tsq": plan.tsquery}
             mode = "prefix-AND"
         contents = await _sql_top_contents(session, sql, params, k)
-        rows.append((case, mode, hit_rate(contents, case), kb_id))
+        if hit_rate(contents, case):
+            verdict = "✅"
+        else:
+            verdict = "❌"
+        rows.append(
+            ExplicitCaseResult(query=case, mode=mode, verdict=verdict, kb_id=kb_id)
+        )
+    if len(rows) != len(EXPLICIT_CASES):
+        raise RuntimeError(
+            f"explicit cases incomplete: {len(rows)} != {len(EXPLICIT_CASES)}"
+        )
     return rows
-
-
-def _render_report(
-    total: int,
-    kb_count: int,
-    terms: list[str],
-    tokenizer_group: dict[str, float],
-    construction_group: dict[str, float],
-    scoring_group: dict[str, float],
-    explicit: list[tuple[str, str, bool, str]],
-    k: int,
-) -> str:
-    """渲染 markdown 报告。"""
-    lines = [
-        "# P3 词项命中探针（jieba + PG 全文检索 横向比较）",
-        "",
-        f"- 语料：{total} 个分块 / {kb_count} 个知识库",
-        f"- 检索条数 k：{k}（= TOP_K_RETRIEVAL，上限 {MAX_QUERY_K}）",
-        f"- 探针词项数：{len(terms)}（n-gram {NGRAM_MIN}..{NGRAM_MAX}，df ∈ [{DF_MIN}, {DF_RATIO}×N]）",
-        "",
-        "> **仅供相对比较，不得作为质量基线或发布判据。**",
-        f"> 176 分块、k={k} 时单词项的命中集合可能已占语料 17%–28%，多数词项会**平凡通过**；",
-        "> 探针的用途是在同一语料上横向比配置。",
-        "",
-        "## 分组 A：分词配置（固定打分算法 = BM25Okapi，字符级 vs 词项级）",
-        "",
-        "| 配置 | 词项命中率 |",
-        "|---|---|",
-    ]
-    for name, rate in tokenizer_group.items():
-        lines.append(f"| {name} | {rate:.4f} |")
-    lines += [
-        "",
-        "> 注：`jieba-tsrank` 的生产落地形态（存储侧依赖 `scripts/rewrite_content_seg.py` 的重写结果）；",
-        "> `pg-trgm` 是本地唯一可对照的扩展方案（`similarity()` 排序）。",
-        "",
-        "## 分组 B：查询构造（固定分词 = jieba，固定打分 = ts_rank）",
-        "",
-        "| 构造方式 | 词项命中率 |",
-        "|---|---|",
-    ]
-    for name, rate in construction_group.items():
-        lines.append(f"| {name} | {rate:.4f} |")
-    lines += [
-        "",
-        "## 分组 C：打分算法（固定 jieba + 前缀 AND）",
-        "",
-        "| 打分函数 | 词项命中率 |",
-        "|---|---|",
-    ]
-    for name, rate in scoring_group.items():
-        lines.append(f"| {name} | {rate:.4f} |")
-    lines += [
-        "",
-        "## 显式失效用例（探针的 df 筛选测不到，必须单列）",
-        "",
-        "| 查询 | 走的路径 | 是否命中 | kb |",
-        "|---|---|---|---|",
-    ]
-    for case, mode, hit, kb_id in explicit:
-        lines.append(f"| {case} | {mode} | {'✅' if hit else '❌'} | {kb_id[:8]}… |")
-    lines += [
-        "",
-        "## 词项清单（完整，供复现）",
-        "",
-        "```",
-        " ".join(terms),
-        "```",
-        "",
-    ]
-    return "\n".join(lines)
 
 
 async def _main(out: str) -> int:
@@ -377,15 +349,20 @@ async def _main(out: str) -> int:
         construction_group = await _probe_group_construction(session, corpus, k)
         scoring_group = await _probe_group_scoring(session, corpus, k)
         explicit = await _probe_explicit_cases(session, corpus, k)
-    report = _render_report(
-        len(contents),
-        len(by_kb),
-        terms,
-        tokenizer_group,
-        construction_group,
-        scoring_group,
-        explicit,
-        k,
+    report = render_report(
+        total=len(contents),
+        kb_count=len(by_kb),
+        terms=terms,
+        tokenizer_counts=tokenizer_group,
+        construction_counts=construction_group,
+        scoring_counts=scoring_group,
+        explicit=explicit,
+        k=k,
+        max_query_k=MAX_QUERY_K,
+        ngram_min=NGRAM_MIN,
+        ngram_max=NGRAM_MAX,
+        df_min=DF_MIN,
+        df_ratio=DF_RATIO,
     )
     Path(out).write_text(report, encoding="utf-8")
     print(report)
