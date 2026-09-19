@@ -9,6 +9,8 @@ P2 期间并存；等价性验收通过后由 Task 9 切换装配并删除 Chrom
   PG 无此限制，这里保留它是为了不把「能力提升」混进迁移等价性验收。
 """
 
+import asyncio
+
 from loguru import logger
 
 from src.chunking.validator import ChunkData
@@ -96,7 +98,10 @@ class PgVectorStore:
         if not chunks:
             return 0
         if embeddings is None:
-            embeddings = self._embed_fn.embed_documents([c.content for c in chunks])
+            # 向量化是同步的 HTTP 调用 → 必须 offload，否则阻塞事件循环（单 worker 下会冻住所有请求与 SSE）
+            embeddings = await asyncio.to_thread(
+                self._embed_fn.embed_documents, [c.content for c in chunks]
+            )
         rows = build_rows(kb_id, doc_id, chunks, embeddings)
         await self._repo.upsert_chunks(rows)
         # 分块数变少时删掉尾部残留（upsert 只覆盖 [0, len(rows)) 区间）

@@ -103,6 +103,30 @@ async def test_add_chunks_removes_tail_when_chunk_count_shrinks(store_and_kb):
 
 
 async def test_add_chunks_empty_returns_zero(store_and_kb):
-    """空输入直接返回 0，不触碰数据库。"""
+    """空输入返回 0。"""
     store, kb_id = store_and_kb
     assert await store.add_chunks(kb_id, [], uuid.uuid4().hex, []) == 0
+
+
+async def test_add_chunks_without_embeddings_computes_them(store_and_kb):
+    """不传 embeddings 时在方法内补算（保持既有方法契约），且不能阻塞事件循环。
+
+    该分支是 P2 的潜在路径（document_service 恒预计算），必须有不依赖调用的回归防线。
+    """
+    store, kb_id = store_and_kb
+    doc_id = uuid.uuid4().hex
+    chunks = [
+        ChunkData(content="第一段", metadata={"source": "a.pdf"}, chunk_id="x:0"),
+        ChunkData(content="第二段", metadata={"source": "a.pdf"}, chunk_id="x:1"),
+    ]
+    count = await store.add_chunks(kb_id, chunks, doc_id)  # 不传 embeddings
+    assert count == 2
+    assert await _count(kb_id) == 2
+    async with session_factory() as s:
+        n = await s.scalar(
+            text(
+                "SELECT count(*) FROM chunks WHERE kb_id = :k AND embedding IS NOT NULL"
+            ),
+            {"k": kb_id},
+        )
+    assert n == 2  # 兜底补算的向量必须真的落库
