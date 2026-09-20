@@ -14,6 +14,10 @@ from src.core.log_events import Event
 from src.infra.llm.prompt_manager import PromptManager
 from src.rag.prompt import build_system_prompt
 
+# 被断言的「正常阈值」显式镜像 settings 的发货默认值：本用例只回答
+# 「在 0.05 这个阈值下是否静默」，不隐式依赖 settings 的当前默认值。
+_NORMAL_THRESHOLD = 0.05
+
 
 def _stub_pm() -> PromptManager:
     """替身 PM，绝不触网。
@@ -83,8 +87,14 @@ def test_section_share_warning_fires_when_threshold_lowered(
 def test_section_share_warning_silent_at_normal_threshold(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """默认阈值下不触发 warning（证明告警不是恒开）。"""
+    """在显式固定的正常阈值下不触发 warning（证明告警不是恒开）。
+
+    阈值在用例内显式固定（镜像发货默认值 0.05），不与 settings 的当前默认值
+    或模板体积隐式耦合：本用例失败即意味着当前段字符数已越过该阈值触发点，
+    失败原因与用例名一致。
+    """
     calls = _capture_log_events(monkeypatch)
+    monkeypatch.setattr(settings, "PROMPT_CONTEXT_SHARE_WARN", _NORMAL_THRESHOLD)
     _build()
 
     assert not any(c["event"] is Event.PROMPT_SECTION_SHARE_HIGH for c in calls)

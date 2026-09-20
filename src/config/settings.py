@@ -76,14 +76,16 @@ VERIFY_ENABLED: bool = os.getenv("VERIFY_ENABLED", "true").lower() in (
 
 # ====== Prompt 组装观测 ======
 # 中文字符 → token 的换算系数（**跨模型借用**，非本模型分词器实测）：
-# 某厂商公开文档给出的「1 个中文字符 ≈ 0.6 token」；本项目跑 DashScope/Qwen，
-# 该系数不是本模型分词器的结果，仅供 system 段占 context window 的量级估算。
+# 出处为 DeepSeek 官方 token 用量文档「1 个中文字符 ≈ 0.6 token」；本项目跑
+# DashScope/Qwen，该系数不是本项目所用模型的分词器实测，仅作量级估算。
 PROMPT_TOKENS_PER_CJK_CHAR: float = float(
     os.getenv("PROMPT_TOKENS_PER_CJK_CHAR", "0.6")
 )
 # system 段估算占 context window 比例的告警阈值（**推断值**，非契约）：
-# 仅触发 warning 不阻断，取值可能需要按实测分布校准。
-PROMPT_CONTEXT_SHARE_WARN: float = float(os.getenv("PROMPT_CONTEXT_SHARE_WARN", "0.5"))
+# 仅触发 warning 不阻断。0.05 在 0.6 系数 / 32768 窗口下约 2731 字符触发，
+# 略高于当前段总量（约 1266 字符）、随后续阶段加内容而生效，仅供参考，
+# 取值可能需要按实测分布校准。
+PROMPT_CONTEXT_SHARE_WARN: float = float(os.getenv("PROMPT_CONTEXT_SHARE_WARN", "0.05"))
 # context window 大小（token）——按当前配置模型 LLM_MODEL（qwen3.7-flash-2026-07-15）
 # 取值。该型号窗口无法在此确证，故取保守偏小值（**假设值**）：使占比告警更早触发；
 # 确证官方窗口后必须更新。
