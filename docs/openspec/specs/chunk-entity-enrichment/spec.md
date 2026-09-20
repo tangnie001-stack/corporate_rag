@@ -2,9 +2,7 @@
 
 ## Purpose
 TBD - created by archiving change chunk-entity-metadata-enrichment. Update Purpose after archive.
-
 ## Requirements
-
 ### Requirement: Document-level entity extraction
 
 The system SHALL extract business entities from a document at ingestion time, once per document. **Core entities** (`company`, `report_period`, `sec_code`) SHALL be rendered into prompt context; **optional entities** (`person`, `currency`, `report_type`) SHALL be kept as supplementary metadata without rendering priority.
@@ -36,9 +34,9 @@ Extraction failure SHALL NOT block ingestion; the system SHALL fall back to rule
 
 ### Requirement: Entity injection into chunk metadata
 
-The system SHALL inject extracted entities into every chunk's metadata of that document before storing in ChromaDB.
+The system SHALL inject extracted entities into every chunk's metadata of that document before storing it into the `chunks` table.
 
-The system SHALL also aggregate entities into `document.meta_info` (`{"entities": {...}}`) in MySQL as the document-level authoritative store.
+The system SHALL also aggregate entities into `document.meta_info` (`{"entities": {...}}`) in the relational store as the document-level authoritative store.
 
 #### Scenario: All chunks carry document entities
 - **WHEN** a document with 50 chunks is ingested

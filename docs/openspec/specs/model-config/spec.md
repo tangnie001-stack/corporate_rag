@@ -2,9 +2,7 @@
 
 ## Purpose
 TBD - created by archiving change kb-routing-and-litellm-gateway. Update Purpose after archive.
-
 ## Requirements
-
 ### Requirement: 三类模型独立配置
 
 系统 SHALL 支持 LLM、Embedding、Rerank 三类模型各自独立配置（model / api_key / base_url），全部从环境变量读取。
@@ -54,8 +52,8 @@ TBD - created by archiving change kb-routing-and-litellm-gateway. Update Purpose
 
 #### Scenario: 向量维度风险
 - **WHEN** 切换 Embedding Provider（如从 DashScope 改为 DeepSeek）
-- **THEN** 需确认新模型输出维度与已有 ChromaDB collection 创建时的维度一致
-- **THEN** 维度不匹配时查询会抛异常，需重建 collection 并 re-index
+- **THEN** 需确认新模型输出维度与已有 `chunks.embedding` 列的声明维度一致
+- **THEN** 维度不匹配时写入或查询会失败，需变更列定义并重建全部分块向量
 
 ### Requirement: Rerank 创建
 

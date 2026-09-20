@@ -7,7 +7,7 @@
 > | **P1** | `docs/superpowers/plans/2026-09-19-postgres-storage-p1-relational-base.md` | PostgreSQL 关系型底座：配置 → compose PG 服务 → alembic baseline（8 表 + pgvector 扩展）→ 合并 ORM → 统一 `ChunkData` → 引擎切 asyncpg → repo 幂等写入 → 退役 MySQL → 文档收尾 | **已完成**（收口 `0535c56`，hash 回填与补正见其后续提交） |
 > | **P2** | `docs/superpowers/plans/2026-09-19-postgres-storage-p2-pgvector-dense.md` | `vector_store/` 换 pgvector、`ChunkResult.metadata` 回填契约、删除 `similarity_search_all`、Chroma→PG 数据搬迁、dense 迁移等价性验收 | **已完成**（收口 `43ab19a`） |
 > | P3 | `docs/superpowers/plans/2026-09-19-postgres-storage-p3-lexical-tsvector.md` | jieba 分词入口 + 查询串构造与转义 + `content_seg` 换分词输出与存量全量重写 + 词项命中探针选型 + `rrf_fusion` 迁移到 `src/rag/fusion.py` + 两路同源并发 + 删除 `bm25_index.py` | **已完成**（收口 `88ed8e0`；DoD D1–D9 全部达成，验收报告见 `docs/tmp/p3-acceptance-2026-09-19.md`） |
-> | P4 | `docs/superpowers/plans/2026-09-19-postgres-storage-p4-transactions-and-cleanup.md` | 入库/删除两条路径同事务（`session_scope` 原语 + 11 处可选会话）+ 故障注入验收 + 依赖与卷清理（含 Chroma/BM25 的数据目录）+ prod compose 与 dev 同构 + ADR + delta 对账 + 归档 | **计划已编写**（待执行） |
+> | **P4** | `docs/superpowers/plans/2026-09-19-postgres-storage-p4-transactions-and-cleanup.md` | 入库/删除两条路径同事务 + 故障注入验收 + 依赖与卷清理（含 Chroma/BM25 的数据目录）+ prod compose 与 dev 同构 + ADR + delta 对账与归档 | **已完成**（收口 `235fe20`） |
 >
 > 分阶段的原因与各 capability 的覆盖对照见 P1 计划文件的「阶段定位」与「覆盖的 spec requirement」两节。
 >
@@ -67,3 +67,4 @@
 | 2026-09-20 | P4 Task 10（capability 对账） | `typed-data-layer` 的 ADDED「关系型实体类型」点名的 6 个类型（`KbListItem` / `DocEntity` / `SessionEntity` / `SessionListItem` / `MessageEntity` / `UserEntity`）**全部不存在**：`src/infra/db/entities/` 早在 `ce3a6c9` 被刻意清理删除，实际返回 ORM 模型实例 / 具名 `Row` | 按 Ruling 4 把该 requirement 改为如实描述（保留"不得 raw dict"的实质），并给 `ChatRepo.get_sessions` 补 `-> list[Row]` | 否（要求实质未变，只是类型命名如实化） |
 | 2026-09-20 | P4 Task 7（prod compose） | prod 的 `app` 有 `app_logs:/data/logs` 卷却**没有 `LOG_DIR`**，而 `logging.py` 默认 `logs` → 日志落容器可写层、重建即丢（与 P1 发现的「prod 的 Chroma 无挂载」同类既有缺陷） | 补 `LOG_DIR: /data/logs`，与 dev 同构；在 `docker-compose.prod.yml`（`LOG_DIR: /data/logs`）与本表写明是既有缺陷被顺带修掉 | 是（已并入 design.md Risks 的同族叙述） |
 | 2026-09-20 | P4 Task 11（数据目录退役） | P4 Task 11 **计划**删除 `data/chroma_persist`（连同 `data/chroma` / `data/bm25_index`）；删除后 **Chroma 回滚路径关闭**：回滚到旧实现不再可能，语料重建只能从 MinIO 的原始文件重新上传。**当前三个目录仍在磁盘**（`glossary.md` 记为「Task 11 才删除」），但 Chroma 读取路径已随 Task 6 删除，**现已不可用于回滚** | 按 `design.md` Migration Plan「第 9 步必须放在验收全部通过之后」执行；回滚收口已记于 `docs/agents/glossary.md` 与 `docs/agents/cookbook.md` 两处 | 否（design 已预告） |
+| 2026-09-20 | 作废 change `bm25-index-durability` | 其 38 个任务的靶子（索引文件的持久化 / 原子写 / 损坏自愈 / 缺失降级）在"词法检索搬进 PostgreSQL"后不存在 | 删除该 change 目录；作废理由写入 ADR-0006 与 proposal 的既定结论 | 否（`design.md` D9 已预告） |

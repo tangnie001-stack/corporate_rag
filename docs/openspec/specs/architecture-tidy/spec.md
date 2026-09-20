@@ -2,9 +2,7 @@
 
 ## Purpose
 TBD - created by archiving change architecture-refactoring-phase3. Update Purpose after archive.
-
 ## Requirements
-
 ### Requirement: 单一问答管道
 
 系统 SHALL 仅有 LangGraph 一条问答管道，`RAGChain.chat_with_citations()` 及其依赖的子函数 SHALL 被删除。CLI eval SHALL 通过 `graph.ainvoke()` 执行问答评估。
@@ -31,15 +29,24 @@ TBD - created by archiving change architecture-refactoring-phase3. Update Purpos
 
 ### Requirement: AppService 直接持有全局依赖
 
-`AppService` SHALL 直接持有 `chat_manager` 和 `BM25Index`，不通过 `RAGChain` 间接获取。`AgentService` SHALL 从 `models.py` 通过 lazy property 获取 `llm` 和 `reranker`。
+`AppService` SHALL 直接持有 `chat_manager`（在 AppService 层创建，不经中间封装间接获取）。流式生成状态（任务注册表与事件缓冲）SHALL `AppService` 直接持有，不依赖额外进程。`AgentService` SHALL 在构造期确定 `llm` 和 `reranker`：构造参数传入实例时直接使用，缺省时回退到 `src.models` 的工厂（`get_llm` / `get_rerank`）。
+
+词法检索不再作为独立组件被持有：其能力并入向量存储组件（两路同源于一个数据库实例）。
 
 #### Scenario: 应用启动
+
 - **WHEN** `AppService` 初始化
-- **THEN** `chat_manager` 和 `bm25` 直接在 AppService 层创建，AgentService 通过构造函数注入获取
+- **THEN** `chat_manager` 直接在 AppService 层创建，AgentService 通过构造函数注入获取
 
 #### Scenario: 测试注入
+
 - **WHEN** 测试构造 `AgentService`
 - **THEN** 可直接传入 mock `llm`/`reranker`，无需 4 层 `@patch`
+
+#### Scenario: 无独立词法索引组件
+
+- **WHEN** 检查应用装配
+- **THEN** SHALL NOT 存在独立的词法索引组件（无进程内索引对象、无索引文件路径配置）
 
 ### Requirement: ChatManager 统一 async 接口
 

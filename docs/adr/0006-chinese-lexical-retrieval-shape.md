@@ -8,7 +8,7 @@
 
 **触发问题**：词法索引从进程内的 `rank_bm25` + pickle 文件迁到 PostgreSQL 全文检索后，中文必须真正可检索。两个已实测的事实决定了不能直接用默认能力：
 
-- **PG 默认分词器不对中文分词**：实测 `to_tsvector('simple','营业收入同比增长率保持稳定')` 只产出 **1 个 token**（整串 CJK 不作切分），因此 `plainto_tsquery` 的词项永远匹配不上（实测记录见 `docs/openspec/changes/postgres-storage-consolidation/design.md` 的 D4）。
+- **PG 默认分词器不对中文分词**：实测 `to_tsvector('simple','营业收入同比增长率保持稳定')` 只产出 **1 个 token**（整串 CJK 不作切分），因此 `plainto_tsquery` 的词项永远匹配不上（实测记录见 `docs/openspec/changes/archive/2026-09-20-postgres-storage-consolidation/design.md` 的 D4）。
 - **旧的字符级 unigram 会把词拆碎**：`rank_bm25` 的字符级索引把「资产负债率」拆成 5 个单字，任何含「资」或「产」的 chunk 都被命中，精确词项反被淹没。
 
 **约束**：栈上不能假设云厂商预装了中文分词扩展。本地实测 `pgvector/pgvector:pg15` 的 `pg_available_extensions` 只有 `vector` (0.8.6) 与 `pg_trgm` (1.6)，**无法在本地验证任何中文分词扩展**。
@@ -68,6 +68,7 @@
 **不解决的问题**（避免后人误以为本 ADR 管了它）：
 
 - **`ts_rank` 不是 BM25**：真 BM25 需 ParadeDB 或应用层自算，属另案。
+- **`bm25-index-durability`（38 任务）的靶子在新形态下不存在，已作废**：该 change 针对索引文件的持久化 / 原子写 / 损坏自愈 / 缺失降级，而词法检索搬进 PostgreSQL 后这些载体消失；其调研见 git 历史（`1f4dec9`）。
 - **HNSW 与中文分词的进一步调优不在本变更**。
 - **176 分块语料上无法给出质量结论** —— 探针只用于同一语料上的横向配置比较（相对判据），不是发布判据。
 

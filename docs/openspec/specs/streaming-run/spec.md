@@ -61,7 +61,7 @@ TBD - created by archiving change streaming-decouple. Update Purpose after archi
 
 ### Requirement: 任务状态查询
 
-系统 SHALL 提供 `GET /api/sessions/task-status`：缓冲存在且无终态 → `generating`（含可续接标记与当前缓冲 seq）；缓冲有终态或 MySQL 存在 assistant 消息 → `completed`；无缓冲且无 assistant → `idle`（不得返回 generating）。
+系统 SHALL 提供 `GET /api/sessions/task-status`：缓冲存在且无终态 → `generating`（含可续接标记与当前缓冲 seq）；缓冲有终态或关系型库存在 assistant 消息 → `completed`；无缓冲且无 assistant → `idle`（不得返回 generating）。
 
 #### Scenario: 生成中可续接
 - **WHEN** 缓冲存在且无 done/error 终态
