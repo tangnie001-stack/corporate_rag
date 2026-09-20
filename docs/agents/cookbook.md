@@ -211,7 +211,7 @@
 **注意事项**：
 - **搬迁脚本已退役**：`scripts/migrate_chroma_to_pg.py` / `scripts/dense_equivalence_check.py` 已随 P4 删除，**不能再从 Chroma 语料重建**，别指望跑旧脚本。
 - **原始文件是唯一不可再生的源头**：MinIO 中的原始上传文件若丢失，语料不可恢复。
-- `data/chroma_persist` / `data/chroma` / `data/bm25_index` 仍是磁盘上的历史回滚基座（Task 11 退役），但读取它们的脚本已删，**不是可用的重建路径**。
+- `data/chroma_persist` / `data/chroma` / `data/bm25_index` 仍在磁盘上（**Task 11 才删除**），但 P4 已删除其读取路径，**不可再用于回滚、也不是可用的重建路径**，仅作历史遗留数据保留。
 
 ## 分区命名
 

@@ -66,7 +66,7 @@ exit=0
 | D6 | 融合迁移完成 | ✅ 达成 | `src/rag/fusion.py`（纯函数 `rrf_fusion`，无 DB 依赖）；`tests/rag/test_fusion.py` 全绿；`RRF_K` / `RRF_TOP_N` 进 `settings` |
 | D7 | 两路同源并发 + 贡献可见 | ✅ 达成 | E2E 实测 `[retrieval] hybrid done … dense_count=1 sparse_count=1 result_count=1`（`sparse_count > 0`，见 ④）；`asyncio.gather` 两路 + `rrf_fusion`；`tests/rag/test_fusion.py::test_hybrid_runs_both_paths_concurrently_on_same_store` 以 `asyncio.Barrier(2)` 证伪并发 |
 | D8 | 无独立词法索引组件 | ✅ 达成 | `src/infra/search/bm25_index.py` 不存在（`ls` 报 No such file）；`tests/config/test_no_bm25_leftovers.py` 全绿（守卫含 `bm25_index` / `BM25Index` / `BM25_INDEX_DIR` / `rank_bm25`） |
-| D9 | 门禁全绿 + E2E | ✅ 达成 | 门禁三连全过（**翻转后**那一次：见「修复轮 2」§③；初始一轮见 ①）+ 真实 E2E 六条观测通过（见 ④；自然语言查询复测见「修复轮 1」§④） |
+| D9 | 门禁全绿 + E2E | ✅ 达成 | 门禁三连全过（**翻转后**那一次：见「修复轮 2」§③；初始一轮见 ①）+ 真实 E2E 六条观测通过（见 ④；自然语言查询复测见 ④ 的『修复轮 1 复测』小节） |
 
 **判定：DoD D1–D9 全部达成。**
 
