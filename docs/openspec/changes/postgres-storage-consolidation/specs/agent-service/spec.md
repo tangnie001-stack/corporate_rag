@@ -2,7 +2,7 @@
 
 ### Requirement: Graph initialization
 
-AgentService SHALL compile and hold the StateGraph instance. It SHALL accept RAGChain as a dependency to access vector_store, llm, and reranker.
+AgentService SHALL compile and hold the StateGraph instance. Its constructor SHALL accept `vector_store`, `chat_manager`, `llm`, `reranker`, and `prompt_manager` as dependencies.
 
 #### Scenario: Graph compiled on init
 

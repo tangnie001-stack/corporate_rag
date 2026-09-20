@@ -2,7 +2,7 @@
 
 ### Requirement: AppService 直接持有全局依赖
 
-`AppService` SHALL 直接持有 `chat_manager`，不通过 `RAGChain` 间接获取。流式生成状态（任务注册表与事件缓冲）SHALL `AppService` 直接持有，不依赖额外进程。`AgentService` SHALL 从 `models.py` 通过 lazy property 获取 `llm` 和 `reranker`。
+`AppService` SHALL 直接持有 `chat_manager`（在 AppService 层创建，不经中间封装间接获取）。流式生成状态（任务注册表与事件缓冲）SHALL `AppService` 直接持有，不依赖额外进程。`AgentService` SHALL 在构造期确定 `llm` 和 `reranker`：构造参数传入实例时直接使用，缺省时回退到 `src.models` 的工厂（`get_llm` / `get_rerank`）。
 
 词法检索不再作为独立组件被持有：其能力并入向量存储组件（两路同源于一个数据库实例）。
 
