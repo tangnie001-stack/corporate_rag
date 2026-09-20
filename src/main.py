@@ -21,6 +21,7 @@ from src.api import (
     sessions_router,
 )
 from src.api import ragas_generate as ragas_generate_routes
+from src.config.prompts import validation
 from src.config.response_codes import Code
 from src.core import logging as core_logging
 from src.core.log_events import Event
@@ -37,10 +38,15 @@ async def lifespan(app: FastAPI):
 
     数据库迁移通过 docker compose exec app alembic upgrade head 手动执行。
 
+    启动阶段校验 prompt 模板集（`validation.validate_all`）：任一校验失败
+    向上抛出 `TemplateLoadError`，进程启动失败，不留请求期降级分支。
+
     启动阶段清空残留的 chat_lock:* 键：重启后进程内无任何生成任务，
     残留锁（来自被杀进程，TTL 兜底 180s）会阻塞新请求的并发锁获取。
     """
     core_logging.log_event(Event.APP_STARTING)
+    section_chars = validation.validate_all()
+    core_logging.log_event(Event.PROMPT_VALIDATED, section_chars=section_chars)
     await _clear_stale_chat_locks()
     yield
     core_logging.log_event(Event.APP_STOPPING)

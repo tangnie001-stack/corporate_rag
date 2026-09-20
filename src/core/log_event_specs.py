@@ -279,6 +279,10 @@ EVENT_SPECS: dict[str, EventSpec] = {
     "capability degraded": EventSpec(
         "capability degraded", "app", "warning", ("resource", "reason")
     ),
+    # prompt 模板启动期校验通过（字段为各段字符数，容器走紧凑 JSON）
+    "prompt validated": EventSpec(
+        "prompt validated", "app", "info", ("section_chars",)
+    ),
     # [delegate] fork 子代理委派（delegate-hardening-observability）
     "delegate start": EventSpec(
         "delegate start",

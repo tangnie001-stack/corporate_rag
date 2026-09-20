@@ -36,6 +36,7 @@
 - [ ] 2.8 `knowledge_base` 加 `domain` 列 + migration，**四处落点都要改**：① `src/infra/db/models/kb.py` 加字段；② `alembic/versions/` 新迁移，必须 `nullable=False, server_default='general'`（否则 ALTER 后存量行为 NULL，"存量 KB 落入通用领域"不成立，只能永远走代码回退分支）；③ `src/infra/db/repos/kb_repo.py` 读写；④ `src/services/kb_service.py` 的创建/更新入参
 - [ ] 2.9 `src/services/agent_service.py:919-921` 附近：按 KB 的 `domain` 解析领域 base，写入 `RequestContext`；取数失败按"回退内置通用 base + warning"处理（不阻断）。⚠ **领域识别判据 = "是否存在对应的 `base` 模板"**（模板 id 即领域名），非法值在**写入前**拒绝（不是读取时静默回退）
 - [ ] 2.9b **本期必须提供最小的 domain 写入口**（KB 创建/更新参数或管理脚本 + repo 字段）—— 否则 spec 的「按领域加载对应 base」Scenario 无法端到端验收，P1 的验收条件不成立
+- [ ] 2.9c **启动校验补回「每个 `section` 至少有一个模板」**（P0 的 `validate_all` 只校验 base 段非空 / 存在 `domain: general` / 总字符数兜底 —— `runtime_contract` 段此期尚无模板，见 task 1.10）：P1 在 task 2.5 引入 `runtime_contract` 段模板后启用全段完整性校验
 - [ ] 2.10 `src/infra/llm/request_context.py` 新增领域字段（含来源/范围/用途注释）**并同步 `child()` 复制**，否则 fork 子代理看不到
 - [ ] 2.11 预设与 KB 领域不一致时记日志、不阻断（对齐 spec 的第三个 scenario）
 - [ ] 2.12 条件注入：`sources` 段按**逐条规则**条件渲染，判据为**工具已注册 AND 适用域成立**（⚠ `retrieve_kb` 无条件注册见 `rag_tools.py:238`，只看工具名会让"先检索"出现在态 A 并与 `KB_UNBOUND_SYSTEM_PROMPT` 互斥；带适用域的规则见 spec 映射表）；`VERIFY_GUIDANCE_PROMPT` / `VERIFY_HINT_PROMPT` 的注入点（`regen_decision.py`）接上工具集。⚠ **判据留代码、不由 YAML 声明**（见 spec「判据的位置」）：模板里 SHALL NOT 出现 `requires_tools` / `applies_when` 之类字段 —— 判据是行为契约，挂错依赖会让规则在该出现时不出现

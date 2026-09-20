@@ -166,6 +166,8 @@ class Event(str, Enum):
     DELEGATE_SKIP = "delegate skip"
     # 能力清单读取失败降级（Task 9：/api/skills、/api/agents fail-open 空列表）
     CAPABILITY_DEGRADED = "capability degraded"
+    # prompt 模板启动期校验通过（fail-fast：失败直接抛错、不记本事件）
+    PROMPT_VALIDATED = "prompt validated"
 
     # [delegate] fork 子代理委派（delegate-hardening-observability）
     DELEGATE_START = "delegate start"
