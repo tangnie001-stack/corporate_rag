@@ -2,7 +2,19 @@
 
 ### Requirement: YAML 载体与目录结构
 
-系统的 prompt 内容 SHALL 存放在 `src/config/prompts/` 下的 YAML 文件中，而非 Python 源码字面量。每个模板文件 SHALL 以 `templates:` 为根。
+系统的 prompt 内容 SHALL 存放在 **prompt 包**内的 YAML 文件中，而非 Python 源码字面量。
+
+**包结构（`prompts.py` 升级为包）**：原 `src/config/prompts.py` SHALL 改为包 `src/config/prompts/`，内含：
+
+| 路径 | 职责 |
+|---|---|
+| `src/config/prompts/__init__.py` | 保留原模块的公开符号（re-export），使既有 `from src.config.prompts import X` 的导入路径**不变**；保留的 7 条**行为键**常量（`VERIFY_*` / `FORK_*`）住在这里 |
+| `src/config/prompts/templates/*.yaml` | 模板正文 |
+| `src/config/prompts/` 包内其余模块 | 加载器实现 |
+
+⚠ **不得让 `prompts.py` 与 `prompts/` 并存**：同名包会**遮蔽**同名模块 —— `from src.config.prompts import ...` 会解析到包，被遮蔽模块里的符号全部不可见。本项目有 8+ 个调用点（`rag/prompt.py`、`infra/llm/prompt_manager.py`、`verify/guardrails.py`、`verify/regen_decision.py`、`infra/search/query_router.py`、`infra/search/document_entity_extractor.py`、`cli/compare_rewrite.py` 等），并存会让它们**全数失效**。
+
+每个模板文件 SHALL 以 `templates:` 为根。
 
 每个模板 SHALL 包含：
 
@@ -19,8 +31,12 @@
 **为什么 `VERIFY_*` / `FORK_*` 不模板化**：它们不是文案，是**行为键** —— `VERIFY_*` 内嵌查重标记短语（`const.VERIFY_*_MARKER`，业务代码靠它判"是否已注入"），`FORK_EXECUTION_CONTRACT` 是子代理的执行契约（`prompts.py` 注释明说"不随执行者人设内容作者意愿而增减"）。模板化等于把行为键交给文案编辑者。
 
 #### Scenario: 模板可从 YAML 读取
-- **WHEN** 加载器读取 `src/config/prompts/` 下的模板文件
+- **WHEN** 加载器读取 `src/config/prompts/templates/` 下的模板文件
 - **THEN** SHALL 得到以 `id` 为键的模板映射，每个模板的 `content` 与 YAML 中的块标量逐字相同
+
+#### Scenario: 包化不破坏既有导入路径
+- **WHEN** `prompts.py` 升级为 `prompts/` 包后
+- **THEN** `from src.config.prompts import X` SHALL 仍然可用（`__init__.py` re-export），SHALL NOT 出现模块被同名包遮蔽的情况
 
 #### Scenario: 新增文案不改 Python
 - **WHEN** 需要修改某个已迁入 YAML 的 prompt 文案
