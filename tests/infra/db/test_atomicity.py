@@ -189,6 +189,44 @@ async def test_delete_document_happy_path_removes_both(atomic_kb):
     assert await _is_deleted(doc_id) == 1
 
 
+async def test_delete_document_rolls_back_chunks_when_soft_delete_fails(
+    atomic_kb, monkeypatch
+):
+    """软删文档失败时**分块必须回滚**（不得留下有分块、文档未删的半删状态）。
+
+    注入点在事务第二步：第一步的删分块已执行、尚未提交；异常由事务边界回滚，
+    已执行的删分块随之撤销 —— 断言分块数即断言边界的回滚。
+    """
+    kb_id, doc_repo = atomic_kb
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(doc_id, kb_id, status="ready", user_id="p4test")
+
+    store = PgVectorStore(chunk_repo=None, embed_fn=_FakeEmbedder())  # type: ignore[reportArgumentType]
+    svc = DocumentService(
+        doc_repo=doc_repo,
+        vector_store=store,
+        router=None,  # type: ignore[reportArgumentType]  # 本用例不走解析路径
+    )
+
+    await svc._write_chunks_and_mark_ready(
+        kb_id=kb_id,
+        doc_id=doc_id,
+        chunks=[ChunkData(content="资产负债率上升", metadata={})],
+        embeddings=[[0.1] * 1024],
+    )
+    assert await _chunk_count(kb_id, doc_id) == 1
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("inject: soft delete failed")
+
+    monkeypatch.setattr(doc_repo, "soft_delete_document", _boom)
+    with pytest.raises(RuntimeError):
+        await svc.delete_document(kb_id, doc_id, user_id="p4test")
+
+    assert await _chunk_count(kb_id, doc_id) == 1
+    assert await _is_deleted(doc_id) == 0
+
+
 async def test_delete_knowledge_base_is_atomic_when_chunk_delete_fails(
     atomic_kb, monkeypatch
 ):
