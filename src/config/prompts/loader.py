@@ -91,6 +91,8 @@ def _read_file(path: Path) -> list[Template]:
             raise TemplateLoadError(f"模板 {tid} 缺少正文")
         section = entry.get("section")
         domain = entry.get("domain")
+        if kind == "task" and section is not None:
+            raise TemplateLoadError(f"task 模板 {tid} 不得带 section：{section!r}")
         if kind == "section" and section not in VALID_SECTIONS:
             raise TemplateLoadError(f"模板 {tid} 的 section 非法：{section!r}")
         if section == "base" and not domain:
@@ -179,11 +181,26 @@ def render(text: str, variables: dict[str, str]) -> str:
         variables: 变量名 → 值
 
     Returns:
-        替换后的文本（未提供的占位符保持 {name} 原样，不被替换为空串）
+        替换后的文本（未提供的占位符保持 {name} 原样；{{name}} 这类表达式写法
+        整体原样输出，不做部分替换）
     """
 
     def _substitute(match: re.Match[str]) -> str:
-        """单次匹配的替换回调：未提供则原样返回。"""
+        """单次匹配的替换回调：未提供或属于双花括号写法则原样返回。
+
+        Args:
+            match: 占位符正则的一次匹配（``match.string`` 为原始文本）
+
+        Returns:
+            替换值；未提供的占位符、以及紧邻花括号的 ``{{name}}`` 写法均原样返回
+        """
+        source = match.string
+        start = match.start()
+        end = match.end()
+        if start > 0 and source[start - 1] == "{":
+            return match.group(0)
+        if end < len(source) and source[end] == "}":
+            return match.group(0)
         name = match.group(1)
         if name in variables:
             return variables[name]
