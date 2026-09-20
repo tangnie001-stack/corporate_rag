@@ -8,8 +8,8 @@
 
 **触发问题**：词法索引从进程内的 `rank_bm25` + pickle 文件迁到 PostgreSQL 全文检索后，中文必须真正可检索。两个已实测的事实决定了不能直接用默认能力：
 
-- **PG 默认分词器不对中文分词**：实测 `to_tsvector('simple','营业收入同比增长率保持稳定')` 只产出 **1 个 token**（整串 CJK 不作切分），因此 `plainto_tsquery` 的词项永远匹配不上（实测记录见 `docs/tmp/postgres-probe-2026-09-19.md`）。
-- **旧的字符级 unigram 会把词拆碎**：`rank_bm25` 的字符级索引把「资产负债率」拆成 6 个单字，任何含「资」或「产」的 chunk 都被命中，精确词项反被淹没。
+- **PG 默认分词器不对中文分词**：实测 `to_tsvector('simple','营业收入同比增长率保持稳定')` 只产出 **1 个 token**（整串 CJK 不作切分），因此 `plainto_tsquery` 的词项永远匹配不上（实测记录见 `docs/openspec/changes/postgres-storage-consolidation/design.md` 的 D4）。
+- **旧的字符级 unigram 会把词拆碎**：`rank_bm25` 的字符级索引把「资产负债率」拆成 5 个单字，任何含「资」或「产」的 chunk 都被命中，精确词项反被淹没。
 
 **约束**：栈上不能假设云厂商预装了中文分词扩展。本地实测 `pgvector/pgvector:pg15` 的 `pg_available_extensions` 只有 `vector` (0.8.6) 与 `pg_trgm` (1.6)，**无法在本地验证任何中文分词扩展**。
 
@@ -33,7 +33,7 @@
 - **不依赖 PG 扩展**：`simple` 是内置配置，托管 PG 必然可用；扩展方案在 RDS 上的可用性本变更无法确认。
 - **`pg_trgm` 语义不对**：它给的是三元组相似度，不是词项加权，与"词项命中"不是同一个量。
 - **`pg_search` 无托管**：破"能用托管就用托管"原则。
-- **依赖已在仓库**：`jieba` 已声明在 `pyproject.toml` 却全仓零调用（僵尸依赖），本变更让它接线。
+- **依赖已在仓库**：`jieba` 已是 `pyproject.toml` 中声明并精确 pin 的依赖（`jieba==0.42.1`），写入与查询两侧共用 `src/infra/search/tokenizer.py` 这一个分词入口。
 
 **连接符的选择与依据 —— 取前缀 OR，依据分两层：**
 

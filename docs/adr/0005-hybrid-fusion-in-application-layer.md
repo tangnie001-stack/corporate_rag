@@ -36,7 +36,7 @@
 必须把两条论据分开，它们论证的是不同的东西：
 
 - **论据 ①（约束，本项目适用）：Postgres 生态缺乏可用的融合能力。** pgvector 本体不提供；ParadeDB 到 0.25.9 仍标 `coming soon`；其余可选项要么无托管（破"能用托管就用托管"原则），要么需要 RDS 预装扩展（可用性未确认）。**因此方案 ② 的实质不是"利用引擎能力"，而是"把手写 RRF 搬进 SQL"**：ParadeDB 官方警告必须加 tiebreaker，否则同一条查询两次运行可能返回不同候选 —— 这与现有纯 Python `sorted` 的确定性需逐条对齐，否则引入不可复现的漂移；而 2 次往返变 1 次、去重下推省下的传输量（`k=30` 下 60 行 vs 50 行）**无关痛痒**。
-- **论据 ②（业界取向，只用来说明"应用层融合不是落后"）：即便引擎提供原生融合，需要加权与多租户可配的产品仍会选择应用层。** 证据：**WeKnora 有 OpenSearch 后端（其 2.19 已有原生 RRF），却把加权 RRF 写在 Go 里**（`internal/application/service/knowledgebase_search_fusion.go:84-125`，配置项 `RRFVectorWeight=0.5` / `RRFKeywordWeight=0.3`，per-tenant 可配）；`financial_rag-main`（pgvector + tsvector，与本变更同栈）在 Python 里做**按 domain 加权**的 RRF；**Elasticsearch 官方明说其原生 RRF 的各 child retriever 权重必须相等** —— 加权能力正是原生方案的缺口。
+- **论据 ②（业界取向，只用来说明"应用层融合不是落后"）：即便引擎提供原生融合，需要加权与多租户可配的产品仍会选择应用层。** 证据：**WeKnora 有 OpenSearch 后端（其 2.19 已有原生 RRF），却把加权 RRF 写在 Go 里**（融合逻辑 `internal/application/service/knowledgebase_search_fusion.go:84-125`；配置项 `internal/types/retrieval_config.go:35,37` 的 `RRFVectorWeight=0.5` / `RRFKeywordWeight=0.3`，per-tenant 可配）；`financial_rag-main`（pgvector + tsvector，与本变更同栈）在 Python 里做**按 domain 加权**的 RRF；**Elasticsearch 官方明说其原生 RRF 的各 child retriever 权重必须相等** —— 加权能力正是原生方案的缺口。
 
 > **WeKnora 属论据 ②，不能用来支持论据 ①。** 它是"有原生能力却不用"，不是"没有原生能力"；把它当作"PG 无融合"的佐证是类比错位。
 

@@ -16,7 +16,7 @@
 
 **根本病根：三套存储 = 三个独立故障域，失败不原子。** 三者可各自半死 —— 词法索引挂掉而关系型完好，系统会一边静默降级、一边照打「混合检索完成」。
 
-**触发事件**：`trace_c54ce259` 的缺陷活了半个月无人发现（一手记录见 `docs/tmp/deep-research-trace-c54ce259.md`）。它暴露的不是"某个支路缺观测"，而是"半活状态可以被伪装成正常"。
+**触发事件**：`trace_c54ce259` 的缺陷活了半个月无人发现（记录见 `docs/tmp/retrieval-three-layers.md` 第 3 层「BM25 静默失效 + 未持久化」；该 trace 实测 bm25 分路结果全为 0，`find / -name "bm25.pkl"` 零命中）。它暴露的不是"某个支路缺观测"，而是"半活状态可以被伪装成正常"。
 
 **实测环境事实**（完整记录见 `docs/tmp/postgres-probe-2026-09-19.md`）：Chroma 里有 **691 个 collection、176 条向量，其中只有 5 个 collection 含分块** —— collection-per-KB 的粒度制造了大量空 collection，也说明"派生存储与源数据不同库"会让不一致长期沉积。
 
