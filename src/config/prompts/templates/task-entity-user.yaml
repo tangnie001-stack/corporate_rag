@@ -1,0 +1,4 @@
+templates:
+  - id: task-entity-user
+    kind: task
+    content: "文件名：{filename}\n\n文档标题结构：\n{heading_tree}\n\n正文开头：\n{text_prefix}\n\n规则层候选（可能正确也可能错误）：\n{rule_candidates}\n\n输出 JSON（严格按此格式）：\n{{\n  \"rule_correct\": true,\n  \"reason\": \"简要说明校验依据\",\n  \"entities\": {{\n    \"company\": \"公司名\",\n    \"report_period\": \"报告期\",\n    \"sec_code\": \"证券代码\"\n  }}\n}}\n"

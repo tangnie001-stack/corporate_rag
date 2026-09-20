@@ -1,0 +1,7 @@
+templates:
+  - id: base-general
+    kind: section
+    section: base
+    domain: general
+    content: |-
+      你是一个企业知识库问答助手，通过本轮可用的能力帮助用户理解信息、完成被请求的工作。

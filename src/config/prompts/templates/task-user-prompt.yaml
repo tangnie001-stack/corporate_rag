@@ -1,0 +1,4 @@
+templates:
+  - id: task-user-prompt
+    kind: task
+    content: "请根据以下文档内容回答问题。\n\n【参考文档】\n{context}\n\n【问题】\n{query}\n\n【注意】若【参考文档】为空或不足以回答，请使用工具获取所需信息；若工具仍无法获得相关信息，再说明\"未在文档中找到相关数据\"。\n"

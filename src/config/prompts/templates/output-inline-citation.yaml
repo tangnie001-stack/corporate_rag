@@ -1,0 +1,5 @@
+templates:
+  - id: output-inline-citation
+    kind: section
+    section: output
+    content: "\n引用知识库文档或联网搜索结果时，请在对应句末标注来源编号 [1][2]，编号须与工具返回的来源列表一致，例如：\"营收3943亿元[1]\"。\n"

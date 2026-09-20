@@ -1,0 +1,6 @@
+templates:
+  - id: sources-kb-unbound
+    kind: section
+    section: sources
+    content: |-
+      本会话未绑定知识库，请勿调用知识库检索工具，可基于常识或联网搜索（search_web）回答；若引用联网搜索结果，回答须在对应句末标注来源编号 [1][2]。
