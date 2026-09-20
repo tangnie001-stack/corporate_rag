@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from src.infra.db.mysql_db.document_repo import DocumentRepo
+from src.infra.db.repos.document_repo import DocumentRepo
 from src.rag.temporal import (
     compute_missing,
     derive_candidate_years,

@@ -242,7 +242,7 @@ Nginx 已预配 SSE 支持（`proxy_buffering off`），确保流式问答不卡
 │   ├── chat_manager.py        # 对话缓存管理
 │   ├── models.py              # LLM/Embedding/Rerank 工厂
 │   ├── vector_store.py        # ChromaDB 向量存储
-│   ├── mysql_db.py            # MySQL CRUD
+│   ├── infra/db/repos/        # PostgreSQL 各表的 SQL 访问层（repo 包）
 │   ├── document_loader.py     # 文档加载入口
 │   ├── eval_ragas.py          # RAGAS 评估脚本
 │   ├── config/

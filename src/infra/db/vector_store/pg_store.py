@@ -28,7 +28,7 @@ from src.models import get_embeddings
 if TYPE_CHECKING:
     # 仅在类型检查期导入，避免在导入期与 chunk_repo 形成循环依赖
     # （chunk_repo → vector_store 父包 __init__ → pg_store → chunk_repo）。
-    from src.infra.db.mysql_db.chunk_repo import ChunkRepo
+    from src.infra.db.repos.chunk_repo import ChunkRepo
 
 
 class QueryEmbedder:
@@ -73,7 +73,7 @@ class PgVectorStore:
         """
         if chunk_repo is None:
             from src.infra.db.engine import session_factory
-            from src.infra.db.mysql_db.chunk_repo import ChunkRepo
+            from src.infra.db.repos.chunk_repo import ChunkRepo
 
             chunk_repo = ChunkRepo(session_factory)
         if embed_fn is None:

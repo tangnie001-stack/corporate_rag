@@ -7,7 +7,7 @@ import pytest_asyncio
 from sqlalchemy import text
 
 from src.infra.db.engine import session_factory
-from src.infra.db.mysql_db.chunk_repo import ChunkRepo
+from src.infra.db.repos.chunk_repo import ChunkRepo
 from src.infra.db.vector_store.mapping import ChunkRow
 
 pytestmark = pytest.mark.asyncio

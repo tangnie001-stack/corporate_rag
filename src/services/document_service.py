@@ -16,7 +16,7 @@ from src.config import CHUNK_EVAL_ENABLED
 from src.config.response_codes import Code
 from src.infra.db.file_store import FileStore
 from src.infra.db.models.document import DocModel as DocEntity
-from src.infra.db.mysql_db import DocumentRepo
+from src.infra.db.repos import DocumentRepo
 from src.infra.db.vector_store import VectorStore
 from src.models import get_classify_llm, get_embeddings
 from src.parsers.router import DocRouter

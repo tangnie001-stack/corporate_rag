@@ -143,7 +143,7 @@ async def aggregate_kb_entities(kb_ids: list[str] | None) -> KbEntityAggregate:
     codes: set[str] = set()
     try:
         from src.infra.db.engine import session_factory
-        from src.infra.db.mysql_db import DocumentRepo
+        from src.infra.db.repos import DocumentRepo
 
         repo = DocumentRepo(session_factory)
         for kb_id in kb_ids:

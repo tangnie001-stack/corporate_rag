@@ -55,7 +55,7 @@ async def derive_candidate_years(kb_ids: list[str]) -> list[int]:
         候选年份列表（升序，可能仅含最近 N 年）
     """
     from src.infra.db.engine import session_factory
-    from src.infra.db.mysql_db.document_repo import DocumentRepo
+    from src.infra.db.repos.document_repo import DocumentRepo
 
     years: set[int] = set()
     repo = DocumentRepo(session_factory)

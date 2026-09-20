@@ -20,7 +20,7 @@ from src.chat.persistence import PersistenceService
 from src.config import REDIS_TTL, REDIS_URL
 from src.core import logging as core_logging
 from src.core.log_events import Event
-from src.infra.db.mysql_db import ChatRepo
+from src.infra.db.repos import ChatRepo
 from src.infra.llm.chat_message import ChatMessage
 
 

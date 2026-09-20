@@ -4,7 +4,7 @@ import uuid
 
 from loguru import logger
 
-from src.infra.db.mysql_db import UserRepo
+from src.infra.db.repos import UserRepo
 from src.utils.auth_crypto import hash_password, verify_password
 from src.utils.errors import BusinessError
 

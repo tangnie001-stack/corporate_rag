@@ -11,7 +11,7 @@ from sqlalchemy import text
 
 from src.chunking.validator import ChunkData
 from src.infra.db.engine import session_factory
-from src.infra.db.mysql_db import DocumentRepo
+from src.infra.db.repos import DocumentRepo
 from src.infra.db.vector_store.pg_store import PgVectorStore
 from src.services.document_service import DocumentService
 
@@ -231,7 +231,7 @@ async def test_delete_knowledge_base_is_atomic_when_chunk_delete_fails(
     atomic_kb, monkeypatch
 ):
     """删知识库时删分块失败 → 文档与知识库都**不得**被软删（且异常向上抛）。"""
-    from src.infra.db.mysql_db import KbRepo
+    from src.infra.db.repos import KbRepo
     from src.services.app_service import AppService
 
     kb_id, doc_repo = atomic_kb

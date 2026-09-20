@@ -11,13 +11,13 @@ from src.infra.db.base import Base
 def test_dead_model_package_is_gone():
     """不生效的那套模型目录必须已删除。"""
     with pytest.raises(ModuleNotFoundError):
-        importlib.import_module("src.infra.db.mysql_db.models")
+        importlib.import_module("src.infra.db.repos.models")
 
 
 def test_dead_alembic_dir_is_gone():
     """不生效的那套 alembic 目录必须已删除。"""
     with pytest.raises(ModuleNotFoundError):
-        importlib.import_module("src.infra.db.mysql_db.alembic.env")
+        importlib.import_module("src.infra.db.repos.alembic.env")
 
 
 def test_metadata_has_all_business_tables():

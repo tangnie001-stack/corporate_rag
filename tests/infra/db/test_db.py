@@ -8,7 +8,7 @@ from sqlalchemy import text
 
 from src.infra.db.engine import session_factory
 from src.infra.db.models.document import DocModel as DocEntity
-from src.infra.db.mysql_db import DocumentRepo, KbRepo
+from src.infra.db.repos import DocumentRepo, KbRepo
 
 # 本文件三个消息用例写入 `conversation_history` 的 session_id 前缀。
 # `save_message` 是纯 INSERT（新 uuid 主键），该表既无 user_id 列也无外键，
@@ -227,7 +227,7 @@ async def test_get_all_kb_doc_count():
 async def test_create_session_idempotent():
     """同一 session_id 重复创建应幂等跳过，不抛主键冲突异常。"""
     from src.infra.db.models.chat import SessionModel
-    from src.infra.db.mysql_db import ChatRepo
+    from src.infra.db.repos import ChatRepo
 
     chat_repo = ChatRepo(session_factory)
     session_id = f"session-{uuid.uuid4().hex[:8]}"
@@ -245,7 +245,7 @@ async def test_create_session_idempotent():
 @pytest.mark.asyncio
 async def test_message_status_default_complete():
     from src.infra.db.models.chat import MessageModel
-    from src.infra.db.mysql_db import ChatRepo
+    from src.infra.db.repos import ChatRepo
 
     chat_repo = ChatRepo(session_factory)
     session_id = f"sess-status-{uuid.uuid4().hex[:8]}"
@@ -259,7 +259,7 @@ async def test_message_status_default_complete():
 @pytest.mark.asyncio
 async def test_save_message_passthrough_status():
     from src.infra.db.models.chat import MessageModel
-    from src.infra.db.mysql_db import ChatRepo
+    from src.infra.db.repos import ChatRepo
 
     chat_repo = ChatRepo(session_factory)
     session_id = f"sess-st-{uuid.uuid4().hex[:8]}"
@@ -284,7 +284,7 @@ async def test_user_created_at_before_assistant():
     无需等待；断言用 <= 宽容到能接受相同时间戳。
     """
     from src.infra.db.models.chat import MessageModel
-    from src.infra.db.mysql_db import ChatRepo
+    from src.infra.db.repos import ChatRepo
 
     chat_repo = ChatRepo(session_factory)
     session_id = f"sess-ts-{uuid.uuid4().hex[:8]}"
@@ -310,7 +310,7 @@ async def test_user_created_at_before_assistant():
 async def test_bind_session_agent_is_bind_once():
     """bind-once：首次写入成功；再次写入（含不同值）不改动已有绑定。"""
     from src.infra.db.models.chat import SessionModel
-    from src.infra.db.mysql_db import ChatRepo
+    from src.infra.db.repos import ChatRepo
 
     chat_repo = ChatRepo(session_factory)
     sid = f"sess_{uuid.uuid4().hex[:12]}"
@@ -331,7 +331,7 @@ async def test_bind_session_agent_is_bind_once():
 async def test_create_session_with_agent_persists():
     """create_session 落 agent；未传时落空串（存量语义不变）。"""
     from src.infra.db.models.chat import SessionModel
-    from src.infra.db.mysql_db import ChatRepo
+    from src.infra.db.repos import ChatRepo
 
     chat_repo = ChatRepo(session_factory)
     sid = f"sess_{uuid.uuid4().hex[:12]}"

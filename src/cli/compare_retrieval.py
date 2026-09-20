@@ -17,7 +17,7 @@ import sys
 from itertools import product
 
 from src.infra.db.engine import session_factory
-from src.infra.db.mysql_db import KbRepo
+from src.infra.db.repos import KbRepo
 
 # 检索 top-K 搜索网格
 RETRIEVAL_VALUES = [5, 10, 15]

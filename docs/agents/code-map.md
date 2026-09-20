@@ -51,7 +51,7 @@ chunking/          分块：router(策略路由) / strategies(4 种) / validator
 parsers/           文档解析：pdf / docx / txt + base / router
 core/              日志：logging / log_events / log_event_specs
 config/            settings(环境变量) / prompts(提示词) / const(常量/文案/枚举) / response_codes
-infra/             基础设施：db(engine/DSN + transaction 事务边界 + models + mysql_db repos + vector_store + lexical_query) / llm / search(tokenizer 为唯一 jieba 分词入口) / auth / redis_client
+infra/             基础设施：db(engine/DSN + transaction 事务边界 + models + repos + vector_store + lexical_query) / llm / search(tokenizer 为唯一 jieba 分词入口) / auth / redis_client
 middleware/        auth / trace_id / response_processor（统一响应包装）
 cli/               RAGAS 评估、检索对比、trace 回放等命令行工具
 models.py          LLM / Embedding / Rerank 工厂（get_llm / get_embedding / get_rerank）
@@ -67,9 +67,9 @@ tools/             工具基类（base.py）
   也在 `engine.py`，与 Langfuse 共享同一实例，见 `docs/agents/defensive-patterns.md`。
 - **ORM 模型唯一来源**：`src/infra/db/models/`（`chat` / `chunk` / `document` / `eval_report` /
   `feedback` / `kb` / `user`），声明式基类与通用 Mixin 在 `src/infra/db/base.py`。
-- **Repo 层**：`src/infra/db/mysql_db/`（`chat_repo` / `chunk_repo` / `document_repo` /
-  `eval_repo` / `kb_repo` / `user_repo`）。⚠ **包名在 P1 迁移后已名不副实** —— 里面全是 PostgreSQL repo，
-  `mysql_db` 只是历史包名；改名（如改为 `repos/`）是独立事项，见需求池 F-18（P1 遗留项 L4）。
+- **Repo 层**：`src/infra/db/repos/`（`chat_repo` / `chunk_repo` / `document_repo` /
+  `eval_repo` / `kb_repo` / `user_repo`）。包名 `repos` 与内容一致：均为 PostgreSQL 各表的 SQL 访问层；
+  原历史包名 mysql_db 的改名已完成（P4 收尾），见需求池 F-18（P1 遗留项 L4，已修）。
 - **事务边界原语**：`src/infra/db/transaction.py` 的 `session_scope` 是跨表原子提交的唯一入口，
   每个 Repo 以其为基础暴露 `transaction()`。**写路径的事务边界**：跨表原子操作须用
   `session_scope(...)` / `Repo.transaction()` 打开唯一事务，并把 `session=` 传给参与方法
@@ -77,7 +77,7 @@ tools/             工具基类（base.py）
   （自开会话、出块提交）。规则与历史缺陷见 `docs/agents/defensive-patterns.md`「派生写操作跨事务」。
 - **`chunks` 表由 `ChunkModel` 映射**（`src/infra/db/models/chunk.py`）：baseline 手写建表
   （`content_seg` 文本列 + `tsv` 生成列 + `embedding vector(1024)` + 3 个索引），SQL 访问层是
-  `src/infra/db/mysql_db/chunk_repo.py` 的 `ChunkRepo`（含 `Vector.cosine_distance` dense 检索与
+  `src/infra/db/repos/chunk_repo.py` 的 `ChunkRepo`（含 `Vector.cosine_distance` dense 检索与
   `search_lexical` 词法检索：`tsv @@ to_tsquery` + `ts_rank` 降序，词元全被滤掉时降级为 `content LIKE`）。
   `content_seg` 存 jieba 词项（空格连接，见 `src/infra/search/tokenizer.py`），`tsv = to_tsvector('simple', content_seg)`
   是它的持久化生成列；分词结果随之固化，**分词器变更必须跑 `scripts/rewrite_content_seg.py --apply`**

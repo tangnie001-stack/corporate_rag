@@ -99,7 +99,7 @@ async def test_kb_row_still_exists(kb_row):
 
 async def test_repo_method_with_outer_session_does_not_commit(kb_row):
     """Repo 方法在外部会话下只执行语句：外层回滚后改动不可见。"""
-    from src.infra.db.mysql_db.kb_repo import KbRepo
+    from src.infra.db.repos.kb_repo import KbRepo
 
     repo = KbRepo(session_factory)
     async with repo.transaction() as s:
@@ -115,7 +115,7 @@ async def test_repo_method_with_outer_session_does_not_commit(kb_row):
 
 async def test_repo_method_without_session_still_commits(kb_row):
     """不传 session 时行为与改造前一致：出块即提交。"""
-    from src.infra.db.mysql_db.kb_repo import KbRepo
+    from src.infra.db.repos.kb_repo import KbRepo
 
     repo = KbRepo(session_factory)
     assert await repo.soft_delete_kb(kb_row) is True

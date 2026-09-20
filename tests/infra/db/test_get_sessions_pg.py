@@ -12,7 +12,7 @@ from sqlalchemy import delete, text
 
 from src.infra.db.engine import session_factory
 from src.infra.db.models.chat import MessageModel, SessionModel
-from src.infra.db.mysql_db import ChatRepo, KbRepo
+from src.infra.db.repos import ChatRepo, KbRepo
 
 pytestmark = pytest.mark.asyncio
 

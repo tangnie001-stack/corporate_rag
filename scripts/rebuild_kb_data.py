@@ -21,7 +21,7 @@ import os
 from collections import Counter
 
 from src.infra.db.engine import session_factory
-from src.infra.db.mysql_db import DocumentRepo, KbRepo
+from src.infra.db.repos import DocumentRepo, KbRepo
 from src.infra.db.vector_store import VectorStore
 from src.parsers.router import DocRouter
 from src.services.document_service import DocumentService

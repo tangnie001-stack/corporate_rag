@@ -244,7 +244,7 @@ def run_generate(
     _ensure_vertexai_stub()
 
     from src.infra.db.engine import session_factory
-    from src.infra.db.mysql_db import DocumentRepo, KbRepo
+    from src.infra.db.repos import DocumentRepo, KbRepo
     from src.infra.db.vector_store import VectorStore
 
     # ---- 0. 查询 kb_name / doc_names，并按白名单读取分块 ----

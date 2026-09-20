@@ -1,6 +1,6 @@
 """知识库管理服务 — KB 的创建、查询、删除。"""
 
-from src.infra.db.mysql_db import KbRepo
+from src.infra.db.repos import KbRepo
 
 
 class KBService:

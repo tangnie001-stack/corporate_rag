@@ -171,7 +171,7 @@ async def main() -> None:
 
     from src.agents.graph.workflow import build_graph
     from src.infra.db.engine import session_factory
-    from src.infra.db.mysql_db import KbRepo
+    from src.infra.db.repos import KbRepo
     from src.infra.db.vector_store import VectorStore
     from src.infra.llm.prompt_manager import PromptManager
     from src.models import get_llm, get_rerank

@@ -10,7 +10,7 @@ from loguru import logger
 
 from src.chat.manager import ChatManager
 from src.infra.db.models.document import DocModel as DocEntity
-from src.infra.db.mysql_db import (
+from src.infra.db.repos import (
     ChatRepo,
     DocumentRepo,
     EvalRepo,

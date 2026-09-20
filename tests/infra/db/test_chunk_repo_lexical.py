@@ -8,7 +8,7 @@ from sqlalchemy import text
 
 from src.infra.db.engine import session_factory
 from src.infra.db.lexical_query import build_lexical_query
-from src.infra.db.mysql_db.chunk_repo import ChunkRepo
+from src.infra.db.repos.chunk_repo import ChunkRepo
 from src.infra.db.vector_store.pg_store import PgVectorStore
 from src.infra.search.tokenizer import to_lexical_text
 

@@ -4,7 +4,7 @@ import json
 
 from src.core import logging as core_logging
 from src.core.log_events import Event
-from src.infra.db.mysql_db import ChatRepo
+from src.infra.db.repos import ChatRepo
 
 
 class PersistenceService:

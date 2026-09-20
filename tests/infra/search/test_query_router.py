@@ -176,7 +176,7 @@ async def test_aggregate_kb_entities_collects_from_meta_info() -> None:
 
     with (
         patch("src.infra.db.engine.session_factory", MagicMock()),
-        patch("src.infra.db.mysql_db.DocumentRepo", return_value=repo),
+        patch("src.infra.db.repos.DocumentRepo", return_value=repo),
     ):
         agg = await aggregate_kb_entities(["kb-1", "kb-2"])
 
@@ -208,7 +208,7 @@ async def test_aggregate_kb_entities_degrades_on_db_error() -> None:
 
     with (
         patch("src.infra.db.engine.session_factory", MagicMock()),
-        patch("src.infra.db.mysql_db.DocumentRepo", return_value=repo),
+        patch("src.infra.db.repos.DocumentRepo", return_value=repo),
     ):
         agg = await aggregate_kb_entities(["kb-1"])
 
@@ -236,7 +236,7 @@ async def test_aggregate_kb_entities_skips_bad_meta_info() -> None:
 
     with (
         patch("src.infra.db.engine.session_factory", MagicMock()),
-        patch("src.infra.db.mysql_db.DocumentRepo", return_value=repo),
+        patch("src.infra.db.repos.DocumentRepo", return_value=repo),
     ):
         agg = await aggregate_kb_entities(["kb-1"])
 

@@ -10,7 +10,7 @@ import pytest_asyncio
 from sqlalchemy import text
 
 from src.infra.db.engine import session_factory
-from src.infra.db.mysql_db import ChatRepo, KbRepo
+from src.infra.db.repos import ChatRepo, KbRepo
 
 pytestmark = pytest.mark.asyncio
 
