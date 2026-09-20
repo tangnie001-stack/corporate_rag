@@ -94,6 +94,12 @@
 
 **规则**：主键/UUID 外键列用 `String(36)`（`src/infra/db/base.py`）。新增模型时遵循此约定。
 
+### 派生写操作跨事务
+
+**现象**：一次业务动作要写多张表（写分块 + 更新文档状态、删分块 + 软删文档/知识库），若各表各自提交，进程死在中间就产生**孤儿**：分块已删而状态已变，或分块未写而文档已 ready。更隐蔽的一种是删除路径**吞掉异常** —— 分块删除失败只 `warning` 后继续软删文档/知识库，孤儿永久存在且不可观测（历史缺陷：KB 删除的 `except Exception: logger.warning`）。
+
+**规则**：跨表写用 `session_scope` / `Repo.transaction()` 打开**唯一**事务，参与者方法传 `session=`（传入时不提交，契约见 api_contract.md §4），失败即整体回滚，**且不得吞异常** —— 删除失败必须向上抛，由调用方决定呈现。实现点：`_write_chunks_and_mark_ready`、`DocumentService.delete_document`、`AppService.delete_knowledge_base`。
+
 ## 存储迁移
 
 ### 派生副本与权威来源分离时，读取侧必须显式重建契约键
@@ -121,6 +127,12 @@
 **现象**：prod 曾配 `--workers 4`。若流式生成依赖进程内状态（任务注册表、事件缓冲），多 worker 下续接/取消请求可能落到别的进程，导致状态读不到、任务找不到。
 
 **规则**：生产环境以单 worker 部署（uvicorn 不配 `--workers`）。流式生成的任务注册表、事件缓冲等状态留在进程内，不引入 Redis 共享/多 worker 支持。新增流式或部署相关设计时遵循此约束；确需横向扩展时先评估，不得默认多 worker。
+
+### 单 worker 下的阻塞调用
+
+**现象**：生产单 worker（见上一条），任何同步阻塞调用都会冻住整个进程 —— 所有请求与 SSE 一起卡住。两类已识别的阻塞面：① 同步外网调用（DashScope embedding / rerank、解析）；② CPU 密集的 jieba 分词（首次加载词典约 0.5–1 s）。二者在 `PgVectorStore.add_chunks` 等处已用 `asyncio.to_thread` offload 到线程池。
+
+**规则**：阻塞调用不得放在事件循环线程上 —— 同步外网 / CPU 工作一律走 `asyncio.to_thread`。**事务内不得包含外网调用**：embedding 等慢调用必须在**进入事务之前**算好，事务只接收已算好的向量（`design.md` D7）—— 否则事务长占连接与锁，单 worker 下把连接池拖垮。
 
 ## 如何更新
 

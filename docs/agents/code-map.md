@@ -13,7 +13,7 @@
 |------|------|
 | `src/` | 后端 Python 源码（分层见下） |
 | `tests/` | 单元测试，与 `src/` 模块一一对应 |
-| `deploy/` | 部署件：`nginx/`（反向代理 + 前端静态文件）、`chroma/Dockerfile`（遗留，待 P4 清理）、`postgres/init/` 建库脚本、`clickhouse/` 集群配置、`wait-for-it.sh` |
+| `deploy/` | 部署件：`nginx/`（反向代理 + 前端静态文件）、`postgres/init/` 建库脚本、`clickhouse/` 集群配置、`wait-for-it.sh` |
 | `deploy/nginx/html/` | **前端页面静态文件**（chat.html / index.html / login.html 等） |
 | `skills/` | 运行时 skill 内容库（`<name>/SKILL.md`，业务侧管理，compose volume 挂载进容器 `/app/skills`） |
 | `agents/` | **智能体预设内容库**（`<name>.md` 平坦文件，业务侧管理；见下方「三个 `agents` 的区别」） |
@@ -51,7 +51,7 @@ chunking/          分块：router(策略路由) / strategies(4 种) / validator
 parsers/           文档解析：pdf / docx / txt + base / router
 core/              日志：logging / log_events / log_event_specs
 config/            settings(环境变量) / prompts(提示词) / const(常量/文案/枚举) / response_codes
-infra/             基础设施：db(engine/DSN + models + mysql_db repos + vector_store + lexical_query) / llm / search(tokenizer 为唯一 jieba 分词入口) / auth / redis_client
+infra/             基础设施：db(engine/DSN + transaction 事务边界 + models + mysql_db repos + vector_store + lexical_query) / llm / search(tokenizer 为唯一 jieba 分词入口) / auth / redis_client
 middleware/        auth / trace_id / response_processor（统一响应包装）
 cli/               RAGAS 评估、检索对比、trace 回放等命令行工具
 models.py          LLM / Embedding / Rerank 工厂（get_llm / get_embedding / get_rerank）
@@ -69,7 +69,12 @@ tools/             工具基类（base.py）
   `feedback` / `kb` / `user`），声明式基类与通用 Mixin 在 `src/infra/db/base.py`。
 - **Repo 层**：`src/infra/db/mysql_db/`（`chat_repo` / `chunk_repo` / `document_repo` /
   `eval_repo` / `kb_repo` / `user_repo`）。⚠ **包名在 P1 迁移后已名不副实** —— 里面全是 PostgreSQL repo，
-  `mysql_db` 只是历史包名；改名（如改为 `repos/`）是独立事项，见需求池 L4。
+  `mysql_db` 只是历史包名；改名（如改为 `repos/`）是独立事项，见需求池 F-18（P1 遗留项 L4）。
+- **事务边界原语**：`src/infra/db/transaction.py` 的 `session_scope` 是跨表原子提交的唯一入口，
+  每个 Repo 以其为基础暴露 `transaction()`。**写路径的事务边界**：跨表原子操作须用
+  `session_scope(...)` / `Repo.transaction()` 打开唯一事务，并把 `session=` 传给参与方法
+  —— 参与者只执行语句、不提交，提交与回滚由边界那一层决定；不传 `session` 的老调用点行为不变
+  （自开会话、出块提交）。规则与历史缺陷见 `docs/agents/defensive-patterns.md`「派生写操作跨事务」。
 - **`chunks` 表由 `ChunkModel` 映射**（`src/infra/db/models/chunk.py`）：baseline 手写建表
   （`content_seg` 文本列 + `tsv` 生成列 + `embedding vector(1024)` + 3 个索引），SQL 访问层是
   `src/infra/db/mysql_db/chunk_repo.py` 的 `ChunkRepo`（含 `Vector.cosine_distance` dense 检索与

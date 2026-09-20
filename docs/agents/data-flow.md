@@ -5,7 +5,8 @@
 ```
 用户上传 → MinIO 存储 → 文档解析(parse) → 策略检测
 → 智能分块(chunk) → 分块质量校验 → [可选]分块质量评估
-→ PostgreSQL 分块入库(chunks 表：content + embedding) → PostgreSQL 文档状态更新(ready)
+→ embedding 计算(事务外) → PostgreSQL 分块入库(chunks 表：content + embedding)
+  + 文档状态更新(ready)   ← 同一事务
 ```
 
 入口: `POST /api/kbs/documents/upload` → 后台 `asyncio.create_task(_process_document_task)`
@@ -13,6 +14,9 @@
 
 分块与向量同写一张 `chunks` 表（`kb_id` 列表达知识库归属，向量存 `embedding` 列）；
 `VectorStore.add_chunks` 按 `(kb_id, doc_id, chunk_index)` 幂等覆盖并删尾部残留。
+**写入的事务边界**：embedding 计算（慢的外网调用）在**事务外**完成，
+`DocumentService._write_chunks_and_mark_ready` 再在**同一事务**内「写 chunks + 文档标记 ready」
+—— 进程死在中间不会留下「有分块、文档未 ready」的孤儿。
 检索底座的表结构、访问层与 ORM 归属见 code-map.md「关系型存储（PostgreSQL）」。
 
 ## 链路 2：用户问答 — 绑 KB 检索问答 与 未绑 KB 纯对话 ★
@@ -272,15 +276,22 @@ SSE 消费侧按事件类型接线（`agent_service._convert_event`，src/servic
 `search_web` → `web_search` 阶段（"正在联网搜索.../联网搜索完成..."）、`ask_user` 不发状态
 （澄清卡由 ask_user/verify 经 clarify_channel 直投）；`on_chain_end`（`format`）→ citations。
 
-## 链路 3：知识库管理
+## 链路 3：知识库与文档管理
 
 ```
 创建知识库 → PostgreSQL get_or_create（名称去重）→ 返回 kb_id
 列出知识库 → PostgreSQL 查询 + 文档计数
-删除知识库 → 软删文档 → 按 kb_id 删 chunks 行 → 软删 KB 记录
+删除文档 → DocumentService.delete_document：校验（存在 / 属主 / 状态）→ 同一事务（删分块 + 软删文档）
+删除知识库 → AppService.delete_knowledge_base：同一事务（软删文档 + 删分块 + 软删 KB）
 ```
 
-入口: `POST /api/kbs` / `POST /api/kbs/list` / `POST /api/kbs/delete`
+入口: `POST /api/kbs` / `POST /api/kbs/list` / `POST /api/kbs/delete` /
+`POST /api/kbs/documents/delete`
+
+删除链路的跨表写以 `session_scope` / `Repo.transaction()` 打开唯一事务，参与者传 `session=`；
+任一步失败整体回滚，**且不得吞异常**（历史缺陷：KB 删除时 `except Exception: logger.warning`
+让孤儿行永久存在）。规则与失败模式见 `docs/agents/defensive-patterns.md`「派生写操作跨事务」；
+删除端点的状态码契约见 `docs/agents/api_contract.md` §2.2.5。
 
 ## 链路 4：会话管理 ★
 

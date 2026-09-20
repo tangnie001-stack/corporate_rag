@@ -182,7 +182,7 @@
 ## 基础设施
 
 - **PostgreSQL**：关系型存储后端（用户 / 知识库 / 文档 / 会话 / 消息 / 反馈 / 评估报告 7 张表，外加检索底座表 `chunks`），经 `postgresql+asyncpg` 访问。结构、引擎归属与迁移链见 `docs/agents/code-map.md`「关系型存储（PostgreSQL）」
-- **ChromaDB**：**遗留向量库**，dense 检索已由 PostgreSQL + pgvector 承载；`chromadb` 依赖、`data/chroma_persist` 与 `deploy/chroma/` 仍在仓库中，唯一用途是搬迁 / 等价性脚本读取旧语料，待 P4 清理
+- **ChromaDB**：**已退役向量库**，dense 检索由 PostgreSQL + pgvector 承载。P4 已删除 `chromadb` 依赖、`deploy/chroma/`、其配置项与 compose 卷/挂载，搬迁与等价性脚本一并退役；`data/chroma_persist`（连同 `data/chroma` / `data/bm25_index`）仍留在磁盘上作为历史回滚基座，Task 11 退役
 - **MinIO**：文档对象存储
 - **LiteLLM**：LLM 代理，`LLM_BASE_URL` 指向（默认 `http://litellm-proxy:4000`）
 - **DashScope**：通义千问系列模型的提供商（Embedding / LLM / Rerank）
@@ -191,9 +191,11 @@
 
 | 术语 | 定义 | 常见错误 |
 |------|------|---------|
-| `存储收敛（storage consolidation）` | 把存储从 MySQL + ChromaDB 收敛到 PostgreSQL 的变更方向。P1 换关系型后端；P2 把 dense 向量检索换到 PostgreSQL + pgvector；P3 把词法检索从进程内 `rank_bm25` 换到 PostgreSQL 全文检索（`tsv @@ to_tsquery('simple', …)` + `ts_rank`，query 侧由 jieba 预分词）。替换不改**融合参数**与 **dense 路**的行为；**词法侧的算法与分词替换是独立事项**（必然改变行为，见 `design.md` D6） | ❌ 以为存储替换必然改变 dense 路行为，或以为词法路换算法也算"只改存储" |
+| `存储收敛（storage consolidation）` | 把存储从 MySQL + ChromaDB 收敛到 PostgreSQL 的变更方向。P1 换关系型后端；P2 把 dense 向量检索换到 PostgreSQL + pgvector；P3 把词法检索从进程内 `rank_bm25` 换到 PostgreSQL 全文检索（`tsv @@ to_tsquery('simple', …)` + `ts_rank`，query 侧由 jieba 预分词）。替换不改**融合参数**与 **dense 路**的行为；**词法侧的算法与分词替换是独立事项**（必然改变行为，见 `design.md` D6）。**P4 终局**：跨表写收口到 `session_scope`（事务边界），Chroma / BM25 的依赖、配置、compose 卷与挂载、`deploy/chroma/`、一次性脚本全部退役，**回滚到 Chroma 不再可能**（磁盘上的 `data/chroma_persist` 是仅存的历史回滚基座，Task 11 退役） | ❌ 以为存储替换必然改变 dense 路行为，或以为词法路换算法也算"只改存储" |
 | `DSN 单一来源` | 应用 DSN 只由 `src/config/settings.py:build_postgres_dsn()` 产出（`postgresql+asyncpg://`，`POSTGRES_PASSWORD` 缺失即抛 `RuntimeError`），`src/infra/db/engine.py` 在模块级消费它。宿主侧跑 alembic / pytest 时用 `POSTGRES_HOST=localhost` 覆盖 `.env` 里的 compose 服务名（`python-dotenv` 默认 `override=False`，已存在的环境变量优先） | ❌ 各处自行拼连接串；❌ 宿主侧忘了加 `POSTGRES_HOST=localhost` |
 | `chunks 表` | 单一张分块表，以 `kb_id` 列表达知识库归属（取代「每库一 collection」）。由 `ChunkModel` 映射（`src/infra/db/models/chunk.py`，ORM 属性名 `extra` → 列名 `metadata`），SQL 访问层是 `ChunkRepo`。`content_seg` 是词法检索文本列（P2 写正文原值作占位，P3 起为 jieba 分词输出并全量重写）；`tsv` 是 `to_tsvector('simple', content_seg)` 的持久化生成列（GIN 索引）；`embedding` 为 `vector(1024)`。列清单、索引与迁移链见 code-map.md「关系型存储（PostgreSQL）」 | ❌ 以为 `chunks` 无 ORM 模型；❌ 把 `content_seg`/`tsv` 当成应用层字段名；❌ 以为还按知识库分 collection |
+| `事务边界（session_scope）` | 跨表原子提交的唯一入口：`src/infra/db/transaction.py` 的 `session_scope(session_factory, session=None)`，每个 Repo 以其为基础暴露 `transaction()`。参与者方法接受 `session=` 且**传入时不提交**，提交/回滚由持有该会话的边界决定。入库路径「写 chunks + 标记 ready」、文档删除「删分块 + 软删文档」、KB 删除「软删文档 + 删分块 + 软删 KB」均同事务，**删除路径失败不得吞异常**；embedding 等外网调用必须在事务外完成 | ❌ 把外网调用放进事务（长占连接与锁）；❌ 参与者自行 commit 破坏边界；❌ `except Exception` 吞掉删除失败 |
+| `一次性验收产物（已退役）` | P2 dense 等价性与 P3 词项命中探针的一次性脚本（`scripts/migrate_chroma_to_pg.py` / `scripts/dense_equivalence_check.py` / `scripts/lexical_probe.py`）已随 P4 退役；其测量文档（`docs/tmp/p2-dense-equivalence-*.md` / `p3-lexical-probe-*.md` / `p3-acceptance-*.md`）作为「那次对比的冻结记录」保留，**不可重跑、不得当质量基线**（判据缺口见需求池 F-30） | ❌ 以为还能跑搬迁/探针脚本重建语料；❌ 回写其测量数字或把它读作质量结论 |
 
 ## 如何更新
 

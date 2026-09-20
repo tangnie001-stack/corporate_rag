@@ -71,6 +71,7 @@
 - override 仅挂载 `src/` 和 `tests/`，其他目录改动不会进容器（如 pip 安装的包需重建镜像）
 - app 的 uvicorn 无 `--reload`（见 CLAUDE.md 常用命令），必须 restart 进程才能加载新代码
 - 判断"代码改动是否已生效"先看 override：挂了 `src/` 则文件已同步只需 restart；未挂载才需要 `--build`
+- **`restart` 只重建进程、不重读 compose 的 env / volumes / command**：改了这些必须 `docker compose up -d --force-recreate app`（`restart` 不生效）；改了依赖（`pyproject.toml` / requirements）必须 `docker compose build --no-cache app`，再 `up -d --force-recreate app`
 
 ### E2E / 验收前的进程代码前置条件
 
@@ -194,6 +195,23 @@
 
 **为什么不能省**：`content_seg` 是 `tsv` 生成列的输入，落库即固化；不重写会静默降召回，
 没有任何日志或异常提示。
+
+## 数据（data）
+
+### 退役 Chroma 之后如何重建 dev 语料
+
+**场景**：dev 的 PostgreSQL 语料被清空或损坏（复位、误删），需要重建。
+**步骤**：
+1. 先读计数基线（`knowledge_base | document | chunks | users`，应为 `5|0|176|1`）：
+   `docker compose exec -T postgres psql -U corporate_rag -d corporate_rag -tAc "SELECT (SELECT count(*) FROM knowledge_base)||'|'||(SELECT count(*) FROM document)||'|'||(SELECT count(*) FROM chunks)||'|'||(SELECT count(*) FROM users);"`
+2. 重建来源**只有一个** —— MinIO 里的原始上传文件：
+   - 若 `document` 记录还在（只清了 chunks）：`docker compose exec app python -m scripts.rebuild_kb_data.py --all`，按记录的 `file_path` 从 MinIO 重跑入库；
+   - 若 `document` / KB 记录也丢了：从 MinIO 取原始文件，经 `POST /api/kbs/documents/upload` 重新上传。
+**验证**：`chunks` 计数恢复；`POSTGRES_HOST=localhost .venv/bin/python scripts/rewrite_content_seg.py --check` 退出码 0（`stale=0`）。
+**注意事项**：
+- **搬迁脚本已退役**：`scripts/migrate_chroma_to_pg.py` / `scripts/dense_equivalence_check.py` 已随 P4 删除，**不能再从 Chroma 语料重建**，别指望跑旧脚本。
+- **原始文件是唯一不可再生的源头**：MinIO 中的原始上传文件若丢失，语料不可恢复。
+- `data/chroma_persist` / `data/chroma` / `data/bm25_index` 仍是磁盘上的历史回滚基座（Task 11 退役），但读取它们的脚本已删，**不是可用的重建路径**。
 
 ## 分区命名
 

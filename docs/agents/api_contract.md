@@ -142,6 +142,28 @@ Response:
 {"code": "SUCCESS", "message": "操作成功", "data": {"items": [...], "total": 42, "page": 1, "page_size": 50}}
 ```
 
+#### 2.2.5 `POST /api/kbs/documents/delete → 200 | 404 | 403 | 409`
+
+删除文档：软删文档 + 删除其全部分块，**同一事务**内完成。端点只转调
+`DocumentService.delete_document`（不再直取 `_doc_repo` / `vector_store`），请求体不变。
+
+Body: `{"kb_id": "uuid", "doc_id": "uuid"}`
+
+Success:
+```json
+{"code": "SUCCESS", "message": "操作成功", "data": {"success": true}}
+```
+
+| 状态码 | code | message | 触发条件 |
+|--------|------|---------|---------|
+| 404 | `DOC_NOT_FOUND` | 文档不存在 | 文档不存在 / 已软删，或不属于该 `kb_id` |
+| 403 | `DOC_DELETE_NOT_ALLOWED` | 只能删除自己上传的文档 | 调用者非文档属主 |
+| 409 | `DOC_STATUS_CONFLICT` | 文档当前状态不允许删除，仅 ready 和 failed 状态的文档可删除 | 文档状态非 `ready` / `failed`（处理中不可删） |
+
+> 分块删除与软删文档同事务：任一步失败整体回滚，**不得**留下「文档已软删、分块成孤儿」
+> 的中间态（旧实现先软删文档再删分块，且吞掉删除异常）。事务边界见 §4 与
+> `docs/agents/data-flow.md`「链路 3」。
+
 ### 2.3 SSE 流式问答
 
 #### 2.3.1 `POST /api/chat/stream`
@@ -793,6 +815,12 @@ CASCADE 级联删除：知识库 → 文档 → 对话历史。
 公开入口名仍是 `VectorStore`，实现是 `src/infra/db/vector_store/pg_store.py` 的 `PgVectorStore`。
 **所有 IO 方法都是 `async`，调用方必须 `await`。**
 
+> **事务边界**：跨表写操作由调用方用 `session_scope` / `Repo.transaction()` 打开唯一事务，
+> 把 `session=` 透传给 `VectorStore` 的写方法（`add_chunks` / `delete_document` /
+> `delete_collection`）。`session` 传入时这些方法**只执行语句、不提交** —— 提交与回滚由
+> 持有该会话的外层边界决定；`session=None` 时下层自开会话并提交（老调用点行为不变）。
+> 规则与历史缺陷见 `docs/agents/defensive-patterns.md`「派生写操作跨事务」。
+
 ### 4.1 分块 ID
 
 分块 ID = `f"{doc_id}:{chunk_index}"`，与 PG 行 `(kb_id, doc_id, chunk_index)` 一一对应，用于按文档删除。
@@ -802,15 +830,17 @@ CASCADE 级联删除：知识库 → 文档 → 对话历史。
 `VectorStore(chunk_repo=None, embed_fn=None)`：`chunk_repo` 缺省用应用 `session_factory` 构造 `ChunkRepo`；
 `embed_fn` 缺省为 DashScope 的 `QueryEmbedder`（`embed_query` / `embed_documents`）。
 
-### 4.3 `async VectorStore.add_chunks(kb_id, chunks, doc_id, embeddings=None) → int`
+### 4.3 `async VectorStore.add_chunks(kb_id, chunks, doc_id, embeddings=None, session=None) → int`
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
 | `chunks` | `list[ChunkData]` | 解析器产出的分块数据（Parent-Child 格式） |
 | `doc_id` | `str` | 文档 UUID |
 | `embeddings` | `list[list[float]] \| None` | 预计算向量；`document_service` 恒预计算，None 分支仅为兼容保留 |
+| `session` | `AsyncSession \| None` | 外部事务边界提供的会话；**传入时不提交**（提交/回滚由调用方边界决定），`None` 时下层自开会话并提交 |
 
 按 `(kb_id, doc_id, chunk_index)` 幂等覆盖，并删除尾部残留。返回实际写入行数。
+传入 `session` 时 embedding 必须已在事务外算好 —— 向量化是慢的外网调用，不应占用事务。
 
 ### 4.4 `async VectorStore.dense_search(kb_id, query, k=5) → list[ChunkResult]`
 
@@ -845,9 +875,10 @@ dense 路 top-k，按余弦距离（pgvector `<=>`）升序。`similarity_search
 
 **查询条件在应用层构造**（`src/infra/db/lexical_query.py`）：每个词元先按安全字符集（中日韩字符 / 字母 / 数字 / 下划线）剔除，再拼成 `词元:*` 并以 ` | ` 连接（前缀 OR：任一词元命中即召回，精度由下游 RRF/rerank 承担）；词元全被滤掉时降级为 `content LIKE '%原文%'`（LIKE 通配符已转义）。**用户原文不得直接交给 `to_tsquery`** —— 含空格会抛语法错误。
 
-### 4.6 `async VectorStore.delete_collection(kb_id) → bool`
+### 4.6 `async VectorStore.delete_collection(kb_id, session=None) → bool`
 
-删除知识库的全部分块；有删除行返回 True，否则 False。
+删除知识库的全部分块；有删除行返回 True，否则 False。`session` 语义同 §4.3
+（传入时不提交，由调用方的事务边界决定）。
 
 ### 4.7 `async VectorStore.get_chunks_by_doc_id(doc_id, kb_id) → list[ChunkResult]`
 
@@ -861,9 +892,9 @@ dense 路 top-k，按余弦距离（pgvector `<=>`）升序。`similarity_search
 
 取整个知识库的全部分块（空库检查 / 全量读取用）。调用方：`src/cli/eval_ragas.py`（空库检查）、`scripts/rebuild_kb_data.py`（清空前的存在性读取）。
 
-### 4.10 `async VectorStore.delete_document(kb_id, doc_id) → int`
+### 4.10 `async VectorStore.delete_document(kb_id, doc_id, session=None) → int`
 
-删除某文档的全部分块，返回删除行数。
+删除某文档的全部分块，返回删除行数。`session` 语义同 §4.3（传入时不提交，由调用方的事务边界决定）。
 
 ### 4.11 `async VectorStore.list_collections() → list[str]`
 
