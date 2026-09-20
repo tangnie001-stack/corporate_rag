@@ -132,6 +132,22 @@ async def test_add_chunks_without_embeddings_computes_them(store_and_kb):
     assert n == 2  # 兜底补算的向量必须真的落库
 
 
+async def test_add_chunks_rejects_session_without_embeddings(store_and_kb):
+    """D7 结构性保证：传 session 却依赖内部补算 embeddings 必须直接报错。
+
+    该组合会把 DashScope 外部调用带进调用方已开启的事务。守卫先于空列表短路，
+    故即便 chunks 为空也报错 —— 契约误用在任何路径上都要确定性暴露。
+    """
+    store, kb_id = store_and_kb
+    doc_id = uuid.uuid4().hex
+    chunks = [ChunkData(content="x", metadata={}, chunk_id="x:0")]
+    async with session_factory() as session:
+        with pytest.raises(ValueError, match="必须由调用方在事务外预计算 embeddings"):
+            await store.add_chunks(kb_id, chunks, doc_id, session=session)
+        with pytest.raises(ValueError, match="必须由调用方在事务外预计算 embeddings"):
+            await store.add_chunks(kb_id, [], doc_id, session=session)
+
+
 async def test_written_chunk_is_immediately_lexically_searchable(store_and_kb):
     """写入后 tsv 生成列自动填充，词法路立即可命中（不需要额外重建索引）。"""
     from src.chunking.validator import ChunkData

@@ -95,8 +95,8 @@ class PgVectorStore:
             kb_id: 知识库 ID
             chunks: 分块数据列表
             doc_id: 文档 ID
-            embeddings: 预计算向量；为 None 时在此处补算（document_service 恒预计算，
-                因此正常路径不会走到这里；保留它是为了不改变既有方法契约）
+            embeddings: 预计算向量；`session` 为 None 时留 None 可在此处补算，
+                `session` 非 None 时必须由调用方在事务外算好
             session: 外部事务边界提供的会话；None 时下层自开会话并提交
 
         Returns:
@@ -105,7 +105,16 @@ class PgVectorStore:
         Note:
             传入 `session` 时本方法**不提交**：提交/回滚由外部边界决定。调用方须
             保证 embedding 已在事务外算好 —— 向量化是慢的外部调用，不应占用事务。
+
+        Raises:
+            ValueError: 同时传入 `session` 与 `embeddings=None`；该组合会把 embedding
+                外部调用带进调用方已开启的事务，违反 D7
         """
+        # 先于空列表短路：传 session 却依赖内部补算属契约误用，需在任何路径上确定性报错
+        if session is not None and embeddings is None:
+            raise ValueError(
+                "add_chunks: 传入 session 时必须由调用方在事务外预计算 embeddings"
+            )
         if not chunks:
             return 0
         if embeddings is None:

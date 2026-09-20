@@ -202,6 +202,38 @@ def test_delete_document_not_found(mock_app_service, auth_client):
     assert response.status_code == 404
 
 
+def test_delete_document_not_owner(mock_app_service, auth_client):
+    """POST /api/kbs/documents/delete 非属主由 service 抛 403。"""
+    mock_svc = mock_app_service
+    mock_svc.document.delete_document = AsyncMock(
+        side_effect=BusinessError(
+            Code.DOC_DELETE_NOT_ALLOWED, Code.DOC_DELETE_NOT_ALLOWED_MSG, 403
+        )
+    )
+
+    response = auth_client.post(
+        "/api/kbs/documents/delete", json={"kb_id": "kb-1", "doc_id": "doc-1"}
+    )
+
+    assert response.status_code == 403
+
+
+def test_delete_document_status_conflict(mock_app_service, auth_client):
+    """POST /api/kbs/documents/delete 状态不允许由 service 抛 409。"""
+    mock_svc = mock_app_service
+    mock_svc.document.delete_document = AsyncMock(
+        side_effect=BusinessError(
+            Code.DOC_STATUS_CONFLICT, Code.DOC_STATUS_CONFLICT_MSG, 409
+        )
+    )
+
+    response = auth_client.post(
+        "/api/kbs/documents/delete", json={"kb_id": "kb-1", "doc_id": "doc-1"}
+    )
+
+    assert response.status_code == 409
+
+
 # Tests for _merge_tiny_chunks
 
 

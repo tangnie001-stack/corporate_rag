@@ -124,7 +124,7 @@ async def test_ingest_is_atomic_when_status_update_fails(atomic_kb, monkeypatch)
 
     monkeypatch.setattr(doc_repo, "update_document_status", _boom)
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="inject: status update failed"):
         await svc._write_chunks_and_mark_ready(
             kb_id=kb_id,
             doc_id=doc_id,
