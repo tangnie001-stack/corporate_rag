@@ -63,7 +63,7 @@ Langfuse (:3000) → PostgreSQL (Tracing 存储)
 评估执行: `python -m src.cli.eval_ragas --kb-id xxx`（加 `--gate` 启用质量门禁）
 
 ### 链路 7：分块质量评估（嵌入在链路 1 中）★
-由 `CHUNK_EVAL_ENABLED` 开关控制，`src/eval/chunk_scorer.py` 实现
+由 `CHUNK_EVAL_ENABLED` 开关控制，`src/chunking/scorer.py` 实现
 
 > ★ 标注的为关键链路
 
@@ -288,13 +288,14 @@ Nginx 已预配 SSE 支持（`proxy_buffering off`），确保流式问答不卡
 
 ```bash
 
-# 运行评估（需先创建知识库并上传测试文档）
-python src/eval_ragas.py
+# 生成测试集（需先创建知识库并上传测试文档）
+python -m src.cli.eval_ragas --kb-id <KB_ID> --generate --size 20
 
-# Benchmark 对比不同 chunk_size
-python src/eval_ragas.py --chunk-size 512
-python src/eval_ragas.py --chunk-size 768
-python src/eval_ragas.py --chunk-size 1024
+# 运行评估（加 --gate 启用质量门禁，不达标退出码为 1）
+python -m src.cli.eval_ragas --kb-id <KB_ID>
+
+# 列出可用知识库
+python -m src.cli.eval_ragas --list-kbs
 ```
 
 ## 已知限制

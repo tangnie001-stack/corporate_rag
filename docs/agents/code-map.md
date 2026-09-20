@@ -17,7 +17,7 @@
 | `deploy/nginx/html/` | **前端页面静态文件**（chat.html / index.html / login.html 等） |
 | `skills/` | 运行时 skill 内容库（`<name>/SKILL.md`，业务侧管理，compose volume 挂载进容器 `/app/skills`） |
 | `agents/` | **智能体预设内容库**（`<name>.md` 平坦文件，业务侧管理；见下方「三个 `agents` 的区别」） |
-| `docs/` | 文档：`agents/`（本目录，规则/契约/排查）、`design/`（UI 设计规格与 HTML 预览）、`openspec/`（OpenSpec 主目录）、`superpowers/`、`pitfalls/` |
+| `docs/` | 文档：`agents/`（本目录，规则/契约/排查）、`design/`（UI 设计规格与 HTML 预览）、`openspec/`（OpenSpec 主目录）、`superpowers/` |
 | `openspec/` | **符号链接 → `docs/openspec`**；OpenSpec changes / specs |
 | `alembic/` + `alembic.ini` | 数据库迁移（唯一链；baseline `alembic/versions/0001_pg_baseline.py` 从零建 8 张表） |
 | `scripts/` | 运维脚本（清库、重建 KB 数据、migrations） |
