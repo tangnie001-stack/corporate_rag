@@ -2,9 +2,11 @@
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.infra.db.models.document import DocModel
 from src.infra.db.models.kb import KbModel
+from src.infra.db.transaction import session_scope
 
 
 class KbRepo:
@@ -125,11 +127,29 @@ class KbRepo:
             await session.commit()
             return True
 
-    async def soft_delete_kb(self, kb_id: str) -> bool:
-        async with self._sf() as session:
+    async def soft_delete_kb(
+        self, kb_id: str, session: AsyncSession | None = None
+    ) -> bool:
+        """软删知识库；知识库不存在返回 False。
+
+        Args:
+            kb_id: 知识库 ID
+            session: 外部事务边界提供的会话；None 时本方法自开会话并提交
+
+        Returns:
+            True = 标记成功；False = 知识库不存在
+        """
+        async with session_scope(self._sf, session) as session:  # noqa: PLR1704  # 复用形参名 session 是刻意的：先取形参再绑定会话
             kb = await session.get(KbModel, kb_id)
             if kb is None:
                 return False
             kb.is_deleted = 1
-            await session.commit()
             return True
+
+    def transaction(self):
+        """打开一个事务边界；其中的 Repo / 存储方法须传入 `session=`。
+
+        Returns:
+            `session_scope(self._sf)` 异步上下文管理器
+        """
+        return session_scope(self._sf)

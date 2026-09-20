@@ -4,11 +4,15 @@
 的增删都在这里，向量存储层（vector_store）只做编排与结果映射。
 """
 
-from sqlalchemy import delete, func, literal, select
+from typing import Any, cast
+
+from sqlalchemy import CursorResult, delete, func, literal, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.infra.db.lexical_query import LexicalQuery, escape_like
 from src.infra.db.models.chunk import ChunkModel
+from src.infra.db.transaction import session_scope
 from src.infra.db.vector_store.mapping import ChunkRow, row_to_chunk_row
 
 
@@ -18,7 +22,9 @@ class ChunkRepo:
     def __init__(self, session_factory) -> None:
         self._sf = session_factory
 
-    async def upsert_chunks(self, rows: list[ChunkRow]) -> int:
+    async def upsert_chunks(
+        self, rows: list[ChunkRow], session: AsyncSession | None = None
+    ) -> int:
         """按 (kb_id, doc_id, chunk_index) 幂等写入，冲突时整行覆盖。
 
         隐含前提：同一 `doc_id` 不得跨 `kb_id` 出现 —— 主键 `id = {doc_id}:{chunk_index}`
@@ -27,13 +33,14 @@ class ChunkRepo:
 
         Args:
             rows: 待写入的分块行（形状见 mapping.ChunkRow）
+            session: 外部事务边界提供的会话；None 时本方法自开会话并提交
 
         Returns:
             实际提交的行数
         """
         if not rows:
             return 0
-        async with self._sf() as session:
+        async with session_scope(self._sf, session) as session:  # noqa: PLR1704  # 复用形参名 session 是刻意的：先取形参再绑定会话
             stmt = pg_insert(ChunkModel).values(
                 [
                     {
@@ -67,12 +74,27 @@ class ChunkRepo:
                 },
             )
             await session.execute(stmt)
-            await session.commit()
         return len(rows)
 
-    async def delete_tail(self, kb_id: str, doc_id: str, from_index: int) -> int:
-        """删除某文档 chunk_index >= from_index 的尾部残留（重传后分块数变少时用）。"""
-        async with self._sf() as session:
+    async def delete_tail(
+        self,
+        kb_id: str,
+        doc_id: str,
+        from_index: int,
+        session: AsyncSession | None = None,
+    ) -> int:
+        """删除某文档 chunk_index >= from_index 的尾部残留（重传后分块数变少时用）。
+
+        Args:
+            kb_id: 知识库 ID
+            doc_id: 文档 ID
+            from_index: 起始分块序号（含）
+            session: 外部事务边界提供的会话；None 时本方法自开会话并提交
+
+        Returns:
+            实际删除的行数
+        """
+        async with session_scope(self._sf, session) as session:  # noqa: PLR1704  # 复用形参名 session 是刻意的：先取形参再绑定会话
             result = await session.execute(
                 delete(ChunkModel).where(
                     ChunkModel.kb_id == kb_id,
@@ -80,8 +102,7 @@ class ChunkRepo:
                     ChunkModel.chunk_index >= from_index,
                 )
             )
-            await session.commit()
-            return result.rowcount or 0
+            return cast(CursorResult[Any], result).rowcount or 0
 
     async def search_dense(
         self, kb_id: str, query_vec: list[float], k: int
@@ -207,22 +228,41 @@ class ChunkRepo:
             result = await session.execute(select(ChunkModel.kb_id).distinct())
             return [kb for kb in result.scalars().all()]
 
-    async def delete_by_doc(self, kb_id: str, doc_id: str) -> int:
-        """删除某文档的全部分块。"""
-        async with self._sf() as session:
+    async def delete_by_doc(
+        self, kb_id: str, doc_id: str, session: AsyncSession | None = None
+    ) -> int:
+        """删除某文档的全部分块。
+
+        Args:
+            kb_id: 知识库 ID
+            doc_id: 文档 ID
+            session: 外部事务边界提供的会话；None 时本方法自开会话并提交
+
+        Returns:
+            实际删除的行数
+        """
+        async with session_scope(self._sf, session) as session:  # noqa: PLR1704  # 复用形参名 session 是刻意的：先取形参再绑定会话
             result = await session.execute(
                 delete(ChunkModel).where(
                     ChunkModel.kb_id == kb_id, ChunkModel.doc_id == doc_id
                 )
             )
-            await session.commit()
-            return result.rowcount or 0
+            return cast(CursorResult[Any], result).rowcount or 0
 
-    async def delete_by_kb(self, kb_id: str) -> int:
-        """删除某知识库的全部分块。"""
-        async with self._sf() as session:
+    async def delete_by_kb(
+        self, kb_id: str, session: AsyncSession | None = None
+    ) -> int:
+        """删除某知识库的全部分块。
+
+        Args:
+            kb_id: 知识库 ID
+            session: 外部事务边界提供的会话；None 时本方法自开会话并提交
+
+        Returns:
+            实际删除的行数
+        """
+        async with session_scope(self._sf, session) as session:  # noqa: PLR1704  # 复用形参名 session 是刻意的：先取形参再绑定会话
             result = await session.execute(
                 delete(ChunkModel).where(ChunkModel.kb_id == kb_id)
             )
-            await session.commit()
-            return result.rowcount or 0
+            return cast(CursorResult[Any], result).rowcount or 0

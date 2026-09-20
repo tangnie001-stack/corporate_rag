@@ -12,6 +12,7 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from loguru import logger
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.chunking.validator import ChunkData
 from src.config import EMBEDDING_MODEL
@@ -86,6 +87,7 @@ class PgVectorStore:
         chunks: list[ChunkData],
         doc_id: str,
         embeddings: list[list[float]] | None = None,
+        session: AsyncSession | None = None,
     ) -> int:
         """批量写入分块（按 (kb_id, doc_id, chunk_index) 幂等覆盖）。
 
@@ -95,9 +97,14 @@ class PgVectorStore:
             doc_id: 文档 ID
             embeddings: 预计算向量；为 None 时在此处补算（document_service 恒预计算，
                 因此正常路径不会走到这里；保留它是为了不改变既有方法契约）
+            session: 外部事务边界提供的会话；None 时下层自开会话并提交
 
         Returns:
             实际写入的分块数量
+
+        Note:
+            传入 `session` 时本方法**不提交**：提交/回滚由外部边界决定。调用方须
+            保证 embedding 已在事务外算好 —— 向量化是慢的外部调用，不应占用事务。
         """
         if not chunks:
             return 0
@@ -109,9 +116,9 @@ class PgVectorStore:
         # 分词是 CPU 工作且 jieba 首次调用要加载词典（约 0.5–1 s）→ offload，
         # 否则阻塞事件循环（单 worker 下会冻住所有请求与 SSE）
         rows = await asyncio.to_thread(build_rows, kb_id, doc_id, chunks, embeddings)
-        await self._repo.upsert_chunks(rows)
+        await self._repo.upsert_chunks(rows, session=session)
         # 分块数变少时删掉尾部残留（upsert 只覆盖 [0, len(rows)) 区间）
-        await self._repo.delete_tail(kb_id, doc_id, len(rows))
+        await self._repo.delete_tail(kb_id, doc_id, len(rows), session=session)
         core_logging.log_event(
             Event.CHUNKS_ADDED, kb_id=kb_id, doc_id=doc_id, count=len(rows)
         )
@@ -239,13 +246,28 @@ class PgVectorStore:
         """
         return await self._repo.list_kb_ids()
 
-    async def delete_document(self, kb_id: str, doc_id: str) -> int:
-        """删除某文档的全部分块，返回删除行数。"""
-        return await self._repo.delete_by_doc(kb_id, doc_id)
+    async def delete_document(
+        self, kb_id: str, doc_id: str, session: AsyncSession | None = None
+    ) -> int:
+        """删除某文档的全部分块，返回删除行数。
 
-    async def delete_collection(self, kb_id: str) -> bool:
-        """删除某知识库的全部分块；返回是否删除了行。"""
-        deleted = await self._repo.delete_by_kb(kb_id)
+        Args:
+            kb_id: 知识库 ID
+            doc_id: 文档 ID
+            session: 外部事务边界提供的会话；None 时下层自开会话并提交
+        """
+        return await self._repo.delete_by_doc(kb_id, doc_id, session=session)
+
+    async def delete_collection(
+        self, kb_id: str, session: AsyncSession | None = None
+    ) -> bool:
+        """删除某知识库的全部分块；返回是否删除了行。
+
+        Args:
+            kb_id: 知识库 ID
+            session: 外部事务边界提供的会话；None 时下层自开会话并提交
+        """
+        deleted = await self._repo.delete_by_kb(kb_id, session=session)
         return deleted > 0
 
     async def get_or_create_collection(self, kb_id: str) -> str:
