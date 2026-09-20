@@ -1,6 +1,6 @@
-"""FINANCIAL_SYSTEM_PROMPT 重写契约：包含判定/兜底关键指令。"""
+"""base-financial 模板重写契约：包含判定/兜底关键指令。"""
 
-from src.config.prompts import FINANCIAL_SYSTEM_PROMPT
+from src.config.prompts import loader
 
 
 def test_prompt_contains_web_fallback_rules():
@@ -16,5 +16,6 @@ def test_prompt_contains_web_fallback_rules():
         "知识库能回答的问题不要调用 search_web",  # 防滥用 guard
         "未在文档中找到相关数据",  # 纯拒答最后手段
     )
+    content = loader.get_content("base-financial")
     for phrase in required:
-        assert phrase in FINANCIAL_SYSTEM_PROMPT
+        assert phrase in content

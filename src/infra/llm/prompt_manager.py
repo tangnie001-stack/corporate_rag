@@ -16,20 +16,23 @@ from zoneinfo import ZoneInfo
 
 from loguru import logger
 
-from src.config.prompts import (
-    CLASSIFIER_SYSTEM_PROMPT,
-    CLASSIFIER_USER_TEMPLATE,
-    DELEGATE_GUIDANCE_SECTION,
-    FINANCIAL_SYSTEM_PROMPT,
-    INLINE_CITATION_INSTRUCTION,
-    USER_PROMPT_TEMPLATE,
-)
+from src.config.prompts import loader
 from src.core import logging as core_logging
 from src.core.log_events import Event
 
-# 本地兜底的 prompt 常量（与 src/config/prompts.py 一致）
-_FALLBACK_SYSTEM_PROMPT: str = FINANCIAL_SYSTEM_PROMPT + INLINE_CITATION_INSTRUCTION
-_FALLBACK_USER_TEMPLATE: str = USER_PROMPT_TEMPLATE
+# 本地兜底的 prompt 文本，经唯一加载入口取自 src/config/prompts/templates/ 的对应模板。
+# 兜底系统提示的拼接顺序（基础段 → 委派引导 → 引用指令）与 rag/prompt.build_system_prompt
+# 的默认路径一致，保证"未选 agent"时两条路径产出逐字相同。
+_FALLBACK_SYSTEM_PROMPT: str = (
+    loader.get_content("base-financial")
+    + loader.get_content("tools-delegate-guidance")
+    + loader.get_content("output-inline-citation")
+)
+_FALLBACK_USER_TEMPLATE: str = loader.get_content("task-user-prompt")
+_FALLBACK_CLASSIFIER_SYSTEM: str = loader.get_content("task-classifier-system")
+_FALLBACK_CLASSIFIER_USER: str = loader.get_content("task-classifier-user")
+_INLINE_CITATION: str = loader.get_content("output-inline-citation")
+_DELEGATE_GUIDANCE: str = loader.get_content("tools-delegate-guidance")
 
 # 北京时区：金融场景锚定"本报告期/今年"需按北京时间取日期。
 # 若用 UTC，北京 00:00-07:59 之间日期落后一天，月初/年初清晨会锚定错"今年/去年"。
@@ -188,11 +191,11 @@ class PromptManager:
         """
         prompt = self.get_base_system_prompt()
         # 确保内联引用指令始终存在（无论 prompt 来自 Langfuse 还是本地兜底）
-        if INLINE_CITATION_INSTRUCTION not in prompt:
-            prompt += INLINE_CITATION_INSTRUCTION
+        if _INLINE_CITATION not in prompt:
+            prompt += _INLINE_CITATION
         # 确保 delegate 引导段始终存在（Langfuse prompt 未更新时也生效，防委派能力不可见）
-        if DELEGATE_GUIDANCE_SECTION not in prompt:
-            prompt += DELEGATE_GUIDANCE_SECTION
+        if _DELEGATE_GUIDANCE not in prompt:
+            prompt += _DELEGATE_GUIDANCE
         return _with_current_date(prompt)
 
     def get_user_template(self, context: str = "", query: str = "") -> str:
@@ -235,9 +238,9 @@ class PromptManager:
             完整的分类器 prompt 文本（系统提示 + 用户消息）
         """
         sys_prompt = self._get(
-            self.PROMPT_NAMES["classifier"], CLASSIFIER_SYSTEM_PROMPT
+            self.PROMPT_NAMES["classifier"], _FALLBACK_CLASSIFIER_SYSTEM
         )
-        user_prompt = CLASSIFIER_USER_TEMPLATE.format(
+        user_prompt = _FALLBACK_CLASSIFIER_USER.format(
             query=query,
             entities=entities or "无",
             kb_entities=kb_entities or "无",

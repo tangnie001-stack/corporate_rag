@@ -216,14 +216,16 @@ def _llm_rewrite(
         LLM 失败时回退规则改写结果（expand/condense/decompose），仍无效回退原 query
     """
     from src.config import CLASSIFIER_TEMPERATURE
-    from src.config.prompts import REWRITE_SYSTEM_PROMPT, REWRITE_USER_TEMPLATE
+    from src.config.prompts import loader
     from src.rag.retrieval import rewrite_query
 
+    rewrite_system = loader.get_content("task-rewrite-system")
+    rewrite_user = loader.get_content("task-rewrite-user")
     history_text = _format_history(history)
     if history_text:
-        prompt = f"{REWRITE_SYSTEM_PROMPT}\n\n{REWRITE_USER_TEMPLATE.format(query=query, route=route, history=history_text)}"
+        prompt = f"{rewrite_system}\n\n{rewrite_user.format(query=query, route=route, history=history_text)}"
     else:
-        prompt = f"{REWRITE_SYSTEM_PROMPT}\n\n{REWRITE_USER_TEMPLATE.format(query=query, route=route, history='无')}"
+        prompt = f"{rewrite_system}\n\n{rewrite_user.format(query=query, route=route, history='无')}"
     try:
         response = llm.invoke(
             [HumanMessage(content=prompt)], temperature=CLASSIFIER_TEMPERATURE

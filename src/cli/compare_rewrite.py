@@ -24,7 +24,7 @@ import json
 import sys
 
 from src.config import CLASSIFIER_TEMPERATURE, TOP_K_RETRIEVAL
-from src.config.prompts import CLASSIFIER_SYSTEM_PROMPT, CLASSIFIER_USER_TEMPLATE
+from src.config.prompts import loader
 from src.core import logging as core_logging
 from src.core.log_events import Event
 from src.core.logging import setup_logging
@@ -541,8 +541,8 @@ async def main() -> None:
             complexity_score,
             history_text,
             kb_entities,
-            CLASSIFIER_SYSTEM_PROMPT,
-            CLASSIFIER_USER_TEMPLATE,
+            loader.get_content("task-classifier-system"),
+            loader.get_content("task-classifier-user"),
         )
         total_tokens["B"][0] += b_pt
         total_tokens["B"][1] += b_ct

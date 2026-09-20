@@ -17,10 +17,11 @@ from src.config.const import (
     ENTITY_OPTIONAL_TYPES,
     ENTITY_TYPES,
 )
-from src.config.prompts import (
-    ENTITY_EXTRACTION_SYSTEM_PROMPT,
-    ENTITY_EXTRACTION_USER_TEMPLATE,
-)
+from src.config.prompts import loader
+
+# 实体抽取任务模板正文，经唯一加载入口读取
+_ENTITY_SYSTEM_PROMPT = loader.get_content("task-entity-system")
+_ENTITY_USER_TEMPLATE = loader.get_content("task-entity-user")
 
 # 文件名模式: {company}_{year}_{quarter|annual}.pdf
 _FILENAME_PATTERN = re.compile(
@@ -232,7 +233,7 @@ class DocumentEntityExtractor:
         heading_text = "\n".join(f"{'#' * lvl} {title}" for lvl, title in heading_tree)
         prefix = text[:ENTITY_TEXT_PREFIX_LEN]
         candidates_text = json.dumps(rule_candidates, ensure_ascii=False)
-        prompt = ENTITY_EXTRACTION_USER_TEMPLATE.format(
+        prompt = _ENTITY_USER_TEMPLATE.format(
             filename=filename,
             heading_tree=heading_text or "（无标题结构）",
             text_prefix=prefix,
@@ -243,7 +244,7 @@ class DocumentEntityExtractor:
         assert self._llm is not None
         resp = self._llm.invoke(
             [
-                SystemMessage(content=ENTITY_EXTRACTION_SYSTEM_PROMPT),
+                SystemMessage(content=_ENTITY_SYSTEM_PROMPT),
                 HumanMessage(content=prompt),
             ]
         )

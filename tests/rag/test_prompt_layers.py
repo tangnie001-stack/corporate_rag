@@ -4,11 +4,7 @@ from unittest.mock import MagicMock
 
 from langchain_core.messages import SystemMessage
 
-from src.config.prompts import (
-    DELEGATE_GUIDANCE_SECTION,
-    INLINE_CITATION_INSTRUCTION,
-    KB_BOUND_RETRIEVAL_DISCIPLINE,
-)
+from src.config.prompts import loader
 from src.rag.prompt import build_prompt, build_system_prompt
 
 
@@ -22,15 +18,20 @@ def _pm(base: str = "基础段正文") -> MagicMock:
 
 
 def test_no_persona_keeps_system_messages_byte_identical():
-    """persona='' 时第一条 system 消息与 get_system_prompt() 逐字相同。"""
-    from src.infra.llm.prompt_manager import PromptManager
+    """persona='' 时第一条 system 消息 = 基础段 + 引用指令 + 委派引导 + 日期。"""
+    from src.infra.llm.prompt_manager import _with_current_date
 
-    pm = PromptManager()
+    pm = _pm(base="基础段正文")
     messages = build_system_prompt(
         persona="", kb_bound=True, has_skills=False, prompt_manager=pm
     )
+    expected = _with_current_date(
+        "基础段正文"
+        + loader.get_content("output-inline-citation")
+        + loader.get_content("tools-delegate-guidance")
+    )
     assert len(messages) == 1
-    assert messages[0].content == pm.get_system_prompt()
+    assert messages[0].content == expected
 
 
 def test_no_persona_unbound_adds_second_system_message():
@@ -57,7 +58,7 @@ def test_persona_replaces_base_segment():
     assert isinstance(content, str)
     assert content.startswith("你是财务专家，只做财务分析。")
     assert "基础段正文" not in content
-    assert INLINE_CITATION_INSTRUCTION in content
+    assert loader.get_content("output-inline-citation") in content
 
 
 def test_persona_without_skills_omits_delegate_section():
@@ -66,7 +67,7 @@ def test_persona_without_skills_omits_delegate_section():
     messages = build_system_prompt(
         persona="你是财务专家。", kb_bound=True, has_skills=False, prompt_manager=pm
     )
-    assert DELEGATE_GUIDANCE_SECTION not in messages[0].content
+    assert loader.get_content("tools-delegate-guidance") not in messages[0].content
 
 
 def test_persona_bound_keeps_retrieval_discipline():
@@ -75,7 +76,8 @@ def test_persona_bound_keeps_retrieval_discipline():
     messages = build_system_prompt(
         persona="你是财务专家。", kb_bound=True, has_skills=False, prompt_manager=pm
     )
-    assert KB_BOUND_RETRIEVAL_DISCIPLINE in messages[0].content
+    discipline = loader.get_content("sources-kb-bound-discipline")
+    assert discipline in messages[0].content
 
 
 def test_no_persona_always_keeps_delegate_section():
@@ -84,7 +86,7 @@ def test_no_persona_always_keeps_delegate_section():
     messages = build_system_prompt(
         persona="", kb_bound=True, has_skills=False, prompt_manager=pm
     )
-    assert DELEGATE_GUIDANCE_SECTION in messages[0].content
+    assert loader.get_content("tools-delegate-guidance") in messages[0].content
 
 
 def test_build_prompt_passes_persona_through():
@@ -99,9 +101,7 @@ def test_build_prompt_passes_persona_through():
 
 def test_get_base_system_prompt_excludes_env_appends():
     """基础段不含日期追加（get_system_prompt 才追加）。"""
-    from src.infra.llm.prompt_manager import PromptManager
-
-    pm = PromptManager()
+    pm = _pm()
     base = pm.get_base_system_prompt()
     assert base
     assert "今天是" not in base

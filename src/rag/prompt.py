@@ -2,17 +2,19 @@
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
-from src.config.prompts import (
-    DELEGATE_GUIDANCE_SECTION,
-    INLINE_CITATION_INSTRUCTION,
-    KB_BOUND_RETRIEVAL_DISCIPLINE,
-    KB_UNBOUND_SYSTEM_PROMPT,
-)
+from src.config.prompts import loader
 from src.core import logging as core_logging
 from src.core.log_events import Event
 from src.infra.llm.chat_message import ChatMessage
 from src.infra.llm.prompt_manager import PromptManager, _with_current_date
 from src.rag.context import RAGContext
+
+# 模板正文经唯一加载入口读取（loader.load_all 有 lru_cache，进程内零重复 I/O）。
+# 段组装顺序与条件注入仍由 build_system_prompt 决定，本层只负责取正文。
+_KB_BOUND_DISCIPLINE = loader.get_content("sources-kb-bound-discipline")
+_KB_UNBOUND = loader.get_content("sources-kb-unbound")
+_INLINE_CITATION = loader.get_content("output-inline-citation")
+_DELEGATE_GUIDANCE = loader.get_content("tools-delegate-guidance")
 
 
 def format_context(contexts: list[RAGContext]) -> str:
@@ -37,7 +39,7 @@ def build_system_prompt(
     Args:
         persona: 人设层正文（会话智能体预设的 system_prompt）；空串=未选 agent，
             则用 prompt_manager.get_base_system_prompt() 作人设层
-        kb_bound: 是否绑定知识库（False 时追加 KB_UNBOUND_SYSTEM_PROMPT 独立消息）
+        kb_bound: 是否绑定知识库（False 时追加未绑库会话指令独立消息）
         has_skills: 本次会话是否有可用技能；仅当 persona 非空时用于决定是否追加
             委派引导段（persona 为空时恒追加，保证未选 agent 的 system 段逐字不变）
         prompt_manager: PromptManager 实例，提供基础段取值
@@ -52,21 +54,21 @@ def build_system_prompt(
         base = prompt_manager.get_base_system_prompt()
         persona_source = "base"
     # 环境约束层·检索纪律：仅当绑定 KB 且选定 agent（persona 非空）时注入。
-    # persona 为空时人设层即 FINANCIAL_SYSTEM_PROMPT，其处理流程 2–9 已含"先检索后作答"，
+    # persona 为空时人设层即 base-financial 模板，其处理流程 2–9 已含"先检索后作答"，
     # 无条件注入会破坏"默认行为逐字不变（端到端快照）"需求。
     discipline_injected = False
-    if kb_bound and persona and KB_BOUND_RETRIEVAL_DISCIPLINE not in base:
-        base += KB_BOUND_RETRIEVAL_DISCIPLINE
+    if kb_bound and persona and _KB_BOUND_DISCIPLINE not in base:
+        base += _KB_BOUND_DISCIPLINE
         discipline_injected = True
-    if INLINE_CITATION_INSTRUCTION not in base:
-        base += INLINE_CITATION_INSTRUCTION
+    if _INLINE_CITATION not in base:
+        base += _INLINE_CITATION
     delegate_injected = False
-    if (has_skills or not persona) and DELEGATE_GUIDANCE_SECTION not in base:
-        base += DELEGATE_GUIDANCE_SECTION
+    if (has_skills or not persona) and _DELEGATE_GUIDANCE not in base:
+        base += _DELEGATE_GUIDANCE
         delegate_injected = True
     messages: list[SystemMessage] = [SystemMessage(content=_with_current_date(base))]
     if not kb_bound:
-        messages.append(SystemMessage(content=KB_UNBOUND_SYSTEM_PROMPT))
+        messages.append(SystemMessage(content=_KB_UNBOUND))
     # system prompt 组成事实（design D11 #3/D15）：人设来源 + 条件注入命中 + system 段数
     core_logging.log_event(
         Event.PROMPT_ASSEMBLED,

@@ -1,10 +1,6 @@
-"""测试 PromptManager 的兜底 prompt 从 src.config.prompts 正确导入。"""
+"""测试 PromptManager 的兜底 prompt 经加载入口取自模板。"""
 
-from src.config.prompts import (
-    FINANCIAL_SYSTEM_PROMPT,
-    INLINE_CITATION_INSTRUCTION,
-    USER_PROMPT_TEMPLATE,
-)
+from src.config.prompts import loader
 from src.infra.llm.prompt_manager import (
     _FALLBACK_SYSTEM_PROMPT,
     _FALLBACK_USER_TEMPLATE,
@@ -12,18 +8,21 @@ from src.infra.llm.prompt_manager import (
 
 
 def test_fallback_system_imported_from_config():
-    """_FALLBACK_SYSTEM_PROMPT 应以 FINANCIAL_SYSTEM_PROMPT 为前缀。"""
-    assert _FALLBACK_SYSTEM_PROMPT.startswith(FINANCIAL_SYSTEM_PROMPT)
+    """_FALLBACK_SYSTEM_PROMPT 应以基础段 + 委派引导段为前缀。"""
+    prefix = loader.get_content("base-financial") + loader.get_content(
+        "tools-delegate-guidance"
+    )
+    assert _FALLBACK_SYSTEM_PROMPT.startswith(prefix)
 
 
 def test_fallback_system_has_citation():
     """_FALLBACK_SYSTEM_PROMPT 应包含引用指令。"""
-    assert INLINE_CITATION_INSTRUCTION in _FALLBACK_SYSTEM_PROMPT
+    assert loader.get_content("output-inline-citation") in _FALLBACK_SYSTEM_PROMPT
 
 
 def test_fallback_user_imported_from_config():
-    """_FALLBACK_USER_TEMPLATE 应与 USER_PROMPT_TEMPLATE 完全相同。"""
-    assert _FALLBACK_USER_TEMPLATE == USER_PROMPT_TEMPLATE
+    """_FALLBACK_USER_TEMPLATE 应与用户消息模板完全相同。"""
+    assert _FALLBACK_USER_TEMPLATE == loader.get_content("task-user-prompt")
 
 
 def test_fallback_system_not_empty():
