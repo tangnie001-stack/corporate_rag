@@ -107,7 +107,10 @@ async def upload_document(
     Returns:
         ResponseModel: data 含 doc_id、status、filename
     """
-    user_id = getattr(request.state, "user_id", "") if request else ""
+    if request is not None and hasattr(request.state, "user_id"):
+        user_id = request.state.user_id
+    else:
+        user_id = ""
     content = await file.read()
     filename = file.filename or ""
     if "." in filename:
@@ -154,8 +157,7 @@ async def get_document_status(
     Returns:
         ResponseModel: data 含 status、chunk_count、progress 等
     """
-    docs = await svc._doc_repo.get_documents(body.kb_id)
-    doc = next((d for d in docs if d.id == body.doc_id), None)
+    doc = await svc.get_document(body.kb_id, body.doc_id)
     if not doc:
         return ResponseModel(data=DocumentStatusResponse(status="not_found"))
     return ResponseModel(
@@ -231,18 +233,30 @@ async def get_document_chunks(
 @router.post("/kbs/documents/delete", response_model=ResponseModel)
 async def delete_document(
     body: DocumentDeleteRequest,
+    request: Request,
     svc: AppService = Depends(get_app_service),
 ):
-    """软删除文档（标记为 deleted），同时删除向量库中的分块。
+    """删除文档：软删文档 + 删除其全部分块（同一事务）。
 
     Args:
         body: 文档删除请求体，含 kb_id 和 doc_id
+        request: FastAPI 请求（`state.user_id` 由认证中间件写入）
+        svc: 应用服务
 
     Returns:
         ResponseModel: data 含 success 布尔值
+
+    Raises:
+        BusinessError: 文档不存在（404）/ 非属主（403）/ 状态不允许（409）
     """
-    ok = await svc.document._doc_repo.soft_delete_document(body.doc_id)
-    if ok:
-        await svc.vector_store.delete_document(body.kb_id, body.doc_id)
-        logger.info("Document deleted: kb_id={} doc_id={}", body.kb_id, body.doc_id)
-    return ResponseModel(data=DocumentDeleteResponse(success=ok))
+    user_id = request.state.user_id
+    result = await svc.document.delete_document(body.kb_id, body.doc_id, user_id)
+    logger.info(
+        "Document deleted: kb_id={} doc_id={} user_id={}",
+        body.kb_id,
+        body.doc_id,
+        user_id,
+    )
+    return ResponseModel(
+        data=DocumentDeleteResponse(success=result["status"] == "deleted")
+    )

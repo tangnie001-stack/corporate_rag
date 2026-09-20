@@ -1,6 +1,6 @@
 """Tests for AppService business logic layer."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -130,7 +130,7 @@ class TestAppServiceKBs:
         mock_router,
         mock_vs,
     ):
-        """删除知识库应软删除文档、清理向量、软删除 KB。"""
+        """删除知识库应软删除文档、清理向量、软删除 KB（同一事务）。"""
         mock_doc_repo.return_value.soft_delete_documents_by_kb = AsyncMock()
         mock_kb_repo.return_value.soft_delete_kb = AsyncMock(return_value=True)
         vs = AsyncMock()
@@ -138,10 +138,12 @@ class TestAppServiceKBs:
         ok, _msg = await svc.delete_knowledge_base("kb_id")
         assert ok is True
         mock_doc_repo.return_value.soft_delete_documents_by_kb.assert_called_once_with(
-            "kb_id"
+            "kb_id", session=ANY
         )
-        # delete_collection 现在是直接 await 的协程，由 AsyncMock 承接
-        mock_kb_repo.return_value.soft_delete_kb.assert_called_once_with("kb_id")
+        vs.delete_collection.assert_called_once_with("kb_id", session=ANY)
+        mock_kb_repo.return_value.soft_delete_kb.assert_called_once_with(
+            "kb_id", session=ANY
+        )
 
     @pytest.mark.asyncio
     @patch("src.services.app_service.VectorStore")
@@ -168,6 +170,7 @@ class TestAppServiceKBs:
         """删除不存在的知识库应返回 False 并提示。"""
         mock_doc_repo.return_value.soft_delete_documents_by_kb = AsyncMock()
         mock_kb_repo.return_value.soft_delete_kb = AsyncMock(return_value=False)
+        mock_vs.return_value.delete_collection = AsyncMock(return_value=0)
         svc = AppService()
         ok, msg = await svc.delete_knowledge_base("nonexistent")
         assert ok is False

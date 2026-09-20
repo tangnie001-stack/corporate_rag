@@ -3,8 +3,10 @@
 from unittest.mock import AsyncMock, MagicMock
 
 from src.chunking.validator import ChunkData
+from src.config.response_codes import Code
 from src.infra.db.vector_store.types import ChunkQueryResult, ChunkResult
 from src.services.document_service import _merge_tiny_chunks
+from src.utils.errors import BusinessError
 from tests.api.mock_data import make_doc
 
 
@@ -46,21 +48,18 @@ def test_upload_document(mock_app_service, auth_client):
 def test_document_status_processing(mock_app_service, auth_client):
     """POST /api/kbs/documents/status 返回文档处理状态。"""
     mock_svc = mock_app_service
-    mock_svc._doc_repo = MagicMock()
-    mock_svc._doc_repo.get_documents = AsyncMock(
-        return_value=[
-            MagicMock(
-                id="doc-1",
-                kb_id="kb-1",
-                filename="test.pdf",
-                status="processing",
-                chunk_count=0,
-                processing_progress=30,
-                processing_state="extracting",
-                processing_message="正在解析...",
-                error_msg=None,
-            ),
-        ]
+    mock_svc.get_document = AsyncMock(
+        return_value=MagicMock(
+            id="doc-1",
+            kb_id="kb-1",
+            filename="test.pdf",
+            status="processing",
+            chunk_count=0,
+            processing_progress=30,
+            processing_state="extracting",
+            processing_message="正在解析...",
+            error_msg=None,
+        )
     )
 
     response = auth_client.post(
@@ -76,8 +75,7 @@ def test_document_status_processing(mock_app_service, auth_client):
 def test_document_status_not_found(mock_app_service, auth_client):
     """POST /api/kbs/documents/status 文档不存在返回 status=not_found。"""
     mock_svc = mock_app_service
-    mock_svc._doc_repo = MagicMock()
-    mock_svc._doc_repo.get_documents = AsyncMock(return_value=[])
+    mock_svc.get_document = AsyncMock(return_value=None)
 
     response = auth_client.post(
         "/api/kbs/documents/status", json={"kb_id": "kb-1", "doc_id": "missing"}
@@ -176,11 +174,11 @@ def test_document_chunks_with_parent_dedup(mock_app_service, auth_client):
 
 
 def test_delete_document_success(mock_app_service, auth_client):
-    """POST /api/kbs/documents/delete 成功返回 success=True。"""
+    """POST /api/kbs/documents/delete 成功返回 success=True（端点只转调 service）。"""
     mock_svc = mock_app_service
-    mock_svc.document._doc_repo = MagicMock()
-    mock_svc.document._doc_repo.soft_delete_document = AsyncMock(return_value=True)
-    mock_svc.vector_store = AsyncMock()
+    mock_svc.document.delete_document = AsyncMock(
+        return_value={"doc_id": "doc-1", "filename": "test.pdf", "status": "deleted"}
+    )
 
     response = auth_client.post(
         "/api/kbs/documents/delete", json={"kb_id": "kb-1", "doc_id": "doc-1"}
@@ -191,17 +189,17 @@ def test_delete_document_success(mock_app_service, auth_client):
 
 
 def test_delete_document_not_found(mock_app_service, auth_client):
-    """POST /api/kbs/documents/delete 文档不存在返回 success=False。"""
+    """POST /api/kbs/documents/delete 文档不存在由 service 抛 404。"""
     mock_svc = mock_app_service
-    mock_svc.document._doc_repo = MagicMock()
-    mock_svc.document._doc_repo.soft_delete_document = AsyncMock(return_value=False)
+    mock_svc.document.delete_document = AsyncMock(
+        side_effect=BusinessError(Code.DOC_NOT_FOUND, Code.DOC_NOT_FOUND_MSG, 404)
+    )
 
     response = auth_client.post(
         "/api/kbs/documents/delete", json={"kb_id": "kb-1", "doc_id": "missing"}
     )
 
-    assert response.status_code == 200
-    assert response.json()["data"]["success"] is False
+    assert response.status_code == 404
 
 
 # Tests for _merge_tiny_chunks

@@ -9,6 +9,7 @@ import json
 from loguru import logger
 
 from src.chat.manager import ChatManager
+from src.infra.db.models.document import DocModel as DocEntity
 from src.infra.db.mysql_db import (
     ChatRepo,
     DocumentRepo,
@@ -87,24 +88,48 @@ class AppService:
         return await self.kb.create_knowledge_base(name, description, user_id)
 
     async def delete_knowledge_base(self, kb_id: str) -> tuple[bool, str]:
-        """删除知识库：软删文档 → 删分块 → 软删 KB。"""
-        await self._doc_repo.soft_delete_documents_by_kb(kb_id)
-        try:
-            deleted = await self.vector_store.delete_collection(kb_id)
-            logger.info("chunks deleted for kb_id={} deleted={}", kb_id, deleted)
-        except Exception:  # noqa: BLE001
-            logger.warning("chunk delete failed for kb={}", kb_id)
-        ok = await self._kb_repo.soft_delete_kb(kb_id)
-        if ok:
-            logger.info("Knowledge base soft-deleted: {}", kb_id)
-            return True, "知识库已删除"
-        logger.warning("Knowledge base '{}' not found for deletion", kb_id)
-        return False, "知识库不存在"
+        """删除知识库：同一事务内「软删文档 + 删分块 + 软删 KB」。
+
+        三步必须原子：分块删除失败时不得软删知识库（否则留下永久孤儿分块）。
+        删除失败 SHALL NOT 被吞掉 —— 静默降级会让孤儿长期存在且不可观测。
+
+        Args:
+            kb_id: 知识库 ID
+
+        Returns:
+            (是否成功, 提示文案)；知识库不存在时返回 (False, "知识库不存在")
+
+        Raises:
+            Exception: 任一步失败时整体回滚并向上抛
+        """
+        async with self._kb_repo.transaction() as session:
+            await self._doc_repo.soft_delete_documents_by_kb(kb_id, session=session)
+            deleted = await self.vector_store.delete_collection(kb_id, session=session)
+            ok = await self._kb_repo.soft_delete_kb(kb_id, session=session)
+        if not ok:
+            logger.warning("Knowledge base '{}' not found for deletion", kb_id)
+            return False, "知识库不存在"
+        logger.info(
+            "Knowledge base soft-deleted: {} (chunks deleted={})", kb_id, deleted
+        )
+        return True, "知识库已删除"
 
     # ==================== 文档 ====================
 
     async def get_documents(self, kb_id: str) -> list[dict]:
         return await self.document.get_documents(kb_id)
+
+    async def get_document(self, kb_id: str, doc_id: str) -> DocEntity | None:
+        """获取知识库下的单个文档。
+
+        Args:
+            kb_id: 知识库 ID
+            doc_id: 文档 ID
+
+        Returns:
+            匹配且未被软删的文档 ORM 对象；不存在或不属于该知识库时返回 None
+        """
+        return await self.document.get_document(kb_id, doc_id)
 
     async def delete_document(
         self,

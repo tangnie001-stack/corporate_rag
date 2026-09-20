@@ -134,3 +134,88 @@ async def test_ingest_is_atomic_when_status_update_fails(atomic_kb, monkeypatch)
 
     assert await _chunk_count(kb_id, doc_id) == 0
     assert await _status(doc_id) == "processing"
+
+
+async def test_delete_document_is_atomic_when_chunk_delete_fails(
+    atomic_kb, monkeypatch
+):
+    """删分块失败时文档**不得**被软删（否则产生永久孤儿分块）。"""
+    kb_id, doc_repo = atomic_kb
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(doc_id, kb_id, status="ready", user_id="p4test")
+
+    store = PgVectorStore(chunk_repo=None, embed_fn=_FakeEmbedder())  # type: ignore[reportArgumentType]
+    svc = DocumentService(
+        doc_repo=doc_repo,
+        vector_store=store,
+        router=None,  # type: ignore[reportArgumentType]  # 本用例不走解析路径
+    )
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("inject: chunk delete failed")
+
+    monkeypatch.setattr(store, "delete_document", _boom)
+    with pytest.raises(RuntimeError):
+        await svc.delete_document(kb_id, doc_id, user_id="p4test")
+
+    assert await _is_deleted(doc_id) == 0
+
+
+async def test_delete_document_happy_path_removes_both(atomic_kb):
+    """两步都成功时：分块归零 + 文档软删。"""
+    kb_id, doc_repo = atomic_kb
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(doc_id, kb_id, status="ready", user_id="p4test")
+
+    store = PgVectorStore(chunk_repo=None, embed_fn=_FakeEmbedder())  # type: ignore[reportArgumentType]
+    svc = DocumentService(
+        doc_repo=doc_repo,
+        vector_store=store,
+        router=None,  # type: ignore[reportArgumentType]  # 本用例不走解析路径
+    )
+
+    await svc._write_chunks_and_mark_ready(
+        kb_id=kb_id,
+        doc_id=doc_id,
+        chunks=[ChunkData(content="资产负债率上升", metadata={})],
+        embeddings=[[0.1] * 1024],
+    )
+    assert await _chunk_count(kb_id, doc_id) == 1
+
+    result = await svc.delete_document(kb_id, doc_id, user_id="p4test")
+
+    assert result["status"] == "deleted"
+    assert await _chunk_count(kb_id, doc_id) == 0
+    assert await _is_deleted(doc_id) == 1
+
+
+async def test_delete_knowledge_base_is_atomic_when_chunk_delete_fails(
+    atomic_kb, monkeypatch
+):
+    """删知识库时删分块失败 → 文档与知识库都**不得**被软删（且异常向上抛）。"""
+    from src.infra.db.mysql_db import KbRepo
+    from src.services.app_service import AppService
+
+    kb_id, doc_repo = atomic_kb
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(doc_id, kb_id, status="ready", user_id="p4test")
+
+    store = PgVectorStore(chunk_repo=None, embed_fn=_FakeEmbedder())  # type: ignore[reportArgumentType]
+    svc = AppService.__new__(AppService)  # 绕开构造器：本用例只测 delete 编排
+    svc._doc_repo = doc_repo
+    svc._kb_repo = KbRepo(session_factory)
+    svc.vector_store = store
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("inject: chunk delete failed")
+
+    monkeypatch.setattr(store, "delete_collection", _boom)
+    with pytest.raises(RuntimeError):
+        await svc.delete_knowledge_base(kb_id)
+
+    assert await _is_deleted(doc_id) == 0
+    async with session_factory() as s:
+        kb_deleted = await s.scalar(
+            text("SELECT is_deleted FROM knowledge_base WHERE id = :k"), {"k": kb_id}
+        )
+    assert kb_deleted == 0

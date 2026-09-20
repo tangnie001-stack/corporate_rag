@@ -100,8 +100,43 @@ class DocumentService:
             for d in docs
         ]
 
+    async def get_document(self, kb_id: str, doc_id: str) -> DocEntity | None:
+        """按 ID 获取文档，且必须属于指定知识库。
+
+        Args:
+            kb_id: 知识库 ID
+            doc_id: 文档 ID
+
+        Returns:
+            匹配且未被软删的文档 ORM 对象；文档不存在、不属于该知识库或已软删时返回 None
+        """
+        doc = await self._doc_repo.get_document(doc_id)
+        if doc is None:
+            return None
+        if doc.kb_id != kb_id:
+            return None
+        if doc.is_deleted:
+            return None
+        return doc
+
     async def delete_document(self, kb_id: str, doc_id: str, user_id: str) -> dict:
-        """删除文档（合法性校验 + 分块清理 + 数据库软删除）。"""
+        """删除文档：校验 → 同一事务内「删分块 + 软删文档」。
+
+        两条写操作必须原子：分块删失败时若已软删文档，会留下永久孤儿分块
+        （且该文档再也删不掉分块 —— 重试时文档已是 deleted）。
+
+        Args:
+            kb_id: 知识库 ID
+            doc_id: 文档 ID
+            user_id: 调用者用户 ID（与上传时写入的属主比对）
+
+        Returns:
+            dict：doc_id / filename / status
+
+        Raises:
+            BusinessError: 文档不存在（404）/ 非属主（403）/ 状态不允许（409）
+            Exception: 底层删除失败时整体回滚并向上抛
+        """
         doc = await self._doc_repo.get_document(doc_id)
         if not doc:
             raise BusinessError(Code.DOC_NOT_FOUND, Code.DOC_NOT_FOUND_MSG, 404)
@@ -117,8 +152,9 @@ class DocumentService:
                 Code.DOC_STATUS_CONFLICT_MSG,
                 409,
             )
-        await self.vector_store.delete_document(kb_id, doc_id)
-        deleted = await self._doc_repo.soft_delete_document(doc_id)
+        async with self._doc_repo.transaction() as session:
+            await self.vector_store.delete_document(kb_id, doc_id, session=session)
+            deleted = await self._doc_repo.soft_delete_document(doc_id, session=session)
         if not deleted:
             raise BusinessError(Code.DOC_NOT_FOUND, Code.DOC_NOT_FOUND_MSG, 404)
         logger.info("Document deleted: {} ({})", doc.filename, doc_id)
