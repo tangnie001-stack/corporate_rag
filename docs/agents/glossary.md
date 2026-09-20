@@ -182,7 +182,7 @@
 ## 基础设施
 
 - **PostgreSQL**：关系型存储后端（用户 / 知识库 / 文档 / 会话 / 消息 / 反馈 / 评估报告 7 张表，外加检索底座表 `chunks`），经 `postgresql+asyncpg` 访问。结构、引擎归属与迁移链见 `docs/agents/code-map.md`「关系型存储（PostgreSQL）」
-- **ChromaDB**：**已退役向量库**，dense 检索由 PostgreSQL + pgvector 承载。P4 已删除 `chromadb` 依赖、`deploy/chroma/`、其配置项与 compose 卷/挂载，搬迁与等价性脚本一并退役；`data/chroma_persist`（连同 `data/chroma` / `data/bm25_index`）三个数据目录仍在磁盘上，**Task 11 才删除**；P4 已删除其读取路径，**不可再用于回滚**，仅作历史遗留数据保留
+- **ChromaDB**：**已退役向量库**，dense 检索由 PostgreSQL + pgvector 承载。P4 已删除 `chromadb` 依赖、`deploy/chroma/`、其配置项与 compose 卷/挂载，搬迁与等价性脚本一并退役；`data/chroma_persist`（连同 `data/chroma` / `data/bm25_index`）三个数据目录已随 P4 Task 11 从磁盘删除，而读取路径更早已（Task 6）移除，**回滚到 Chroma 不再可能**（语料重建只能从 MinIO 的原始文件重新上传）
 - **MinIO**：文档对象存储
 - **LiteLLM**：LLM 代理，`LLM_BASE_URL` 指向（默认 `http://litellm-proxy:4000`）
 - **DashScope**：通义千问系列模型的提供商（Embedding / LLM / Rerank）
