@@ -40,6 +40,9 @@ dependencies = [
     "asyncpg>=0.30.0,<1.0.0",
     "pgvector>=0.3.6,<1.0.0",
     "sqlalchemy[asyncio]>=2.0.36,<3.0.0",
+    # 密码哈希：src/utils/auth_crypto.py 直接 import bcrypt；此前仅由 chromadb 传递提供，
+    # 已随 Chroma 退役一并消失，故显式声明为运行时依赖，不可移除
+    "bcrypt==5.0.0",
 ]
 
 [project.optional-dependencies]
