@@ -198,7 +198,7 @@ Nginx 容器把本目录挂到 `/usr/share/nginx/html` 直接托管，**无 npm 
 |------|------|
 | 加/改一个 HTTP 接口 | `src/api/<模块>.py`（路由）+ `src/api/model/request.py`/`response.py`（契约）+ 对应 `services/` 编排；同步 `docs/agents/api_contract.md` 与测试断言 |
 | 改一次生成的编排 / 事件转换 | `src/services/agent_service.py`（`_run_generation` / `_convert_event`） |
-| 改 agent 循环 / 提示词 | `src/agents/graph/agent_node.py`、`nodes.py`、`src/rag/prompt.py`、`src/config/prompts.py` |
+| 改 agent 循环 / 提示词 | `src/agents/graph/agent_node.py`、`nodes.py`、`src/rag/prompt.py`、`src/config/prompts/` |
 | 加/改工具 | `src/agents/tools/`（实现 + 在 `rag_tools.py` 注册）；工具描述文案入 `src/config/` |
 | 加/改 skill 机制 | `src/agents/skills/`（loader/registry/executor/delegate_task）；内容放 `skills/<name>/SKILL.md` |
 | 加/改智能体预设 | 内容放 `agents/<name>.md`；机制在 `src/agents/presets/`（loader/registry） |
@@ -206,7 +206,7 @@ Nginx 容器把本目录挂到 `/usr/share/nginx/html` 直接托管，**无 npm 
 | 改知识库管理页 | `deploy/nginx/html/index.html`（+ `js/api.js`） |
 | 改 Nginx 路由 / 静态托管 | `deploy/nginx/nginx.conf`、`deploy/nginx/Dockerfile` |
 | 改分块 | `src/chunking/`（`strategies/` 加策略 + `router.py` 挂路由）；排查见 `docs/agents/chunking-issues.md` |
-| 改常量 / 文案 / 阈值 | `src/config/`（`settings.py` 环境变量、`prompts.py` 提示词、`const.py` 常量与 SSE 文案） |
+| 改常量 / 文案 / 阈值 | `src/config/`（`settings.py` 环境变量、`prompts/` 提示词、`const.py` 常量与 SSE 文案） |
 | 加日志事件 / 前缀 | `src/core/log_events.py`、`log_event_specs.py`；规范见 `docs/agents/logging-rules.md` |
 | 改数据库 schema / 迁移 | `src/infra/db/models/`（ORM）+ `alembic/versions/`（迁移）；见本文「关系型存储（PostgreSQL）」 |
 | 改部署 / 容器 | `docker-compose*.yml`、`Dockerfile`；操作见 `docs/agents/cookbook.md` |

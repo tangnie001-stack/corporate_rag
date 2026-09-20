@@ -107,7 +107,7 @@
 
 | 层 | 落点 |
 |----|------|
-| Scaffolding（模型可见） | `src/config/prompts.py`、工具描述、`SKILL.md` 的 name/description、`agents/*.md` 预设正文、输出格式约束 |
+| Scaffolding（模型可见） | `src/config/prompts/`、工具描述、`SKILL.md` 的 name/description、`agents/*.md` 预设正文、输出格式约束 |
 | Harness（模型不可见） | LangGraph 图与循环、工具注册表路由、迭代预算与停止条件、verify 与护栏强制、SSE 事件发射、会话状态装载与持久化、trace |
 | Model | DashScope 侧的模型本体，非本项目所有 |
 

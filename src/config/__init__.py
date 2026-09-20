@@ -2,7 +2,7 @@
 
 使用方式：
   from src.config import MEMORY_WINDOW              # settings 中的常量
-  from src.config.prompts import FINANCIAL_SYSTEM_PROMPT  # 提示词模板（推荐显式路径）
+  from src.config.prompts import loader             # prompt 加载入口（模板见 prompts/templates/）
 """
 
 from src.config.settings import *
