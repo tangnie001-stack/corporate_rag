@@ -10,6 +10,20 @@ from src.infra.db.engine import session_factory
 from src.infra.db.models.document import DocModel as DocEntity
 from src.infra.db.mysql_db import DocumentRepo, KbRepo
 
+# 本文件三个消息用例写入 `conversation_history` 的 session_id 前缀。
+# `save_message` 是纯 INSERT（新 uuid 主键），该表既无 user_id 列也无外键，
+# 消息行不与任何 sessions 行挂钩，故只能按前缀定位。生产会话 id 是裸 UUID
+# （形如 94feec1d-c013-...），不含 "sess-" 片段，谓词与生产/开发数据不相交。
+# 守卫用例复用同一 WHERE，保证断言与 fixture 删除范围一致。
+_TEST_MESSAGE_WHERE = (
+    "session_id LIKE 'sess-status-%'"
+    " OR session_id LIKE 'sess-st-%'"
+    " OR session_id LIKE 'sess-ts-%'"
+)
+_DELETE_TEST_MESSAGES = text(
+    "DELETE FROM conversation_history WHERE " + _TEST_MESSAGE_WHERE
+)
+
 
 @pytest.fixture
 async def repos():
@@ -24,9 +38,10 @@ async def _cleanup_test_user_rows():
     """每个用例前后清掉本文件写入真实 PG 的记录（直写真实 PG 的代价由本 fixture 承担）。
 
     刻意**不**调 `tests/reset_data.reset_pg()` —— 那会连 176 分块语料一起清掉。
-    只删本文件自己造的数据：`user_id='test-user'` 的知识库及其文档/分块，以及
+    只删本文件自己造的数据：`user_id='test-user'` 的知识库及其文档/分块、
     `test-user`、`u_agent` 两类会话（后者见 test_bind_session_agent_is_bind_once
-    与 test_create_session_with_agent_persists）。
+    与 test_create_session_with_agent_persists），以及三个消息用例按前缀写入的
+    `conversation_history` 行（见 `_TEST_MESSAGE_WHERE`）。
 
     删除顺序受外键约束：`chunks.kb_id` 指向 `knowledge_base.id`，故 chunks 先删；
     文档按 `kb_id` 归属删除而非 `document.user_id`（本文件写入的文档该列为空串，
@@ -49,6 +64,9 @@ async def _cleanup_test_user_rows():
         await s.execute(
             text("DELETE FROM sessions WHERE user_id IN ('test-user', 'u_agent')")
         )
+        # 消息行按 session_id 前缀删除：conversation_history 无 user_id 列、无外键，
+        # 且 save_message 是插入而非 upsert，无法靠 sessions 关联定位。
+        await s.execute(_DELETE_TEST_MESSAGES)
         await s.commit()
     yield
     async with session_factory() as s:
@@ -68,6 +86,9 @@ async def _cleanup_test_user_rows():
         await s.execute(
             text("DELETE FROM sessions WHERE user_id IN ('test-user', 'u_agent')")
         )
+        # 消息行按 session_id 前缀删除：conversation_history 无 user_id 列、无外键，
+        # 且 save_message 是插入而非 upsert，无法靠 sessions 关联定位。
+        await s.execute(_DELETE_TEST_MESSAGES)
         await s.commit()
 
 
@@ -332,15 +353,45 @@ async def test_create_session_with_agent_persists():
 
 @pytest.mark.asyncio
 async def test_file_leaves_no_rows_behind_note():
-    """本文件所有真实 PG 写入都必须被 autouse fixture 清理（防污染 dev 库）。
+    """本文件跑完后真实 PG 无残留 —— 覆盖 fixture 的每一条删除谓词。
 
-    该用例本身不造数据：它把"清理"变成可观测契约 —— autouse fixture 已在本
-    用例进入前完成收尾，故此刻查询 `test-user` / `u_agent` 的记录必须为 0。
-    若 `_cleanup_test_user_rows` 被删掉或漏删某张表，本断言会失败。
+    该用例本身不造数据：autouse fixture 已在本用例进入前完成收尾。
+    断言逐句对应 `_cleanup_test_user_rows` 的删除集合：`test-user` 的知识库、
+    挂在 `test-user` 知识库下的文档与分块、`test-user`/`u_agent` 会话、
+    以及三个消息用例按 `_TEST_MESSAGE_WHERE` 写入的 `conversation_history` 行。
+    任一集合非空即说明 fixture 漏删，本断言失败。
+
+    文档/分块另加孤儿断言：本文件写入的文档与分块只挂在自建的 `test-user`
+    知识库下，若 fixture 漏删某条删除语句，这些行会因知识库已删而成为孤儿，
+    此时"挂在 `test-user` 知识库下"的计数恒为 0（子查询为空），只有孤儿断言能抓到。
     """
     async with session_factory() as s:
         kb_count = await s.scalar(
             text("SELECT count(*) FROM knowledge_base WHERE user_id = 'test-user'")
+        )
+        doc_count = await s.scalar(
+            text(
+                "SELECT count(*) FROM document WHERE kb_id IN"
+                " (SELECT id FROM knowledge_base WHERE user_id = 'test-user')"
+            )
+        )
+        doc_orphan_count = await s.scalar(
+            text(
+                "SELECT count(*) FROM document WHERE kb_id NOT IN"
+                " (SELECT id FROM knowledge_base)"
+            )
+        )
+        chunk_count = await s.scalar(
+            text(
+                "SELECT count(*) FROM chunks WHERE kb_id IN"
+                " (SELECT id FROM knowledge_base WHERE user_id = 'test-user')"
+            )
+        )
+        chunk_orphan_count = await s.scalar(
+            text(
+                "SELECT count(*) FROM chunks WHERE kb_id NOT IN"
+                " (SELECT id FROM knowledge_base)"
+            )
         )
         session_count = await s.scalar(
             text(
@@ -348,5 +399,15 @@ async def test_file_leaves_no_rows_behind_note():
                 " WHERE user_id IN ('test-user', 'u_agent')"
             )
         )
+        message_count = await s.scalar(
+            text(
+                "SELECT count(*) FROM conversation_history WHERE " + _TEST_MESSAGE_WHERE
+            )
+        )
     assert kb_count == 0
+    assert doc_count == 0
+    assert doc_orphan_count == 0
+    assert chunk_count == 0
+    assert chunk_orphan_count == 0
     assert session_count == 0
+    assert message_count == 0
