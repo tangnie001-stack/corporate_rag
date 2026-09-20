@@ -24,6 +24,38 @@ from src.config.prompts import loader
 SECTION_CHARS_LIMIT: int = 50000
 
 
+def _count_section_chars(templates: dict[str, loader.Template]) -> dict[str, int]:
+    """统计每个段全部模板正文的字符数之和。
+
+    Args:
+        templates: 模板 id → 模板（loader.load_all 的返回值）
+
+    Returns:
+        段名 → 字符数之和；键序为首次出现顺序，稳定
+    """
+    section_chars: dict[str, int] = {}
+    for template in templates.values():
+        if template.kind != "section":
+            continue
+        assert template.section is not None  # loader 已校验，此处仅供类型收窄
+        section_chars[template.section] = section_chars.get(template.section, 0) + len(
+            template.content
+        )
+    return section_chars
+
+
+def section_char_totals() -> dict[str, int]:
+    """返回各段总字符数（**不做校验**，供请求期观测借用）。
+
+    模板是打进镜像的静态文件，启动期已由 `validate_all()` 校验且运行期不变，
+    故请求期只借用计数结果，不重复校验、也不会因模板问题在请求期失败。
+
+    Returns:
+        段名 → 该段全部模板正文的字符数之和（键序为首次出现顺序，稳定）
+    """
+    return _count_section_chars(loader.load_all())
+
+
 def validate_all() -> dict[str, int]:
     """校验全部模板并返回各段总字符数（启动期调用，失败即进程启动失败）。
 
@@ -36,14 +68,7 @@ def validate_all() -> dict[str, int]:
     """
     templates = loader.load_all()
 
-    section_chars: dict[str, int] = {}
-    for template in templates.values():
-        if template.kind != "section":
-            continue
-        assert template.section is not None  # loader 已校验，此处仅供类型收窄
-        section_chars[template.section] = section_chars.get(template.section, 0) + len(
-            template.content
-        )
+    section_chars = _count_section_chars(templates)
 
     if "base" not in section_chars:
         raise loader.TemplateLoadError("base 段没有任何模板")

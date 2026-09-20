@@ -25,7 +25,8 @@
 ## 值类型编码（helper 唯一实现）
 - int/bool 裸写；时长整数毫秒
 - 字符串 token 安全（`^[A-Za-z0-9_./:@-]+$`）裸写，否则双引号 + JSON 转义
-- 数组/容器：紧凑 JSON 文本（无空格）
+- 数组/容器：紧凑 JSON 文本（无空格）。如 `prompt validated` / `prompt assembled`
+  的 `section_chars` 为「段名 → 字符数」映射，走此编码（调用方传 dict，编码由 helper 负责）
 - query/搜索词完整记录、不按固定长度截断
 - 附加字段（含 retrieval_signal）同走此编码
 
@@ -53,7 +54,12 @@
   （沿用绑定）/ new_bound（首次绑定）/ ignored（请求与会话绑定不一致，已忽略）/
   unregistered（请求名未注册，降级为空）/ none
 - `prompt assembled`（llm / info）——system prompt 组成；`persona_source` 取 preset
-  （会话预设人设）/ base（系统默认人设）
+  （会话预设人设）/ base（系统默认人设）；`section_chars` 为各非空段字符数（容器值，
+  紧凑 JSON）
+- `prompt section share high`（llm / warning）——system 段按字符数估算占 context window
+  的比例超阈值；**仅告警不阻断**。`share` 为估算占比、`est_tokens` 为估算 token 数、
+  `threshold` 为当前阈值。换算系数是跨模型借用值、阈值是推断值，均非契约（见
+  `src/config/settings.py` 的 Prompt 组装观测段）
 - `prompt messages`（agent / info）——首轮组装的消息三段条数（system / 注入 / 历史）
 - `skill injected`（session / info）——技能正文成功注入；`mode` 取 inline（命令触发）/
   preload（预设预绑定首轮预加载），`source` 取 command / preset

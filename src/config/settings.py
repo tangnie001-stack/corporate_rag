@@ -74,6 +74,23 @@ VERIFY_ENABLED: bool = os.getenv("VERIFY_ENABLED", "true").lower() in (
     "yes",
 )
 
+# ====== Prompt 组装观测 ======
+# 中文字符 → token 的换算系数（**跨模型借用**，非本模型分词器实测）：
+# 某厂商公开文档给出的「1 个中文字符 ≈ 0.6 token」；本项目跑 DashScope/Qwen，
+# 该系数不是本模型分词器的结果，仅供 system 段占 context window 的量级估算。
+PROMPT_TOKENS_PER_CJK_CHAR: float = float(
+    os.getenv("PROMPT_TOKENS_PER_CJK_CHAR", "0.6")
+)
+# system 段估算占 context window 比例的告警阈值（**推断值**，非契约）：
+# 仅触发 warning 不阻断，取值可能需要按实测分布校准。
+PROMPT_CONTEXT_SHARE_WARN: float = float(os.getenv("PROMPT_CONTEXT_SHARE_WARN", "0.5"))
+# context window 大小（token）——按当前配置模型 LLM_MODEL（qwen3.7-flash-2026-07-15）
+# 取值。该型号窗口无法在此确证，故取保守偏小值（**假设值**）：使占比告警更早触发；
+# 确证官方窗口后必须更新。
+MODEL_CONTEXT_WINDOW_TOKENS: int = int(
+    os.getenv("MODEL_CONTEXT_WINDOW_TOKENS", "32768")
+)
+
 # 向量化模型：将文本转为向量，用于 pgvector 语义检索
 EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "qwen3.7-text-embedding")
 # Embedding API Key（fallback: DASHSCOPE_API_KEY → LLM_API_KEY）

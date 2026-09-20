@@ -2,7 +2,8 @@
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
-from src.config.prompts import loader
+from src.config import settings
+from src.config.prompts import loader, validation
 from src.core import logging as core_logging
 from src.core.log_events import Event
 from src.infra.llm.chat_message import ChatMessage
@@ -23,6 +24,46 @@ def format_context(contexts: list[RAGContext]) -> str:
     for i, ctx in enumerate(contexts):
         blocks.append(f"[{i + 1}] {ctx.to_prompt_text()}")
     return "\n\n".join(blocks)
+
+
+def _section_chars() -> dict[str, int]:
+    """取各非空段的模板字符数（供组装事件与占比告警共用）。
+
+    模板是打入镜像的静态文件，启动期已由 validation.validate_all() 校验，
+    运行期不变；此处只借用非校验计数入口，不重复校验、不会在请求期失败。
+
+    Returns:
+        段名 → 字符数；空段（count=0）不出现
+
+    说明：P0 口径是「各段模板正文字符数之和」；P1 引入段组装后应改为
+    「实际拼进 system 的各段字符数」（含条件注入与领域三选一的结果）。
+    """
+    totals = validation.section_char_totals()
+    return {name: count for name, count in totals.items() if count > 0}
+
+
+def _warn_if_section_share_high(section_chars: dict[str, int]) -> None:
+    """system 段估算占 context window 比例超阈值时记 warning（**不阻断**）。
+
+    换算系数为跨模型借用的经验值、阈值为推断值（见 settings 的中文注释），
+    仅作量级参考，不构成契约。
+
+    Args:
+        section_chars: 各段字符数（正整数）
+    """
+    # window 为环境变量可配；配成非正值时直接放弃估算，绝不让观测路径中断组装
+    if settings.MODEL_CONTEXT_WINDOW_TOKENS <= 0:
+        return
+    total = sum(section_chars.values())
+    est_tokens = int(total * settings.PROMPT_TOKENS_PER_CJK_CHAR)
+    share = est_tokens / settings.MODEL_CONTEXT_WINDOW_TOKENS
+    if share > settings.PROMPT_CONTEXT_SHARE_WARN:
+        core_logging.log_event(
+            Event.PROMPT_SECTION_SHARE_HIGH,
+            est_tokens=est_tokens,
+            share=round(share, 4),
+            threshold=settings.PROMPT_CONTEXT_SHARE_WARN,
+        )
 
 
 def build_system_prompt(
@@ -70,6 +111,8 @@ def build_system_prompt(
     if not kb_bound:
         messages.append(SystemMessage(content=_KB_UNBOUND))
     # system prompt 组成事实（design D11 #3/D15）：人设来源 + 条件注入命中 + system 段数
+    # + 各段字符数（容器值，由日志层编码为紧凑 JSON）
+    section_chars = _section_chars()
     core_logging.log_event(
         Event.PROMPT_ASSEMBLED,
         persona_source=persona_source,
@@ -78,7 +121,9 @@ def build_system_prompt(
         discipline_injected=discipline_injected,
         delegate_injected=delegate_injected,
         system_msgs=len(messages),
+        section_chars=section_chars,
     )
+    _warn_if_section_share_high(section_chars)
     return messages
 
 

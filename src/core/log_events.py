@@ -182,8 +182,10 @@ class Event(str, Enum):
 
     # [session] 本轮生效智能体与来源（turn-provenance；两者全空时不记）
     AGENT_RESOLVED = "agent resolved"
-    # [llm] system prompt 组成（人设来源、条件注入、system 段数）
+    # [llm] system prompt 组成（人设来源、条件注入、system 段数、各段字符数）
     PROMPT_ASSEMBLED = "prompt assembled"
+    # [llm] system 段估算占 context window 比例超阈值（只告警不阻断）
+    PROMPT_SECTION_SHARE_HIGH = "prompt section share high"
     # [agent] 首轮组装的消息构成（system / 注入 / 历史三段条数）
     PROMPT_MESSAGES = "prompt messages"
     # [session] 技能正文成功注入（inline 命令触发 / 首轮预设预加载）

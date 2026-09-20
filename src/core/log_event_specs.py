@@ -344,7 +344,15 @@ EVENT_SPECS: dict[str, EventSpec] = {
             "discipline_injected",
             "delegate_injected",
             "system_msgs",
+            "section_chars",
         ),
+    ),
+    # system 段估算占 context window 比例超阈值（阈值驱动，仅告警不阻断）
+    "prompt section share high": EventSpec(
+        "prompt section share high",
+        "llm",
+        "warning",
+        ("est_tokens", "share", "threshold"),
     ),
     "prompt messages": EventSpec(
         "prompt messages",
