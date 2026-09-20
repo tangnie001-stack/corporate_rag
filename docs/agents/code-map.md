@@ -20,7 +20,7 @@
 | `docs/` | 文档：`agents/`（本目录，规则/契约/排查）、`design/`（UI 设计规格与 HTML 预览）、`openspec/`（OpenSpec 主目录）、`superpowers/` |
 | `openspec/` | **符号链接 → `docs/openspec`**；OpenSpec changes / specs |
 | `alembic/` + `alembic.ini` | 数据库迁移（唯一链；baseline `alembic/versions/0001_pg_baseline.py` 从零建 8 张表） |
-| `scripts/` | 运维脚本（清库、重建 KB 数据、migrations） |
+| `scripts/` | 运维脚本（清库、重建 KB 数据、重写 `content_seg`） |
 | `litellm/` | LiteLLM 代理配置（模型网关） |
 | `data/`、`logs/` | 运行期数据与日志挂载点 |
 | `docker-compose.yml` / `.override.yml` / `.prod.yml` | 编排（redis / postgres / clickhouse / minio / langfuse / nginx / litellm-proxy / app 共 8 个服务） |

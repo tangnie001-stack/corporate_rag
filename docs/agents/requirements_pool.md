@@ -42,7 +42,7 @@
 | 需求 | 描述 | 来源对比 | 优先级 | 预估成本 | 依赖 |
 |------|------|---------|--------|---------|------|
 | C-01 | SQLAlchemy ORM | 替换手写 PyMySQL，减少 SQL 注入风险 | P1 | 中 | 无 |
-| C-02 | Alembic 数据库迁移 | 自动化 schema 版本管理，支持回滚。**现状核实（2026-09-21）**：迁移链**已归一** —— 仅根 `alembic/versions/0001_pg_baseline.py` 一条（从零建 8 张表），`alembic.ini` 的 `script_location` 指向根 `alembic/`；此前分叉的 `src/infra/db/mysql_db/alembic/versions/`（3 个版本，不在生效链上）已随 P4 归并删除。**残留**：`scripts/migrations/` 下 2 个手工 SQL（`2026-08-31-add-message-status.sql`、`2026-09-11-add-session-agent.sql`）仍是 MySQL 方言、注释里的执行命令指向已退役的 MySQL 容器，且其改动（`conversation_history.status` / `sessions.agent`）baseline 已覆盖，属死文件 | P1 | 中 | 无 |
+| C-02 | Alembic 数据库迁移 | 自动化 schema 版本管理，支持回滚。**现状核实（2026-09-21）**：迁移链**已归一** —— 仅根 `alembic/versions/0001_pg_baseline.py` 一条（从零建 8 张表），`alembic.ini` 的 `script_location` 指向根 `alembic/`；此前分叉的 `src/infra/db/mysql_db/alembic/versions/`（3 个版本，不在生效链上）已随 P4 归并删除。原并存的两个手工 SQL（`scripts/migrations/`）也已在 ADR-0008（2026-09-21）删除：MySQL 方言、执行命令指向已退役容器，且改动已被 baseline 覆盖 | P1 | 中 | 无 |
 | C-03 | 数据库连接池 | 生产环境连接池管理 | P1 | 低 | C-01 |
 | C-04 | 查询语句集中管理 | 目前 SQL 分散在各模块 | P1 | 低 | 无 |
 
