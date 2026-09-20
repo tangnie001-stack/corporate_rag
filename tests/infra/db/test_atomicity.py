@@ -1,0 +1,136 @@
+"""三条跨表路径的原子性验收（故障注入，真实 PG）。
+
+判据不是"成功路径能跑通"，而是"中途注入异常后两边都不落库"。
+"""
+
+import uuid
+
+import pytest
+import pytest_asyncio
+from sqlalchemy import text
+
+from src.chunking.validator import ChunkData
+from src.infra.db.engine import session_factory
+from src.infra.db.mysql_db import DocumentRepo
+from src.infra.db.vector_store.pg_store import PgVectorStore
+from src.services.document_service import DocumentService
+
+pytestmark = pytest.mark.asyncio
+
+
+class _FakeEmbedder:
+    """本文件的用例都显式传 embeddings，故不需要真实向量化；仅为构造 PgVectorStore。"""
+
+    def embed_query(self, text: str) -> list[float]:
+        """返回全零 1024 维向量（本文件不会走到这里）。"""
+        return [0.0] * 1024
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        """逐条返回全零向量（本文件不会走到这里）。"""
+        return [[0.0] * 1024 for _ in texts]
+
+
+@pytest_asyncio.fixture
+async def atomic_kb():
+    """建真实 KB，返回 (kb_id, doc_repo)，测后清理该 KB 的一切痕迹。"""
+    kb_id = f"p4atom-{uuid.uuid4().hex[:12]}"
+    async with session_factory() as s:
+        await s.execute(
+            text(
+                "INSERT INTO knowledge_base (id, user_id, name, description, doc_count, is_deleted)"
+                " VALUES (:k, 'p4test', :n, '', 0, 0)"
+            ),
+            {"k": kb_id, "n": f"p4-{kb_id[-6:]}"},
+        )
+        await s.commit()
+    yield kb_id, DocumentRepo(session_factory)
+    async with session_factory() as s:
+        await s.execute(text("DELETE FROM chunks WHERE kb_id = :k"), {"k": kb_id})
+        await s.execute(text("DELETE FROM document WHERE kb_id = :k"), {"k": kb_id})
+        await s.execute(text("DELETE FROM knowledge_base WHERE id = :k"), {"k": kb_id})
+        await s.commit()
+
+
+async def _insert_doc(
+    doc_id: str, kb_id: str, *, status: str = "processing", user_id: str = ""
+) -> None:
+    """插一行最小 document。
+
+    Args:
+        doc_id: 文档 ID
+        kb_id: 所属知识库
+        status: 文档状态（删文档的用例需要 ready）
+        user_id: 属主（删文档的用例需要与调用者一致）
+    """
+    async with session_factory() as s:
+        await s.execute(
+            text(
+                "INSERT INTO document (id, kb_id, filename, file_type, file_size,"
+                " status, is_deleted, user_id, processing_state, chunk_count,"
+                " processing_progress)"
+                " VALUES (:i, :k, 'a.txt', 'txt', 10, :st, 0, :u, 'running', 0, 0)"
+            ),
+            {"i": doc_id, "k": kb_id, "st": status, "u": user_id},
+        )
+        await s.commit()
+
+
+async def _status(doc_id: str) -> str:
+    """读文档状态。"""
+    async with session_factory() as s:
+        return str(
+            await s.scalar(
+                text("SELECT status FROM document WHERE id = :i"), {"i": doc_id}
+            )
+        )
+
+
+async def _is_deleted(doc_id: str) -> int:
+    """读文档软删标记。"""
+    async with session_factory() as s:
+        return int(
+            await s.scalar(
+                text("SELECT is_deleted FROM document WHERE id = :i"), {"i": doc_id}
+            )
+        )
+
+
+async def _chunk_count(kb_id: str, doc_id: str) -> int:
+    """读某文档的分块数。"""
+    async with session_factory() as s:
+        return int(
+            await s.scalar(
+                text("SELECT count(*) FROM chunks WHERE kb_id = :k AND doc_id = :i"),
+                {"k": kb_id, "i": doc_id},
+            )
+        )
+
+
+async def test_ingest_is_atomic_when_status_update_fails(atomic_kb, monkeypatch):
+    """分块写入与文档状态更新同一事务：状态更新失败时**分块也不得落库**。"""
+    kb_id, doc_repo = atomic_kb
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(doc_id, kb_id)
+
+    svc = DocumentService(
+        doc_repo=doc_repo,
+        # 假 embedder 仅占位，用例显式传 embeddings
+        vector_store=PgVectorStore(chunk_repo=None, embed_fn=_FakeEmbedder()),  # type: ignore[reportArgumentType]
+        router=None,  # type: ignore[reportArgumentType]  # 本用例不走解析路径
+    )
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("inject: status update failed")
+
+    monkeypatch.setattr(doc_repo, "update_document_status", _boom)
+
+    with pytest.raises(RuntimeError):
+        await svc._write_chunks_and_mark_ready(
+            kb_id=kb_id,
+            doc_id=doc_id,
+            chunks=[ChunkData(content="资产负债率上升", metadata={})],
+            embeddings=[[0.1] * 1024],
+        )
+
+    assert await _chunk_count(kb_id, doc_id) == 0
+    assert await _status(doc_id) == "processing"

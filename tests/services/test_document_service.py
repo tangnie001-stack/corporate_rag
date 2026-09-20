@@ -15,6 +15,12 @@ from src.services.document_service import DocumentService
 def _make_service() -> tuple[DocumentService, AsyncMock]:
     """构造最小 DocumentService（repo 用 AsyncMock，不触数据库）。"""
     doc_repo = AsyncMock()
+    doc_repo.transaction = MagicMock(
+        return_value=AsyncMock(
+            __aenter__=AsyncMock(return_value=AsyncMock()),
+            __aexit__=AsyncMock(return_value=False),
+        )
+    )
     svc = DocumentService(doc_repo, vector_store=AsyncMock(), router=MagicMock())
     return svc, doc_repo
 

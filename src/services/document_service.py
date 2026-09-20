@@ -359,6 +359,48 @@ class DocumentService:
             "Entity extraction for '{}': {}", filename, list(doc_entities.keys())
         )
 
+    async def _write_chunks_and_mark_ready(
+        self,
+        kb_id: str,
+        doc_id: str,
+        chunks: list[ChunkData],
+        embeddings: list[list[float]],
+        strategy: str = "",
+    ) -> int:
+        """把「写分块」与「文档标记 ready」放进同一个事务。
+
+        两者必须原子：进程死在中间会留下「有分块、文档未 ready」的孤儿。
+        embedding 由调用方在**进入本方法之前**算好（外网调用不得进事务）。
+
+        Args:
+            kb_id: 知识库 ID
+            doc_id: 文档 ID
+            chunks: 分块列表
+            embeddings: 与 chunks 一一对应的向量（已在事务外算好）
+            strategy: 分块策略（写入文档元信息）
+
+        Returns:
+            实际写入的分块数量
+
+        Raises:
+            Exception: 任一步失败时整体回滚并向上抛（调用方负责把文档标记为 failed）
+        """
+        async with self._doc_repo.transaction() as session:
+            count = await self.vector_store.add_chunks(
+                kb_id, chunks, doc_id, embeddings, session=session
+            )
+            await self._doc_repo.update_document_status(
+                doc_id,
+                "ready",
+                session=session,
+                chunk_count=count,
+                processing_state="completed",
+                processing_progress=100,
+                processing_message=f"处理完成，共 {count} 个分块",
+                chunk_strategy=strategy,
+            )
+        return count
+
     async def process_document(
         self,
         kb_id: str,
@@ -511,29 +553,19 @@ class DocumentService:
                             "Chunk eval failed for '{}': {}", filename, eval_err
                         )
 
-                # 分块写入 — PG 后端为 async，直接 await
+                # 分块写入 + 文档状态：同一事务（embedding 已在上方事务外算好）
                 t2 = time.perf_counter()
-                count = await self.vector_store.add_chunks(
-                    kb_id,
-                    chunks,
-                    doc_id,
-                    chunk_embeddings,
+                count = await self._write_chunks_and_mark_ready(
+                    kb_id=kb_id,
+                    doc_id=doc_id,
+                    chunks=chunks,
+                    embeddings=chunk_embeddings,
+                    strategy=strategy,
                 )
-
-                # DB 更新 — 异步，直接 await
                 t3 = time.perf_counter()
-                await self._doc_repo.update_document_status(
-                    doc_id,
-                    "ready",
-                    chunk_count=count,
-                    processing_state="completed",
-                    processing_progress=100,
-                    processing_message=f"处理完成，共 {count} 个分块",
-                    chunk_strategy=strategy,
-                )
                 logger.info(
                     "Document processed: {} -> {} chunks (strategy={}) | "
-                    "parse={:.1f}s chunk={:.1f}s store={:.1f}s total={:.1f}s",
+                    "parse={:.1f}s chunk={:.1f}s tx={:.1f}s total={:.1f}s",
                     filename,
                     count,
                     strategy,
