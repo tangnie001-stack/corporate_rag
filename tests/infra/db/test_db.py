@@ -3,6 +3,8 @@
 import uuid
 
 import pytest
+import pytest_asyncio
+from sqlalchemy import text
 
 from src.infra.db.engine import session_factory
 from src.infra.db.models.document import DocModel as DocEntity
@@ -15,6 +17,58 @@ async def repos():
     kb_repo = KbRepo(session_factory)
     doc_repo = DocumentRepo(session_factory)
     yield kb_repo, doc_repo
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _cleanup_test_user_rows():
+    """每个用例前后清掉本文件写入真实 PG 的记录（直写真实 PG 的代价由本 fixture 承担）。
+
+    刻意**不**调 `tests/reset_data.reset_pg()` —— 那会连 176 分块语料一起清掉。
+    只删本文件自己造的数据：`user_id='test-user'` 的知识库及其文档/分块，以及
+    `test-user`、`u_agent` 两类会话（后者见 test_bind_session_agent_is_bind_once
+    与 test_create_session_with_agent_persists）。
+
+    删除顺序受外键约束：`chunks.kb_id` 指向 `knowledge_base.id`，故 chunks 先删；
+    文档按 `kb_id` 归属删除而非 `document.user_id`（本文件写入的文档该列为空串，
+    按 user_id 删不掉）。
+    """
+    async with session_factory() as s:
+        await s.execute(
+            text(
+                "DELETE FROM chunks WHERE kb_id IN"
+                " (SELECT id FROM knowledge_base WHERE user_id = 'test-user')"
+            )
+        )
+        await s.execute(
+            text(
+                "DELETE FROM document WHERE kb_id IN"
+                " (SELECT id FROM knowledge_base WHERE user_id = 'test-user')"
+            )
+        )
+        await s.execute(text("DELETE FROM knowledge_base WHERE user_id = 'test-user'"))
+        await s.execute(
+            text("DELETE FROM sessions WHERE user_id IN ('test-user', 'u_agent')")
+        )
+        await s.commit()
+    yield
+    async with session_factory() as s:
+        await s.execute(
+            text(
+                "DELETE FROM chunks WHERE kb_id IN"
+                " (SELECT id FROM knowledge_base WHERE user_id = 'test-user')"
+            )
+        )
+        await s.execute(
+            text(
+                "DELETE FROM document WHERE kb_id IN"
+                " (SELECT id FROM knowledge_base WHERE user_id = 'test-user')"
+            )
+        )
+        await s.execute(text("DELETE FROM knowledge_base WHERE user_id = 'test-user'"))
+        await s.execute(
+            text("DELETE FROM sessions WHERE user_id IN ('test-user', 'u_agent')")
+        )
+        await s.commit()
 
 
 @pytest.mark.asyncio
@@ -274,3 +328,25 @@ async def test_create_session_with_agent_persists():
     target = [row for row in rows if row.id == sid]
     assert len(target) == 1
     assert target[0].agent == "finance-expert"
+
+
+@pytest.mark.asyncio
+async def test_file_leaves_no_rows_behind_note():
+    """本文件所有真实 PG 写入都必须被 autouse fixture 清理（防污染 dev 库）。
+
+    该用例本身不造数据：它把"清理"变成可观测契约 —— autouse fixture 已在本
+    用例进入前完成收尾，故此刻查询 `test-user` / `u_agent` 的记录必须为 0。
+    若 `_cleanup_test_user_rows` 被删掉或漏删某张表，本断言会失败。
+    """
+    async with session_factory() as s:
+        kb_count = await s.scalar(
+            text("SELECT count(*) FROM knowledge_base WHERE user_id = 'test-user'")
+        )
+        session_count = await s.scalar(
+            text(
+                "SELECT count(*) FROM sessions"
+                " WHERE user_id IN ('test-user', 'u_agent')"
+            )
+        )
+    assert kb_count == 0
+    assert session_count == 0
