@@ -231,8 +231,6 @@ services:
       LOG_DIR: /data/logs
     volumes:
       - app_logs:/data/logs
-      - chroma_onnx_cache:/root/.cache/chroma
-      - ./data/chroma_persist:/app/data/chroma_persist
       - ./data/ragas:/app/data/ragas
     depends_on:
       redis:
@@ -253,8 +251,6 @@ volumes:
     name: corporate_rag_minio_data
   app_logs:
     name: corporate_rag_app_logs
-  chroma_onnx_cache:
-    name: corporate_rag_chroma_onnx_cache
 
 networks:
   app-network:

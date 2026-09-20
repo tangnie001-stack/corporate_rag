@@ -33,7 +33,7 @@ COPY scripts/ scripts/
 COPY deploy/ deploy/
 
 # Volume mount points
-VOLUME ["/data/chroma", "/data/logs"]
+VOLUME ["/data/logs"]
 
 EXPOSE 8000
 CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--timeout-graceful-shutdown", "30"]
