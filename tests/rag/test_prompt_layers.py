@@ -99,11 +99,22 @@ def test_build_prompt_passes_persona_through():
     assert content.startswith("你是财务专家。")
 
 
-def test_get_base_system_prompt_excludes_env_appends():
-    """基础段不含日期追加（get_system_prompt 才追加）。"""
-    pm = _pm()
+def test_get_base_system_prompt_excludes_env_appends(monkeypatch):
+    """真实 get_base_system_prompt 原样返回取数缝隙的文本，不加日期后缀。
+
+    取数缝隙 `PromptManager._get` 被替换为返回哨兵串，消除网络依赖；
+    日期追加只发生在 get_system_prompt 层，故本方法返回值应逐字等于哨兵串。
+
+    Args:
+        monkeypatch: pytest 内置夹具，用于替换取数缝隙
+    """
+    from src.infra.llm.prompt_manager import PromptManager
+
+    sentinel = "基础段哨兵正文"
+    pm = PromptManager()
+    monkeypatch.setattr(pm, "_get", lambda name, fallback: sentinel)
     base = pm.get_base_system_prompt()
-    assert base
+    assert base == sentinel
     assert "今天是" not in base
 
 
