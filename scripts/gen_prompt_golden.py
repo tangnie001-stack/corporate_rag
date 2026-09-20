@@ -8,18 +8,25 @@
 - 一律用替身 PromptManager，不构造真实实例，避免走 Langfuse 远端（既有测试
   test_prompt_layers.py:24-33 就是因为构造真实实例才会发网络请求）。
 
-⚠ assembly.json 含 `_with_current_date` 追加的当日日期行（如"今天是 2026年9月21日。"），
-故该文件带生成日期、重跑会得到不同内容 —— 消费方须固定时钟后再比对。
+assembly.json 的日期行由 FROZEN_DATE 常量注入：生成时把 `src.rag.prompt._with_current_date`
+替换为 `_with_frozen_date`（逐字复刻源实现的格式与幂等守卫，仅日期值不同），使 golden 与日历
+解耦、可重复生成。消费方比对时必须锚定同一常量，否则闸门会随日期变红。
 """
 
 import json
+from datetime import date
 from pathlib import Path
 from typing import TypedDict, cast
+from unittest.mock import patch
 
 from src.agents.graph.verify import guardrails  # noqa: F401  (仅为断言其可导入)
 from src.config import prompts as P
 from src.infra.llm.prompt_manager import PromptManager
 from src.rag.prompt import build_system_prompt
+
+# 冻结日期：golden 的职责是钉"哪几段、什么顺序、什么分隔"，日期是噪声。
+# 生成与断言两侧必须用同一个常量，否则闸门会随日历变红。
+FROZEN_DATE: str = "2026-01-01"
 
 # 常量名 → 模板 id（与 plan 的映射表一致）
 TEMPLATE_MAP: dict[str, str] = {
@@ -86,6 +93,22 @@ def _templates() -> dict[str, dict[str, str]]:
     return result
 
 
+def _with_frozen_date(prompt: str) -> str:
+    """`_with_current_date` 的替身：格式与幂等守卫逐字一致，日期固定为 FROZEN_DATE。
+
+    Args:
+        prompt: 原始系统提示词文本
+
+    Returns:
+        追加冻结日期行后的提示词文本
+    """
+    frozen = date.fromisoformat(FROZEN_DATE)
+    date_line = f"\n今天是 {frozen.year}年{frozen.month}月{frozen.day}日。\n"
+    if date_line.strip() in prompt:
+        return prompt
+    return prompt + date_line
+
+
 def _assembly() -> dict[str, str]:
     """组装层 golden：固定输入下的最终 system 文本（分离 base 正文，只钉组装行为）。
 
@@ -135,8 +158,11 @@ def main() -> None:
         json.dumps(_templates(), ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    # build_system_prompt 以模块全局名解析日期函数，故替换 src.rag.prompt 上的绑定即可生效
+    with patch("src.rag.prompt._with_current_date", _with_frozen_date):
+        assembly = _assembly()
     (target / "assembly.json").write_text(
-        json.dumps(_assembly(), ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        json.dumps(assembly, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     print(f"golden written to {target}")
