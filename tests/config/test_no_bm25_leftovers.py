@@ -15,10 +15,9 @@ REPO = Path(__file__).resolve().parents[2]
 SCAN_DIRS = ("src", "tests", "scripts", "alembic", "deploy")
 SCAN_GLOBS = ("*.py", "*.ini", "*.yml", "*.yaml", "*.toml", "*.sql")
 
-# 允许的例外：本文件自身（持有用于比对的正则）、探针脚本（分组 A 的基线对照）
+# 允许的例外：本文件自身（持有用于比对的正则）
 ALLOWED = {
     "tests/config/test_no_bm25_leftovers.py",
-    "scripts/lexical_probe.py",
 }
 PATTERNS = (
     re.compile(r"from\s+src\.infra\.search\.bm25_index"),

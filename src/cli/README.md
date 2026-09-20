@@ -9,7 +9,7 @@ python -m src.cli.<模块名> --help
 ## 前提条件
 
 - 环境变量：`.env` 中配置有效的 `DASHSCOPE_API_KEY`（Embedding / LLM / Rerank 调用）
-- 基础设施：MySQL 与 ChromaDB 可用（文档处理、知识库查询依赖）
+- 基础设施：PostgreSQL（关系元数据 + pgvector 向量存储）可用（知识库查询依赖）
 - 数据就绪：目标知识库已创建且文档已入库
 
 ## 命令一览
@@ -47,8 +47,8 @@ python -m src.cli.eval_ragas --kb-id <知识库UUID> --generate --size 30
 
 ### 内部流程
 
-1. 从 MySQL 查询知识库名称，按白名单（`RAGAS_DOC_WHITELIST`）取文档 ID
-2. 从 ChromaDB 取出这些文档已有的分块
+1. 从 PostgreSQL 查询知识库名称，按白名单（`RAGAS_DOC_WHITELIST`）取文档 ID
+2. 从 PostgreSQL 取出这些文档已有的分块
 3. 分块脱敏后构建 KnowledgeGraph，应用 Summary / NER 抽取
 4. 生成 Personas（用户角色）→ Scenarios（场景）→ QA Samples（问答对）
 5. 写入测试集 JSON，版本号自动递增
@@ -115,7 +115,7 @@ python -m src.cli.eval_ragas --kb-id <知识库UUID> --output /path/report.csv
 
 > **评估模式跳过追问**：批量评估以 `skip_clarify=True` 运行图——即使 classify 判定问题缺实体（如缺年份），也不会停在「追问澄清」分支（生产交互链路会追问，评估不会），而是直接走检索+生成。这样单轮指标才有分数可算；追问分支的真实效果属于多轮/Agent 评估范畴，不在单轮评测内。
 
-> 注意：评估阶段每个指标内部会多次调用 LLM（faithfulness 把回答拆句逐句判断、answer_relevancy 反向生成候选问题等），所以**评估耗时明显长于回答生成**。若 ChromaDB 为空或 `RAGAS_LLM_MODEL` 未配置会直接报错退出。
+> 注意：评估阶段每个指标内部会多次调用 LLM（faithfulness 把回答拆句逐句判断、answer_relevancy 反向生成候选问题等），所以**评估耗时明显长于回答生成**。若知识库尚无可用分块或 `RAGAS_LLM_MODEL` 未配置会直接报错退出。
 
 ## 测试结果在哪里看
 
@@ -203,7 +203,7 @@ python -m src.cli.compare_retrieval --kb-name <知识库名称>
 
 ## eval_ragas_generate — 测试集生成模块
 
-`eval_ragas.py --generate` 的内部实现，一般无需直接运行。包含：从 ChromaDB 读取已有分块、构建知识图谱、`TestsetGenerator` 编排、版本管理与缓存恢复。
+`eval_ragas.py --generate` 的内部实现，一般无需直接运行。包含：从 PostgreSQL 读取已有分块、构建知识图谱、`TestsetGenerator` 编排、版本管理与缓存恢复。
 
 ## compare_retrieval — 检索参数对比实验
 
@@ -220,7 +220,7 @@ python -m src.cli.compare_retrieval --kb-name rag_eval
 python -m src.cli.check_retrieval --kb <知识库名称> --query "<问题>" [--top-k 10]
 ```
 
-对已有知识库执行一次语义检索，打印每条结果的距离分数、来源文件、页码与内容摘要。注意只走语义检索（ChromaDB），**不走** rerank 与生成环节。
+对已有知识库执行一次语义检索，打印每条结果的距离分数、来源文件、页码与内容摘要。注意只走语义检索（pgvector），**不走** rerank 与生成环节。
 
 ---
 

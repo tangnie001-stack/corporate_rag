@@ -1,4 +1,4 @@
-"""全量清理脚本 — 清 PostgreSQL 应用库、清 Redis、删 MinIO 文件、清 ChromaDB。
+"""全量清理脚本 — 清 PostgreSQL 应用库、清 Redis、删 MinIO 文件。
 
 适用场景：开发/测试环境重置、表结构大改后重建。
 """
@@ -8,8 +8,6 @@ import asyncio
 from sqlalchemy import text
 
 from src.config import (
-    CHROMA_COLLECTION_PREFIX,
-    CHROMA_PERSIST_DIR,
     MINIO_ACCESS_KEY,
     MINIO_DOC_BUCKET,
     MINIO_ENDPOINT,
@@ -70,36 +68,11 @@ async def clean_minio():
     print(f"[MinIO] 已重建 bucket: {MINIO_DOC_BUCKET}")
 
 
-async def reset_chromadb():
-    from pathlib import Path
-
-    import chromadb
-    from chromadb.config import Settings
-
-    persist_path = Path(CHROMA_PERSIST_DIR)
-    if not persist_path.exists():
-        print(f"[ChromaDB] 持久化目录不存在，跳过: {CHROMA_PERSIST_DIR}")
-        return
-    client = chromadb.PersistentClient(
-        path=str(persist_path),
-        settings=Settings(anonymized_telemetry=False),
-    )
-    names = [
-        c.name
-        for c in client.list_collections()
-        if c.name.startswith(CHROMA_COLLECTION_PREFIX)
-    ]
-    for name in names:
-        client.delete_collection(name)
-    print(f"[ChromaDB] 已删除 {len(names)} 个 collection")
-
-
 async def main():
     print("即将执行：")
     print("  1. PostgreSQL — 删除应用库全部表（保留 vector 扩展）")
     print("  2. Redis — FLUSHDB")
     print("  3. MinIO — 清空 bucket + 删除后重建")
-    print("  4. ChromaDB — 删除所有 collection")
     confirm = input("输入 YES 确认执行: ")
     if confirm != "YES":
         print("已取消。")
@@ -107,7 +80,6 @@ async def main():
     await reset_postgres()
     await flush_redis()
     await clean_minio()
-    await reset_chromadb()
     print("\n✅ 全部清理完成。")
     print("   下一步：alembic upgrade head 重建 PostgreSQL 表结构")
 

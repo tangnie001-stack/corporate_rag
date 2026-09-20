@@ -86,7 +86,6 @@ class Event(str, Enum):
     SKILL_PRELOAD_SKIP = "skill preload skip"
 
     # [db] 数据库层事件（3.4 批迁移登记：vector_store / file_store）
-    CHROMA_CLIENT_READY = "chroma client ready"
     BUCKET_CREATED = "bucket created"
     FILE_UPLOAD_FAILED = "file upload failed"
     FILE_DOWNLOAD_FAILED = "file download failed"

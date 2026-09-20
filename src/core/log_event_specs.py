@@ -150,9 +150,6 @@ EVENT_SPECS: dict[str, EventSpec] = {
         "skill preload skip", "session", "warning", ("skill", "reason")
     ),
     # [db] 向量检索 / 文件存储（3.4 批）
-    "chroma client ready": EventSpec(
-        "chroma client ready", "db", "info", ("persist_dir", "model")
-    ),
     "bucket created": EventSpec("bucket created", "db", "info", ("bucket",)),
     "file upload failed": EventSpec(
         "file upload failed", "db", "warning", ("key", "err")

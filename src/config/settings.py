@@ -7,7 +7,6 @@
   - DashScope API：阿里云大模型平台认证与模型选择
   - PostgreSQL：关系型元数据库连接参数
   - Redis：对话历史缓存参数
-  - ChromaDB：向量数据库持久化路径
   - 文档处理：分块策略（chunk size/overlap）和检索参数
   - 对话管理：历史窗口大小和缓存过期时间
   - 重试策略：外部调用的指数退避参数
@@ -75,7 +74,7 @@ VERIFY_ENABLED: bool = os.getenv("VERIFY_ENABLED", "true").lower() in (
     "yes",
 )
 
-# 向量化模型：将文本转为向量，用于 ChromaDB 语义检索
+# 向量化模型：将文本转为向量，用于 pgvector 语义检索
 EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "qwen3.7-text-embedding")
 # Embedding API Key（fallback: DASHSCOPE_API_KEY → LLM_API_KEY）
 EMBEDDING_API_KEY: str = (
@@ -87,7 +86,7 @@ EMBEDDING_API_KEY: str = (
 EMBEDDING_BASE_URL: str = os.getenv("EMBEDDING_BASE_URL") or os.getenv(
     "LLM_BASE_URL", "http://litellm-proxy:4000"
 )
-# 向量输出维度：固定维度后切换模型无需重建 ChromaDB collection
+# 向量输出维度：固定维度后切换模型无需重建向量列
 EMBEDDING_DIMENSION: int = int(os.getenv("EMBEDDING_DIMENSION", "1024"))
 # Embedding API 单次 batch 上限（DashScope 限制 20 条，超出需分批）
 EMBEDDING_BATCH_SIZE: int = int(os.getenv("EMBEDDING_BATCH_SIZE", "20"))
@@ -180,16 +179,6 @@ REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "financial_qa_pass")
 REDIS_URL: str = (
     f"redis://{REDIS_USERNAME}:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
 )
-
-# ====== ChromaDB ======
-# 向量数据库服务地址（Docker 容器内用容器名，开发环境用 localhost）
-CHROMA_HOST: str = os.getenv("CHROMA_HOST", "localhost")
-# 向量数据库服务端口（ChromaDB 默认 8000）
-CHROMA_PORT: int = int(os.getenv("CHROMA_PORT", "8000"))
-# collection 名称前缀，每个知识库对应一个 collection（如 kb_<uuid>）
-CHROMA_COLLECTION_PREFIX: str = os.getenv("CHROMA_COLLECTION_PREFIX", "kb_")
-# （已废弃）向量数据库持久化目录 — 改用独立 ChromaDB 容器后不再需要本地路径
-CHROMA_PERSIST_DIR: str = os.getenv("CHROMA_PERSIST_DIR", "./data/chroma_persist")
 
 # ====== 文档处理 ======
 # 文本分块大小（字符数）：512 是金融文档的平衡点，太小丢上下文，太大检索不精准
