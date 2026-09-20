@@ -78,39 +78,39 @@ PersistenceService SHALL 接收 ChatRepo 而非关系型连接组件。
 
 ### Requirement: 关系型实体类型
 
-每个关系型表的查询结果 SHALL 使用对应的 dataclass Entity 类型，而非 raw dict。
+每个关系型表的查询结果 SHALL 使用**有具名属性的类型**表达，而非 raw dict —— 即对应的 ORM 模型实例（`KbModel` / `DocModel` / `SessionModel` / `MessageModel` / `UserModel` / `EvalReportModel`），或在聚合查询中带具名属性的 `Row`。
 
-#### Scenario: 知识库查询返回 KbListItem
+（历史说明：本 requirement 的前身点名了一套 dataclass Entity 层。该层在更早的一次清理中被刻意移除，本变更沿用 ORM 模型实例作为边界类型 —— 要求的实质是"调用方按类型取属性、不自己解 dict"，这一点由下列 scenario 逐条保证。）
+
+#### Scenario: 知识库查询返回 ORM 实例
 - **WHEN** KbRepo.get_all_kb() 被调用
-- **THEN** 返回 `list[KbListItem]`，每项含 id、user_id、name、doc_count
+- **THEN** 返回 `list[KbModel]`，每项含 id、user_id、name、doc_count
 
-#### Scenario: 知识库查询返回 KbEntity 或 str
+#### Scenario: 知识库取或建返回元组
 - **WHEN** KbRepo.get_or_create_kb() 被调用
 - **THEN** 返回 `tuple[str, bool]`（kb_id, is_new）
 - **WHEN** KbRepo.get_kb_by_name() 被调用
 - **THEN** 返回 `Optional[str]`
 
-#### Scenario: 文档查询返回 DocEntity
+#### Scenario: 文档查询返回 ORM 实例
 - **WHEN** DocumentRepo.get_documents() 被调用
-- **THEN** 返回 `list[DocEntity]`
+- **THEN** 返回 `list[DocModel]`
 
-#### Scenario: 会话查询返回 SessionEntity
+#### Scenario: 会话查询返回 ORM 实例
 - **WHEN** ChatRepo.get_session_by_id() 被调用
-- **THEN** 返回 `Optional[SessionEntity]`
+- **THEN** 返回 `Optional[SessionModel]`
 
-#### Scenario: 会话列表返回 SessionListItem
+#### Scenario: 会话列表返回带具名属性的 Row
 - **WHEN** ChatRepo.get_sessions() 被调用
-- **THEN** 返回 `list[SessionListItem]`
+- **THEN** 返回 `list[Row]`，每项可按属性读出 id / title / kb_id / kb_name / message_count
 
-#### Scenario: 消息查询返回 MessageEntity
+#### Scenario: 消息查询返回 ORM 实例
 - **WHEN** ChatRepo.get_messages() 被调用
-- **THEN** 返回 `list[MessageEntity]`
+- **THEN** 返回 `list[MessageModel]`
 
-#### Scenario: 用户查询返回 UserEntity
-- **WHEN** UserRepo.get_user_by_account() 被调用
-- **THEN** 返回 `Optional[UserEntity]`
-- **WHEN** UserRepo.get_user_by_token() 被调用
-- **THEN** 返回 `Optional[UserEntity]`
+#### Scenario: 用户查询返回 ORM 实例
+- **WHEN** UserRepo.get_user_by_account() / get_user_by_token() 被调用
+- **THEN** 返回 `Optional[UserModel]`
 
 ### Requirement: 连接管理拆为 Repo
 

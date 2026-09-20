@@ -2,7 +2,7 @@
 
 import json
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import Row, delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from src.infra.db.models.chat import MessageModel, SessionModel
@@ -61,8 +61,15 @@ class ChatRepo:
             await s.commit()
             return result.rowcount > 0
 
-    async def get_sessions(self, user_id: str = "") -> list:
-        """返回 Row 对象（支持 .id 属性访问，兼容旧 SessionListItem 用法）。"""
+    async def get_sessions(self, user_id: str = "") -> list[Row]:
+        """返回带具名属性的 Row（`.id` / `.kb_name` / `.message_count` 可直接访问）。
+
+        Args:
+            user_id: 用户 ID；空串表示不过滤（管理侧视角）
+
+        Returns:
+            会话列表（含知识库名与消息数），按 updated_at 倒序、最多 50 条
+        """
         async with self._sf() as session:
             stmt = (
                 select(

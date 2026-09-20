@@ -71,3 +71,24 @@ async def test_get_sessions_returns_kb_name_and_message_count(seeded_session):
     assert len(target) == 1
     assert target[0].kb_name == kb_name
     assert target[0].message_count == 3
+
+
+async def test_get_sessions_rows_expose_named_attributes(seeded_session):
+    """get_sessions 的返回值必须可按属性访问（不是 raw dict）。"""
+    chat_repo, session_id, _kb_name = seeded_session
+
+    rows = await chat_repo.get_sessions(_USER_ID)
+
+    target = [row for row in rows if row.id == session_id]
+    assert len(target) == 1
+    row = target[0]
+    for attr in (
+        "id",
+        "title",
+        "kb_id",
+        "created_at",
+        "updated_at",
+        "kb_name",
+        "message_count",
+    ):
+        assert hasattr(row, attr), f"Row 缺属性 {attr}"
