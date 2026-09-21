@@ -243,7 +243,9 @@
   - **未跟踪文件不共享**（只有被跟踪的才跨工作区可见）→ 先提交，再切过去用
 - 换目录起服务会重建 `app` / `nginx`（渲染出的 bind source 不同 → 配置哈希不同），属预期
 - 用完 `git worktree remove <路径>`；分支有未合并提交时需 `--force`
-- 前提：override 的挂载须是相对路径，否则 worktree 里改代码静默失效（见 defensive-patterns.md「部署」）
+- 前提：override 的挂载须是相对路径（本仓 2026-09-21 已改），否则 worktree 里改代码静默失效（见 defensive-patterns.md「部署」）
+- **`core.symlinks=false`（本仓 git 配置）下，被跟踪的 symlink 会被写成普通文件**：`openspec` 在 git 里是 symlink（mode `120000`），检出到该环境却成了内容为 `docs/openspec` 的**文本文件** → `openspec` CLI 报 `Unknown item '<name>'`。修法：`rm openspec && ln -s docs/openspec openspec`（git 仍判定未变）。**任何新建的 worktree / clone 都会中这一条**。
+- **`.gitignore` 的 `/data/` 忽略不了同名 symlink**：尾斜杠只匹配目录，而 symlink 不是目录 → 把 `data` 整体 symlink 过去会以未跟踪文件冒出来，有被 `git add .` 带进提交的风险。改法：建**真目录** `data/`，只在里面 symlink 具体子目录（`data/ragas`）。
 
 ## 分区命名
 
