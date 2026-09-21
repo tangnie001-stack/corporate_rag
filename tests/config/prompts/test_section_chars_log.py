@@ -5,30 +5,15 @@
 - 占比告警是 **阈值驱动** 的：正常阈值下不触发，降低阈值后触发（见两个阈值用例）。
 """
 
-from unittest.mock import MagicMock
-
 import pytest
 
 from src.config import settings
 from src.core.log_events import Event
-from src.infra.llm.prompt_manager import PromptManager
 from src.rag.prompt import build_system_prompt
 
 # 被断言的「正常阈值」显式镜像 settings 的发货默认值：本用例只回答
 # 「在 0.05 这个阈值下是否静默」，不隐式依赖 settings 的当前默认值。
 _NORMAL_THRESHOLD = 0.05
-
-
-def _stub_pm() -> PromptManager:
-    """替身 PM，绝不触网。
-
-    Returns:
-        仅实现 build_system_prompt 用到的方法的 MagicMock，类型上冒充 PromptManager
-    """
-    pm = MagicMock()
-    pm.get_base_system_prompt.return_value = "基础段"
-    pm.get_user_template.return_value = "用户模板"
-    return pm
 
 
 def _capture_log_events(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
@@ -53,7 +38,11 @@ def _capture_log_events(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
 def _build() -> None:
     """以固定入参组装一次 system prompt（触发 PROMPT_ASSEMBLED）。"""
     build_system_prompt(
-        persona="", kb_bound=True, has_skills=False, prompt_manager=_stub_pm()
+        persona="",
+        kb_bound=True,
+        has_skills=False,
+        tool_names=frozenset({"retrieve_kb", "ask_user"}),
+        kb_domain="general",
     )
 
 
@@ -71,6 +60,20 @@ def test_prompt_assembled_carries_section_chars(
     for name, count in section_chars.items():
         assert isinstance(name, str)
         assert isinstance(count, int) and count > 0
+
+
+def test_section_chars_key_order_matches_assembly_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """section_chars 的键序 = 段组装顺序（不是文件名顺序）。"""
+    from src.rag.prompt import SECTION_ORDER
+
+    calls = _capture_log_events(monkeypatch)
+    _build()
+
+    payload = next(c for c in calls if c["event"] is Event.PROMPT_ASSEMBLED)
+    keys = list(payload["section_chars"])
+    assert keys == [name for name in SECTION_ORDER if name in keys]
 
 
 def test_section_share_warning_fires_when_threshold_lowered(
