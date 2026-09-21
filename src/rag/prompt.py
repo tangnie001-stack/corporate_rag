@@ -14,6 +14,8 @@ from src.rag.context import RAGContext
 # 段组装顺序与条件注入仍由 build_system_prompt 决定，本层只负责取正文。
 _KB_BOUND_DISCIPLINE = loader.get_content("sources-kb-ladder")
 _KB_UNBOUND = loader.get_content("sources-kb-unbound")
+# 未绑定会话的联网句：按联网工具是否启用条件追加
+_KB_UNBOUND_WEB = loader.get_content("sources-kb-unbound-web")
 _INLINE_CITATION = loader.get_content("output-citation")
 _DELEGATE_GUIDANCE = loader.get_content("tools-delegate")
 
@@ -108,7 +110,10 @@ def build_system_prompt(
         delegate_injected = True
     messages: list[SystemMessage] = [SystemMessage(content=_with_current_date(base))]
     if not kb_bound:
-        messages.append(SystemMessage(content=_KB_UNBOUND))
+        unbound = _KB_UNBOUND
+        if settings.WEB_SEARCH_ENABLED:
+            unbound += "\n" + _KB_UNBOUND_WEB.strip("\n")
+        messages.append(SystemMessage(content=unbound))
     # system prompt 组成事实（design D11 #3/D15）：人设来源 + 条件注入命中 + system 段数
     # + 各段字符数（容器值，由日志层编码为紧凑 JSON）
     section_chars = _section_chars()

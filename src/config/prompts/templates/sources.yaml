@@ -24,3 +24,15 @@ templates:
       - 再次检索仍无相关结果时：先说明"该问题不在当前知识库范围内"，再调用 search_web 联网搜索获取信息并回答，保留网络来源引用。
       - 若联网检索也无法获得相关信息，最后才说明"未在文档中找到相关数据"。
       - 知识库能回答的问题不要调用 search_web，仅在确认知识库无法覆盖时才联网。
+
+  - id: sources-kb-unbound
+    kind: section
+    section: sources
+    content: |-
+      本会话未绑定知识库，请勿调用知识库检索工具。可基于常识回答，不得声称检索过实际未检索的内容。
+
+  - id: sources-kb-unbound-web
+    kind: section
+    section: sources
+    content: |-
+      若本轮可用联网搜索（search_web），也可联网检索，并在引用联网结果的对应句末标注来源编号 [1][2]。

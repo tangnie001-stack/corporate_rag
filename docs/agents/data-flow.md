@@ -205,7 +205,7 @@ verify（态 A，verify/node.py:35-41）：
 
 关键代码：态 A 分派 src/agents/graph/verify/node.py:35-41；联网引用引导
 src/agents/graph/verify/guardrails.py:68-104；未绑 KB 禁检索指令
-src/agents/graph/agent_node.py:68-74 与 src/config/prompts/templates/sources-kb-unbound.yaml（原 KB_UNBOUND_SYSTEM_PROMPT）；
+src/agents/graph/agent_node.py:68-74 与 src/config/prompts/templates/sources.yaml（模板 sources-kb-unbound / sources-kb-unbound-web，经 src/rag/prompt.py:110-113 条件组装）；
 空 kb_id 不检索 src/agents/tools/rag_tools.py:127-130；web 结果写入
 src/agents/tools/web_tools.py:131-141。
 

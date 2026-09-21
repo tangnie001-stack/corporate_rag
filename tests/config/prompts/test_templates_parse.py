@@ -1,4 +1,4 @@
-"""19 条模板文件可解析、字段合法、id 唯一。"""
+"""20 条模板文件可解析、字段合法、id 唯一。"""
 
 from pathlib import Path
 
@@ -24,9 +24,9 @@ def _all_templates() -> list[dict]:
 
 
 def test_template_count_and_migrated_ids() -> None:
-    """19 条 = 12 条搬运 + 1 条通用 base（base-general）+ 6 条新增段模板（runtime-contract / sources-general / sources-kb-web-rules / output-delegate-citation / tools-execution / tools-ask-user）。"""
+    """20 条 = 12 条搬运 + 1 条通用 base（base-general）+ 7 条新增段模板（runtime-contract / sources-general / sources-kb-web-rules / sources-kb-unbound-web / output-delegate-citation / tools-execution / tools-ask-user）。"""
     templates = _all_templates()
-    assert len(templates) == 19
+    assert len(templates) == 20
     migrated = {
         "tools-delegate",
         "base-financial",
@@ -227,3 +227,46 @@ def test_base_does_not_contain_generic_output_rules() -> None:
         content = loader.get_content(tid)
         for generic in ("不强加 Markdown", "URL 保真", "完成前自检"):
             assert generic not in content, f"{tid} 出现了通用输出形态规则：{generic}"
+
+
+def test_user_template_is_data_only() -> None:
+    """用户模板只传数据（参考资料 / 用户请求），不含任何策略句。"""
+    from src.config.prompts import loader
+
+    content = loader.get_content("task-user-prompt")
+    assert "{context}" in content
+    assert "{query}" in content
+    assert "参考资料" in content
+    assert "用户请求" in content
+    # 策略句（出口条件）已移出 —— 它的唯一 owner 是 sources 段
+    assert "若【参考文档】为空" not in content
+    assert "未在文档中找到相关数据" not in content
+
+
+def test_user_template_placeholders_are_satisfiable() -> None:
+    """模板占位符集合 ⊆ 消费点实际传入的变量集合（防 KeyError 每请求 500）。"""
+    import re
+
+    from src.config.prompts import loader
+
+    content = loader.get_content("task-user-prompt")
+    provided = {"context", "query"}
+    used = set(re.findall(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", content))
+    assert used <= provided, f"模板引用了消费点未提供的占位符：{used - provided}"
+
+
+def test_kb_unbound_split_into_core_and_web() -> None:
+    """未绑定提示拆两条：核心句无条件、联网句依赖 search_web。"""
+    from src.config.prompts import loader
+
+    templates = loader.load_all()
+    core = templates["sources-kb-unbound"]
+    web = templates["sources-kb-unbound-web"]
+    assert core.section == "sources" and web.section == "sources"
+
+    assert "请勿调用知识库检索工具" in core.content
+    assert "不得声称检索过实际未检索的内容" in core.content
+    assert "search_web" not in core.content, "核心句不得提及 search_web"
+
+    assert "search_web" in web.content
+    assert "[1][2]" in web.content
