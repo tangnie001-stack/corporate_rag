@@ -1,23 +1,112 @@
-"""Prompt 构建 — 将上下文、历史和问题组装为 LLM 消息列表。"""
+"""Prompt 构建 — 将上下文、历史和问题组装为 LLM 消息列表。
+
+组装职责边界（spec <prompt-composition>）：
+- 段顺序、逐条条件注入、base 三选一都住在本模块；YAML 模板只装正文。
+- 判据留代码、不由模板声明（"能改文案、不能改挂载"），逐条对照表见
+  docs/agents/prompt-ownership.md §3。
+"""
+
+from collections.abc import Callable
+from dataclasses import dataclass
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from src.config import settings
-from src.config.prompts import loader, validation
+from src.config.prompts import loader
 from src.core import logging as core_logging
 from src.core.log_events import Event
 from src.infra.llm.chat_message import ChatMessage
 from src.infra.llm.prompt_manager import PromptManager, _with_current_date
 from src.rag.context import RAGContext
 
-# 模板正文经唯一加载入口读取（loader.load_all 有 lru_cache，进程内零重复 I/O）。
-# 段组装顺序与条件注入仍由 build_system_prompt 决定，本层只负责取正文。
-_KB_BOUND_DISCIPLINE = loader.get_content("sources-kb-ladder")
-_KB_UNBOUND = loader.get_content("sources-kb-unbound")
-# 未绑定会话的联网句：按联网工具是否启用条件追加
-_KB_UNBOUND_WEB = loader.get_content("sources-kb-unbound-web")
-_INLINE_CITATION = loader.get_content("output-citation")
-_DELEGATE_GUIDANCE = loader.get_content("tools-delegate")
+# 段组装顺序（spec「五段按固定顺序组装」）
+SECTION_ORDER: tuple[str, ...] = (
+    "base",
+    "runtime_contract",
+    "sources",
+    "tools",
+    "output",
+)
+
+# 通用 base 的领域保留值（spec「general 是保留值，且它必须有对应模板」）
+GENERAL_DOMAIN: str = "general"
+
+# 本轮实际注册的工具名集合（题面里可能出现的全部工具名）
+KNOWN_TOOL_NAMES: frozenset[str] = frozenset(
+    {"retrieve_kb", "search_web", "ask_user", "delegate_task"}
+)
+
+
+@dataclass(frozen=True)
+class AssemblyContext:
+    """段组装的判据输入 —— 本轮实际可用能力。
+
+    Attributes:
+        persona: 会话智能体预设正文；来源：RequestContext.persona；空串 = 未选预设
+        kb_bound: 是否绑定知识库；来源：state.kb_id 非空
+        has_skills: 是否有可用技能；来源：RequestContext.has_skills
+        tool_names: 本轮实际注册的工具名；来源：build_graph 的 rag_tools 列表
+        kb_domain: 知识库领域；来源：RequestContext.kb_domain；缺省 general
+    """
+
+    persona: str
+    kb_bound: bool
+    has_skills: bool
+    tool_names: frozenset[str]
+    kb_domain: str
+
+
+RuleFn = Callable[[AssemblyContext], bool]
+
+
+def _always(_ctx: AssemblyContext) -> bool:
+    """无条件规则：与本轮能力无关。"""
+    return True
+
+
+def _kb_retrieval_ladder(ctx: AssemblyContext) -> bool:
+    """检索阶梯：`retrieve_kb` 已注册 AND 适用域成立（已绑定知识库）。"""
+    if not ctx.kb_bound:
+        return False
+    return "retrieve_kb" in ctx.tool_names
+
+
+def _kb_web_rules(ctx: AssemblyContext) -> bool:
+    """联网系列：`search_web` 已注册 AND 适用域成立（已绑定知识库）。"""
+    if not ctx.kb_bound:
+        return False
+    return "search_web" in ctx.tool_names
+
+
+def _ask_user_available(ctx: AssemblyContext) -> bool:
+    """澄清时机：只看 `ask_user` 是否注册（无适用域）。"""
+    return "ask_user" in ctx.tool_names
+
+
+def _delegate_available(ctx: AssemblyContext) -> bool:
+    """委派系列：只看 `delegate_task` 是否注册（无适用域）。"""
+    return "delegate_task" in ctx.tool_names
+
+
+# 段 → ((模板 id, 判据), ...)；判据留代码、不由 YAML 声明（spec「判据的位置」）。
+# 增删条目必须同步 docs/agents/prompt-ownership.md §3 的逐条判据表。
+_SECTION_RULES: dict[str, tuple[tuple[str, RuleFn], ...]] = {
+    "runtime_contract": (("runtime-contract", _always),),
+    "sources": (
+        ("sources-general", _always),
+        ("sources-kb-ladder", _kb_retrieval_ladder),
+        ("sources-kb-web-rules", _kb_web_rules),
+    ),
+    "tools": (
+        ("tools-execution", _always),
+        ("tools-ask-user", _ask_user_available),
+        ("tools-delegate", _delegate_available),
+    ),
+    "output": (
+        ("output-citation", _always),
+        ("output-delegate-citation", _delegate_available),
+    ),
+}
 
 
 def format_context(contexts: list[RAGContext]) -> str:
@@ -28,20 +117,60 @@ def format_context(contexts: list[RAGContext]) -> str:
     return "\n\n".join(blocks)
 
 
-def _section_chars() -> dict[str, int]:
-    """取各非空段的模板字符数（供组装事件与占比告警共用）。
+def _resolve_base(ctx: AssemblyContext) -> tuple[str, str]:
+    """按三选一（替换）解析 base 段正文。
 
-    模板是打入镜像的静态文件，启动期已由 validation.validate_all() 校验，
-    运行期不变；此处只借用非校验计数入口，不重复校验、不会在请求期失败。
+    Args:
+        ctx: 组装判据输入
 
     Returns:
-        段名 → 字符数；空段（count=0）不出现
-
-    说明：P0 口径是「各段模板正文字符数之和」；P1 引入段组装后应改为
-    「实际拼进 system 的各段字符数」（含条件注入与领域三选一的结果）。
+        (base 正文, persona_source)；persona_source 取 preset / domain / general
     """
-    totals = validation.section_char_totals()
-    return {name: count for name, count in totals.items() if count > 0}
+    if ctx.persona:
+        return ctx.persona.strip("\n"), "preset"
+    if loader.has_domain(ctx.kb_domain):
+        return loader.get_domain_base(ctx.kb_domain).strip("\n"), "domain"
+    return loader.get_domain_base(GENERAL_DOMAIN).strip("\n"), "general"
+
+
+def _render_section(section: str, ctx: AssemblyContext) -> str:
+    """按判据表逐条取正文，拼成一段。
+
+    Args:
+        section: 段名（SECTION_ORDER 中除 base 外的段）
+        ctx: 组装判据输入
+
+    Returns:
+        该段正文；无条目命中时为空串（调用方丢弃，不输出空标题）
+    """
+    parts: list[str] = []
+    for template_id, predicate in _SECTION_RULES[section]:
+        if not predicate(ctx):
+            continue
+        parts.append(loader.get_content(template_id).strip("\n"))
+    return "\n".join(parts)
+
+
+def _render_all_sections(ctx: AssemblyContext) -> tuple[dict[str, str], str]:
+    """按 SECTION_ORDER 逐段渲染。
+
+    base 只解析一次：先取三选一结果，再按段序填入，避免重复解析。
+
+    Args:
+        ctx: 组装判据输入
+
+    Returns:
+        (段名 → 段正文, persona_source)；段键序 = 组装顺序，
+        persona_source 取 preset / domain / general
+    """
+    base_text, persona_source = _resolve_base(ctx)
+    sections: dict[str, str] = {}
+    for section in SECTION_ORDER:
+        if section == "base":
+            sections[section] = base_text
+            continue
+        sections[section] = _render_section(section, ctx)
+    return sections, persona_source
 
 
 def _warn_if_section_share_high(section_chars: dict[str, int]) -> None:
@@ -68,62 +197,68 @@ def _warn_if_section_share_high(section_chars: dict[str, int]) -> None:
         )
 
 
+def _build_unbound_message(ctx: AssemblyContext) -> str:
+    """组装态 A 的第二条 system 消息（核心句 + 条件联网句）。
+
+    Args:
+        ctx: 组装判据输入（读 tool_names 决定是否追加联网句）
+
+    Returns:
+        未绑定提示正文
+    """
+    text = loader.get_content("sources-kb-unbound").strip("\n")
+    if "search_web" in ctx.tool_names:
+        text += "\n" + loader.get_content("sources-kb-unbound-web").strip("\n")
+    return text
+
+
 def build_system_prompt(
     persona: str,
     kb_bound: bool,
     has_skills: bool,
-    prompt_manager: PromptManager,
+    tool_names: frozenset[str] | None = None,
+    kb_domain: str = GENERAL_DOMAIN,
 ) -> list[SystemMessage]:
-    """组装 system 消息（人设层 + 环境约束层）。
+    """组装 system 消息（人设层 base + 环境约束层四段）。
 
-    追加顺序：基础段 →（绑库时）检索纪律 → 引用指令 → 委派引导 → 日期，各段均带幂等守卫。
-    检索纪律不再取决于 persona 是否为空：base 已瘦身、不再自含检索阶梯。
+    组装顺序固定为 base → runtime_contract → sources → tools → output；
+    空段丢弃。未绑定知识库时追加第二条 system 消息（未绑定提示）。
 
     Args:
-        persona: 人设层正文（会话智能体预设的 system_prompt）；空串=未选 agent，
-            则用 prompt_manager.get_base_system_prompt() 作人设层
-        kb_bound: 是否绑定知识库（False 时追加未绑库会话指令独立消息）
-        has_skills: 本次会话是否有可用技能；仅当 persona 非空时用于决定是否追加
-            委派引导段（persona 为空时恒追加，保证未选 agent 的 system 段逐字不变）
-        prompt_manager: PromptManager 实例，提供基础段取值
+        persona: 会话智能体预设正文；空串 = 未选预设（改用知识库领域 base）
+        kb_bound: 是否绑定知识库
+        has_skills: 是否有可用技能（保留形参：决策判据已改由工具集承担，
+            见 prompt-ownership.md §3；本值仍进组装日志）
+        tool_names: 本轮实际注册的工具名；None 视为空集（无工具）
+        kb_domain: 知识库领域；缺省 general
 
     Returns:
-        system 消息列表（未绑定 KB 时为两条：主 system + KB_UNBOUND）
+        system 消息列表（未绑定 KB 时为两条）
     """
-    if persona:
-        base = persona
-        persona_source = "preset"
-    else:
-        base = prompt_manager.get_base_system_prompt()
-        persona_source = "base"
-    # 环境约束层·检索纪律：检索纪律住在 sources 段，凡绑定 KB 即注入（不再看 persona）。
-    # base 已瘦身、不再自含检索阶梯，故 persona 为空时也需注入，否则该路无检索纪律。
-    discipline_injected = False
-    if kb_bound and _KB_BOUND_DISCIPLINE not in base:
-        base += _KB_BOUND_DISCIPLINE
-        discipline_injected = True
-    if _INLINE_CITATION not in base:
-        base += _INLINE_CITATION
-    delegate_injected = False
-    if (has_skills or not persona) and _DELEGATE_GUIDANCE not in base:
-        base += _DELEGATE_GUIDANCE
-        delegate_injected = True
-    messages: list[SystemMessage] = [SystemMessage(content=_with_current_date(base))]
+    if tool_names is None:
+        tool_names = frozenset()
+    ctx = AssemblyContext(
+        persona=persona,
+        kb_bound=kb_bound,
+        has_skills=has_skills,
+        tool_names=tool_names,
+        kb_domain=kb_domain,
+    )
+    sections, persona_source = _render_all_sections(ctx)
+    body = "\n\n".join(text for text in sections.values() if text)
+    messages: list[SystemMessage] = [SystemMessage(content=_with_current_date(body))]
     if not kb_bound:
-        unbound = _KB_UNBOUND
-        if settings.WEB_SEARCH_ENABLED:
-            unbound += "\n" + _KB_UNBOUND_WEB.strip("\n")
-        messages.append(SystemMessage(content=unbound))
-    # system prompt 组成事实（design D11 #3/D15）：人设来源 + 条件注入命中 + system 段数
-    # + 各段字符数（容器值，由日志层编码为紧凑 JSON）
-    section_chars = _section_chars()
+        messages.append(SystemMessage(content=_build_unbound_message(ctx)))
+    # system prompt 组成事实：人设来源 + 条件注入命中 + system 段数 + 各段字符数
+    # （容器值，由日志层编码为紧凑 JSON；键序 = 组装顺序，空段不出现）
+    section_chars = {name: len(text) for name, text in sections.items() if text}
     core_logging.log_event(
         Event.PROMPT_ASSEMBLED,
         persona_source=persona_source,
         kb_bound=kb_bound,
         has_skills=has_skills,
-        discipline_injected=discipline_injected,
-        delegate_injected=delegate_injected,
+        kb_domain=ctx.kb_domain,
+        tool_count=len(tool_names),
         system_msgs=len(messages),
         section_chars=section_chars,
     )
@@ -139,24 +274,23 @@ def build_prompt(
     kb_bound: bool = True,
     persona: str = "",
     has_skills: bool = False,
+    tool_names: frozenset[str] | None = None,
+    kb_domain: str = GENERAL_DOMAIN,
 ) -> list:
     """构建含系统指令和对话历史的完整 prompt。
 
-    Args:
-        query: 用户查询文本
-        context: 已格式化的检索上下文（可能为空字符串）
-        history: 对话历史（user/assistant 交替排列）
-        prompt_manager: PromptManager，提供系统指令与用户模板
-        kb_bound: 是否绑定知识库（默认 True）；False 时在系统提示后追加会话指令，
-            明确禁止调用知识库检索工具（KB=RAG 开关软引导）
-        persona: 会话选定智能体的人设正文；空串=未选 agent，用系统默认人设（默认 ""）
-        has_skills: 本次会话是否有可用技能；仅在 persona 非空时影响委派引导段（默认 False）
-
-    Returns:
-        LLM 消息列表：system（+未绑定时追加会话指令）+ 历史 + 当前 user 消息
+    追加形参见 build_system_prompt；prompt_manager 只用于渲染用户消息模板。
     """
     messages: list[BaseMessage] = []
-    messages.extend(build_system_prompt(persona, kb_bound, has_skills, prompt_manager))
+    messages.extend(
+        build_system_prompt(
+            persona,
+            kb_bound,
+            has_skills,
+            tool_names=tool_names,
+            kb_domain=kb_domain,
+        )
+    )
     for msg in history:
         if msg.role == "user":
             messages.append(HumanMessage(content=msg.content))
@@ -171,10 +305,14 @@ def build_simple_prompt(
     query: str,
     history: list[ChatMessage],
     prompt_manager: PromptManager,
+    tool_names: frozenset[str] | None = None,
+    kb_domain: str = GENERAL_DOMAIN,
 ) -> list:
     """构建无检索上下文的简洁 prompt。"""
     messages: list[BaseMessage] = []
-    messages.extend(build_system_prompt("", True, False, prompt_manager))
+    messages.extend(
+        build_system_prompt("", True, False, tool_names=tool_names, kb_domain=kb_domain)
+    )
     for msg in history:
         if msg.role == "user":
             messages.append(HumanMessage(content=msg.content))

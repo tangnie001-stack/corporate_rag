@@ -21,7 +21,7 @@ def _call_initial_messages(state: AgentState, known: set[str]):
     ctx.has_skills = False
     token = current_request_ctx.set(ctx)
     try:
-        return _initial_messages(state, pm)
+        return _initial_messages(state, pm, frozenset())
     finally:
         current_request_ctx.reset(token)
 

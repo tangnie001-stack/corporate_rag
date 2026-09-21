@@ -464,7 +464,7 @@ def test_prompt_messages_counts_three_segments(monkeypatch):
                 ChatMessage(role="user", content=f"{SKILL_INJECTION_PREFIX}\n方法论"),
             ],
         )
-        _initial_messages(state, _make_prompt_manager())
+        _initial_messages(state, _make_prompt_manager(), frozenset())
     finally:
         current_request_ctx.set(None)
 

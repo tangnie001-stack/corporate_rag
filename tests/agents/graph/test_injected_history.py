@@ -34,7 +34,7 @@ def test_injected_history_becomes_separate_human_message(monkeypatch):
     ctx.has_skills = False
     token = current_request_ctx.set(ctx)
     try:
-        messages = _initial_messages(state, pm)
+        messages = _initial_messages(state, pm, frozenset())
     finally:
         current_request_ctx.reset(token)
 

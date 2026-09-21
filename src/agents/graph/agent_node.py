@@ -59,7 +59,9 @@ def _truncate_history(
     return recent
 
 
-def _initial_messages(state: AgentState, prompt_manager) -> list[BaseMessage]:
+def _initial_messages(
+    state: AgentState, prompt_manager, tool_names: frozenset[str]
+) -> list[BaseMessage]:
     """组装首轮 LLM 消息列表：system 段 + 注入隐藏消息 + 普通历史 + 当前 query。
 
     注入型隐藏消息（内容带 SKILL_INJECTION_PREFIX 标记的 user 行）从历史中
@@ -69,7 +71,8 @@ def _initial_messages(state: AgentState, prompt_manager) -> list[BaseMessage]:
 
     Args:
         state: 图状态（读 query / kb_id / _history）
-        prompt_manager: PromptManager，提供系统指令与用户模板
+        prompt_manager: PromptManager，提供用户消息模板
+        tool_names: 本轮实际注册的工具名（段组装的条件注入判据）
 
     Returns:
         LLM 消息列表：system（+未绑定时追加会话指令）+ 注入消息 + 历史 + 当前 user
@@ -81,10 +84,12 @@ def _initial_messages(state: AgentState, prompt_manager) -> list[BaseMessage]:
     if ctx is not None:
         persona = ctx.persona
         has_skills = ctx.has_skills
+        kb_domain = ctx.kb_domain
         known = ctx.known_skill_names
     else:
         persona = ""
         has_skills = False
+        kb_domain = "general"
         known = set()
     injected: list[BaseMessage] = []
     normal: list[ChatMessage] = []
@@ -111,6 +116,8 @@ def _initial_messages(state: AgentState, prompt_manager) -> list[BaseMessage]:
         kb_bound=bool(state.kb_id),
         persona=persona,
         has_skills=has_skills,
+        tool_names=tool_names,
+        kb_domain=kb_domain,
     )
     # 注入消息放在主 system 段之后、普通对话历史之前（不进人设层/环境约束层）
     if injected:
@@ -133,6 +140,8 @@ def _initial_messages(state: AgentState, prompt_manager) -> list[BaseMessage]:
 def make_agent_model_node(llm, tools, prompt_manager) -> Callable:
     """创建 agent 模型节点工厂：bind_tools + 初始消息注入 + 迭代计数。
 
+    工具名集合由入参 `tools` 就地派生（各工具的 .name），作为段组装条件注入判据。
+
     Args:
         llm: 聊天模型实例（bind_tools 后调用）
         tools: 可调用工具列表（绑定给模型的工具）
@@ -141,13 +150,16 @@ def make_agent_model_node(llm, tools, prompt_manager) -> Callable:
     Returns:
         异步节点函数，接收 AgentState，返回 dict 更新 messages/_agent_iterations
     """
+    # 本轮实际注册的工具名（段组装的条件注入判据）。取各工具的 .name
+    # （LangChain BaseTool 契约）；缺 name 是编程错误，装配期即暴露。
+    tool_names = frozenset(str(t.name) for t in tools)
     model = llm.bind_tools(tools)
 
     async def agent_model(state: AgentState) -> dict:
         if state.messages:
             messages = state.messages
         else:
-            messages = _initial_messages(state, prompt_manager)
+            messages = _initial_messages(state, prompt_manager, tool_names)
         iteration = state._agent_iterations + 1
         core_logging.log_event(
             Event.ITERATION_DONE, iteration=iteration, msgs=len(messages)
