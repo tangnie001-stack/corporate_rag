@@ -54,3 +54,25 @@ def test_classifier_prompt_renders_without_format_braces() -> None:
     assert "问题" in prompt
     assert "{query}" not in prompt
     assert "{complexity_score}" not in prompt
+
+
+def test_classifier_prompt_has_no_format_escapes() -> None:
+    """分类器模板不得带 str.format 时代的双花括号转义。
+
+    渲染已统一走 loader.render，它不做 ``{{`` → ``{`` 的还原，因此模板正文里的
+    ``{{`` / ``}}`` 会原样发给模型（JSON 示例会被写成无效的 ``{{ ... }}``）；
+    正确的模板形态是单花括号 JSON 示例。
+    """
+    pm = PromptManager()
+    prompt = pm.get_classifier_prompt(
+        query="问题", entities="实体", complexity_score=3.0, history="历史"
+    )
+    reason = (
+        "模板不得带 str.format 时代的双花括号转义，"
+        "因为渲染已统一走 loader.render（不做还原）"
+    )
+    assert "{{" not in prompt, reason
+    assert "}}" not in prompt, reason
+    assert '"route": "simple|medium|complex"' in prompt, (
+        "应保留单花括号形态的 JSON 示例"
+    )

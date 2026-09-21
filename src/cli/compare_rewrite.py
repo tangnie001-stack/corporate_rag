@@ -84,15 +84,15 @@ BUNDLED_CLASSIFY_USER_TEMPLATE: str = """用户问题：{query}
 {history}
 
 输出 JSON（严格按此格式，改写字段仅对应路由输出）：
-{{
+{
   "route": "simple|medium|complex",
   "missing_entities": [
-    {{"type": "year", "question": "请问您想查询哪一年的数据？"}}
+    {"type": "year", "question": "请问您想查询哪一年的数据？"}
   ],
   "confidence": 0.0,
   "standalone_query": "仅 medium 时输出；simple/complex 省略",
   "sub_queries": ["仅 complex 时输出 2-4 条；simple/medium 省略"]
-}}
+}
 """
 
 # ====== 方案 B：独立版 rewrite prompt ======
@@ -313,10 +313,17 @@ def _run_classify(
     解析结果含 route / missing_entities / confidence，以及捆绑版特有的
     standalone_query / sub_queries 字段（若无则缺省）。
     """
-    prompt = (
-        f"{system_prompt}\n\n"
-        f"{user_template.format(query=query, entities=entities_text or '无', kb_entities=kb_entities or '无', complexity_score=str(complexity_score), history=history_text or '无')}"
+    user_prompt = loader.render(
+        user_template,
+        {
+            "query": query,
+            "entities": entities_text or "无",
+            "kb_entities": kb_entities or "无",
+            "complexity_score": str(complexity_score),
+            "history": history_text or "无",
+        },
     )
+    prompt = f"{system_prompt}\n\n{user_prompt}"
     data, pt, ct = _llm_json(llm, prompt)
     return (
         {
