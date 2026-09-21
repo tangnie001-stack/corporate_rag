@@ -1,12 +1,12 @@
 services:
   app:
     volumes:
-      - /mnt/d/code/demo/AIAgent/corporate_rag/src:/app/src
-      - /mnt/d/code/demo/AIAgent/corporate_rag/tests:/app/tests
-      - /mnt/d/code/demo/AIAgent/corporate_rag/skills:/app/skills
-      - /mnt/d/code/demo/AIAgent/corporate_rag/agents:/app/agents
+      - ./src:/app/src
+      - ./tests:/app/tests
+      - ./skills:/app/skills
+      - ./agents:/app/agents
 
   nginx:
     volumes:
-      - /mnt/d/code/demo/AIAgent/corporate_rag/deploy/nginx/nginx.conf:/etc/nginx/conf.d/default.conf
-      - /mnt/d/code/demo/AIAgent/corporate_rag/deploy/nginx/html:/usr/share/nginx/html
+      - ./deploy/nginx/nginx.conf:/etc/nginx/conf.d/default.conf
+      - ./deploy/nginx/html:/usr/share/nginx/html
