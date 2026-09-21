@@ -38,3 +38,30 @@ def test_validate_all_rejects_oversized_sections(
     monkeypatch.setattr(validation, "SECTION_CHARS_LIMIT", 10)
     with pytest.raises(loader.TemplateLoadError):
         validation.validate_all()
+
+
+def test_validate_all_requires_every_section_covered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """某个 section 没有任何模板时校验失败（P1 起启用全段完整性）。"""
+    original = loader.load_all()
+
+    def fake_load_all() -> dict[str, loader.Template]:
+        """返回去掉 runtime_contract 段的模板映射。"""
+        return {k: v for k, v in original.items() if v.section != "runtime_contract"}
+
+    monkeypatch.setattr(loader, "load_all", fake_load_all)
+    with pytest.raises(loader.TemplateLoadError):
+        validation.validate_all()
+
+
+def test_validate_all_passes_with_five_sections() -> None:
+    """当前模板集覆盖全部五个段。"""
+    section_chars = validation.validate_all()
+    assert set(section_chars) == {
+        "base",
+        "runtime_contract",
+        "sources",
+        "tools",
+        "output",
+    }

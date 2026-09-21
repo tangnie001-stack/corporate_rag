@@ -77,3 +77,12 @@ def test_get_domain_base_returns_domain_text() -> None:
     """按领域取 base 正文。"""
     text = loader.get_domain_base("finance")
     assert text.startswith("你是一名企业财务与投资研判助手")
+
+
+def test_has_domain_true_for_known_false_for_unknown() -> None:
+    """has_domain 按"存在对应 base 模板"判定，不存在的领域返回 False。"""
+    from src.config.prompts import loader
+
+    assert loader.has_domain("finance") is True
+    assert loader.has_domain("general") is True
+    assert loader.has_domain("hr") is False

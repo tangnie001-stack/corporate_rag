@@ -173,6 +173,24 @@ def get_domain_base(domain: str) -> str:
     raise KeyError(domain)
 
 
+def has_domain(domain: str) -> bool:
+    """是否存在该领域的 base 模板（领域识别判据，不抛异常）。
+
+    服务层用它做**写入前**校验（spec <prompt-composition>「知识库领域绑定」：
+    领域标识不满足该判据的值 SHALL 在写入前被拒绝，而非读取时静默回退）。
+
+    Args:
+        domain: 领域名
+
+    Returns:
+        True = 存在 kind=section 且 section=base 且 domain 等于该值的模板
+    """
+    for template in get_by_section("base"):
+        if template.domain == domain:
+            return True
+    return False
+
+
 def render(text: str, variables: dict[str, str]) -> str:
     """仅标识符式替换占位符；未提供的占位符原样保留。
 

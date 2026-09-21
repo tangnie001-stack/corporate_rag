@@ -8,10 +8,8 @@
 与 Langfuse 官方建议的差异：采纳其"启动期预取"，不采纳 fallback；
 该建议的前提是远端源可能不可达，而本项目的模板源是打进镜像的本地文件。
 
-本期（P0）校验范围：① `base` 段至少有一条模板；② 存在 `domain: general` 的
-base 模板；③ 全部段模板正文总字符数不超过事故兜底上限。设计中「每个 `section`
-至少有一条模板」推迟到 P1 —— 该期才引入 `runtime_contract` 段模板，P0 要求全段
-完整会让启动校验拒绝自身模板集。
+当前校验范围：① 每个 `section` 都至少有一条模板；② 存在 `domain: general` 的
+base 模板；③ 全部段模板正文总字符数不超过事故兜底上限。
 """
 
 from __future__ import annotations
@@ -64,15 +62,18 @@ def validate_all() -> dict[str, int]:
         段名 → 该段全部模板正文的字符数之和（键序为首次出现顺序，稳定）
 
     Raises:
-        loader.TemplateLoadError: 目录/YAML/id 非法，或 base 段无模板、
+        loader.TemplateLoadError: 目录/YAML/id 非法，或某段无模板、
             缺少 domain=general 的 base 模板、总字符数超出事故兜底上限
     """
     templates = loader.load_all()
 
     section_chars = _count_section_chars(templates)
 
-    if "base" not in section_chars:
-        raise loader.TemplateLoadError("base 段没有任何模板")
+    missing_sections = [
+        name for name in sorted(loader.VALID_SECTIONS) if name not in section_chars
+    ]
+    if missing_sections:
+        raise loader.TemplateLoadError(f"以下 section 没有任何模板：{missing_sections}")
 
     has_general = any(
         t.kind == "section" and t.section == "base" and t.domain == "general"
