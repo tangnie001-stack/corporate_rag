@@ -1,9 +1,12 @@
-"""Prompt 管理器 — 从 Langfuse 拉取 prompt，不可用时兜底到本地配置。
+"""Prompt 模板的门面 — 按 id 取正文并渲染占位符，唯一读取路径是加载入口。
 
 使用方式：
-    manager = PromptManager(secret_key, public_key, host)
-    sys_prompt = manager.get_system_prompt()  # 尝试 Langfuse → 兜底本地
-    user_tmpl = manager.get_user_template(input_data)  # 同上
+    loader = PromptManager()
+    base = loader.get_base_system_prompt(domain="finance")
+    user_tmpl = loader.get_user_template(context=context, query=query)
+
+远端名单（PROMPT_NAMES）已出列，本地 YAML 模板是唯一事实源；`_fetch_prompt` /
+`_get` / 缓存实现保留，名单为空时不发起网络请求，直接返回本地正文。
 """
 
 import json
@@ -20,20 +23,6 @@ from src.config.prompts import loader
 from src.core import logging as core_logging
 from src.core.log_events import Event
 
-# 本地兜底的 prompt 文本，经唯一加载入口取自 src/config/prompts/templates/ 的对应模板。
-# 兜底系统提示的拼接顺序（基础段 → 委派引导 → 引用指令）与 rag/prompt.build_system_prompt
-# 的默认路径一致，保证"未选 agent"时两条路径产出逐字相同。
-_FALLBACK_SYSTEM_PROMPT: str = (
-    loader.get_content("base-financial")
-    + loader.get_content("tools-delegate")
-    + loader.get_content("output-citation")
-)
-_FALLBACK_USER_TEMPLATE: str = loader.get_content("task-user-prompt")
-_FALLBACK_CLASSIFIER_SYSTEM: str = loader.get_content("task-classifier-system")
-_FALLBACK_CLASSIFIER_USER: str = loader.get_content("task-classifier-user")
-_INLINE_CITATION: str = loader.get_content("output-citation")
-_DELEGATE_GUIDANCE: str = loader.get_content("tools-delegate")
-
 # 北京时区：金融场景锚定"本报告期/今年"需按北京时间取日期。
 # 若用 UTC，北京 00:00-07:59 之间日期落后一天，月初/年初清晨会锚定错"今年/去年"。
 _BEIJING_TZ = ZoneInfo("Asia/Shanghai")
@@ -43,7 +32,7 @@ def _with_current_date(prompt: str) -> str:
     """在系统提示词末尾追加今日日期，锚定相对时间表达（本报告期/今年）。
 
     重复调用时若日期行已存在则直接返回，保证幂等。
-    日期在 get_system_prompt 层追加而非存入缓存，避免 _get() 60s 缓存跨天返回旧日期。
+    日期在段组装层追加而非存入缓存，避免 _get() 60s 缓存跨天返回旧日期。
     日期按北京时间（Asia/Shanghai）计算，避免 UTC 在凌晨时段日期落后一天。
 
     Args:
@@ -60,29 +49,26 @@ def _with_current_date(prompt: str) -> str:
 
 
 class PromptManager:
-    """从 Langfuse 拉取 prompt，带缓存和本地兜底。
+    """prompt 模板的门面 —— 唯一读取路径是 `src/config/prompts/loader`。
+
+    本类不持有任何模板正文副本，也不参与段组装（组装在 `src/rag/prompt.py`）；
+    它的职责只有"按 id 取正文 + 渲染占位符"，与加载入口是转发关系而非第二事实源。
+
+    远端名单已出列（见 `docs/adr/0010-delist-langfuse-prompts.md`）：本地模板是唯一
+    事实源。拉取实现（`_fetch_prompt` / `_get` / 缓存）保留，使终态接入只需"加回名单
+    + 固定 label/版本"，而 `_resolve` 在名单为空时直接返回本地正文、不发起网络请求。
 
     Args:
-        secret_key: Langfuse Secret Key
-        public_key: Langfuse Public Key
-        host: Langfuse 服务器地址
-        cache_ttl: 缓存有效期（秒），默认 60
+        cache_ttl: 远端缓存有效期（秒），仅在名单非空时生效，默认 60
     """
 
-    PROMPT_NAMES: ClassVar[dict[str, str]] = {
-        "system": "financial-system-prompt",
-        "user": "user-prompt-template",
-        "classifier": "classifier-prompt",
-    }
+    PROMPT_NAMES: ClassVar[dict[str, str]] = {}
 
-    def __init__(
-        self,
-        cache_ttl: int = 60,
-    ) -> None:
-        """从环境变量读取 Langfuse 配置，失败时兜底本地 prompt。
+    def __init__(self, cache_ttl: int = 60) -> None:
+        """从环境变量读取 Langfuse 配置。
 
         Args:
-            cache_ttl: 缓存有效期（秒），默认 60 秒
+            cache_ttl: 远端缓存有效期（秒），默认 60 秒
         """
         import base64
 
@@ -167,52 +153,47 @@ class PromptManager:
         self._cache[name] = (fallback, now + self._cache_ttl)
         return fallback
 
-    def get_base_system_prompt(self) -> str:
-        """取"基础段"system prompt（不含环境约束追加段与日期）。
+    def _resolve(self, key: str, local: str) -> str:
+        """远端名单有该键则按名单取（失败兜底 local），否则直接用 local。
 
-        与 get_system_prompt() 的分工：本方法只负责"人设层的默认来源"，
-        不做引用指令 / 委派引导 / 日期追加——那些属环境约束层，由
-        `src/rag/prompt.build_system_prompt` 统一追加（保证追加顺序唯一）。
-
-        Returns:
-            Langfuse 拉取或本地兜底的 system prompt 原文
-        """
-        return self._get(self.PROMPT_NAMES["system"], _FALLBACK_SYSTEM_PROMPT)
-
-    def get_system_prompt(self) -> str:
-        """获取系统指令 prompt，追加内联引用编号指令、委派引导和今日日期。
-
-        从 Langfuse 拉取或使用本地兜底的 financial-system-prompt，
-        确保末尾始终包含内联引用编号指令与 delegate 引导段，并追加今日日期
-        锚定相对时间表达。语义与既有调用方保持不变。
+        Args:
+            key: PROMPT_NAMES 的键（system / user / classifier）
+            local: 本地模板正文（本期的唯一事实源）
 
         Returns:
-            完整的系统 prompt 文本
+            prompt 文本
         """
-        prompt = self.get_base_system_prompt()
-        # 确保内联引用指令始终存在（无论 prompt 来自 Langfuse 还是本地兜底）
-        if _INLINE_CITATION not in prompt:
-            prompt += _INLINE_CITATION
-        # 确保 delegate 引导段始终存在（Langfuse prompt 未更新时也生效，防委派能力不可见）
-        if _DELEGATE_GUIDANCE not in prompt:
-            prompt += _DELEGATE_GUIDANCE
-        return _with_current_date(prompt)
+        name = self.PROMPT_NAMES.get(key)
+        if not name:
+            return local
+        return self._get(name, local)
+
+    def get_base_system_prompt(self, domain: str = "general") -> str:
+        """取指定领域的 base 段正文（人设层的默认来源）。
+
+        不做引用指令 / 委派引导 / 日期追加 —— 那些属环境约束层，由
+        `src/rag/prompt.build_system_prompt` 统一处理（保证唯一入口）。
+
+        Args:
+            domain: 领域名；缺省保留值 general
+
+        Returns:
+            该领域的 base 正文
+        """
+        return self._resolve("system", loader.get_domain_base(domain))
 
     def get_user_template(self, context: str = "", query: str = "") -> str:
-        """获取用户消息模板并填充占位符。
-
-        从 Langfuse 拉取或使用本地兜底的 user-prompt-template，
-        用 context 和 query 替换模板中的 {context} 和 {query} 占位符。
+        """渲染用户消息模板。
 
         Args:
             context: 检索到的文档上下文文本
             query: 用户查询文本
 
         Returns:
-            填充后的用户消息 prompt 文本
+            渲染后的用户消息文本（未提供的占位符原样保留）
         """
-        template = self._get(self.PROMPT_NAMES["user"], _FALLBACK_USER_TEMPLATE)
-        return template.format(context=context, query=query)
+        template = self._resolve("user", loader.get_content("task-user-prompt"))
+        return loader.render(template, {"context": context, "query": query})
 
     def get_classifier_prompt(
         self,
@@ -222,10 +203,7 @@ class PromptManager:
         history: str,
         kb_entities: str = "",
     ) -> str:
-        """获取分类器 prompt，从 Langfuse 拉取或兜底本地模板。
-
-        拼接系统提示词和填充后的用户消息模板，返回完整的 prompt 文本。
-        由调用方自行封装为 SystemMessage / HumanMessage，本层不耦合 LangChain。
+        """渲染分类器 prompt（系统提示 + 用户消息）。
 
         Args:
             query: 用户原始查询文本
@@ -235,17 +213,20 @@ class PromptManager:
             kb_entities: KB 聚合的候选实体（公司/报告期/代码），默认空串兜底为"无"
 
         Returns:
-            完整的分类器 prompt 文本（系统提示 + 用户消息）
+            完整的分类器 prompt 文本
         """
-        sys_prompt = self._get(
-            self.PROMPT_NAMES["classifier"], _FALLBACK_CLASSIFIER_SYSTEM
+        sys_prompt = self._resolve(
+            "classifier", loader.get_content("task-classifier-system")
         )
-        user_prompt = _FALLBACK_CLASSIFIER_USER.format(
-            query=query,
-            entities=entities or "无",
-            kb_entities=kb_entities or "无",
-            complexity_score=str(complexity_score),
-            history=history or "无",
+        user_prompt = loader.render(
+            loader.get_content("task-classifier-user"),
+            {
+                "query": query,
+                "entities": entities or "无",
+                "kb_entities": kb_entities or "无",
+                "complexity_score": str(complexity_score),
+                "history": history or "无",
+            },
         )
         return f"{sys_prompt}\n\n{user_prompt}"
 

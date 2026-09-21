@@ -1,10 +1,9 @@
-"""PromptManager 当前日期注入测试。"""
+"""prompt_manager 模块日期注入测试。"""
 
 from datetime import UTC, datetime
 from unittest.mock import patch
 
 import src.infra.llm.prompt_manager as pm_module
-from src.infra.llm.prompt_manager import PromptManager
 
 # 固定时刻：UTC 2026-03-04 17:30 == 北京时间 2026-03-05 01:30。
 # 若误用 UTC 日期，会得到 2026年3月4日（落后一天）。
@@ -26,27 +25,22 @@ def _freeze_datetime():
     return patch.object(pm_module, "datetime", _FakeDatetime)
 
 
-def test_system_prompt_injects_beijing_date_line():
-    """get_system_prompt() 应注入北京时间日期行，而非 UTC 日期。"""
-    pm = PromptManager(cache_ttl=0)  # 关缓存避免跨天干扰
+def test_with_current_date_injects_beijing_date_line() -> None:
+    """_with_current_date 注入北京时间日期行，而非 UTC 日期。"""
+    from src.infra.llm.prompt_manager import _with_current_date
+
     with _freeze_datetime():
-        prompt = pm.get_system_prompt()
+        prompt = _with_current_date("正文")
     assert _BEIJING_DATE_LINE in prompt
-
-
-def test_system_prompt_not_using_utc_date():
-    """固定时刻 UTC 日期落后一天，prompt 不应出现 UTC 日期行。"""
-    pm = PromptManager(cache_ttl=0)
-    with _freeze_datetime():
-        prompt = pm.get_system_prompt()
     assert _UTC_DATE_LINE not in prompt
 
 
-def test_system_prompt_date_line_idempotent():
-    """连续调用两次 get_system_prompt()，日期行只出现一次。"""
-    pm = PromptManager(cache_ttl=60)
+def test_with_current_date_is_idempotent() -> None:
+    """重复调用日期行只出现一次。"""
+    from src.infra.llm.prompt_manager import _with_current_date
+
     with _freeze_datetime():
-        p1 = pm.get_system_prompt()
-        p2 = pm.get_system_prompt()
-    assert p1 == p2
-    assert p1.count(_BEIJING_DATE_LINE) == 1
+        once = _with_current_date("正文")
+        twice = _with_current_date(once)
+    assert once == twice
+    assert once.count(_BEIJING_DATE_LINE) == 1
