@@ -148,7 +148,7 @@ def get_by_section(section: str) -> list[Template]:
         section: 段名（base/runtime_contract/sources/tools/output）
 
     Returns:
-        该段的模板列表（顺序为 id 字典序，稳定）
+        该段的模板列表（顺序为文件名升序、文件内声明顺序，稳定）
     """
     return [
         t for t in load_all().values() if t.kind == "section" and t.section == section

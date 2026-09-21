@@ -51,7 +51,8 @@ def section_char_totals() -> dict[str, int]:
     故请求期只借用计数结果，不重复校验、也不会因模板问题在请求期失败。
 
     Returns:
-        段名 → 该段全部模板正文的字符数之和（键序为首次出现顺序，稳定）
+        段名 → 该段全部模板正文的字符数之和（键序为本期加载顺序，即**文件名顺序**，
+        非组装顺序；组装顺序待引入组装时对齐）
     """
     return _count_section_chars(loader.load_all())
 

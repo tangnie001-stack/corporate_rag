@@ -31,8 +31,7 @@ def test_golden_has_twelve_templates(golden: dict) -> None:
 
 def test_migrated_templates_match_golden_byte_for_byte(golden: dict) -> None:
     """每条模板的正文与 golden 逐字节相同（搬运无损的正证明）。"""
-    # loader 由 T2 包化 + T4 实现；此刻该模块尚不存在，导入即红 —— 这正是本任务的 TDD 先红
-    from src.config.prompts import loader  # pyright: ignore[reportAttributeAccessIssue]
+    from src.config.prompts import loader
 
     for template_id, entry in golden.items():
         actual = loader.get_content(template_id)
