@@ -1,52 +1,52 @@
 ## 1. 前置调研与确认
 
-- [ ] 1.1 **已完成（实测）**：`langfuse/langfuse:2.95.12` **没有 Docker tag**（404，官方只发 GitHub release）；浮动 `:2` 解析为 **`2.95.11`**；`2.95.11` 是独立可锁 tag → **锁定 `langfuse/langfuse:2.95.11`**。注意 `docker manifest inspect` 在本机**不可用**（CLI 不读 daemon.json 加速器、直连 registry-1.docker.io 超时）；须走加速器自带鉴权端点（见 design D10#2）。需完全可复现时用 amd64 摘要 `sha256:e7aafd3ccf721821b40f8b2251220b4bb8af5e4877b5c5a8846af5b3318aaf1d`
-- [ ] 1.2 **v2 的监听地址**：已确认 v2 的 `HOSTNAME` **默认 `localhost`**（Next.js standalone 默认绑回环；官方示例须设 `HOSTNAME="0.0.0.0"`）→ **跨容器不可达**。因此这不是"待验证"，而是**必须在组 2/3 显式设 `HOSTNAME=0.0.0.0`**（对应 design D9#2，已由待验证升级为必设）
-- [ ] 1.3 `NEXTAUTH_URL`：已确认 `.env:56` 为 `http://localhost:3000`，即回环绑定下的"外部可见 URL"，符合 v2 要求（v2 要求该值是可被浏览器解析的对外地址，**不是**容器名）→ **无需改动**（对应 design D9#7，已解决）
-- [ ] 1.4 明确库重建的操作边界：先停 v3 栈再 drop；只 `DROP DATABASE`，**禁止** `docker compose down -v` / `docker volume prune`（会毁应用库与 `postgres_data` 卷）。**例外**：组 5 中显式 `docker volume rm` 已核实的孤儿卷是允许的（那是定向删除，不是 prune）
-- [ ] 1.5 收口 `architecture-review` 闸门结论（共四轮：round 1 Request changes → 7 处已修；round 2 Request changes → NF1 顺序/NF2 连接上下文/一致性问题；round 3 Request changes → NF-A design↔tasks 顺序矛盾、NF2 在 D4 的残留、NF-B 容器不存在、一致性问题；round 4 **Approve**）
-- [ ] 1.6 **前置动作：停 v3 栈（必须先于组 2/3 的 compose 改动）** —— `docker stop corporate-rag-langfuse-web corporate-rag-langfuse-worker corporate-rag-clickhouse || true`（**按容器名**，因为组 2/3 会把后两个服务名从 compose 删除，之后再按服务名 stop 会报未知服务）。**本机实测这三个容器根本不存在**（该 profile 从未启用），故实际为空操作——`|| true` 即为此准备。保留 `postgres` 运行
+- [x] 1.1 **已完成（实测）**：`langfuse/langfuse:2.95.12` **没有 Docker tag**（404，官方只发 GitHub release）；浮动 `:2` 解析为 **`2.95.11`**；`2.95.11` 是独立可锁 tag → **锁定 `langfuse/langfuse:2.95.11`**。注意 `docker manifest inspect` 在本机**不可用**（CLI 不读 daemon.json 加速器、直连 registry-1.docker.io 超时）；须走加速器自带鉴权端点（见 design D10#2）。需完全可复现时用 amd64 摘要 `sha256:e7aafd3ccf721821b40f8b2251220b4bb8af5e4877b5c5a8846af5b3318aaf1d`
+- [x] 1.2 **v2 的监听地址**：已确认 v2 的 `HOSTNAME` **默认 `localhost`**（Next.js standalone 默认绑回环；官方示例须设 `HOSTNAME="0.0.0.0"`）→ **跨容器不可达**。因此这不是"待验证"，而是**必须在组 2/3 显式设 `HOSTNAME=0.0.0.0`**（对应 design D9#2，已由待验证升级为必设）
+- [x] 1.3 `NEXTAUTH_URL`：已确认 `.env:56` 为 `http://localhost:3000`，即回环绑定下的"外部可见 URL"，符合 v2 要求（v2 要求该值是可被浏览器解析的对外地址，**不是**容器名）→ **无需改动**（对应 design D9#7，已解决）
+- [x] 1.4 明确库重建的操作边界：先停 v3 栈再 drop；只 `DROP DATABASE`，**禁止** `docker compose down -v` / `docker volume prune`（会毁应用库与 `postgres_data` 卷）。**例外**：组 5 中显式 `docker volume rm` 已核实的孤儿卷是允许的（那是定向删除，不是 prune）
+- [x] 1.5 收口 `architecture-review` 闸门结论（共四轮：round 1 Request changes → 7 处已修；round 2 Request changes → NF1 顺序/NF2 连接上下文/一致性问题；round 3 Request changes → NF-A design↔tasks 顺序矛盾、NF2 在 D4 的残留、NF-B 容器不存在、一致性问题；round 4 **Approve**）
+- [x] 1.6 **前置动作：停 v3 栈（必须先于组 2/3 的 compose 改动）** —— `docker stop corporate-rag-langfuse-web corporate-rag-langfuse-worker corporate-rag-clickhouse || true`（**按容器名**，因为组 2/3 会把后两个服务名从 compose 删除，之后再按服务名 stop 会报未知服务）。**本机实测这三个容器根本不存在**（该 profile 从未启用），故实际为空操作——`|| true` 即为此准备。保留 `postgres` 运行
 
 ## 2. dev compose 改造（`docker-compose.yml`）
 
-- [ ] 2.1 `langfuse-web` 镜像 `langfuse/langfuse:3` → **`langfuse/langfuse:2.95.11`**（`:155`）
-- [ ] 2.2 把 `&langfuse-env`（`:124`）与 `&langfuse-depends`（`:117`）的定义从 `langfuse-worker` 迁到 `langfuse-web`（**先迁锚点再删服务**，否则引用悬空）
-- [ ] 2.3 删除 `langfuse-worker` 服务（`:110-152`）
-- [ ] 2.4 `langfuse-web` 环境变量精简：删除 `CLICKHOUSE_*`（`:129-132`）、`REDIS_*`（`:133-135`）、`LANGFUSE_S3_*`（`:136-149`）、`LANGFUSE_ENABLE_BACKGROUND_MIGRATIONS`（`:167`）；保留 `DATABASE_URL`/`NEXTAUTH_URL`/`SALT`/`ENCRYPTION_KEY`/`LANGFUSE_INIT_*`
-- [ ] 2.5 `langfuse-web.depends_on` 只保留 `postgres: { condition: service_healthy }`
-- [ ] 2.6 删除 `clickhouse` 服务（`:58-84`）
-- [ ] 2.7 删除 `clickhouse_data` 卷定义（`:248-249`）与 keeper 配置挂载（`:73`）
-- [ ] 2.8 `langfuse-web` 端口 `3000:3000` → `127.0.0.1:3000:3000`
-- [ ] 2.9 确认保留不动：`profiles: ["langfuse"]`、`minio`、`redis`、`postgres`
-- [ ] 2.10 minio 启动命令去掉 `mkdir -p /data/langfuse`（v2 不再用 S3 事件存储；minio 本身与应用的 `documents` bucket 保留）
-- [ ] 2.11 `langfuse-web` 环境**新增** `HOSTNAME: "0.0.0.0"`（v2 默认绑回环，不设则 `app` 无法经 `langfuse-web:3000` 访问）
-- [ ] 2.12 `langfuse-web` 环境**新增** `LANGFUSE_INIT_PROJECT_ID` / `LANGFUSE_INIT_PROJECT_PUBLIC_KEY` / `LANGFUSE_INIT_PROJECT_SECRET_KEY`（值取自 `.env`）——使库重建后**现有 API Key 继续有效**；**注意官方 gotcha：这些值不要加双引号**
-- [ ] 2.13 `cgr.dev/chainguard/minio` 目前**无 tag（= 隐式 `latest`）** → 查可用 tag 后**显式锁定版本**；优先选与运行中容器一致的构建（当前容器内为 MinIO `RELEASE.2026-06-04`）
+- [x] 2.1 `langfuse-web` 镜像 `langfuse/langfuse:3` → **`langfuse/langfuse:2.95.11`**（`:155`）
+- [x] 2.2 **锚点随之取消**（原计划"迁到 web"不可实现）：worker 删除后 `langfuse-web` 成为**唯一**消费者，而 YAML 不允许同一服务既定义 `&anchor` 又引用 `*anchor`（`environment` 的 `<<:` 自引用同样非法）→ 把 `&langfuse-env` / `&langfuse-depends` 的内容**直接内联**进 `langfuse-web`，不再保留锚点
+- [x] 2.3 删除 `langfuse-worker` 服务（`:110-152`）
+- [x] 2.4 `langfuse-web` 环境变量精简：删除 `CLICKHOUSE_*`（`:129-132`）、`REDIS_*`（`:133-135`）、`LANGFUSE_S3_*`（`:136-149`）、`LANGFUSE_ENABLE_BACKGROUND_MIGRATIONS`（`:167`）；保留 `DATABASE_URL`/`NEXTAUTH_URL`/`SALT`/`ENCRYPTION_KEY`/`LANGFUSE_INIT_*`
+- [x] 2.5 `langfuse-web.depends_on` 只保留 `postgres: { condition: service_healthy }`
+- [x] 2.6 删除 `clickhouse` 服务（`:58-84`）
+- [x] 2.7 删除 `clickhouse_data` 卷定义（`:248-249`）与 keeper 配置挂载（`:73`）
+- [x] 2.8 `langfuse-web` 端口 `3000:3000` → `127.0.0.1:3000:3000`
+- [x] 2.9 确认保留不动：`profiles: ["langfuse"]`、`minio`、`redis`、`postgres`
+- [x] 2.10 minio 启动命令去掉 `mkdir -p /data/langfuse`（v2 不再用 S3 事件存储；minio 本身与应用的 `documents` bucket 保留）
+- [x] 2.11 `langfuse-web` 环境**新增** `HOSTNAME: "0.0.0.0"`（v2 默认绑回环，不设则 `app` 无法经 `langfuse-web:3000` 访问）
+- [x] 2.12 `langfuse-web` 环境**新增** `LANGFUSE_INIT_PROJECT_ID` / `LANGFUSE_INIT_PROJECT_PUBLIC_KEY` / `LANGFUSE_INIT_PROJECT_SECRET_KEY`（值取自 `.env`）——使库重建后**现有 API Key 继续有效**；**注意官方 gotcha：这些值不要加双引号**
+- [x] 2.13 **无法按 tag 锁定 → 保持隐式 `latest`**（用户 2026-09-22 决定）：实测该 registry 的非签名 tag **只有 `latest` / `latest-dev`**，没有任何版本 tag；且 `latest` 已在漂移（此刻 index 摘要 `sha256:a3c85091…` ≠ 本机 37 小时前拉取的 `sha256:a74b2956…`）。按 digest 锁定会静默冻结 Chainguard 的持续 CVE 重建、而本项目没有 bump 例行 → 保持 `latest`，理由与代价记入 ADR（7.1）
 
 ## 3. prod compose 改造（`docker-compose.prod.yml`）
 
-- [ ] 3.1 `langfuse-web` 镜像 `langfuse/langfuse:3` → **`:2.95.11`**（`:154`）
-- [ ] 3.2 把 `&langfuse-env`（`:123`）与 `&langfuse-depends`（`:117`）的定义从 `langfuse-worker` 迁到 `langfuse-web`
-- [ ] 3.3 删除 `langfuse-worker` 服务（`:112-152`）
-- [ ] 3.4 `langfuse-web` 环境变量精简（同 2.4 的 v3 专属项）
-- [ ] 3.5 `langfuse-web.depends_on` 只保留 `postgres(service_healthy)`
-- [ ] 3.6 删除 `clickhouse` 服务（`:63-86`）、`clickhouse_data` 卷定义与 keeper 配置挂载
-- [ ] 3.7 确认 `langfuse-web` 端口已是 `127.0.0.1:3000:3000`
-- [ ] 3.8 确认未向 prod 引入任何 `profiles:`（保持 prod 全服务常开，与 dev 的默认启用行为对齐）
-- [ ] 3.9 minio 启动命令去掉 `mkdir -p /data/langfuse`（与 dev 同步）
-- [ ] 3.10 `langfuse-web` 环境**新增** `HOSTNAME: "0.0.0.0"`（同 2.11）
-- [ ] 3.11 `langfuse-web` 环境**新增** `LANGFUSE_INIT_PROJECT_ID` / `LANGFUSE_INIT_PROJECT_PUBLIC_KEY` / `LANGFUSE_INIT_PROJECT_SECRET_KEY`（同 2.12，值不要加双引号）
-- [ ] 3.12 **既有缺陷顺带修复**：`docker-compose.prod.yml:88` 的 `minio/minio:latest` **已被上游删除镜像**（实测 404，MinIO 2026.09 删镜像、仓库已存档）→ 改为 `cgr.dev/chainguard/minio`（与 dev 一致）并**显式锁定版本**，不用隐式 `latest`
+- [x] 3.1 `langfuse-web` 镜像 `langfuse/langfuse:3` → **`:2.95.11`**（`:154`）
+- [x] 3.2 同 2.2：锚点取消，`&langfuse-env` / `&langfuse-depends` 的内容内联进 `langfuse-web`
+- [x] 3.3 删除 `langfuse-worker` 服务（`:112-152`）
+- [x] 3.4 `langfuse-web` 环境变量精简（同 2.4 的 v3 专属项）
+- [x] 3.5 `langfuse-web.depends_on` 只保留 `postgres(service_healthy)`
+- [x] 3.6 删除 `clickhouse` 服务（`:63-86`）、`clickhouse_data` 卷定义与 keeper 配置挂载
+- [x] 3.7 确认 `langfuse-web` 端口已是 `127.0.0.1:3000:3000`
+- [x] 3.8 确认未向 prod 引入任何 `profiles:`（保持 prod 全服务常开，与 dev 的默认启用行为对齐）
+- [x] 3.9 minio 启动命令去掉 `mkdir -p /data/langfuse`（与 dev 同步）
+- [x] 3.10 `langfuse-web` 环境**新增** `HOSTNAME: "0.0.0.0"`（同 2.11）
+- [x] 3.11 `langfuse-web` 环境**新增** `LANGFUSE_INIT_PROJECT_ID` / `LANGFUSE_INIT_PROJECT_PUBLIC_KEY` / `LANGFUSE_INIT_PROJECT_SECRET_KEY`（同 2.12，值不要加双引号）
+- [x] 3.12 **既有缺陷顺带修复**：`docker-compose.prod.yml:88` 的 `minio/minio:latest` **已被上游删除镜像**（实测 404，MinIO 2026.09 删镜像、仓库已存档）→ 改为 `cgr.dev/chainguard/minio`（与 dev 一致）；**不锁版本**，理由同 2.13
 
 ## 4. env 与 deploy 件
 
-- [ ] 4.1 `.env` 新增 `COMPOSE_PROFILES=langfuse`（实现"保留 profile + 默认开启"）
-- [ ] 4.2 `.env.template` 新增 `COMPOSE_PROFILES=langfuse`，删除 `CLICKHOUSE_PASSWORD`（`:90`），并**补齐漂移的键**：`LANGFUSE_INIT_*`、`LANGFUSE_ENCRYPTION_KEY`、`NEXTAUTH_URL`（对照 `.env.example` 齐平）；同时把 `LANGFUSE_HOST`（`:79`）由 `http://langfuse:3000`（**无此服务**）改为 `http://langfuse-web:3000`，并把 `LANGFUSE_ENABLE`（`:80`）由 `true` 改为 **`false`**（与 `.env:49`、本地兜底前提及 ADR-0010 出列一致）
-- [ ] 4.3 `.env.example` 补 `COMPOSE_PROFILES` 键名，并核对无残留 ClickHouse 键（注：其中只有 `LANGFUSE_INIT_ORG_*` / `PROJECT_NAME` / `USER_*`，**缺** `PROJECT_ID` / `PUBLIC_KEY` / `SECRET_KEY`，由 4.7 补）
-- [ ] 4.4 删除 `deploy/clickhouse/keeper_and_cluster.xml`（目录随之移除）
-- [ ] 4.5 `docker compose config` 校验 dev 与 prod 两份配置：无锚点悬空、无语法错误
-- [ ] 4.6 `.env` 新增 `LANGFUSE_INIT_PROJECT_ID` / `LANGFUSE_INIT_PROJECT_PUBLIC_KEY` / `LANGFUSE_INIT_PROJECT_SECRET_KEY`，取值 = 现有 `LANGFUSE_PUBLIC_KEY`/`SECRET_KEY` 那对（`.env:46-47`）与一个固定的 project id —— 目的是让重建后凭据不变
-- [ ] 4.7 `.env.template` / `.env.example` 同步登记上述三个键名（占位值）
+- [x] 4.1 `.env` 新增 `COMPOSE_PROFILES=langfuse`（实现"保留 profile + 默认开启"）
+- [x] 4.2 `.env.template` 新增 `COMPOSE_PROFILES=langfuse`，删除 `CLICKHOUSE_PASSWORD`（`:90`），并**补齐漂移的键**：`LANGFUSE_INIT_*`、`LANGFUSE_ENCRYPTION_KEY`、`NEXTAUTH_URL`（对照 `.env.example` 齐平）；同时把 `LANGFUSE_HOST`（`:79`）由 `http://langfuse:3000`（**无此服务**）改为 `http://langfuse-web:3000`，并把 `LANGFUSE_ENABLE`（`:80`）由 `true` 改为 **`false`**（与 `.env:49`、本地兜底前提及 ADR-0010 出列一致）
+- [x] 4.3 `.env.example` 补 `COMPOSE_PROFILES` 键名，并核对无残留 ClickHouse 键（注：其中只有 `LANGFUSE_INIT_ORG_*` / `PROJECT_NAME` / `USER_*`，**缺** `PROJECT_ID` / `PUBLIC_KEY` / `SECRET_KEY`，由 4.7 补）
+- [x] 4.4 删除 `deploy/clickhouse/keeper_and_cluster.xml`（目录随之移除）
+- [x] 4.5 `docker compose config` 校验 dev 与 prod 两份配置：无锚点悬空、无语法错误
+- [x] 4.6 `.env` 新增 `LANGFUSE_INIT_PROJECT_ID` / `LANGFUSE_INIT_PROJECT_PUBLIC_KEY` / `LANGFUSE_INIT_PROJECT_SECRET_KEY`，取值 = 现有 `LANGFUSE_PUBLIC_KEY`/`SECRET_KEY` 那对（`.env:46-47`）与一个固定的 project id —— 目的是让重建后凭据不变
+- [x] 4.7 `.env.template` / `.env.example` 同步登记上述三个键名（占位值）
 
 ## 5. Langfuse 库重建与退役资源清理
 
