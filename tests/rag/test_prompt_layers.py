@@ -66,7 +66,13 @@ def test_persona_bound_keeps_retrieval_ladder() -> None:
 
 
 def test_no_persona_uses_general_base_when_domain_unknown() -> None:
-    """未选 agent 且领域未知 → 回落通用 base（不阻断）。"""
+    """未选 agent 且领域未知 → 回退通用 base，且不阻断、不降级成额外提示。
+
+    与 T9 的 `test_base_three_way_replacement` 分工：那条只钉"正文以通用 base 开头"
+    这一结构事实；本用例在此之外钉住 spec「领域标识缺失或无法识别时系统 SHALL 回退
+    到内置通用 base，SHALL NOT 阻断请求」的两个可观测后果——领域 base 正文不参与组装，
+    且绑库情形下仍只有一条 system 消息（"回退"不等于追加提示）。
+    """
     messages = build_system_prompt(
         persona="",
         kb_bound=True,
@@ -77,6 +83,8 @@ def test_no_persona_uses_general_base_when_domain_unknown() -> None:
     content = messages[0].content
     assert isinstance(content, str)
     assert content.startswith("你是一个企业知识库问答助手")
+    assert loader.get_content("base-financial").strip("\n") not in content
+    assert len(messages) == 1
 
 
 def test_build_prompt_passes_persona_through() -> None:
