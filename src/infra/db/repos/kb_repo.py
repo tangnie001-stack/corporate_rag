@@ -16,7 +16,7 @@ class KbRepo:
         self._sf = session_factory
 
     async def get_or_create_kb(
-        self, user_id: str, name: str, description: str = ""
+        self, user_id: str, name: str, description: str = "", domain: str = "general"
     ) -> tuple[str, bool]:
         """按 (user_id, name) 取或建知识库。
 
@@ -28,10 +28,18 @@ class KbRepo:
         实现仍走"插入撞唯一键 → 回滚 → 回读"：三态用 ON CONFLICT DO UPDATE 表达不了
         （RETURNING 只能看到更新后的行，无法区分"原本活跃"与"刚被复活"），
         强行改写会改掉返回值语义。
+
+        Args:
+            user_id: 所属用户
+            name: 知识库名称
+            description: 描述
+            domain: 领域标识（prompt base 三选一依据）
         """
         async with self._sf() as session:
             try:
-                kb = KbModel(user_id=user_id, name=name, description=description)
+                kb = KbModel(
+                    user_id=user_id, name=name, description=description, domain=domain
+                )
                 session.add(kb)
                 await session.commit()
                 return kb.id, True
@@ -59,6 +67,7 @@ class KbRepo:
                     )
                 deleted.is_deleted = 0
                 deleted.description = description
+                deleted.domain = domain
                 await session.commit()
                 return deleted.id, True
 
@@ -77,6 +86,39 @@ class KbRepo:
         async with self._sf() as session:
             kb = await session.get(KbModel, kb_id)
             return kb.name if kb else None
+
+    async def get_kb_domain(self, kb_id: str) -> str:
+        """取知识库领域；库不存在时回落保留值 general。
+
+        Args:
+            kb_id: 知识库 ID
+
+        Returns:
+            领域标识；库不存在时返回 "general"
+        """
+        async with self._sf() as session:
+            kb = await session.get(KbModel, kb_id)
+            if kb is None:
+                return "general"
+            return kb.domain
+
+    async def update_kb_domain(self, kb_id: str, domain: str) -> bool:
+        """更新知识库领域；库不存在返回 False。
+
+        Args:
+            kb_id: 知识库 ID
+            domain: 新的领域标识（调用方须已校验合法性）
+
+        Returns:
+            True = 更新成功；False = 知识库不存在
+        """
+        async with self._sf() as session:
+            kb = await session.get(KbModel, kb_id)
+            if kb is None:
+                return False
+            kb.domain = domain
+            await session.commit()
+            return True
 
     async def get_all_kb(self, user_id: str = "") -> list[KbModel]:
         """获取用户的所有知识库列表（doc_count 为实时统计）。

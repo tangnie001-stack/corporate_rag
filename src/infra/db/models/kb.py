@@ -12,6 +12,12 @@ class KbModel(Base, IDMixin, TimestampMixin):
     user_id: Mapped[str] = mapped_column(String(36), nullable=False, comment="所属用户")
     name: Mapped[str] = mapped_column(String(256), nullable=False, comment="知识库名称")
     description: Mapped[str] = mapped_column(String(1024), default="", comment="描述")
+    domain: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        server_default="general",
+        comment="知识库领域（prompt base 三选一依据；取值须有对应 base 模板）",
+    )
     doc_count: Mapped[int] = mapped_column(Integer, default=0, comment="关联文档数")
     is_deleted: Mapped[int] = mapped_column(Integer, default=0, comment="软删除标志")
 

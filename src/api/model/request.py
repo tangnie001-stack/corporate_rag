@@ -15,6 +15,14 @@ class CreateKBRequest(BaseModel):
 
     name: str  # 知识库名称（必填）
     description: str = ""  # 知识库描述（可选）
+    domain: str = "general"  # 领域标识；须有对应 base 模板，否则 400
+
+
+class KBSetDomainRequest(BaseModel):
+    """更新知识库领域的请求体。"""
+
+    kb_id: str  # 知识库 UUID
+    domain: str  # 新领域标识；须有对应 base 模板，否则 400
 
 
 class KBDeleteRequest(BaseModel):

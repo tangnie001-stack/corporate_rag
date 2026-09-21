@@ -55,6 +55,7 @@ class AppService:
         self.agent_service = agent_service or AgentService(
             vector_store=self.vector_store,
             chat_manager=self.chat_manager,
+            kb_repo=self._kb_repo,
         )
         self.kb = KBService(self._kb_repo)
         self.document = DocumentService(self._doc_repo, self.vector_store, self.router)
@@ -84,8 +85,14 @@ class AppService:
         name: str,
         description: str = "",
         user_id: str = "",
+        domain: str = "general",
     ) -> tuple[str, bool]:
-        return await self.kb.create_knowledge_base(name, description, user_id)
+        """创建知识库；见 KBService.create_knowledge_base。"""
+        return await self.kb.create_knowledge_base(name, description, user_id, domain)
+
+    async def set_kb_domain(self, kb_id: str, domain: str) -> bool:
+        """更新知识库领域；见 KBService.set_domain。"""
+        return await self.kb.set_domain(kb_id, domain)
 
     async def delete_knowledge_base(self, kb_id: str) -> tuple[bool, str]:
         """删除知识库：同一事务内「软删文档 + 删分块 + 软删 KB」。

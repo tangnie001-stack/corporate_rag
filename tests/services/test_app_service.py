@@ -66,15 +66,19 @@ class TestAppServiceKBs:
         """列出所有知识库应从 _kb_repo.get_all_kb 获取数据。"""
         mock_kb_repo.return_value.get_all_kb = AsyncMock(
             return_value=[
-                KbListItem(id="id1", user_id="u1", name="KB1", doc_count=0),
-                KbListItem(id="id2", user_id="u1", name="KB2", doc_count=0),
+                KbListItem(
+                    id="id1", user_id="u1", name="KB1", doc_count=0, domain="general"
+                ),
+                KbListItem(
+                    id="id2", user_id="u1", name="KB2", doc_count=0, domain="general"
+                ),
             ]
         )
         svc = AppService()
         result = await svc.list_knowledge_bases()
         assert result == [
-            {"id": "id1", "name": "KB1", "doc_count": 0},
-            {"id": "id2", "name": "KB2", "doc_count": 0},
+            {"id": "id1", "name": "KB1", "doc_count": 0, "domain": "general"},
+            {"id": "id2", "name": "KB2", "doc_count": 0, "domain": "general"},
         ]
 
     @pytest.mark.asyncio

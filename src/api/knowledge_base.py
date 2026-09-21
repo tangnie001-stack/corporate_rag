@@ -3,7 +3,11 @@
 from fastapi import APIRouter, Depends, Request
 
 from src.api.dependencies import get_app_service
-from src.api.model.request import CreateKBRequest, KBDeleteRequest
+from src.api.model.request import (
+    CreateKBRequest,
+    KBDeleteRequest,
+    KBSetDomainRequest,
+)
 from src.api.model.response import CreateKBResponse, KBDeleteResponse, KBItem
 from src.api.schema import ResponseModel
 from src.config.response_codes import Code
@@ -29,7 +33,12 @@ async def list_knowledge_bases(
     kbs = await svc.list_knowledge_bases(user_id)
     return ResponseModel(
         data=[
-            KBItem(id=kb["id"], name=kb["name"], doc_count=kb["doc_count"])
+            KBItem(
+                id=kb["id"],
+                name=kb["name"],
+                doc_count=kb["doc_count"],
+                domain=kb["domain"],
+            )
             for kb in kbs
         ]
     )
@@ -51,7 +60,7 @@ async def create_knowledge_base(
     """
     user_id = getattr(request.state, "user_id", "")
     kb_id, is_new = await svc.create_knowledge_base(
-        body.name, body.description, user_id=user_id
+        body.name, body.description, user_id=user_id, domain=body.domain
     )
     return ResponseModel(data=CreateKBResponse(id=kb_id, created=is_new))
 
@@ -75,3 +84,24 @@ async def delete_knowledge_base(
     if not success:
         raise BusinessError(Code.KB_NOT_FOUND, Code.KB_NOT_FOUND_MSG, 404)
     return ResponseModel(data=KBDeleteResponse(success=True, message=message))
+
+
+@router.post("/kbs/domain", response_model=ResponseModel)
+async def set_knowledge_base_domain(
+    body: KBSetDomainRequest, svc: AppService = Depends(get_app_service)
+):
+    """更新知识库领域（prompt base 三选一依据）。
+
+    Args:
+        body: 请求体，含 kb_id 与目标 domain
+
+    Returns:
+        ResponseModel: data 含 success
+
+    Raises:
+        BusinessError: 知识库不存在时 404；领域无对应 base 模板时 400
+    """
+    ok = await svc.set_kb_domain(body.kb_id, body.domain)
+    if not ok:
+        raise BusinessError(Code.KB_NOT_FOUND, Code.KB_NOT_FOUND_MSG, 404)
+    return ResponseModel(data={"success": True})

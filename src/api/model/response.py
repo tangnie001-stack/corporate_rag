@@ -39,6 +39,7 @@ class KBItem(BaseModel):
     id: str  # 知识库 UUID
     name: str  # 知识库名称
     doc_count: int  # 包含的文档数量
+    domain: str  # 领域标识（prompt base 三选一依据）
 
 
 class KBDeleteResponse(BaseModel):

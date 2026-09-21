@@ -737,6 +737,7 @@ class AgentService:
         llm=None,
         reranker=None,
         prompt_manager: PromptManager | None = None,
+        kb_repo=None,
     ):
         from src.agents.presets.loader import AgentPresetLoader
         from src.agents.presets.registry import AgentPresetRegistry
@@ -753,6 +754,7 @@ class AgentService:
         self._reranker = reranker or get_rerank()
         self._chat_manager = chat_manager
         self._prompt_manager = prompt_manager or PromptManager()
+        self._kb_repo = kb_repo
         self._tracer = LangfuseTracer()
 
         # skill 委派（agent-delegation-skills）：SKILLS_DIR 环境变量覆盖，缺省项目根 skills/

@@ -8,9 +8,9 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 
-def make_kb(id="kb-1", name="年报知识库", doc_count=0):
+def make_kb(id="kb-1", name="年报知识库", doc_count=0, domain="general"):
     """创建模拟知识库数据。"""
-    return {"id": id, "name": name, "doc_count": doc_count}
+    return {"id": id, "name": name, "doc_count": doc_count, "domain": domain}
 
 
 def make_doc(id="doc-1", filename="test.pdf", status="ready", **kw):
