@@ -22,6 +22,51 @@
 | ⑤ 生成文件 | `writing-plans`（落 `docs/superpowers/plans/`）**或** `openspec-propose` 的 tasks | — | **二选一，不可都写**，否则一事两档 |
 | ⑥ 执行 | `executing-plans` 或 `openspec-apply-change` | `verification-before-completion` → `requesting-code-review`；收尾 `finishing-a-development-branch` | 两道闸门必走 |
 
+## ⑤ 的例外：分阶段变更是「change 承载规格 + plan 承载步骤」
+
+跨子系统的大变更会同时用到 ⑤ 的两个产物，**不构成"一事两档"**。判据只有一条：**同一份文件里不出现两套可执行的步骤清单**。
+
+- openspec change 只承载**为什么 + 规格**（`proposal.md` / `design.md` / `specs/`）
+- `tasks.md` **不再承载任务清单**，退化为「**执行档索引**」：写明阶段划分，并指向各阶段的计划文件
+- 实施计划按阶段落在 `docs/superpowers/plans/`，由 ⑥ 执行
+
+### 判据一：是否跨子系统（满足任一即是）
+
+- 触及 **≥2 个独立模块**（如 `src/infra/db` + `src/rag` + `src/chunking`）
+- 触及 **≥2 个有真实行为变化的 capability**（纯命名同步不算）
+
+### 判据二：跨子系统之后，是否该拆阶段（满足任一即该拆）
+
+- **硬顺序依赖**——A 不做完，B 无从下手（底座先行）
+- 需要**中途交付一个可运行状态**（不能"全部改完才第一次能跑"）
+- 各阶段**验收标准不同**（如存储迁移等价性 vs 检索命中率），混在一起无法一次判定
+- 与**在途 change 重叠**，需声明谁先行
+
+> 口诀：**规模决定计划有多长；子系统数量与顺序依赖，决定要不要拆阶段。**
+
+**实例**：`postgres-storage-consolidation` 跨了关系型存储 / 向量存储 / 词法检索 / 分块 / 取数融合 / 迁移 / 部署 / 依赖共八个面（proposal 自记"capability 面 14 个"），加之 P1 的 PG 底座必须先行、各阶段验收标准不同 → 拆 P1–P4，`tasks.md` 退化为索引。
+
+**反例**：`langfuse-v2-downgrade` 有 60 条任务，却只跨"可观测后端部署"一个工作流，`src/` 零改动、无硬顺序、无中途交付需求 → **不分阶段**，一份 `tasks.md` 到底。
+
+## ⑥ 执行器三选一：看 ⑤ 的产物 + 工作性质
+
+| 执行器 | 对应 ⑤ 产物 | 适用 |
+|--------|-----------|------|
+| `openspec-apply-change` | openspec change 的 `tasks.md` | 变更带 spec/capability 语义；需要归档并把 delta 合并进主规格 |
+| `subagent-driven-development` | `docs/superpowers/plans/*.md` | **有子代理时的计划执行，默认选它** |
+| `executing-plans` | 同上 | 无子代理时；或要把执行换到并行会话 |
+
+### 不适合走 SDD 的情形
+
+`subagent-driven-development` 的模型是「**隔离 worktree 内、可逐任务独立评审的代码任务** → 结尾合并」。以下四类改用 `openspec-apply-change`，或按计划人工执行：
+
+1. **无代码 diff 的工作** —— 纯部署 / 配置 / 数据操作（改 compose、改 env、跑迁移、操作运行中的容器）。worktree 隔离与结尾 merge 在这里没有意义。
+2. **含不可逆或破坏性操作** —— drop 数据库、删卷、删数据。这类操作在 SDD 里属**必须停下追问**的停止条件，与它"任务之间不 check in、连续执行"的取向相抵。
+3. **任务紧耦合、切不出独立评审单元** —— SDD 的前置就是"任务大体彼此独立"。
+4. **改动面不落在这棵工作树上** —— 如面向远程环境或运行中容器。
+
+一句话判据：**SDD 要的是"能切成独立任务、能在 worktree 里评审、结尾能 merge"的代码工作**；三者缺一就别选它。（各执行器内部机制见其 `SKILL.md`。）
+
 ## 两条硬规则
 
 1. **审提案与审 diff 是两件事**：④ 用 `architecture-review`（写文件**之前**），⑥ 用 `requesting-code-review`（改完**之后**）。二者不可互替。
