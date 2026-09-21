@@ -51,7 +51,7 @@ chunking/          分块：router(策略路由) / strategies(4 种) / validator
 parsers/           文档解析：pdf / docx / txt + base / router
 core/              日志：logging / log_events / log_event_specs
 config/            settings(环境变量) / const(常量/文案/枚举) / response_codes
-  └─ prompts/      prompt 模板包：__init__.py(7 条行为键常量 VERIFY_* / FORK_*) / loader.py(唯一读取点) / validation.py(启动期校验) / templates/*.yaml(13 条模板，12 搬运 + 1 新增)
+  └─ prompts/      prompt 模板包：__init__.py(7 条行为键常量 VERIFY_* / FORK_*) / loader.py(唯一读取点) / validation.py(启动期校验) / templates/*.yaml(20 条模板：段模板 + 独立任务模板)
                    —— 段模板(`kind: section`)与独立任务模板(`kind: task`)同处一包；改 prompt 文案改 YAML，改规则的挂载点改代码
 infra/             基础设施：db(engine/DSN + transaction 事务边界 + models + repos + vector_store + lexical_query) / llm / search(tokenizer 为唯一 jieba 分词入口) / auth / redis_client
 middleware/        auth / trace_id / response_processor（统一响应包装）
@@ -60,6 +60,15 @@ models.py          LLM / Embedding / Rerank 工厂（get_llm / get_embedding / g
 utils/             sse 事件类型 / errors / desensitize / auth_crypto
 tools/             工具基类（base.py）
 ```
+
+### prompt 组装与段模板归属
+
+- `src/rag/prompt.py` —— **段组装器**：五段固定顺序（`SECTION_ORDER`）、逐条条件注入的
+  **判据表**（`_SECTION_RULES`，判据住代码、YAML 只装正文）、`base` 三选一解析。
+  逐条判据与文案的对照表在 `docs/agents/prompt-ownership.md` §3，两处必须同步增删。
+- `src/config/prompts/templates/` —— 段模板（`kind: section`，参与 system 组装）与独立
+  任务模板（`kind: task`，各自单独调用）；归属由 `kind` / `section` / `domain` 字段声明，
+  不从文件名或 id 推断。
 
 ### 关系型存储（PostgreSQL）
 

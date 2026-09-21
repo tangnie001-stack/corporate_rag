@@ -43,9 +43,11 @@ RAG 检索 + 验证）** 与 **链路 2b（未绑 KB 纯对话链，联网兜底
 StateGraph 拓扑（`agent ↔ tools 循环 → agent_finalize → verify → format → END`，
 workflow.py:37-87）上的四处分叉：
 
-1. **prompt**：未绑 KB 时在系统指令后追加 `KB_UNBOUND_SYSTEM_PROMPT`，禁止调用检索
-   （src/agents/graph/agent_node.py:68-74 以 `kb_bound=bool(state.kb_id)` 调
-   `build_prompt`；src/rag/prompt.py:42-43 注入）。组装点为
+1. **prompt**：未绑 KB 时在系统指令后追加未绑定提示（`src/config/prompts/templates/sources.yaml`
+   的 `sources-kb-unbound`；联网句 `sources-kb-unbound-web` 仅在 `search_web` 已注册时追加），
+   禁止调用检索（`src/agents/graph/agent_node.py` 的 `_initial_messages` 以
+   `kb_bound=bool(state.kb_id)` 调 `build_prompt`；`src/rag/prompt.py` 的
+   `_build_unbound_message` 注入）。组装点为
    `agent_node._initial_messages` → `build_prompt` → `build_system_prompt`
    （system 段 persona/条件注入 → 技能注入消息 → 历史），组装点记 `prompt messages`
    日志（见 logging-rules.md「来源与 prompt 观测事件」）
@@ -182,7 +184,8 @@ src/agents/tools/rag_tools.py:192-204；拒答 → SSEAbstentionEvent（含 abst
 ### 链路 2b：未绑 KB 纯对话链
 
 - 触发条件：`kb_id` 为空串（会话未绑定知识库），`ctx.kb_bound=False`。
-- 与 2a 的差异：prompt 追加 `KB_UNBOUND_SYSTEM_PROMPT` 明令禁止检索（prompts.py:50）；
+- 与 2a 的差异：prompt 追加未绑定提示（`src/config/prompts/templates/sources.yaml` 的
+  `sources-kb-unbound`，及仅在 `search_web` 已注册时追加的 `sources-kb-unbound-web`）明令禁止检索；
   `retrieve_kb` 即便被调也返回空，不产出 kind=kb 上下文；verify 仅走态 A 联网引用引导，
   无年份完整性/联网询问；SSE 主状态为 `web_search` 联网阶段，引用仅 `kind=web`
   （未联网的纯闲聊则无引用）。
@@ -204,8 +207,10 @@ verify（态 A，verify/node.py:35-41）：
 ```
 
 关键代码：态 A 分派 src/agents/graph/verify/node.py:35-41；联网引用引导
-src/agents/graph/verify/guardrails.py:68-104；未绑 KB 禁检索指令
-src/agents/graph/agent_node.py:68-74 与 src/config/prompts/templates/sources.yaml（模板 sources-kb-unbound / sources-kb-unbound-web，经 src/rag/prompt.py:110-113 条件组装）；
+src/agents/graph/verify/guardrails.py:68-104；未绑 KB 禁检索指令由
+`src/agents/graph/agent_node.py` 的 `_initial_messages` 与 `src/rag/prompt.py` 的
+`_build_unbound_message` 承载（模板 `sources-kb-unbound` / `sources-kb-unbound-web` 见
+`src/config/prompts/templates/sources.yaml`，联网句按 `search_web` 是否注册条件追加）；
 空 kb_id 不检索 src/agents/tools/rag_tools.py:127-130；web 结果写入
 src/agents/tools/web_tools.py:131-141。
 

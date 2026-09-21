@@ -53,9 +53,19 @@
 - `agent resolved`（session / info）——每轮生效智能体与解析来源；`source` 取 bound
   （沿用绑定）/ new_bound（首次绑定）/ ignored（请求与会话绑定不一致，已忽略）/
   unregistered（请求名未注册，降级为空）/ none
+- `kb domain fallback`（session / warning）——知识库领域无对应 base 模板，回落保留值
+  general；**不阻断**。`kb_id` 为发生回退的知识库、`domain` 为落库的非法值
+- `agent domain mismatch`（session / info）——会话选定了预设同时又绑定了非通用领域的
+  知识库；三选一替换语义下领域方法此时不参与组装，属**明确接受的代价**，非缺陷。
+  `agent` 为生效预设名、`domain` 为知识库领域
 - `prompt assembled`（llm / info）——system prompt 组成；`persona_source` 取 preset
-  （会话预设人设）/ base（系统默认人设）；`section_chars` 为各非空段字符数（容器值，
-  紧凑 JSON）
+  （会话预设人设）/ domain（知识库领域 base）/ general（**仅当领域未知、回落到内置通用
+  base** 时出现 —— `kb_domain` 为 `general` 且有对应模板时走的是 domain 分支）；`kb_domain`
+  为本次生效的领域标识；`tool_count` 为本轮注册的工具数（**`rag_tools` 全量**，含
+  `task_create` / `task_get` / `task_list` / `task_update` / `task_output` / `task_stop`
+  六个任务工具，生产约 8~10，不是"RAG 工具数"）；`section_chars` 为**实际拼进 system 的
+  各段**字符数（容器值，紧凑 JSON，键序 = 段组装顺序 `base → runtime_contract → sources
+  → tools → output`，空段不出现）
 - `prompt section share high`（llm / warning）——system 段按字符数估算占 context window
   的比例超阈值；**仅告警不阻断**。`share` 为估算占比、`est_tokens` 为估算 token 数、
   `threshold` 为当前阈值。换算系数是跨模型借用值、阈值是推断值，均非契约（见

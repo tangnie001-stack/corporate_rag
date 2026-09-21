@@ -86,6 +86,26 @@
 
 **规则**：prompt 中的日期/时间注入统一使用 `Asia/Shanghai` 时区。
 
+### 无条件引用条件注册的工具
+
+**症状**：prompt 里出现"调用 `search_web` 联网搜索"这类句子，但本轮该工具**并未注册**
+（`settings.WEB_SEARCH_ENABLED=false`，或 `delegate_task` 因 skill 库为空而为 `None`）。
+模型照做 → 报错或被拒 → 白耗一轮。
+
+**根因**：文案的"挂载点"是**无条件**的，而工具是**条件注册**的。
+
+**规则**：凡引用某个工具的规则，其判据 SHALL 是"该工具已注册"（适用域另计）。
+判据住代码、不由 YAML 声明；逐条对照表见 `docs/agents/prompt-ownership.md` §3。
+
+**历史实例**（同属"文案假设的运行期事实不成立、失败静默"这一类）：
+1. `KB_UNBOUND_SYSTEM_PROMPT` 无条件提及 `search_web`（后者受 `settings.WEB_SEARCH_ENABLED`
+   条件注册，`rag_tools.py:240`）。
+2. `tools-delegate-guidance` 无条件提及 `delegate_task`（skill 库为空时为 `None`）。
+3. 模板里残留 `str.format` 时代的 `{{` / `}}` 转义，而渲染已切到**不做还原**的
+   `loader.render` —— JSON 示例被静默改写成 `{{...}}`，下游 `json.loads` 失败又被 `except`
+   吞掉并静默回退（classifier 与 rewrite/entity 模板上都真实发生过，见提交 `0aab2e9`
+   与 `005c572`）。
+
 ## 数据库
 
 ### UUID 列必须用 String(36)
