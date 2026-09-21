@@ -136,6 +136,8 @@ def _resolve_base(ctx: AssemblyContext) -> tuple[str, str]:
 def _render_section(section: str, ctx: AssemblyContext) -> str:
     """按判据表逐条取正文，拼成一段。
 
+    条目间以空行分隔（保留模板作者刻意的分块意图）。
+
     Args:
         section: 段名（SECTION_ORDER 中除 base 外的段）
         ctx: 组装判据输入
@@ -148,7 +150,7 @@ def _render_section(section: str, ctx: AssemblyContext) -> str:
         if not predicate(ctx):
             continue
         parts.append(loader.get_content(template_id).strip("\n"))
-    return "\n".join(parts)
+    return "\n\n".join(parts)
 
 
 def _render_all_sections(ctx: AssemblyContext) -> tuple[dict[str, str], str]:
