@@ -76,4 +76,4 @@ def test_get_by_section_returns_section_templates() -> None:
 def test_get_domain_base_returns_domain_text() -> None:
     """按领域取 base 正文。"""
     text = loader.get_domain_base("finance")
-    assert text.startswith("你是一个智能问答助手")
+    assert text.startswith("你是一名企业财务与投资研判助手")

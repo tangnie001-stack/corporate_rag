@@ -74,8 +74,8 @@ def build_system_prompt(
 ) -> list[SystemMessage]:
     """组装 system 消息（人设层 + 环境约束层）。
 
-    追加顺序与既有 get_system_prompt() 一致：基础段 → 引用指令（带幂等守卫）
-    → 委派引导（带守卫）→ 日期。persona 为空时逐字等同 get_system_prompt()。
+    追加顺序：基础段 →（绑库时）检索纪律 → 引用指令 → 委派引导 → 日期，各段均带幂等守卫。
+    检索纪律不再取决于 persona 是否为空：base 已瘦身、不再自含检索阶梯。
 
     Args:
         persona: 人设层正文（会话智能体预设的 system_prompt）；空串=未选 agent，
@@ -94,11 +94,10 @@ def build_system_prompt(
     else:
         base = prompt_manager.get_base_system_prompt()
         persona_source = "base"
-    # 环境约束层·检索纪律：仅当绑定 KB 且选定 agent（persona 非空）时注入。
-    # persona 为空时人设层即 base-financial 模板，其处理流程 2–9 已含"先检索后作答"，
-    # 无条件注入会破坏"默认行为逐字不变（端到端快照）"需求。
+    # 环境约束层·检索纪律：检索纪律住在 sources 段，凡绑定 KB 即注入（不再看 persona）。
+    # base 已瘦身、不再自含检索阶梯，故 persona 为空时也需注入，否则该路无检索纪律。
     discipline_injected = False
-    if kb_bound and persona and _KB_BOUND_DISCIPLINE not in base:
+    if kb_bound and _KB_BOUND_DISCIPLINE not in base:
         base += _KB_BOUND_DISCIPLINE
         discipline_injected = True
     if _INLINE_CITATION not in base:

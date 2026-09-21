@@ -181,3 +181,49 @@ def test_evidence_sufficiency_stop_not_in_p1() -> None:
         t.content for t in templates.values() if t.section == "sources"
     )
     assert "证据足够即停止检索" not in sources_text
+
+
+def test_base_financial_is_slimmed() -> None:
+    """base 段只留角色 + 领域方法 + 默认检索方法 + 指针句；运行时内容已移出。"""
+    from src.config.prompts import loader
+
+    content = loader.get_content("base-financial")
+
+    # 移出的运行时内容（各自的唯一 owner 在 sources / tools / runtime_contract）
+    for moved in (
+        "先调用 retrieve_kb",
+        "ask_user",
+        "换一种问法",
+        "top_k=10",
+        "不要调用 search_web",
+        "未在文档中找到相关数据",
+        "回答必须忠实",
+    ):
+        assert moved not in content, f"{moved} 应已移出 base"
+
+    # 留下的：角色 / 领域方法 / 默认检索方法 / 指针句
+    assert "财务" in content
+    assert "报告期" in content
+    assert "关键指标与趋势" in content, (
+        "领域输出骨架归 base（spec「领域输出骨架不写进输出段」）"
+    )
+    assert "先遵循运行时来源选择规则" in content, "缺优先级指针句"
+
+
+def test_base_general_ends_with_pointer_sentence() -> None:
+    """通用 base 同样以指针句收尾（领域 base 与预设是同段位的互斥候选）。"""
+    from src.config.prompts import loader
+
+    content = loader.get_content("base-general")
+    assert "先遵循运行时来源选择规则" in content
+    assert content.rstrip().endswith("属于任务本身。")
+
+
+def test_base_does_not_contain_generic_output_rules() -> None:
+    """通用输出形态不写进 base（spec「通用输出形态不写进 base」）。"""
+    from src.config.prompts import loader
+
+    for tid in ("base-financial", "base-general"):
+        content = loader.get_content(tid)
+        for generic in ("不强加 Markdown", "URL 保真", "完成前自检"):
+            assert generic not in content, f"{tid} 出现了通用输出形态规则：{generic}"

@@ -17,8 +17,11 @@ def _pm(base: str = "基础段正文") -> MagicMock:
     return pm
 
 
-def test_no_persona_keeps_system_messages_byte_identical():
-    """persona='' 时第一条 system 消息 = 基础段 + 引用指令 + 委派引导 + 日期。"""
+def test_no_persona_bound_system_message_includes_discipline():
+    """persona='' 且绑库 → 第一条 system 消息 = 基础段 + 检索纪律 + 引用指令 + 委派引导 + 日期。
+
+    base 已瘦身、不再自含检索阶梯，故 persona 为空时检索纪律照常注入。
+    """
     from src.infra.llm.prompt_manager import _with_current_date
 
     pm = _pm(base="基础段正文")
@@ -27,6 +30,7 @@ def test_no_persona_keeps_system_messages_byte_identical():
     )
     expected = _with_current_date(
         "基础段正文"
+        + loader.get_content("sources-kb-ladder")
         + loader.get_content("output-citation")
         + loader.get_content("tools-delegate")
     )
@@ -148,8 +152,8 @@ def test_prompt_assembled_logged_with_injection_facts(monkeypatch):
     assert payload["system_msgs"] == 1
 
 
-def test_prompt_assembled_reports_base_persona_and_no_discipline(monkeypatch):
-    """未选 agent（persona 为空）→ 人设来源 base、检索纪律不注入。
+def test_prompt_assembled_reports_base_persona_and_injects_discipline(monkeypatch):
+    """未选 agent（persona 为空）→ 人设来源 base；绑库时检索纪律照常注入。
 
     用最小替身（基础段不含委派引导）验证"persona 为空时委派段恒追加（缺则补）"：
     真实 PromptManager 基础段已内嵌委派引导，守卫命中 → delegate_injected 为 False。
@@ -168,5 +172,5 @@ def test_prompt_assembled_reports_base_persona_and_no_discipline(monkeypatch):
 
     payload = next(c for c in calls if c["event"] is Event.PROMPT_ASSEMBLED)
     assert payload["persona_source"] == "base"
-    assert payload["discipline_injected"] is False
+    assert payload["discipline_injected"] is True
     assert payload["delegate_injected"] is True
