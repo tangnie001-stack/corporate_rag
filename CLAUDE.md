@@ -24,6 +24,7 @@ Python 3.11+ / FastAPI / ChromaDB / LangChain / DashScope / MySQL 8.0 / Redis 7 
 |------|---------|---------|
 | docs/agents/rules.md | 架构规约：异常处理 / 响应包装 / 日志约定 / 排查规范 / 代码注释标准 | 写代码前 |
 | docs/agents/logging-rules.md | 日志格式唯一归属：行模板 / 前缀主表(开放登记制) / 事件命名 / 值类型编码(token 字符集) / 级别语义 / 已知例外(retrieval_signal) | 写任何日志、登记事件/前缀前 |
+| docs/agents/prompt-ownership.md | prompt 段归属规则唯一归属：五段归属表 / 段数最小性判据 / 逐条条件判据表 / base-vs-sources 判别例 / 领域 base 与预设的定位差异 | 改段模板、加条件规则、判定某条文案该住哪段前 |
 | docs/agents/api_contract.md | 接口契约：参数语义、返回值格式、历史踩坑 | 改 API / 公共方法签名前；前端页面对接接口时 |
 | docs/agents/code-map.md | 代码结构唯一归属：顶层目录 / 后端 `src/` 分层与模块职责 / 前端 `deploy/nginx/html` 页面与 SSE 消费 / 常见改动落点速查 | **改动代码前定位文件时必读** |
 | docs/agents/data-flow.md | 数据流链路 | 排查问题、理解系统流程 |
