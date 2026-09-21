@@ -213,6 +213,38 @@
 - **原始文件是唯一不可再生的源头**：MinIO 中的原始上传文件若丢失，语料不可恢复。
 - `data/chroma_persist` / `data/chroma` / `data/bm25_index` 已随 P4 Task 11 从磁盘删除；P4 更早已（Task 6）删除其读取路径，**回滚到 Chroma 不再可能、也不是可用的重建路径** —— 语料重建只能从 MinIO 的原始文件重新上传。
 
+## 并行会话（worktree）
+
+### 用 worktree 隔离并行任务
+
+**场景**：同一台机器上多个会话/任务同时改这个仓库。共用一个工作区会互踩 —— 本仓 pre-commit 含 doc 闸门（单次提交实测约 2 分钟），这个长窗口里另一会话若提交，会撞 `fatal: cannot lock ref 'HEAD'`；若改了工作区文件，钩子会报 `files were modified by this hook`（**文档校验本身是过的**，失败只因窗口内有并发写入）。
+
+**步骤**：
+1. 建 worktree —— **必须配新分支**（`dev-wsl` 已被主工作区签出，git 拒绝同一分支签出两处）：
+   ```bash
+   git worktree add -b <新分支> /mnt/d/code/demo/AIAgent/corporate_rag-<名字> dev-wsl
+   ```
+   目录由 git 创建，**不能预先存在**。
+2. 若要在该 worktree 里跑 compose / pytest，把 gitignore 的运行时文件带过去（至少 `.env`，否则 compose 的 `${POSTGRES_PASSWORD:?}` 直接报错）：
+   ```bash
+   ln -s /mnt/d/code/demo/AIAgent/corporate_rag/.env \
+         /mnt/d/code/demo/AIAgent/corporate_rag-<名字>/.env
+   ```
+3. 在新目录里正常编辑、提交。
+
+**验证**：`git worktree list` 列出两个工作区；新目录内 `git branch --show-current` 是新分支。
+
+**注意事项**：
+- **worktree 只隔离 git**：HEAD / index / 工作区文件 / pre-commit 扫描范围各一份。**不隔离**的是 ——
+  - **`git stash`**（仓库级唯一一条 ref，两边序号互相挤动）→ **跨工作区禁用 stash**，要暂存就提交到自己的分支
+  - 分支/tag 删除、`git push --force`（全仓库范围）
+  - **Docker**：工程名、8 个 `container_name`、5 个命名卷、端口全部写死 → 两个工作区**无法各跑一套**容器与数据；从不同工作区 `up -d` 操作的是同一套容器
+  - gitignore 的运行时产物：`.env`、`data/`、`logs/`、`.venv`、`.codegraph/`、`.superpowers/` 都不会带过去
+  - **未跟踪文件不共享**（只有被跟踪的才跨工作区可见）→ 先提交，再切过去用
+- 换目录起服务会重建 `app` / `nginx`（渲染出的 bind source 不同 → 配置哈希不同），属预期
+- 用完 `git worktree remove <路径>`；分支有未合并提交时需 `--force`
+- 前提：override 的挂载须是相对路径，否则 worktree 里改代码静默失效（见 defensive-patterns.md「部署」）
+
 ## 分区命名
 
 按操作主题分区，例如：`## 评估`、`## 分块`、`## 部署`。新主题首次出现时新建分区。
