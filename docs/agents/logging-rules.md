@@ -66,7 +66,7 @@
   六个任务工具，生产约 8~10，不是"RAG 工具数"）；`section_chars` 为**实际拼进 system 的
   各段**字符数（容器值，紧凑 JSON，键序 = 段组装顺序 `base → runtime_contract → sources
   → tools → output`，空段不出现）；口径**不含**日期行与态 A 第二条未绑定消息，故占比
-  估算系统性偏低，属预期而非缺陷）
+  估算系统性偏低，属预期而非缺陷。
 - `prompt section share high`（llm / warning）——system 段按字符数估算占 context window
   的比例超阈值；**仅告警不阻断**。`share` 为估算占比、`est_tokens` 为估算 token 数、
   `threshold` 为当前阈值。换算系数是跨模型借用值、阈值是推断值，均非契约（见

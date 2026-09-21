@@ -219,13 +219,11 @@ def _llm_rewrite(
     from src.config.prompts import loader
     from src.rag.retrieval import rewrite_query
 
-    rewrite_system = loader.get_content("task-rewrite-system")
-    rewrite_user = loader.get_content("task-rewrite-user")
-    history_text = _format_history(history)
     rendered_user = loader.render(
-        rewrite_user,
-        {"query": query, "route": route, "history": history_text or "无"},
+        loader.get_content("task-rewrite-user"),
+        {"query": query, "route": route, "history": _format_history(history) or "无"},
     )
+    rewrite_system = loader.get_content("task-rewrite-system")
     prompt = f"{rewrite_system}\n\n{rendered_user}"
     try:
         response = llm.invoke(

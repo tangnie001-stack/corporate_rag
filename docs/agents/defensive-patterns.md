@@ -97,14 +97,22 @@
 **规则**：凡引用某个工具的规则，其判据 SHALL 是"该工具已注册"（适用域另计）。
 判据住代码、不由 YAML 声明；逐条对照表见 `docs/agents/prompt-ownership.md` §3。
 
-**历史实例**（同属"文案假设的运行期事实不成立、失败静默"这一类）：
+**历史实例**：
 1. `KB_UNBOUND_SYSTEM_PROMPT` 无条件提及 `search_web`（后者受 `settings.WEB_SEARCH_ENABLED`
    条件注册，`rag_tools.py:240`）。
 2. `tools-delegate-guidance` 无条件提及 `delegate_task`（skill 库为空时为 `None`）。
-3. 模板里残留 `str.format` 时代的 `{{` / `}}` 转义，而渲染已切到**不做还原**的
-   `loader.render` —— JSON 示例被静默改写成 `{{...}}`，下游 `json.loads` 失败又被 `except`
-   吞掉并静默回退（classifier 与 rewrite/entity 模板上都真实发生过，见提交 `0aab2e9`
-   与 `005c572`）。
+
+### 渲染器切换残留格式转义
+
+**现象**：模板换了渲染器，旧渲染器时代的 `{{` / `}}` 转义没跟着去掉。`str.format`
+会把双花括号还原成单花括号，而 `loader.render` **不做还原** —— JSON 示例于是原样输出
+`{{...}}`，下游 `json.loads` 失败又被 `except` 吞掉、静默回退。
+
+**规则**：切换渲染器 SHALL 在同一提交内去掉该渲染器特有的转义；消费点的 `except`
+兜底 SHALL NOT 让解析失败无声通过。`loader.render` 的调用方 SHALL 配一条"渲染产物
+无残留转义"的守卫测试。
+
+**历史实例**：classifier / rewrite / entity 三个远端模板各有一条（提交 `0aab2e9`、`005c572`）。
 
 ## 数据库
 
