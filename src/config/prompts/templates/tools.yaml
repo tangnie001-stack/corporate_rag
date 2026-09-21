@@ -17,6 +17,4 @@ templates:
   - id: tools-delegate
     kind: section
     section: tools
-    content: |-
-      委派（delegate_task）：判断当前问题是否需要领域专家能力（多步财务建模、深度分析）时，调用 delegate_task 委派给对应 skill；轻量领域问题先用 retrieve_kb 检索后自己答，不要为每个问题委派。
-      skill 的可用列表见 delegate_task 工具描述；委派深度分析任务时，先把已检索到的材料随 task 一并传入。
+    content: "\n委派（delegate_task）：判断当前问题是否需要领域专家能力（多步财务建模、深度分析）时，调用 delegate_task 委派给对应 skill；轻量领域问题先用 retrieve_kb 检索后自己答，不要为每个问题委派。\nskill 的可用列表见 delegate_task 工具描述；委派深度分析任务时，先把已检索到的材料随 task 一并传入。\n"
