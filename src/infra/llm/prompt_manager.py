@@ -25,14 +25,14 @@ from src.core.log_events import Event
 # 的默认路径一致，保证"未选 agent"时两条路径产出逐字相同。
 _FALLBACK_SYSTEM_PROMPT: str = (
     loader.get_content("base-financial")
-    + loader.get_content("tools-delegate-guidance")
+    + loader.get_content("tools-delegate")
     + loader.get_content("output-citation")
 )
 _FALLBACK_USER_TEMPLATE: str = loader.get_content("task-user-prompt")
 _FALLBACK_CLASSIFIER_SYSTEM: str = loader.get_content("task-classifier-system")
 _FALLBACK_CLASSIFIER_USER: str = loader.get_content("task-classifier-user")
 _INLINE_CITATION: str = loader.get_content("output-citation")
-_DELEGATE_GUIDANCE: str = loader.get_content("tools-delegate-guidance")
+_DELEGATE_GUIDANCE: str = loader.get_content("tools-delegate")
 
 # 北京时区：金融场景锚定"本报告期/今年"需按北京时间取日期。
 # 若用 UTC，北京 00:00-07:59 之间日期落后一天，月初/年初清晨会锚定错"今年/去年"。

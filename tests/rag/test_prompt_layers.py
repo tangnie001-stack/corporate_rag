@@ -28,7 +28,7 @@ def test_no_persona_keeps_system_messages_byte_identical():
     expected = _with_current_date(
         "基础段正文"
         + loader.get_content("output-citation")
-        + loader.get_content("tools-delegate-guidance")
+        + loader.get_content("tools-delegate")
     )
     assert len(messages) == 1
     assert messages[0].content == expected
@@ -67,7 +67,7 @@ def test_persona_without_skills_omits_delegate_section():
     messages = build_system_prompt(
         persona="你是财务专家。", kb_bound=True, has_skills=False, prompt_manager=pm
     )
-    assert loader.get_content("tools-delegate-guidance") not in messages[0].content
+    assert loader.get_content("tools-delegate") not in messages[0].content
 
 
 def test_persona_bound_keeps_retrieval_discipline():
@@ -86,7 +86,7 @@ def test_no_persona_always_keeps_delegate_section():
     messages = build_system_prompt(
         persona="", kb_bound=True, has_skills=False, prompt_manager=pm
     )
-    assert loader.get_content("tools-delegate-guidance") in messages[0].content
+    assert loader.get_content("tools-delegate") in messages[0].content
 
 
 def test_build_prompt_passes_persona_through():

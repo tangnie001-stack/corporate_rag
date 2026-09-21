@@ -15,7 +15,7 @@ from src.rag.context import RAGContext
 _KB_BOUND_DISCIPLINE = loader.get_content("sources-kb-bound-discipline")
 _KB_UNBOUND = loader.get_content("sources-kb-unbound")
 _INLINE_CITATION = loader.get_content("output-citation")
-_DELEGATE_GUIDANCE = loader.get_content("tools-delegate-guidance")
+_DELEGATE_GUIDANCE = loader.get_content("tools-delegate")
 
 
 def format_context(contexts: list[RAGContext]) -> str:

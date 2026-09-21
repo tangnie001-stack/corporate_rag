@@ -1,4 +1,4 @@
-"""15 条模板文件可解析、字段合法、id 唯一。"""
+"""17 条模板文件可解析、字段合法、id 唯一。"""
 
 from pathlib import Path
 
@@ -24,11 +24,11 @@ def _all_templates() -> list[dict]:
 
 
 def test_template_count_and_migrated_ids() -> None:
-    """15 条 = 12 条搬运 + 1 条通用 base（base-general）+ 2 条新增段模板（runtime-contract / output-delegate-citation）。"""
+    """17 条 = 12 条搬运 + 1 条通用 base（base-general）+ 4 条新增段模板（runtime-contract / output-delegate-citation / tools-execution / tools-ask-user）。"""
     templates = _all_templates()
-    assert len(templates) == 15
+    assert len(templates) == 17
     migrated = {
-        "tools-delegate-guidance",
+        "tools-delegate",
         "base-financial",
         "sources-kb-unbound",
         "sources-kb-bound-discipline",
@@ -110,3 +110,35 @@ def test_old_output_inline_citation_template_removed() -> None:
     from src.config.prompts import loader
 
     assert "output-inline-citation" not in loader.load_all()
+
+
+def test_tools_segment_has_three_templates() -> None:
+    """tools 段三条模板：通用执行（无条件）+ ask_user + delegate，归属字段正确。"""
+    from src.config.prompts import loader
+
+    templates = loader.load_all()
+    for tid in ("tools-execution", "tools-ask-user", "tools-delegate"):
+        template = templates[tid]
+        assert template.kind == "section", tid
+        assert template.section == "tools", tid
+
+    assert "ask_user" in templates["tools-ask-user"].content
+    assert "delegate_task" in templates["tools-delegate"].content
+
+
+def test_ask_user_rule_not_in_sources() -> None:
+    """澄清时机不写在来源段（spec「澄清时机不写在来源段」）。"""
+    from src.config.prompts import loader
+
+    templates = loader.load_all()
+    sources_text = "\n".join(
+        t.content for t in templates.values() if t.section == "sources"
+    )
+    assert "ask_user" not in sources_text
+
+
+def test_delegate_guidance_old_template_removed() -> None:
+    """旧 tools-delegate-guidance 已删除，不留并存副本。"""
+    from src.config.prompts import loader
+
+    assert "tools-delegate-guidance" not in loader.load_all()
