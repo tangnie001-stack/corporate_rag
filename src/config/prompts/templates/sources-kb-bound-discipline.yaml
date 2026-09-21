@@ -1,5 +1,0 @@
-templates:
-  - id: sources-kb-bound-discipline
-    kind: section
-    section: sources
-    content: "\n\n检索纪律：本会话已绑定知识库。实质性问题必须先调用 retrieve_kb 检索，根据检索到的文档内容作答，不要预先猜测问题是否在知识库范围内。"

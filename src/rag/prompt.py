@@ -12,7 +12,7 @@ from src.rag.context import RAGContext
 
 # 模板正文经唯一加载入口读取（loader.load_all 有 lru_cache，进程内零重复 I/O）。
 # 段组装顺序与条件注入仍由 build_system_prompt 决定，本层只负责取正文。
-_KB_BOUND_DISCIPLINE = loader.get_content("sources-kb-bound-discipline")
+_KB_BOUND_DISCIPLINE = loader.get_content("sources-kb-ladder")
 _KB_UNBOUND = loader.get_content("sources-kb-unbound")
 _INLINE_CITATION = loader.get_content("output-citation")
 _DELEGATE_GUIDANCE = loader.get_content("tools-delegate")

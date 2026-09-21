@@ -1,4 +1,4 @@
-"""17 条模板文件可解析、字段合法、id 唯一。"""
+"""19 条模板文件可解析、字段合法、id 唯一。"""
 
 from pathlib import Path
 
@@ -24,14 +24,14 @@ def _all_templates() -> list[dict]:
 
 
 def test_template_count_and_migrated_ids() -> None:
-    """17 条 = 12 条搬运 + 1 条通用 base（base-general）+ 4 条新增段模板（runtime-contract / output-delegate-citation / tools-execution / tools-ask-user）。"""
+    """19 条 = 12 条搬运 + 1 条通用 base（base-general）+ 6 条新增段模板（runtime-contract / sources-general / sources-kb-web-rules / output-delegate-citation / tools-execution / tools-ask-user）。"""
     templates = _all_templates()
-    assert len(templates) == 17
+    assert len(templates) == 19
     migrated = {
         "tools-delegate",
         "base-financial",
         "sources-kb-unbound",
-        "sources-kb-bound-discipline",
+        "sources-kb-ladder",
         "task-user-prompt",
         "task-classifier-system",
         "task-classifier-user",
@@ -142,3 +142,42 @@ def test_delegate_guidance_old_template_removed() -> None:
     from src.config.prompts import loader
 
     assert "tools-delegate-guidance" not in loader.load_all()
+
+
+def test_sources_segment_templates_and_ownership() -> None:
+    """sources 段三条工具相关模板归属正确；检索阶梯归本段、不在 base。"""
+    from src.config.prompts import loader
+
+    templates = loader.load_all()
+    for tid in ("sources-general", "sources-kb-ladder", "sources-kb-web-rules"):
+        template = templates[tid]
+        assert template.kind == "section", tid
+        assert template.section == "sources", tid
+
+    ladder = templates["sources-kb-ladder"].content
+    assert "换一种问法" in ladder
+    assert "top_k=10" in ladder
+    assert "至少一个核心实体" in ladder
+
+    web = templates["sources-kb-web-rules"].content
+    assert "该问题不在当前知识库范围内" in web, "漂移拷贝删掉的出口指引必须补回"
+    assert "未在文档中找到相关数据" in web
+    assert "不要调用 search_web" in web
+
+
+def test_drift_copy_template_removed() -> None:
+    """漂移拷贝 sources-kb-bound-discipline 已删除。"""
+    from src.config.prompts import loader
+
+    assert "sources-kb-bound-discipline" not in loader.load_all()
+
+
+def test_evidence_sufficiency_stop_not_in_p1() -> None:
+    """P1 的 sources 段不得出现"证据足够即停止检索"（属 P2，task 3.3）。"""
+    from src.config.prompts import loader
+
+    templates = loader.load_all()
+    sources_text = "\n".join(
+        t.content for t in templates.values() if t.section == "sources"
+    )
+    assert "证据足够即停止检索" not in sources_text

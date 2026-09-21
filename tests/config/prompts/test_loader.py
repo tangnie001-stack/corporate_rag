@@ -9,9 +9,9 @@ from src.config.prompts import loader
 
 def test_get_content_returns_verbatim_template() -> None:
     """取到的正文与模板文件里的一致（首尾空白不丢）。"""
-    content = loader.get_content("sources-kb-bound-discipline")
-    assert content.startswith("\n\n检索纪律：")
-    assert content.endswith("范围内。")
+    content = loader.get_content("sources-kb-ladder")
+    assert content.startswith("\n\n本会话已绑定知识库")
+    assert content.endswith("（若本轮可用联网）。\n")
 
 
 def test_get_content_unknown_id_raises() -> None:

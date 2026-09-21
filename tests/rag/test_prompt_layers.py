@@ -76,7 +76,7 @@ def test_persona_bound_keeps_retrieval_discipline():
     messages = build_system_prompt(
         persona="你是财务专家。", kb_bound=True, has_skills=False, prompt_manager=pm
     )
-    discipline = loader.get_content("sources-kb-bound-discipline")
+    discipline = loader.get_content("sources-kb-ladder")
     assert discipline in messages[0].content
 
 
