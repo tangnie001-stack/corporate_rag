@@ -13,7 +13,7 @@
 |------|------|
 | `src/` | 后端 Python 源码（分层见下） |
 | `tests/` | 单元测试，与 `src/` 模块一一对应 |
-| `deploy/` | 部署件：`nginx/`（反向代理 + 前端静态文件）、`postgres/init/` 建库脚本、`clickhouse/` 集群配置、`wait-for-it.sh` |
+| `deploy/` | 部署件：`nginx/`（反向代理 + 前端静态文件）、`postgres/init/` 建库脚本、`wait-for-it.sh` |
 | `deploy/nginx/html/` | **前端页面静态文件**（chat.html / index.html / login.html 等） |
 | `skills/` | 运行时 skill 内容库（`<name>/SKILL.md`，业务侧管理，compose volume 挂载进容器 `/app/skills`） |
 | `agents/` | **智能体预设内容库**（`<name>.md` 平坦文件，业务侧管理；见下方「三个 `agents` 的区别」） |
@@ -23,7 +23,7 @@
 | `scripts/` | 运维脚本（清库、重建 KB 数据、重写 `content_seg`） |
 | `litellm/` | LiteLLM 代理配置（模型网关） |
 | `data/`、`logs/` | 运行期数据与日志挂载点 |
-| `docker-compose.yml` / `.override.yml` / `.prod.yml` | 编排（redis / postgres / clickhouse / minio / langfuse / nginx / litellm-proxy / app 共 8 个服务） |
+| `docker-compose.yml` / `.override.yml` / `.prod.yml` | 编排（redis / postgres / minio / langfuse-web / nginx / litellm-proxy / app 共 7 个服务；prod 无 litellm-proxy）。`langfuse-web` 挂 `profiles: ["langfuse"]`，dev 经 `.env` 的 `COMPOSE_PROFILES=langfuse` 默认启用 |
 | `Dockerfile`、`pyproject.toml` | 应用镜像与依赖 |
 
 > **三个 `agents` 的区别（勿混淆）**：根 `agents/` = 智能体预设**内容**（`<name>.md` 平坦文件）；

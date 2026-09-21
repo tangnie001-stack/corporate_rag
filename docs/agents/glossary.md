@@ -184,6 +184,7 @@
 - **PostgreSQL**：关系型存储后端（用户 / 知识库 / 文档 / 会话 / 消息 / 反馈 / 评估报告 7 张表，外加检索底座表 `chunks`），经 `postgresql+asyncpg` 访问。结构、引擎归属与迁移链见 `docs/agents/code-map.md`「关系型存储（PostgreSQL）」
 - **ChromaDB**：**已退役向量库**，dense 检索由 PostgreSQL + pgvector 承载。P4 已删除 `chromadb` 依赖、`deploy/chroma/`、其配置项与 compose 卷/挂载，搬迁与等价性脚本一并退役；`data/chroma_persist`（连同 `data/chroma` / `data/bm25_index`）三个数据目录已随 P4 Task 11 从磁盘删除，而读取路径更早已（Task 6）移除，**回滚到 Chroma 不再可能**（语料重建只能从 MinIO 的原始文件重新上传）
 - **MinIO**：文档对象存储
+- **Langfuse**：自托管可观测后端（**现为 v2 线**：仅 `langfuse-web` + 复用既有 PostgreSQL）；术语与部署契约见下节「可观测后端（Langfuse）」
 - **LiteLLM**：LLM 代理，`LLM_BASE_URL` 指向（默认 `http://litellm-proxy:4000`）
 - **DashScope**：通义千问系列模型的提供商（Embedding / LLM / Rerank）
 
@@ -196,6 +197,14 @@
 | `chunks 表` | 单一张分块表，以 `kb_id` 列表达知识库归属（取代「每库一 collection」）。由 `ChunkModel` 映射（`src/infra/db/models/chunk.py`，ORM 属性名 `extra` → 列名 `metadata`），SQL 访问层是 `ChunkRepo`。`content_seg` 是词法检索文本列（P2 写正文原值作占位，P3 起为 jieba 分词输出并全量重写）；`tsv` 是 `to_tsvector('simple', content_seg)` 的持久化生成列（GIN 索引）；`embedding` 为 `vector(1024)`。列清单、索引与迁移链见 code-map.md「关系型存储（PostgreSQL）」 | ❌ 以为 `chunks` 无 ORM 模型；❌ 把 `content_seg`/`tsv` 当成应用层字段名；❌ 以为还按知识库分 collection |
 | `事务边界（session_scope）` | 跨表原子提交的唯一入口：`src/infra/db/transaction.py` 的 `session_scope(session_factory, session=None)`，每个 Repo 以其为基础暴露 `transaction()`。参与者方法接受 `session=` 且**传入时不提交**，提交/回滚由持有该会话的边界决定。入库路径「写 chunks + 标记 ready」、文档删除「删分块 + 软删文档」、KB 删除「软删文档 + 删分块 + 软删 KB」均同事务，**删除路径失败不得吞异常**；embedding 等外网调用必须在事务外完成 | ❌ 把外网调用放进事务（长占连接与锁）；❌ 参与者自行 commit 破坏边界；❌ `except Exception` 吞掉删除失败 |
 | `一次性验收产物（已退役）` | P2 dense 等价性与 P3 词项命中探针的一次性脚本（`scripts/migrate_chroma_to_pg.py` / `scripts/dense_equivalence_check.py` / `scripts/lexical_probe*.py`）已随 P4 退役；其测量文档（`docs/tmp/p2-dense-equivalence-*.md` / `p3-lexical-probe-*.md` / `p3-acceptance-*.md`）作为「那次对比的冻结记录」保留，**不可重跑、不得当质量基线**（判据缺口见需求池 F-30） | ❌ 以为还能跑搬迁/探针脚本重建语料；❌ 回写其测量数字或把它读作质量结论 |
+
+## 可观测后端（Langfuse）
+
+| 术语 | 定义 | 常见错误 |
+|------|------|---------|
+| `可观测后端（observability backend）` | 本项目自托管的 Langfuse 后端及其部署形态。**现为 v2 线**（`langfuse/langfuse:2.95.11`）：只有 `langfuse-web` 一个容器 + 复用既有 PostgreSQL 的独立 database，**不含** ClickHouse / `langfuse-worker` / S3 事件存储。决策与代价见 `docs/adr/0011-langfuse-v2-downgrade.md`；部署契约见 change 的 `docs/openspec/changes/langfuse-v2-downgrade/specs/observability-backend/spec.md` | ❌ 以为还需要 ClickHouse 或 `langfuse-worker`；❌ 按 v3 的六组件形态排查问题 |
+| `凭据播种（credential seeding）` | 用 `LANGFUSE_INIT_ORG_*` / `LANGFUSE_INIT_PROJECT_*` / `LANGFUSE_INIT_USER_*` 在**空库首次启动**时创建组织、项目、API Key 与管理员。**`LANGFUSE_INIT_PROJECT_ID` 是开关** —— 官方 initialize 逻辑把 project 与 key 的创建整体嵌在 `if (env.LANGFUSE_INIT_PROJECT_ID)` 内，缺它时二者都不建**且不报错**。本项目用它与 `_PUBLIC_KEY` / `_SECRET_KEY` 播种**既有** key 对，使库重建后 `.env` 凭据仍有效 | ❌ 只配 `_PUBLIC_KEY` / `_SECRET_KEY` 而漏 `_PROJECT_ID`（静默不播种，凭据失效）；❌ 在 compose 里给这些值加双引号（官方 gotcha） |
+| `trace 保留窗口` | **另案，尚未落地**。Langfuse 的 Data Retention 在自托管下属企业版功能，OSS v2 无 retention/cleanup 开关。当前 tracing 未接线、后端不产 trace，故该问题暂为空；**一旦接线而清理未落地，trace 将无界增长**（ADR-0011 的显式残留） | ❌ 以为 v2 有内置 retention 配置可开 |
 
 ## prompt 组装
 

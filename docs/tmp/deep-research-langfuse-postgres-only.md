@@ -1,5 +1,7 @@
 # Langfuse「只用 PostgreSQL」自托管可行性 — 一手来源研究
 
+> **状态：本文的「v2 路线」已被采纳（2026-09-22，ADR-0011）。** 本文是研究记录，结论与数字**不回写**。两处需注意：① 落地版本为 `langfuse/langfuse:2.95.11`（`2.95.12` 只有 GitHub release、**无 Docker tag**）；② 本文 §9.4「不建议为了只用 PG 而新上 EOL 的 v2」这一反对意见已被**显式权衡后推翻** —— 依据是 Langfuse 当前**不在请求路径上**（`LANGFUSE_ENABLE=false` 走本地兜底、tracing 未接线且唯一消费点是死代码），故「把 EOL 服务放进关键路径」这一前提不成立。现行决策与复查触发条件见 `docs/adr/0011-langfuse-v2-downgrade.md`。
+
 生成日期：2026-09-18 ｜ 研究范围：Langfuse 服务端自托管存储依赖、v2/v3/v4 分界、SDK 兼容、托管 Postgres、升级路径、替代方案，以及本仓库实际用到的 Langfuse 能力。
 来源约定：**一手确认** = Langfuse/LangChain/Arize/MLflow 官方文档、官方 GitHub release/源码、或本仓 `文件:行号`；**推断** = 由一手事实经推理得出；**未确认** = 仅有二手来源或无法核实。
 

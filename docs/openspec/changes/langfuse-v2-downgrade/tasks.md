@@ -50,33 +50,34 @@
 
 ## 5. Langfuse 库重建与退役资源清理
 
-- [ ] 5.1 复核 Langfuse 侧确无在用数据（prompt 远端被 `LANGFUSE_ENABLE=false` 关闭、tracing 未接线且唯一消费点 `rag/stream.py:stream_answer` 无调用方、无 score/dataset）；**本机实测 langfuse 库 14MB、活跃连接数 0**；确认 prod 从未部署过 v3，故范围仅限 dev
-- [ ] 5.2 重建库（连**维护库**执行，避开"cannot drop the currently open database"——`langfuse` 角色的默认库正是待删库）：`docker compose exec postgres psql -U langfuse -d postgres -c "DROP DATABASE langfuse WITH (FORCE);"` 再 `-c "CREATE DATABASE langfuse OWNER langfuse;"`。**不经** `down -v` / `volume prune`
-- [ ] 5.3 清退役容器：`docker rm corporate-rag-langfuse-worker corporate-rag-clickhouse || true`（本机本就不存在，故为空操作）。若改用 `docker compose --profile langfuse down --remove-orphans`，须知 `down` 会停掉本项目**全部**容器（postgres/minio/redis/app/nginx；命名卷保留），需随后重新 `up -d`
-- [ ] 5.4 确认应用库 `corporate_rag` 与 `postgres_data` 卷未受影响（应用表可正常读写）
-- [ ] 5.5 **删除退役命名卷**（4 个，均已实测 `LINKS=0` 孤儿；用户 2026-09-21 决定直接删、不留回退）：`docker volume rm corporate_rag_clickhouse_data`（439MB）、`corporate_rag_chroma_data`（815kB）、`corporate_rag_chroma_onnx_cache`（0B）、`financial_qa_app_logs`（0B）。**严禁触碰** `corporate_rag_app_logs`（正被 `corporate-rag-app` 挂载）、`corporate_rag_postgres_data`、`corporate_rag_redis_data`、`corporate_rag_minio_data`
-- [ ] 5.6 删除 minio 的 `langfuse` 桶/目录（v2 不再用 S3 事件存储；`documents` 保留）。**注意**：本机实测该条目时间戳为 `0001-01-01`，疑似 entrypoint 的 `mkdir -p /data/langfuse` 产生的**普通目录**而非真实 bucket（v3 从未启用）→ 用 `mc rb --force`，或直接删目录并在验证时确认其不存在；`mc rb` 对不存在的 bucket 报错属预期
+- [x] 5.1 复核 Langfuse 侧确无在用数据（prompt 远端被 `LANGFUSE_ENABLE=false` 关闭、tracing 未接线且唯一消费点 `rag/stream.py:stream_answer` 无调用方、无 score/dataset）；**本机实测 langfuse 库 14MB、活跃连接数 0**；确认 prod 从未部署过 v3，故范围仅限 dev
+- [x] 5.2 重建库（连**维护库**执行，避开"cannot drop the currently open database"——`langfuse` 角色的默认库正是待删库）：`docker compose exec postgres psql -U langfuse -d postgres -c "DROP DATABASE langfuse WITH (FORCE);"` 再 `-c "CREATE DATABASE langfuse OWNER langfuse;"`。**不经** `down -v` / `volume prune`
+- [x] 5.3 清退役容器：`docker rm corporate-rag-langfuse-worker corporate-rag-clickhouse || true`（本机本就不存在，故为空操作）。若改用 `docker compose --profile langfuse down --remove-orphans`，须知 `down` 会停掉本项目**全部**容器（postgres/minio/redis/app/nginx；命名卷保留），需随后重新 `up -d`
+- [x] 5.4 确认应用库 `corporate_rag` 与 `postgres_data` 卷未受影响（应用表可正常读写）
+- [x] 5.5 **删除退役命名卷**（4 个，均已实测 `LINKS=0` 孤儿；用户 2026-09-21 决定直接删、不留回退）：`docker volume rm corporate_rag_clickhouse_data`（439MB）、`corporate_rag_chroma_data`（815kB）、`corporate_rag_chroma_onnx_cache`（0B）、`financial_qa_app_logs`（0B）。**严禁触碰** `corporate_rag_app_logs`（正被 `corporate-rag-app` 挂载）、`corporate_rag_postgres_data`、`corporate_rag_redis_data`、`corporate_rag_minio_data`
+- [x] 5.6 删除 minio 的 `langfuse` 桶/目录（v2 不再用 S3 事件存储；`documents` 保留）。**注意**：本机实测该条目时间戳为 `0001-01-01`，疑似 entrypoint 的 `mkdir -p /data/langfuse` 产生的**普通目录**而非真实 bucket（v3 从未启用）→ 用 `mc rb --force`，或直接删目录并在验证时确认其不存在；`mc rb` 对不存在的 bucket 报错属预期
 
 ## 6. 验证
 
-- [ ] 6.1 启用 langfuse profile 起服务（**必须在组 2–5 全部完成之后执行；勿在"compose 已指向 v2 而库仍是 v3 schema"的中间态 `up -d`**），确认 v2 自动迁移在空库上从零完成，日志无 schema 不匹配或 `permission denied`
-- [ ] 6.2 确认 UI 本机可访问（`127.0.0.1:3000`），且非本机不可达
-- [ ] 6.3 确认容器集合只含 `langfuse-web`，不存在 `clickhouse` / `langfuse-worker`
-- [ ] 6.4 应用侧回归：发起一次对话，确认正常（`LANGFUSE_ENABLE=false` 走本地兜底），后端变更不影响应用
-- [ ] 6.5 质量门禁（**已收窄**）：`ruff check .` 无错误、`pyright src/` 无新增 error，且**全量测试结果与改动前逐项一致**（先取基线再对比）。**不要求绝对全绿**——本 change 不改 `src/`/`tests/`，且测试机 DB 用例历史上报 `gaierror`（环境问题，与本次无关）
-- [ ] 6.6 内存实测：测试机 3.8 GB 下运行该后端的余量可接受
-- [ ] 6.7 可关闭性验证：置空 `COMPOSE_PROFILES` 后 `langfuse-web` 不启动、应用仍可完成对话
-- [ ] 6.8 跨容器可达性验证：从 `app` 容器确认能访问 `http://langfuse-web:3000`（验证 2.11/3.10 的 `HOSTNAME=0.0.0.0` 确实生效）
-- [ ] 6.9 **端到端写入冒烟**（证明后端真的"可用"而非只是进程起来了）：用现有 `LangfuseTracer` **裸发一条 trace**（不经应用路径、不改 `src/`），在 UI 的 Traces 里确认可见，随后丢弃。**脚本要点**：容器内 `python -c` 显式 `current_trace_id.set(<uuid>)`——`start_trace`/`end_trace` 都读该 ContextVar，不设会各读 `None` 而产出**两条** trace；结束前 `flush`，否则批次事件可能暂不可见
-- [ ] 6.10 **凭据连续性验证**：确认 UI 里的 project 仍持有 `.env` 中那对 `pk-lf-…`/`sk-lf-…`（即 `LANGFUSE_INIT_PROJECT_*` 生效，无需重签 key）
-- [ ] 6.11 **prod 静态验收**（prod 从未部署，无运行环境）：`docker compose -f docker-compose.prod.yml config` 通过，且与 dev 逐项同构对照（镜像 tag、env 差异项、端口、无 `profiles:`）。**前置**：prod compose 用 `${MINIO_ROOT_USER:?}` 等必填插值，而 `.env` 只有 `MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY`（实测当前直接跑 `config` 即 exit 1）→ 须用独立 `--env-file` 或临时环境提供缺失的 prod-only 变量，再执行校验
-- [ ] 6.12 **镜像可拉取性验证**：`docker pull langfuse/langfuse:2.95.11` 成功（已实测可拉）；`docker pull cgr.dev/chainguard/minio:<锁定 tag>` 成功（cgr.dev 不被加速器代理，是直连，需确认 prod 机器可达）
+- [x] 6.1 启用 langfuse profile 起服务（**必须在组 2–5 全部完成之后执行；勿在"compose 已指向 v2 而库仍是 v3 schema"的中间态 `up -d`**），确认 v2 自动迁移在空库上从零完成，日志无 schema 不匹配或 `permission denied`
+- [x] 6.2 确认 UI 本机可访问（`127.0.0.1:3000`），且非本机不可达
+- [x] 6.3 确认容器集合只含 `langfuse-web`，不存在 `clickhouse` / `langfuse-worker`
+- [x] 6.4 应用侧回归：发起一次对话，确认正常（`LANGFUSE_ENABLE=false` 走本地兜底），后端变更不影响应用。**实测在 `langfuse-web` 已停止的状态下完成** —— SSE 事件 `status → 33×token → model_info → agent_used → done`，**error 数 0**；这是"Langfuse 不在请求路径上"最强的实测证据
+- [x] 6.5 质量门禁（**已收窄**）：`ruff check .` 无错误、`pyright src/` 无新增 error，且**全量测试结果与改动前逐项一致**（先取基线再对比）。**不要求绝对全绿**——本 change 不改 `src/`/`tests/`，且测试机 DB 用例历史上报 `gaierror`（环境问题，与本次无关）。
+  **实测与定性的三个数字**：① 首轮 `33 failed / 65 errors` 中，**65 个 error 全是我调用漏了 `POSTGRES_HOST=localhost`**（宿主侧必需，见 glossary「DSN 单一来源」；漏设后 DSN 指向 compose 服务名 `postgres`，宿主解析不了 → `socket.gaierror`）；② 另有 **11 个 parser 用例失败是 worktree 缺夹具** —— 它们用相对路径读 `data/test_docs/*`，而本 worktree 的 `data/` 只 symlink 了 `ragas`（补 `test_docs` / `reports` 后 `tests/parsers/` → 46 passed）；③ 余下 **9 failed + 2 errors 是 dev-wsl 既有失败**。**判据**：同一用例集在 worktree 与主工作区各跑一次，结果**逐项一致（9 failed / 11 passed / 2 errors）**；`src/`+`tests/` 与 dev-wsl 亦逐字节一致 → **零回归**
+- [x] 6.6 内存实测：测试机 3.8 GB 下运行该后端的余量可接受。**实测 `langfuse-web` 空载约 199 MiB，在 `256m` 上限下已达 78%、余量不足** → 已把 dev 上调为 `mem_limit: 512m` / `mem_reservation: 256m`（复测 149 MiB / 512 MiB = 29.1%，`OOMKilled=false`），并同步修正 spec 的「单元资源上限」断言 —— 原先写死的 `256m` 是未经测量的取值
+- [x] 6.7 可关闭性验证：置空 `COMPOSE_PROFILES` 后 `langfuse-web` 不启动、应用仍可完成对话
+- [x] 6.8 跨容器可达性验证：从 `app` 容器确认能访问 `http://langfuse-web:3000`（验证 2.11/3.10 的 `HOSTNAME=0.0.0.0` 确实生效）
+- [x] 6.9 **端到端写入冒烟**（证明后端真的"可用"而非只是进程起来了）：用现有 `LangfuseTracer` **裸发一条 trace**（不经应用路径、不改 `src/`），在 UI 的 Traces 里确认可见，随后丢弃。**脚本要点**：容器内 `python -c` 显式 `current_trace_id.set(<uuid>)`——`start_trace`/`end_trace` 都读该 ContextVar，不设会各读 `None` 而产出**两条** trace；结束前 `flush`，否则批次事件可能暂不可见。**实测已写入 `trace_smoke_1790014782`（`name=v2_smoke_verify`、`output="smoke ok"`），在 langfuse 库 `traces` 表中可查** —— 证明 v2 后端的写入链路端到端可用，而不只是"进程起来了"
+- [x] 6.10 **凭据连续性验证**：确认 UI 里的 project 仍持有 `.env` 中那对 `pk-lf-…`/`sk-lf-…`（即 `LANGFUSE_INIT_PROJECT_*` 生效，无需重签 key）
+- [x] 6.11 **prod 静态验收**（prod 从未部署，无运行环境）：`docker compose -f docker-compose.prod.yml config` 通过，且与 dev 逐项同构对照（镜像 tag、env 差异项、端口、无 `profiles:`）。**前置**：prod compose 用 `${MINIO_ROOT_USER:?}` 等必填插值，而 `.env` 只有 `MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY`（实测当前直接跑 `config` 即 exit 1）→ 须用独立 `--env-file` 或临时环境提供缺失的 prod-only 变量，再执行校验
+- [x] 6.12 **镜像可拉取性验证**：`docker pull langfuse/langfuse:2.95.11` 成功（已实测可拉）；`docker pull cgr.dev/chainguard/minio:<锁定 tag>` 成功（cgr.dev 不被加速器代理，是直连，需确认 prod 机器可达）
 
 ## 7. 文档与 ADR
 
-- [ ] 7.1 新增 ADR：可观测后端由 v3 切至 v2 的决策、EOL 的显式接受与升级通道的保留（不改旧 ADR；ADR-0004 中"trace 在 ClickHouse"已失真，按"只追加"处理）。**须记明**：prod 侧未运行验证；凭据经 `LANGFUSE_INIT_PROJECT_*` 保持连续
-- [ ] 7.2 更新 `docs/agents/code-map.md:16,26` 的服务清单与 `deploy/` 树（移除 clickhouse）
-- [ ] 7.3 在 `docs/langfuse-v3-vs-v2-and-clickhouse-memory.md` 标注其已被本决策取代（冻结分析，不回写数字）
-- [ ] 7.4 在 `docs/tmp/deep-research-langfuse-postgres-only.md` 标注其"v2 路线"结论已被采纳（同时记录其"不建议"意见已被显式权衡）
-- [ ] 7.5 在新 ADR 的复查条件里登记触发点：① trace 量级超过既定阈值时评估 v3/v4 迁移；② Langfuse 首次被真正接入请求路径（prompt 远端读取开启或 tracing 接线）时重新评估本次降级决策；③ **tracing 接线的那次变更必须一并落地 trace 保留/清理机制**（承接 design D7 的残留）；④ `src/config/settings.py:305` 的 `LANGFUSE_HOST` 陈旧默认值另行清理；⑤ **MinIO 上游已存档、镜像已删** → 需另立议题替换 S3 实现（Garage / RustFS / VersityGW / SeaweedFS 等），`cgr.dev/chainguard/minio` 只是权宜
-- [ ] 7.6 在 `docs/agents/glossary.md` 登记本变更引入的术语：「可观测后端」（自托管 Langfuse 后端及其部署形态）、「凭据播种」（`LANGFUSE_INIT_PROJECT_*` 保持 key 连续）；「trace 保留窗口」标注为另案
+- [x] 7.1 新增 ADR：可观测后端由 v3 切至 v2 的决策、EOL 的显式接受与升级通道的保留（不改旧 ADR；ADR-0004 中"trace 在 ClickHouse"已失真，按"只追加"处理）。**须记明**：prod 侧未运行验证；凭据经 `LANGFUSE_INIT_PROJECT_*` 保持连续
+- [x] 7.2 更新 `docs/agents/code-map.md:16,26` 的服务清单与 `deploy/` 树（移除 clickhouse）
+- [x] 7.3 在 `docs/langfuse-v3-vs-v2-and-clickhouse-memory.md` 标注其已被本决策取代（冻结分析，不回写数字）
+- [x] 7.4 在 `docs/tmp/deep-research-langfuse-postgres-only.md` 标注其"v2 路线"结论已被采纳（同时记录其"不建议"意见已被显式权衡）
+- [x] 7.5 在新 ADR 的复查条件里登记触发点：① trace 量级超过既定阈值时评估 v3/v4 迁移；② Langfuse 首次被真正接入请求路径（prompt 远端读取开启或 tracing 接线）时重新评估本次降级决策；③ **tracing 接线的那次变更必须一并落地 trace 保留/清理机制**（承接 design D7 的残留）；④ `src/config/settings.py:305` 的 `LANGFUSE_HOST` 陈旧默认值另行清理；⑤ **MinIO 上游已存档、镜像已删** → 需另立议题替换 S3 实现（Garage / RustFS / VersityGW / SeaweedFS 等），`cgr.dev/chainguard/minio` 只是权宜
+- [x] 7.6 在 `docs/agents/glossary.md` 登记本变更引入的术语：「可观测后端」（自托管 Langfuse 后端及其部署形态）、「凭据播种」（`LANGFUSE_INIT_PROJECT_*` 保持 key 连续）；「trace 保留窗口」标注为另案

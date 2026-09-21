@@ -37,14 +37,13 @@ Langfuse SHALL 复用应用所在的同一 PostgreSQL 实例的独立 database�
 
 ### Requirement: 单元资源上限
 
-`langfuse-web` SHALL 声明显式 `mem_limit`：dev 为 `256m`（并带 `mem_reservation: 128m`），prod 为 `2g`。
+`langfuse-web` SHALL 声明显式 `mem_limit`：dev 为 `512m`（并带 `mem_reservation: 256m`），prod 为 `2g`。dev 取值须相对**实测空载占用**留有可测余量（v2 首次启动后实测约 199 MiB，即 `256m` 上限下的 78%，余量不足）。
 
 #### Scenario: 内存上限为确定值
 
 - **WHEN** 检查 `docker-compose.yml` 与 `docker-compose.prod.yml` 中 `langfuse-web` 的服务定义
-- **THEN** dev 的 `mem_limit` 为 `256m` 且带 `mem_reservation`
+- **THEN** dev 的 `mem_limit` 为 `512m` 且带 `mem_reservation`
 - **AND** prod 的 `mem_limit` 为 `2g`
-- **AND** 两者的取值不因移除 ClickHouse 而上调
 
 ### Requirement: EOL 版本的暴露面收敛
 
