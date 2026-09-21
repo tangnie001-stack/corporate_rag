@@ -83,3 +83,9 @@
 |---|---|---|
 | classifier 的 `missing_entities` 与 `ask_user` 的澄清是同一事实的两个 owner | `task-classifier-*` 模板 vs `tools-ask-user` | 记入本表为已知重复，另开 change |
 | `src/cli/compare_rewrite.py` 的 4 处重复 prompt、`src/cli/eval_ragas_generate.py:118` 内联 prompt | 该两文件 | 属"副本清理"，与本变更段模型无关 |
+| `retrieve_kb` docstring 的"何时调用"（事实性内容才调、闲聊不调）与 `sources` 段的证据需求判断是同一事实的两个 owner | `src/agents/tools/rag_tools.py:88-91` vs `sources-general` / `sources-kb-ladder` | 记入本表为已知重复，另开 change |
+| `search_web` docstring 的"何时调用"（检索空/不相关才联网、KB 能答不调）与 `sources` 段的联网规则逐条重复 | `src/agents/tools/web_tools.py:43-45` vs `sources-kb-web-rules` | 记入本表为已知重复，另开 change |
+| `ask_user` docstring 的"何时调用"（缺关键实体且无法推断才问）与 `tools` 段的澄清规则逐条重复 | `src/agents/tools/ask_tools.py:66-67` vs `tools-ask-user` | 记入本表为已知重复，另开 change |
+| `delegate_task` 的 `description` 的"何时调用"（需领域专家能力才委派、轻量自答）与 `tools` 段的委派规则逐条重复 | `src/agents/skills/delegate_task.py:59-63` vs `tools-delegate` | 记入本表为已知重复，另开 change |
+
+> **2026-09-21 审计**：`retrieve_kb` / `search_web` / `ask_user` / `delegate_task` 四个工具的 description 已逐条比对 `sources` / `tools` 段，四条均含"何时调用"表述重复（上表四行）。本期只审计、不改文案（工具 docstring 文本改写属 `design.md` 的明确不做项）。
