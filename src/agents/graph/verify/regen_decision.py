@@ -1,7 +1,8 @@
 """态 B 完整性缺失决策化 — 询问/记住用户联网意愿，据 agent 上一轮 search_web queries 决策。
 
 缺失年份存在时 verify_node 委托本模块决定"注入指引重生成 / 标注直通"。控制流：
-先经 ask_confirm 询问用户是否联网（本轮已确认则跳过；拒绝/超时/槽被占 → 标注直通）；
+先判联网工具是否注册 —— 未注册则直接标注直通（不询问一个做不到的动作）；
+已注册则经 ask_confirm 询问用户是否联网（本轮已确认则跳过；拒绝/超时/槽被占 → 标注直通）；
 随后看 agent 上一轮 search_web 的 queries 是否带全缺失年份：带全仍缺 → 网络已穷尽标注
 直通；带漏 → 完整指引按 VERIFY_GUIDANCE_MARKER 查重注入 + 独立 hint 按 VERIFY_HINT_MARKER
 至多补发一次，regen 轮复位主循环预算（_agent_iterations=0）。保险丝
@@ -68,6 +69,15 @@ async def decide_missing_web(
     """
     # ── 1. 询问/记住用户联网意愿 ──
     confirmed = False
+    if ctx is not None and ctx.tool_names and "search_web" not in ctx.tool_names:
+        # 联网工具未注册时不询问：向用户询问一个系统做不到的动作是更差的失败形态
+        # （用户答"需要"后无工具可调，只会再消耗一轮）。直接走标注直通，且不消耗
+        # 询问计数 —— 这不是"用户拒绝"，是"能力不存在"。
+        covered = [y for y in required if y not in missing]
+        answer = (
+            f"{answer}\n\n> 注：知识库仅覆盖 {covered}，缺失 {missing} 未联网补充。"
+        )
+        return {"answer": answer, "_needs_regenerate": False}
     if ctx is not None and not ctx.web_confirmed:
         confirmed = await ask_confirm._ask_web_confirm(state, missing)
         core_logging.log_event(
