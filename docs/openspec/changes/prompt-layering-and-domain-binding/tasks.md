@@ -70,6 +70,7 @@
 - [ ] 2.25 **日志事件登记**：`docs/agents/logging-rules.md` 登记"分段字节数""领域回退""预设与领域不一致"三处字段/事件；`Event.PROMPT_ASSEMBLED` 补领域来源字段
 - [ ] 2.26 **工具 `description` 审计**：逐条检查 `retrieve_kb` / `search_web` / `ask_user` / `delegate_task` 的 docstring 是否与 `sources` / `tools` 段重复；发现重复在 `prompt-ownership.md` 登记（本期只审计不改文案）
 - [ ] 2.27 **经典 RAG 路径断言**：断言带 `{context}` 的经典 RAG 路径与 agent 路径经同一组装入口产段，不存在第二套分层模型
+- [x] 2.28 **退役 P0 golden 闸门**（本项为实现计划补登）：删除 `tests/config/prompts/test_golden_{templates,assembly}.py`、`tests/fixtures/prompt_golden/` 与 `scripts/gen_prompt_golden.py`。理由：该闸门断言"最终 prompt 与 P0 前逐字节相同"，其证明对象（搬运无损）在 P0 验收时已终结，且与 P1 的段模型**互斥**（`specs/prompt-composition/spec.md` 已明写逐字不变量仅在 P0 成立）。终态契约转由契约测试（2.16）与态 A 结构断言（2.15）承担
 
 ## 3. P2 内容对齐 WeKnora（闸门：RAGAS eval 对比）
 
