@@ -12,7 +12,6 @@ def _call_initial_messages(state: AgentState, known: set[str]):
     """设置 RequestContext 后调用 _initial_messages，返回组装后的消息列表。"""
     pm = MagicMock()
     pm.get_base_system_prompt.return_value = "基础段"
-    pm.get_system_prompt.return_value = "基础段"
     pm.get_user_template.side_effect = lambda context="", query="": f"Q:{query}"
 
     ctx = RequestContext(session_id="s1")

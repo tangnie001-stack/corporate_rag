@@ -69,10 +69,6 @@ class _FakeExecutor:
 class _StubPromptManager:
     """极简 PromptManager 替身（agent 节点直出轮不会执行，仅满足构建签名）。"""
 
-    def get_system_prompt(self):
-        """返回固定系统指令。"""
-        return "system prompt"
-
     def get_user_template(self, context="", query=""):
         """返回含 query 的用户模板。"""
         return f"user template: {query}"
