@@ -69,7 +69,7 @@ async def decide_missing_web(
     """
     # ── 1. 询问/记住用户联网意愿 ──
     confirmed = False
-    if ctx is not None and ctx.tool_names and "search_web" not in ctx.tool_names:
+    if ctx is not None and "search_web" not in ctx.tool_names:
         # 联网工具未注册时不询问：向用户询问一个系统做不到的动作是更差的失败形态
         # （用户答"需要"后无工具可调，只会再消耗一轮）。直接走标注直通，且不消耗
         # 询问计数 —— 这不是"用户拒绝"，是"能力不存在"。

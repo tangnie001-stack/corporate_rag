@@ -46,10 +46,22 @@ def test_completeness_check():
 # ── _ask_web_confirm ──
 
 
+# verify_node 测试默认声明的本轮工具集。缺失年份后的"询问用户是否联网 / 注入指引重生成"
+# 路径以联网工具已注册为前提：decide_missing_web 在 search_web 未注册时直接标注直通、不询问。
+# 故显式声明，而非依赖 RequestContext 的空集默认（空集 = 未注册）。需验证"工具缺失"
+# 语义（不询问、标注直通）的用例应显式覆盖 tool_names。
+_NODE_TOOL_NAMES = frozenset({"retrieve_kb", "ask_user", "search_web"})
+
+
 def _make_ctx(
     session_id: str = "s1", **overrides
 ) -> tuple[RequestContext, Token[RequestContext | None]]:
-    """构造并 set 到 contextvar 的 RequestContext，返回 (ctx, token)。"""
+    """构造并 set 到 contextvar 的 RequestContext，返回 (ctx, token)。
+
+    默认声明本轮工具集含 search_web（_NODE_TOOL_NAMES）：verify 的询问/重生成决策只在
+    联网工具注册时成立，未注册时 decide_missing_web 走标注直通。
+    """
+    overrides.setdefault("tool_names", _NODE_TOOL_NAMES)
     ctx = RequestContext(session_id=session_id, **overrides)
     token = current_request_ctx.set(ctx)
     return ctx, token

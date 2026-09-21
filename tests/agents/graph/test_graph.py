@@ -283,11 +283,17 @@ def _build_test_graph(llm, tools=None) -> object:
 
 
 def _make_verify_ctx():
-    """构造并 set 已确认联网的 RequestContext，返回 (ctx, token)。"""
+    """构造并 set 已确认联网的 RequestContext，返回 (ctx, token)。
+
+    显式声明本轮工具集含 search_web：verify 的询问/重生成路径以联网工具已注册为前提
+    （未注册时 decide_missing_web 直接标注直通），而本文件各用例测的正是重生成/标注
+    路径，测试图也已注入 fake search_web 工具（_build_test_graph）。
+    """
     ctx = RequestContext(
         session_id="s1",
         temporal_years=[2023, 2024, 2025],
         web_confirmed=True,  # 模拟用户已确认联网，避免走 clarify_channel 询问
+        tool_names=frozenset({"retrieve_kb", "ask_user", "search_web"}),
     )
     return ctx, current_request_ctx.set(ctx)
 
