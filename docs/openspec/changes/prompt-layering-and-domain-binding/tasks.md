@@ -92,8 +92,8 @@
 
 ## 4. 收尾
 
-- [ ] 4.1 `docs/agents/requirements_pool.md:143-146` 对应条目加一句阶段说明（Git 内 YAML 为第一阶段，终态为远端读取）
-- [ ] 4.2 `docs/agents/glossary.md` 登记新术语（**本项目用 `glossary.md` 而非根目录 `CONTEXT.md`，遵循 CLAUDE.md 的文档组织表**）：六段模型、领域 base、预设替换（三选一）、**段模板 vs 独立任务模板**、**优先级指针句**、**读取路径唯一化**、**判据留代码（能改文案不能改挂载）**、**完成条件（= 证据足够且已给出答案）**。⚠ 若 change `retrieval-fetch-and-dedup` 正在并行，`glossary.md` 会被两边同时修改（它改 `dedup` / `RETRIEVAL_MAX_PER_DOC` 词条）—— 需协调合并顺序，或让 change 1 先落（见 4.4b）
+- [x] 4.1 `docs/agents/requirements_pool.md` 的「Prompt 管理」表后加阶段说明（Git 内 YAML 为第一阶段，终态为远端读取）
+- [x] 4.2 `docs/agents/glossary.md` 登记新术语（**本项目用 `glossary.md` 而非根目录 `CONTEXT.md`，遵循 CLAUDE.md 的文档组织表**）：六段模型、领域 base、预设替换（三选一）、**段模板 vs 独立任务模板**、**优先级指针句**、**读取路径唯一化**、**判据留代码（能改文案不能改挂载）**、**完成条件（= 证据足够且已给出答案）**。⚠ 若 change `retrieval-fetch-and-dedup` 正在并行，`glossary.md` 会被两边同时修改（它改 `dedup` / `RETRIEVAL_MAX_PER_DOC` 词条）—— 需协调合并顺序，或让 change 1 先落（见 4.4b）
 - [ ] 4.3 Langfuse 侧 3 个 prompt 的归属 **已决定：出列**（本地模板为唯一事实源），落到 task 2.23
 - [ ] 4.4 与"库边界"项的态 A 冲突 **已决定：取"结构不变"**（D8），落到 task 2.15/2.15b
 - [ ] 4.4b **与 change `retrieval-fetch-and-dedup` 的文档竞争边界（OQ-5）**：两边都会改 `docs/agents/glossary.md`（见 4.2）、`docs/agents/code-map.md`（见 1.9）与 `CLAUDE.md` 的「文档组织」表 —— 约定**本变更先落**（P0 的载体/目录登记必须先到位），对端在其后合并；若顺序被迫颠倒，这三处改为"先落对端、本变更改完后再补一次"

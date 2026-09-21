@@ -166,6 +166,13 @@
 | **本地兜底只做离线保护** | 代码中的兜底 prompt 只应对 Langfuse 宕机场景，不参与日常迭代。版本号与 Langfuse 同步，标注最后同步时间 |
 | **避免双轨制** | 不需要 Git 也存一份 prompt。当 Langfuse 和 Git 不一致时会产生混淆，最终没人知道哪个是"对的" |
 
+**当前阶段说明（2026-09-21）**：上表的"Langfuse 作为唯一权威来源"是**终态意向**，不是现状。
+现阶段的唯一事实源是 **Git 内的 `src/config/prompts/templates/*.yaml`** —— 远端 3 个 prompt
+（`financial-system-prompt` / `user-prompt-template` / `classifier-prompt`）已出列。
+
+Git 管理只是**第一阶段**，终态切回远端读取：远端读取实现保留未删，届时是"加回名单 + 固定
+label/版本"，而非重写。出列理由（终态门槛与闸门可重复性）见 `docs/adr/0010-delist-langfuse-prompts.md`。
+
 ### 可靠性（限流/熔断/降级）
 
 RAG 管线中需要防护的关键位置：
