@@ -197,6 +197,8 @@
 | `事务边界（session_scope）` | 跨表原子提交的唯一入口：`src/infra/db/transaction.py` 的 `session_scope(session_factory, session=None)`，每个 Repo 以其为基础暴露 `transaction()`。参与者方法接受 `session=` 且**传入时不提交**，提交/回滚由持有该会话的边界决定。入库路径「写 chunks + 标记 ready」、文档删除「删分块 + 软删文档」、KB 删除「软删文档 + 删分块 + 软删 KB」均同事务，**删除路径失败不得吞异常**；embedding 等外网调用必须在事务外完成 | ❌ 把外网调用放进事务（长占连接与锁）；❌ 参与者自行 commit 破坏边界；❌ `except Exception` 吞掉删除失败 |
 | `一次性验收产物（已退役）` | P2 dense 等价性与 P3 词项命中探针的一次性脚本（`scripts/migrate_chroma_to_pg.py` / `scripts/dense_equivalence_check.py` / `scripts/lexical_probe*.py`）已随 P4 退役；其测量文档（`docs/tmp/p2-dense-equivalence-*.md` / `p3-lexical-probe-*.md` / `p3-acceptance-*.md`）作为「那次对比的冻结记录」保留，**不可重跑、不得当质量基线**（判据缺口见需求池 F-30） | ❌ 以为还能跑搬迁/探针脚本重建语料；❌ 回写其测量数字或把它读作质量结论 |
 
+## prompt 组装
+
 ### 六段模型
 system prompt 的段划分：`base`（人设层，可替换）/ `runtime_contract` / `sources` / `tools` / `output`（环境约束层，不可替换）/ `skills`（运行时层，不参与 system 组装）。
 准确读法是 **5 个 system 段 + 1 个非 system 载体格位**。与既有「三层组装」是**嵌套**关系，不是两套规范。
