@@ -372,4 +372,12 @@ EVENT_SPECS: dict[str, EventSpec] = {
         "info",
         ("kind", "skill", "context", "direct_skill"),
     ),
+    # 知识库领域无对应 base 模板，回落通用领域（不阻断）
+    "kb domain fallback": EventSpec(
+        "kb domain fallback", "session", "warning", ("kb_id", "domain")
+    ),
+    # 预设与知识库领域不一致（用户自选行为，记日志但不阻断）
+    "agent domain mismatch": EventSpec(
+        "agent domain mismatch", "session", "info", ("agent", "domain")
+    ),
 }

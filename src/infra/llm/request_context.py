@@ -57,6 +57,10 @@ class RequestContext:
     deep_thinking: bool = False  # 请求级深思考开关（来源：chat/stream 请求入口 deep_thinking 参数；范围：请求内只读；用途：fork 未声明 thinking 时决定 enable_thinking）
     agent: str = ""  # 会话绑定智能体名（来源：Plan 3 由 sessions.agent 写入；范围：请求内只读；用途：fork 执行者选择的第二优先级；空=未绑定→系统默认）
     persona: str = ""  # 会话智能体人设正文（来源：Plan 3 T5 由预设 system_prompt 写入；范围：请求内只读；用途：build_system_prompt 人设层；空=未选 agent）
+    kb_domain: str = "general"  # 知识库领域（来源：AgentService 按 kb_id 查库并校验；范围：请求内只读；用途：base 段三选一取领域默认视角；未绑定或领域未知时回落 general）
+    tool_names: frozenset[str] = (
+        frozenset()
+    )  # 本轮实际注册的工具名（来源：AgentService 由 build_graph 填充的工具池派生；范围：请求内只读；用途：verify 运行期指引的条件渲染判据（src/agents/graph/verify/regen_decision.py）；组装路径另由节点工厂带入同一值）
     has_skills: bool = False  # 本会话是否有可用技能（来源：Plan 3 T5 由 skill_registry.model_visible() 写入；范围：请求内只读；用途：决定人设非空时是否追加委派引导段）
     known_skill_names: set[str] = field(
         default_factory=set
@@ -89,6 +93,8 @@ class RequestContext:
             clarify_channel=self.clarify_channel,
             abort_signal=self.abort_signal,
             deep_thinking=self.deep_thinking,
+            kb_domain=self.kb_domain,
+            tool_names=self.tool_names,
         )
 
 

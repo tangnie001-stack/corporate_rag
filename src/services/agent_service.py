@@ -38,8 +38,10 @@ from src.chat.streaming import (
 )
 from src.config import TOP_K_RERANK, settings
 from src.config.const import SKILL_INJECTION_PREFIX, SSEInteractionTexts
+from src.config.prompts import loader
 from src.core import logging as core_logging
 from src.core.log_events import Event, Signal
+from src.infra.db.repos import KbRepo
 from src.infra.db.vector_store import VectorStore
 from src.infra.llm.chat_message import ChatMessage
 from src.infra.llm.langfuse_tracing import LangfuseTracer
@@ -730,6 +732,11 @@ async def _run_generation(
 class AgentService:
     """图生命周期管理服务。"""
 
+    # 可选协作方的默认契约：生产路径由 __init__ 赋值覆盖，这里声明的默认值给出
+    # "无 KB 仓库 → 领域取 general"、"无工具 → 空集" 的确定语义（不用 getattr 兜底）。
+    _kb_repo: KbRepo | None = None
+    _tool_names: frozenset[str] = frozenset()
+
     def __init__(
         self,
         vector_store: VectorStore,
@@ -737,7 +744,7 @@ class AgentService:
         llm=None,
         reranker=None,
         prompt_manager: PromptManager | None = None,
-        kb_repo=None,
+        kb_repo: KbRepo | None = None,
     ):
         from src.agents.presets.loader import AgentPresetLoader
         from src.agents.presets.registry import AgentPresetRegistry
@@ -815,6 +822,12 @@ class AgentService:
             delegate_task=delegate_task_tool,
             tool_sink=fork_tool_pool,
             skill_direct_node=skill_direct_node,
+        )
+        # 本轮实际注册的工具名（段组装与 verify 指引的条件注入判据）。
+        # 取各工具的 .name（LangChain BaseTool 契约）；缺 name 是编程错误，
+        # 故在装配期直接暴露，而非每请求静默跳过。
+        self._tool_names: frozenset[str] = frozenset(
+            str(t.name) for t in fork_tool_pool
         )
         # 能力清单服务（Task 9）：由两个注册表派生只读清单，api 层只转发
         self.capability_service = CapabilityService(skill_registry, preset_registry)
@@ -917,6 +930,19 @@ class AgentService:
         ctx = RequestContext(session_id=session_id)
         ctx.kb_id = kb_id
         ctx.kb_bound = bool(kb_id)
+        ctx.tool_names = self._tool_names
+        # 知识库领域：base 段三选一的依据。领域非法（无对应 base 模板）时回落到保留值
+        # general 并记 warning，不阻断请求 —— 写入侧已拒绝非法值（KBService._require_known_domain），
+        # 此处兜的是"模板被删/改名后存量库指向了不存在的领域"这类跨版本情形。
+        if kb_id and self._kb_repo is not None:
+            stored_domain = await self._kb_repo.get_kb_domain(kb_id)
+            if loader.has_domain(stored_domain):
+                ctx.kb_domain = stored_domain
+            else:
+                ctx.kb_domain = "general"
+                core_logging.log_event(
+                    Event.KB_DOMAIN_FALLBACK, kb_id=kb_id, domain=stored_domain
+                )
         ctx.deep_thinking = (
             deep_thinking  # fork thinking 跟随的请求级来源（executor 读取）
         )
@@ -959,6 +985,12 @@ class AgentService:
         else:
             ctx.persona = ""
             ctx.agent_display_name = ""
+        # 预设与知识库领域不一致：属用户自选行为，**记日志但不阻断**（spec 第三 scenario）。
+        # 三选一替换语义下领域方法此时不参与组装，这是明确接受的代价，不是缺陷。
+        if ctx.persona and kb_id and ctx.kb_domain != "general":
+            core_logging.log_event(
+                Event.AGENT_DOMAIN_MISMATCH, agent=effective_agent, domain=ctx.kb_domain
+            )
         # [session] 生效智能体与解析来源（design D11 #2）：请求与绑定都为空时不记，
         # 避免每轮噪声（log_event 级别由 EventSpec 固定，不能逐次降级为 debug）
         if agent or bound_raw:

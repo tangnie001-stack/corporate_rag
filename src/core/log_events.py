@@ -192,6 +192,10 @@ class Event(str, Enum):
     SKILL_INJECTED = "skill injected"
     # [session] 命令形态分派结果（kind=plain 不记，避免每轮噪声）
     SKILL_DISPATCH = "skill dispatch"
+    # [session] 知识库领域无对应 base 模板，回落通用领域（不阻断）
+    KB_DOMAIN_FALLBACK = "kb domain fallback"
+    # [session] 预设与知识库领域不一致（用户自选行为，记日志但不阻断）
+    AGENT_DOMAIN_MISMATCH = "agent domain mismatch"
 
 
 @dataclass(frozen=True)
