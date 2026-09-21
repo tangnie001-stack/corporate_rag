@@ -1,6 +1,5 @@
 """PromptManager 已收窄为加载入口的门面：不持有正文副本、不触网。"""
 
-from src.config.prompts import loader
 from src.infra.llm.prompt_manager import PromptManager
 
 
@@ -27,13 +26,6 @@ def test_remote_prompt_names_are_delisted() -> None:
 def test_get_system_prompt_retired() -> None:
     """追加职责已移交段组装器，旧方法退役（避免双入口重复注入）。"""
     assert not hasattr(PromptManager, "get_system_prompt")
-
-
-def test_base_system_prompt_reads_domain_template() -> None:
-    """get_base_system_prompt 按领域取模板正文（不触网、可重复）。"""
-    pm = PromptManager()
-    assert pm.get_base_system_prompt("finance") == loader.get_domain_base("finance")
-    assert pm.get_base_system_prompt("general") == loader.get_domain_base("general")
 
 
 def test_user_template_renders_placeholders() -> None:

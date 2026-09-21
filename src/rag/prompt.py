@@ -31,11 +31,6 @@ SECTION_ORDER: tuple[str, ...] = (
 # 通用 base 的领域保留值（spec「general 是保留值，且它必须有对应模板」）
 GENERAL_DOMAIN: str = "general"
 
-# 本轮实际注册的工具名集合（题面里可能出现的全部工具名）
-KNOWN_TOOL_NAMES: frozenset[str] = frozenset(
-    {"retrieve_kb", "search_web", "ask_user", "delegate_task"}
-)
-
 
 @dataclass(frozen=True)
 class AssemblyContext:
@@ -89,7 +84,8 @@ def _delegate_available(ctx: AssemblyContext) -> bool:
 
 
 # 段 → ((模板 id, 判据), ...)；判据留代码、不由 YAML 声明（spec「判据的位置」）。
-# 增删条目必须同步 docs/agents/prompt-ownership.md §3 的逐条判据表。
+# 增删条目必须同步 docs/agents/prompt-ownership.md §3 的逐条判据表（该表另含判据
+# 在 `_build_unbound_message`、不在本表的 `sources-kb-unbound(-web)` 两条）。
 _SECTION_RULES: dict[str, tuple[tuple[str, RuleFn], ...]] = {
     "runtime_contract": (("runtime-contract", _always),),
     "sources": (

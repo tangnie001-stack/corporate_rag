@@ -1,9 +1,12 @@
 """Prompt 模板的门面 — 按 id 取正文并渲染占位符，唯一读取路径是加载入口。
 
 使用方式：
-    loader = PromptManager()
-    base = loader.get_base_system_prompt(domain="finance")
-    user_tmpl = loader.get_user_template(context=context, query=query)
+    manager = PromptManager()
+    user_tmpl = manager.get_user_template(context=context, query=query)
+    classifier = manager.get_classifier_prompt(...)
+
+base 段（人设层）不经本类取数：解析入口是 `src/rag/prompt._resolve_base`
+→ `loader.get_domain_base`。
 
 远端名单（PROMPT_NAMES）已出列，本地 YAML 模板是唯一事实源；`_fetch_prompt` /
 `_get` / 缓存实现保留，名单为空时不发起网络请求，直接返回本地正文。
@@ -62,6 +65,8 @@ class PromptManager:
         cache_ttl: 远端缓存有效期（秒），仅在名单非空时生效，默认 60
     """
 
+    # 远端名单已出列为空（依据 docs/adr/0010-delist-langfuse-prompts.md）：
+    # 本地 YAML 模板是唯一事实源。加回名单即恢复远端读取（需同时固定 label/版本）。
     PROMPT_NAMES: ClassVar[dict[str, str]] = {}
 
     def __init__(self, cache_ttl: int = 60) -> None:
@@ -168,20 +173,6 @@ class PromptManager:
             return local
         return self._get(name, local)
 
-    def get_base_system_prompt(self, domain: str = "general") -> str:
-        """取指定领域的 base 段正文（人设层的默认来源）。
-
-        不做引用指令 / 委派引导 / 日期追加 —— 那些属环境约束层，由
-        `src/rag/prompt.build_system_prompt` 统一处理（保证唯一入口）。
-
-        Args:
-            domain: 领域名；缺省保留值 general
-
-        Returns:
-            该领域的 base 正文
-        """
-        return self._resolve("system", loader.get_domain_base(domain))
-
     def get_user_template(self, context: str = "", query: str = "") -> str:
         """渲染用户消息模板。
 
@@ -231,9 +222,10 @@ class PromptManager:
         return f"{sys_prompt}\n\n{user_prompt}"
 
     def invalidate_cache(self) -> None:
-        """清空缓存，下次调用会重新拉取。
+        """清空远端缓存。
 
-        在 Langfuse prompt 版本更新后调用，强制重新获取最新版本。
+        名单为空（出列态）时 `_get` 不会被调用，缓存恒为空，本方法实际是 no-op；
+        仅当 `PROMPT_NAMES` 非空、缓存被填充后，本方法才有"下次调用重新拉取"的效果。
         """
         self._cache.clear()
         logger.debug("Prompt cache cleared")

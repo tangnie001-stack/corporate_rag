@@ -155,6 +155,21 @@ def get_by_section(section: str) -> list[Template]:
     ]
 
 
+def _find_domain_base(domain: str) -> Template | None:
+    """在 base 段模板中查找匹配领域者（领域判据的唯一实现）。
+
+    Args:
+        domain: 领域名
+
+    Returns:
+        匹配的 base 模板；无匹配时返回 None（不抛异常）
+    """
+    for template in get_by_section("base"):
+        if template.domain == domain:
+            return template
+    return None
+
+
 def get_domain_base(domain: str) -> str:
     """按领域取 base 正文。
 
@@ -167,10 +182,10 @@ def get_domain_base(domain: str) -> str:
     Raises:
         KeyError: 无匹配模板
     """
-    for template in get_by_section("base"):
-        if template.domain == domain:
-            return template.content
-    raise KeyError(domain)
+    template = _find_domain_base(domain)
+    if template is None:
+        raise KeyError(domain)
+    return template.content
 
 
 def has_domain(domain: str) -> bool:
@@ -185,10 +200,7 @@ def has_domain(domain: str) -> bool:
     Returns:
         True = 存在 kind=section 且 section=base 且 domain 等于该值的模板
     """
-    for template in get_by_section("base"):
-        if template.domain == domain:
-            return True
-    return False
+    return _find_domain_base(domain) is not None
 
 
 def render(text: str, variables: dict[str, str]) -> str:

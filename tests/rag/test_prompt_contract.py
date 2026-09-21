@@ -12,11 +12,11 @@ from typing import cast
 import pytest
 from langchain_core.messages import BaseMessage, SystemMessage
 
+from src.agents.tools.task_tools import make_task_tools
 from src.config.const import EXPERT_ANALYSIS_MARKER
 from src.infra.llm.chat_message import ChatMessage
 from src.infra.llm.prompt_manager import PromptManager
 from src.rag.prompt import (
-    KNOWN_TOOL_NAMES,
     AssemblyContext,
     build_prompt,
     build_simple_prompt,
@@ -26,6 +26,16 @@ from src.rag.prompt import (
 # 生产实际可能的工具集：retrieve_kb 与 ask_user 恒注册（rag_tools.py:238-239），
 # search_web 受 WEB_SEARCH_ENABLED、delegate_task 受 skill 库是否有内容。
 _BASE_TOOLS = frozenset({"retrieve_kb", "ask_user"})
+
+# 4 个 RAG 面向的工具名显式列出：它们由 make_rag_tools 按需注册，构造需要依赖，
+# 无法在本测试里安全实例化。
+_RAG_TOOL_NAMES = frozenset({"retrieve_kb", "search_web", "ask_user", "delegate_task"})
+
+# 契约断言用的工具名全集：task 工具名从 make_task_tools() 派生（它无外部依赖，
+# 可在测试内直接构造），避免在本测试手维护第二份会漂移的名单。
+_KNOWN_TOOL_NAMES: frozenset[str] = _RAG_TOOL_NAMES | frozenset(
+    tool.name for tool in make_task_tools()
+)
 
 
 class _FakePromptManager:
@@ -119,19 +129,19 @@ def test_3_named_tools_are_subset_of_registered() -> None:
     )
     for tools in combos:
         text = _system_text(tools=tools)
-        mentioned = {name for name in KNOWN_TOOL_NAMES if name in text}
+        mentioned = {name for name in _KNOWN_TOOL_NAMES if name in text}
         assert mentioned <= tools, f"prompt 提到了未注册的工具：{mentioned - tools}"
 
 
 def test_3b_empty_toolset_mentions_no_known_tool() -> None:
-    """③ 空工具集下最终 prompt 不得出现任何 KNOWN_TOOL_NAMES 里的名字。
+    """③ 空工具集下最终 prompt 不得出现任何 _KNOWN_TOOL_NAMES 里的名字。
 
     上面四组组合恒含 retrieve_kb / ask_user，测不出"常驻段误写工具名"；
     此处 tools=frozenset()，任何工具名出现都说明有段落没按判据开合。
     """
     for kb_bound in (True, False):
         text = _system_text(kb_bound=kb_bound, tools=frozenset())
-        mentioned = {name for name in KNOWN_TOOL_NAMES if name in text}
+        mentioned = {name for name in _KNOWN_TOOL_NAMES if name in text}
         assert mentioned == set(), (
             f"空工具集（kb_bound={kb_bound}）下 prompt 仍提到工具名："
             f"{sorted(mentioned)}，说明有段落未按判据开合"

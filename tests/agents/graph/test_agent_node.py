@@ -35,10 +35,6 @@ class MockChatModel:
 class StubPromptManager:
     """极简 PromptManager 替身：只提供 build_prompt 需要的取值方法。"""
 
-    def get_base_system_prompt(self):
-        """返回固定基础段系统指令。"""
-        return "system prompt"
-
     def get_user_template(self, context="", query=""):
         """返回含 query 的用户模板。"""
         return f"user template: {query}"

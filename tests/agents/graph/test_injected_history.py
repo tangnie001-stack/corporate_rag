@@ -14,7 +14,6 @@ from src.infra.llm.request_context import RequestContext, current_request_ctx
 def test_injected_history_becomes_separate_human_message(monkeypatch):
     """注入行抽成独立 HumanMessage 且排在普通历史之前；普通历史不受影响。"""
     pm = MagicMock()
-    pm.get_base_system_prompt.return_value = "基础段"
     pm.get_user_template.return_value = "用户模板"
 
     state = AgentState(
