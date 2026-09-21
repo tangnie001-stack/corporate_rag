@@ -1,4 +1,4 @@
 templates:
   - id: task-rewrite-user
     kind: task
-    content: "用户问题：{query}\n\n路由类型：{route}\n\n对话历史（最近2轮）：\n{history}\n\n输出 JSON（严格按此格式，改写字段仅对应路由输出）：\n{{\n  \"standalone_query\": \"仅 medium 时输出；complex 省略\",\n  \"sub_queries\": [\"仅 complex 时输出 2-4 条；medium 省略\"]\n}}\n"
+    content: "用户问题：{query}\n\n路由类型：{route}\n\n对话历史（最近2轮）：\n{history}\n\n输出 JSON（严格按此格式，改写字段仅对应路由输出）：\n{\n  \"standalone_query\": \"仅 medium 时输出；complex 省略\",\n  \"sub_queries\": [\"仅 complex 时输出 2-4 条；medium 省略\"]\n}\n"

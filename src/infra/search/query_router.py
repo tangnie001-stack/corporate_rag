@@ -222,10 +222,11 @@ def _llm_rewrite(
     rewrite_system = loader.get_content("task-rewrite-system")
     rewrite_user = loader.get_content("task-rewrite-user")
     history_text = _format_history(history)
-    if history_text:
-        prompt = f"{rewrite_system}\n\n{rewrite_user.format(query=query, route=route, history=history_text)}"
-    else:
-        prompt = f"{rewrite_system}\n\n{rewrite_user.format(query=query, route=route, history='无')}"
+    rendered_user = loader.render(
+        rewrite_user,
+        {"query": query, "route": route, "history": history_text or "无"},
+    )
+    prompt = f"{rewrite_system}\n\n{rendered_user}"
     try:
         response = llm.invoke(
             [HumanMessage(content=prompt)], temperature=CLASSIFIER_TEMPERATURE

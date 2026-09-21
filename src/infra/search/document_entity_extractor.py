@@ -233,11 +233,14 @@ class DocumentEntityExtractor:
         heading_text = "\n".join(f"{'#' * lvl} {title}" for lvl, title in heading_tree)
         prefix = text[:ENTITY_TEXT_PREFIX_LEN]
         candidates_text = json.dumps(rule_candidates, ensure_ascii=False)
-        prompt = _ENTITY_USER_TEMPLATE.format(
-            filename=filename,
-            heading_tree=heading_text or "（无标题结构）",
-            text_prefix=prefix,
-            rule_candidates=candidates_text,
+        prompt = loader.render(
+            _ENTITY_USER_TEMPLATE,
+            {
+                "filename": filename,
+                "heading_tree": heading_text or "（无标题结构）",
+                "text_prefix": prefix,
+                "rule_candidates": candidates_text,
+            },
         )
         from langchain_core.messages import HumanMessage, SystemMessage
 
