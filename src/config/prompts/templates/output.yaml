@@ -1,0 +1,11 @@
+templates:
+  - id: output-citation
+    kind: section
+    section: output
+    content: "\n引用知识库文档或联网搜索结果时，请在对应句末标注来源编号 [1][2]，编号须与工具返回的来源列表一致，例如：\"营收3943亿元[1]\"。\n"
+
+  - id: output-delegate-citation
+    kind: section
+    section: output
+    content: |-
+      委派 fork 返回的是专家分析文本（无引用编号），它不是检索来源：整合进最终回答时，凡引用数据/事实必须指向你自己的检索来源 [n]；专家观点与建议属分析表述，不配 [n]，必要时标注"基于领域经验的分析"。

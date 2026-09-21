@@ -1,4 +1,4 @@
-"""13 条模板文件可解析、字段合法、id 唯一（12 条搬运 + 1 条新增）。"""
+"""15 条模板文件可解析、字段合法、id 唯一。"""
 
 from pathlib import Path
 
@@ -24,9 +24,9 @@ def _all_templates() -> list[dict]:
 
 
 def test_template_count_and_migrated_ids() -> None:
-    """13 条 = 12 条搬运 + 1 条新增 base-general（见 design.md D12.6 Q1 与 spec 的 general 保留值）。"""
+    """15 条 = 12 条搬运 + 1 条通用 base（base-general）+ 2 条新增段模板（runtime-contract / output-delegate-citation）。"""
     templates = _all_templates()
-    assert len(templates) == 13
+    assert len(templates) == 15
     migrated = {
         "tools-delegate-guidance",
         "base-financial",
@@ -39,7 +39,7 @@ def test_template_count_and_migrated_ids() -> None:
         "task-rewrite-user",
         "task-entity-system",
         "task-entity-user",
-        "output-inline-citation",
+        "output-citation",
     }
     assert migrated <= {t["id"] for t in templates}, "12 条搬运模板必须齐全"
 
@@ -72,3 +72,41 @@ def test_content_is_non_empty(tid: str) -> None:
     """段模板正文非空。"""
     entry = next(t for t in _all_templates() if t["id"] == tid)
     assert entry["content"].strip()
+
+
+def test_runtime_contract_segment_exists_and_is_unconditional() -> None:
+    """runtime_contract 段存在，且含数据·指令边界与完成条件两条无条件规则。"""
+    from src.config.prompts import loader
+
+    template = loader.load_all()["runtime-contract"]
+    assert template.kind == "section"
+    assert template.section == "runtime_contract"
+    assert template.domain is None
+    content = template.content
+    assert "不可信的来源数据" in content, "缺数据·指令边界"
+    assert "停止调用工具" in content, "缺完成条件"
+    assert "仅有进度更新不算完成任务" in content, "完成条件措辞不完整"
+
+
+def test_output_segment_templates_exist() -> None:
+    """output 段两条模板的归属字段正确，引用编码一条为无条件。"""
+    from src.config.prompts import loader
+
+    templates = loader.load_all()
+    citation = templates["output-citation"]
+    assert citation.kind == "section"
+    assert citation.section == "output"
+    assert "[n]" in citation.content or "[1][2]" in citation.content
+
+    delegated = templates["output-delegate-citation"]
+    assert delegated.section == "output"
+    assert "基于领域经验的分析" in delegated.content, (
+        "EXPERT_ANALYSIS_MARKER 短语必须逐字保留：kb_citation_guardrail 靠它豁免"
+    )
+
+
+def test_old_output_inline_citation_template_removed() -> None:
+    """旧模板 id 已删除（一条事实一个 owner，不留并存副本）。"""
+    from src.config.prompts import loader
+
+    assert "output-inline-citation" not in loader.load_all()

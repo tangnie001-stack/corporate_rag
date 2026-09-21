@@ -27,7 +27,7 @@ def test_no_persona_keeps_system_messages_byte_identical():
     )
     expected = _with_current_date(
         "基础段正文"
-        + loader.get_content("output-inline-citation")
+        + loader.get_content("output-citation")
         + loader.get_content("tools-delegate-guidance")
     )
     assert len(messages) == 1
@@ -58,7 +58,7 @@ def test_persona_replaces_base_segment():
     assert isinstance(content, str)
     assert content.startswith("你是财务专家，只做财务分析。")
     assert "基础段正文" not in content
-    assert loader.get_content("output-inline-citation") in content
+    assert loader.get_content("output-citation") in content
 
 
 def test_persona_without_skills_omits_delegate_section():

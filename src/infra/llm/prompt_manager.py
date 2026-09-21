@@ -26,12 +26,12 @@ from src.core.log_events import Event
 _FALLBACK_SYSTEM_PROMPT: str = (
     loader.get_content("base-financial")
     + loader.get_content("tools-delegate-guidance")
-    + loader.get_content("output-inline-citation")
+    + loader.get_content("output-citation")
 )
 _FALLBACK_USER_TEMPLATE: str = loader.get_content("task-user-prompt")
 _FALLBACK_CLASSIFIER_SYSTEM: str = loader.get_content("task-classifier-system")
 _FALLBACK_CLASSIFIER_USER: str = loader.get_content("task-classifier-user")
-_INLINE_CITATION: str = loader.get_content("output-inline-citation")
+_INLINE_CITATION: str = loader.get_content("output-citation")
 _DELEGATE_GUIDANCE: str = loader.get_content("tools-delegate-guidance")
 
 # 北京时区：金融场景锚定"本报告期/今年"需按北京时间取日期。
