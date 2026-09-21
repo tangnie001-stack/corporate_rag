@@ -50,7 +50,9 @@ chat/              对话管理：manager(Redis) / persistence(PostgreSQL) / str
 chunking/          分块：router(策略路由) / strategies(4 种) / validator / scorer
 parsers/           文档解析：pdf / docx / txt + base / router
 core/              日志：logging / log_events / log_event_specs
-config/            settings(环境变量) / prompts(提示词) / const(常量/文案/枚举) / response_codes
+config/            settings(环境变量) / const(常量/文案/枚举) / response_codes
+  └─ prompts/      prompt 模板包：__init__.py(7 条行为键常量 VERIFY_* / FORK_*) / loader.py(唯一读取点) / validation.py(启动期校验) / templates/*.yaml(13 条模板，12 搬运 + 1 新增)
+                   —— 段模板(`kind: section`)与独立任务模板(`kind: task`)同处一包；改 prompt 文案改 YAML，改规则的挂载点改代码
 infra/             基础设施：db(engine/DSN + transaction 事务边界 + models + repos + vector_store + lexical_query) / llm / search(tokenizer 为唯一 jieba 分词入口) / auth / redis_client
 middleware/        auth / trace_id / response_processor（统一响应包装）
 cli/               RAGAS 评估、检索对比、trace 回放等命令行工具
@@ -198,7 +200,7 @@ Nginx 容器把本目录挂到 `/usr/share/nginx/html` 直接托管，**无 npm 
 |------|------|
 | 加/改一个 HTTP 接口 | `src/api/<模块>.py`（路由）+ `src/api/model/request.py`/`response.py`（契约）+ 对应 `services/` 编排；同步 `docs/agents/api_contract.md` 与测试断言 |
 | 改一次生成的编排 / 事件转换 | `src/services/agent_service.py`（`_run_generation` / `_convert_event`） |
-| 改 agent 循环 / 提示词 | `src/agents/graph/agent_node.py`、`nodes.py`、`src/rag/prompt.py`、`src/config/prompts/` |
+| 改 agent 循环 / 提示词 | 文案改 `src/config/prompts/templates/*.yaml`（经 `loader.py` 唯一读取）；规则挂载点改 `src/agents/graph/agent_node.py`、`nodes.py`、`src/rag/prompt.py` |
 | 加/改工具 | `src/agents/tools/`（实现 + 在 `rag_tools.py` 注册）；工具描述文案入 `src/config/` |
 | 加/改 skill 机制 | `src/agents/skills/`（loader/registry/executor/delegate_task）；内容放 `skills/<name>/SKILL.md` |
 | 加/改智能体预设 | 内容放 `agents/<name>.md`；机制在 `src/agents/presets/`（loader/registry） |
