@@ -152,6 +152,7 @@
 | 「完成时给出完整答案并停止调用工具。仅有进度更新不算完成任务」 | `prompts.go:519-520` 原文 `When the requested work is complete, provide the complete answer and stop calling tools. A progress update alone does not complete the task.` | **M**（原 change task 3.2 只写"完成即停调工具"，措辞弱于出处） |
 | 「默认使用中文回答；遵循用户明确的语言与输出格式要求」 | `prompts.go:439-442` + `system_prompt.yaml:27` | **W**（取代原规则 11） |
 | ⚠ 已删除的一句：「不得泄露私有来源句柄」 | `prompts.go:516-518` | **D** — 该句服务的是 WeKnora 的 `protocol` 段与 `cN/dN/bN/wN` 私有句柄机制（`internal/modelcontext/citations.go:14-19`），而本变更已决定**不抄 protocol**（`docs/tmp/kb-boundary-visibility-problem.md` 附录 D）。我们没有句柄概念，保留此句会指向不存在的对象 |
+| 「默认使用中文回答；遵循用户明确的语言与输出格式要求」的位置 | — | **有意差异（第 4 处）**：mapping 正文把它列为「运行上下文」的第 7 个 bullet，落盘时提为独立段落。理由：① 保持 P1 既有形态（本条在 P1 就是独立段落，T2 只补运行上下文块、不重排已有内容）；② 本文件自己的依据表已把它单列并标 **W**、且把「运行上下文」计为 6 条，说明它本不属于那 6 条 |
 
 ---
 
