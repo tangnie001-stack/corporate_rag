@@ -143,18 +143,33 @@ def _disable_langfuse_tracing() -> Generator[None, None, None]:
 def _rearm_langfuse_kill_switch() -> Generator[None, None, None]:
     """每个用例前重新压上关停开关（会话级那次会被中途重新武装掉）。
 
-    为什么必须每例重设，而不是只靠上面的会话级 fixture：
+    为什么必须每例重设 settings 属性，而不是只靠上面的会话级 fixture：
     `tests/config/test_settings.py::test_langfuse_enable_default_true` 会
     `reload(src.config.settings)`（并临时 `pop` 掉 `LANGFUSE_ENABLE`）；reload 会
     重新执行模块里的 `os.getenv("LANGFUSE_ENABLE", "true")` 赋值，把
     `settings.LANGFUSE_ENABLE` 变回 `True` 并一直保留到会话结束。若只在会话开头
     关停一次，该用例之后的所有用例都会在 tracing 打开的状态下运行 —— 本任务要立
-    的「恒为关停」不再成立。`configure` 开销约 0.2 ms，逐例重设可忽略。
+    的「恒为关停」不再成立。
+
+    为什么 SDK 侧只在「已经是 enabled」时才重设：`configure()` 走
+    `LangfuseSingleton.reset()` → `shutdown()` → `flush()` + `join()`，会阻塞等待
+    SDK 消费线程从轮询超时（ingestion `flush_interval` 0.5s、media `queue.get` 1s）
+    中醒来 —— 实测重新配置一次约 **2.0 s**（reset 约 2.0 s，客户端构建仅约 0.08 s）。
+    若逐例无条件调用，1184 条用例会平白多出约 40 分钟。这一行不能删：Task 2 会故意
+    在用例内打开 tracing，这道逐例的条件重设是约零成本的安全网，用来挡住那种会污染
+    后续所有用例（真发网络）的泄漏。
     """
     from langfuse.decorators import langfuse_context
 
     from src.config import settings
 
     settings.LANGFUSE_ENABLE = False
-    langfuse_context.configure(enabled=False)
+
+    client = langfuse_context.client_instance
+    if client is None:
+        # 客户端尚未构建：此处只构建一个 disabled 客户端，约 0.08 s
+        langfuse_context.configure(enabled=False)
+    elif client.enabled:
+        # 客户端被重新打开（如 Task 2 故意开启）：付约 2.0 s 的 reset 代价按回去
+        langfuse_context.configure(enabled=False)
     yield
