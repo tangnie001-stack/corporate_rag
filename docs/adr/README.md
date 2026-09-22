@@ -43,7 +43,42 @@ docs/adr/NNNN-<kebab-case-短标题>.md
 - 短标题：**英文** kebab-case（便于检索与跨工具引用），如 `0007-drop-classify-node.md`
 - 正文用**中文**（与项目文档一致）
 
-**取代关系**写在文件头部：新 ADR 的 `Status` 填 `Accepted (supersedes 0003)`，被取代的旧 ADR 的 `Status` 改为 `Superseded by NNNN`。
+## 取代关系与头部字段
+
+头部字段固定四个，取值口径如下：
+
+| 字段 | 何时填 | 取值 |
+|---|---|---|
+| `Supersedes` | 本 ADR 取代了在先的决策 | `ADR-NNNN`（完全）；局部写 `ADR-NNNN 的「<哪一条>」（局部）` |
+| `关系` | 与在先 ADR 有关联但**不构成取代** | 一句话说明关联 |
+| `修订记录` | 仅「原地修订」例外（见下）时填 | 改了什么 + 为什么允许原地改 |
+| `Status` | 恒填 | 见「状态取值」；**反向指针写在 `Status` 上**（不另设 `Superseded by` 字段） |
+
+反向指针只有两种形态，按取代范围二选一：
+
+| 取代范围 | 旧 ADR 的 `Status` |
+|---|---|
+| **完全取代** | `Superseded by 0009` |
+| **局部取代** | `Accepted（**<哪一条>已被 ADR-0009 取代**，其余仍有效）` |
+
+**完全取代**：新 ADR 头部填 `Supersedes：ADR-0003`；旧 ADR 的 `Status` 改为 `Superseded by 0009` —— 该 Status 本身即反向指针。
+
+**局部取代**（本仓最常见的形态）：只推翻旧 ADR 的**某一条**决策或某一段陈述，其余继续有效。
+
+- 新 ADR 填 `Supersedes：ADR-0003 的「决策 3」（局部）`
+- 旧 ADR 的 `Status` 写明是哪一条：
+
+  ```markdown
+  - **Status**：Accepted（**决策 3 已被 ADR-0009 取代**，其余仍有效）
+  ```
+
+> 反向指针**必填，不是可选**。它只动 `Status` 一行，属导航元数据，**不违反「正文不可变」**（正文一字不改）。缺了它，后人单读旧 ADR 会把已被推翻的那条当成仍然成立 —— 这是本目录最容易误导人的失效方式。
+
+**原地修订（例外，须满足条件）**：**仅当该 ADR 尚未落地任何代码**时，允许直接改正文，并在头部 `修订记录` 留痕（含原内容与改写理由）。一旦已落地代码，一律改为「新开 ADR + 反向指针」。先例见 ADR-0003。
+
+**为什么不把修订追加在同一文件末尾**：ADR 的价值是「某个时点为什么这么定」的快照。同文件追加会让读者仍需通读全文才知道哪条被改，文件也退化为滚动的现状文档 —— 那是 `docs/agents/` 的职责。取代关系必须**跨文件可导航**，靠头部字段 + 索引表解决。
+
+**怎么保证后续不走偏**：以上是规则，靠人记会漂（本目录已有四种写法并存，见索引表）。机械校验在 `python -m src.cli.check_adr`，随 pre-commit 的 `check-adr` hook 全量运行，缺字段 / 指针不对称 / 索引漏登记都会以 error 拦截提交。
 
 ## 状态取值
 
@@ -55,6 +90,24 @@ docs/adr/NNNN-<kebab-case-短标题>.md
 | `Deprecated` | 曾经生效，现已不再推荐（但未被取代） |
 | `Superseded by NNNN` | 已被更新的决策取代 |
 
+## 索引
+
+**这是本目录的导航入口** —— 想知道"哪条还有效"，看这里，不必逐个打开文件。新增 ADR 时必须同步在此登记一行（`check-adr` 会校验覆盖完整性）。
+
+| # | 决策（一句话） | Status | 取代关系 |
+|---|---|---|---|
+| [0001](0001-retrieval-fetch-and-dedup-scope.md) | 检索取数取消每文档配额，改为大候选池 + 内容级去重 | Accepted | — |
+| [0002](0002-prompt-carrier-yaml-two-phase.md) | prompt 载体迁到 Git 内 YAML，终态为远端读取 | Accepted | 0010 为其第一阶段内部的子决策（不取代） |
+| [0003](0003-prompt-layering-six-sections.md) | prompt 六段模型，运行时各段恒定、base 三选一 | Accepted | **决策 3 已被 0009 取代**；0010 为其子决策 |
+| [0004](0004-storage-consolidation-single-postgres.md) | 三套存储收敛到单个 PostgreSQL 实例 | Accepted | **「trace 在 ClickHouse」一句已被 0011 推翻** |
+| [0005](0005-hybrid-fusion-in-application-layer.md) | 混合检索的融合留在应用层 | Accepted | — |
+| [0006](0006-chinese-lexical-retrieval-shape.md) | 中文词法检索 = jieba 预分词 + tsvector('simple') + 前缀 OR | Accepted | — |
+| [0007](0007-retire-mysql-rollback-basis.md) | 退役 MySQL 回滚基座（容器 / 卷 / 镜像全部清理） | Accepted | **「历史迁移脚本保留」一条已被 0008 取代** |
+| [0008](0008-delete-historical-migration-sql.md) | 删除历史手工 SQL 迁移文件 | Accepted | 局部取代 0007 的一条 |
+| [0009](0009-prompt-base-three-way-replacement.md) | `base` 段按三选一（替换）解析 | Accepted | 局部取代 0003 的决策 3 |
+| [0010](0010-delist-langfuse-prompts.md) | Langfuse 侧 3 个 prompt 出列，本地模板为唯一事实源 | Accepted | 不取代 0002；0002 内部的子决策 |
+| [0011](0011-langfuse-v2-downgrade.md) | 自托管 Langfuse 由 v3 降至 v2，去掉 ClickHouse 与 worker | Accepted | 局部推翻 0004 的一条附带陈述 |
+
 ## 模板
 
 复制以下内容到新文件：
@@ -65,7 +118,9 @@ docs/adr/NNNN-<kebab-case-短标题>.md
 - **Status**：Proposed
 - **Date**：YYYY-MM-DD
 - **Deciders**：<谁定的>
-- **Supersedes / Superseded by**：<无则省略>
+- **Supersedes**：<无则省略；完全写 `ADR-NNNN`，局部写 `ADR-NNNN 的「<哪一条>」（局部）`>
+- **关系**：<与在先 ADR 有关联但不构成取代时填，一句话；无则省略>
+- **修订记录**：<仅「落地前原地修订」时填（含原内容与理由）；无则省略>
 
 ## 背景与问题
 

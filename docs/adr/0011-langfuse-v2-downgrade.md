@@ -3,7 +3,7 @@
 - **Status**：Accepted
 - **Date**：2026-09-22
 - **Deciders**：用户（决策）；Claude（调研、实测与评审）
-- **关系**：**不取代 ADR-0004**，但推翻其中一条**附带陈述**。ADR-0004 写「trace 在 ClickHouse」；本决策后 trace 落在 PostgreSQL。ADR-0004 的主决策（**一个 PG 实例、两个 database**）不但仍成立，且被本决策强化 —— 降级后 Langfuse 完全依赖它。
+- **Supersedes**：ADR-0004 的**一条附带陈述**（局部）。ADR-0004 写「trace 在 ClickHouse」；本决策后 trace 落在 PostgreSQL。ADR-0004 的主决策（**一个 PG 实例、两个 database**）不但仍成立，且被本决策强化 —— 降级后 Langfuse 完全依赖它。
 
 ## 背景与问题
 

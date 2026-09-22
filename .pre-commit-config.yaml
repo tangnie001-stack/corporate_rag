@@ -56,3 +56,15 @@ repos:
         language: system
         always_run: true
         pass_filenames: false
+
+  # ADR 头部防腐（全量扫描，防止"新增 ADR 没登记索引 / 取代了旧 ADR 但旧 ADR
+  # 没加反向指针"这类取代关系漂移）。与 check-docs 同理用 always_run：漂移常
+  # 发生在"新增了 ADR"这类与文件无关的改动上。error 时退出码 1，拦截提交。
+  - repo: local
+    hooks:
+      - id: check-adr
+        name: ADR header consistency (all ADRs)
+        entry: .venv/bin/python -m src.cli.check_adr
+        language: system
+        always_run: true
+        pass_filenames: false

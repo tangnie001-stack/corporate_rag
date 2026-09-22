@@ -1,8 +1,9 @@
 # ADR-0009：`base` 段按三选一（替换）解析
 
-- **Status**：Accepted（**只取代 ADR-0003 的决策 3**；⚠ ADR-0003 其余决策继续有效，其 `Status` 保持 `Accepted`，正文不作改动）
+- **Status**：Accepted
 - **Date**：2026-09-21
 - **Deciders**：用户（决策）；Claude（调研 + 独立评审后的修正）
+- **Supersedes**：ADR-0003 的**决策 3**（局部；ADR-0003 其余决策继续有效，其 `Status` 保持 `Accepted`，正文不作改动）
 
 ## 背景与问题
 

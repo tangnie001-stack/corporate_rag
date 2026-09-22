@@ -1,6 +1,6 @@
 # ADR-0004：三套存储收敛到单个 PostgreSQL 实例（含共享实例的运维后果）
 
-- **Status**：Accepted
+- **Status**：Accepted（**「trace 在 ClickHouse」这一附带陈述已被 ADR-0011 推翻**，其余决策仍有效）
 - **Date**：2026-09-20
 - **Deciders**：用户（决策）；Claude（调研与实测）
 

@@ -1,6 +1,6 @@
 # ADR-0007：退役 MySQL 回滚基座（容器 / 卷 / 镜像全部清理）
 
-- **Status**：Accepted
+- **Status**：Accepted（**「历史迁移脚本保留」一条已被 ADR-0008 取代**，其余决策仍有效）
 - **Date**：2026-09-20
 - **Deciders**：用户（决策）；Claude（执行与取证）
 - **Supersedes**：无 ADR（被逆转的是 P1 计划 `docs/superpowers/plans/2026-09-19-postgres-storage-p1-relational-base.md` 的 T9「保留 MySQL 卷作回滚基座」决定，属计划而非 ADR，故无 ADR 可取代）

@@ -1,0 +1,387 @@
+#!/usr/bin/env python3
+"""ADR 头部一致性检查 CLI — 防止取代关系与索引走偏。
+
+背景（规则防腐）：`docs/adr/README.md` 规定了取代关系、反向指针与索引登记三件事，
+但规则靠人记会漂 —— 历史上同一件事在本目录出现过四种写法（`Supersedes` 字段、
+塞进 `Status` 的说明、`关系` 字段、原地修订），且被局部推翻的旧 ADR 一条反向指针
+都没有。本脚本把规则变成机械校验。
+
+检查项（全部 error 档，退出码 1）：
+
+  - A1 编号连续：`NNNN` 四位递增、不跳号、不复用
+  - A2 文件名格式：`NNNN-<kebab-case>.md`
+  - A3 必填字段：`Status` / `Date` / `Deciders` 均在头部
+  - A4 指针有效：`Supersedes` 与完全取代的 `Status` 指向的 ADR 必须存在
+  - A5 反向指针对称：被取代的旧 ADR，其 `Status` 必须提到取代者的编号
+  - A6 索引覆盖一致：README 索引表覆盖全部 ADR，且 `Status` 列与文件头部一致
+
+用法：
+    python -m src.cli.check_adr
+"""
+
+import re
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_ADR_DIR = _PROJECT_ROOT / "docs" / "adr"
+_INDEX_FILE = _ADR_DIR / "README.md"
+
+# 头部字段行：`- **Status**：...`；中英文冒号都容忍
+_FIELD_RE = re.compile(
+    r"^- \*\*(Status|Date|Deciders|Supersedes|Superseded by|关系)\*\*[：:]\s*(.*)$"
+)
+# 文件名：NNNN-<kebab>.md
+_FILENAME_RE = re.compile(r"^(\d{4})-([a-z0-9]+(?:-[a-z0-9]+)*)\.md$")
+# 文中任意位置出现的 ADR 编号引用（仅用于解析取代字段的指向）
+_ADR_REF_RE = re.compile(r"ADR-(\d{4})")
+# 索引表数据行：`| [0003](file.md) | 一句话 | Accepted | 取代关系 |`
+_INDEX_ROW_RE = re.compile(r"^\|\s*\[(\d{4})\]\(([^)]+)\)\s*\|")
+
+_REQUIRED_FIELDS = ("Status", "Date", "Deciders")
+
+
+@dataclass
+class AdrFinding:
+    """一条 ADR 校验结果。
+
+    Attributes:
+        adr: 涉及的 ADR 编号（四位字符串），索引级问题为 "index"
+        line: 问题所在行号
+        message: 人类可读的说明
+    """
+
+    adr: str
+    line: int
+    message: str
+
+
+@dataclass
+class Adr:
+    """一条 ADR 的头部解析结果。
+
+    Attributes:
+        number: 四位编号字符串，如 "0003"
+        path: 文件路径
+        fields: 头部字段名 → 原文值（不含前缀）
+        field_lines: 头部字段名 → 行号
+    """
+
+    number: str
+    path: Path
+    fields: dict[str, str]
+    field_lines: dict[str, int]
+
+
+def _parse_header(path: Path) -> tuple[Adr, str]:
+    """解析单个 ADR 文件头部字段。
+
+    头部指 H1 标题之后、第一个 `##` 小节之前的字段行（`- **X**：...`）。字段值
+    允许换行：空行不影响归属，缩进续行并入当前字段。遇到 `##` 即停止，避免正文
+    里的 `- **X**：` 被误当头部。
+
+    Args:
+        path: ADR 文件路径
+
+    Returns:
+        (Adr, 文件名中的编号字符串)；文件名不合法时编号返回 ""
+    """
+    number = ""
+    match = _FILENAME_RE.match(path.name)
+    if match:
+        number = match.group(1)
+    fields: dict[str, str] = {}
+    field_lines: dict[str, int] = {}
+    current_key = ""
+    for lineno, line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), start=1
+    ):
+        if line.startswith("## "):
+            break
+        fm = _FIELD_RE.match(line)
+        if fm:
+            current_key = fm.group(1)
+            fields[current_key] = fm.group(2).strip()
+            field_lines[current_key] = lineno
+            continue
+        # 续行：字段值可换行，缩进继续属同一字段
+        if current_key and line.startswith("  ") and line.strip():
+            fields[current_key] += " " + line.strip()
+    return Adr(number=number, path=path, fields=fields, field_lines=field_lines), number
+
+
+def _load_adrs(adr_dir: Path) -> list[Adr]:
+    """加载指定目录下全部 ADR（跳过 README）。
+
+    Args:
+        adr_dir: ADR 目录
+
+    Returns:
+        按文件名升序排列的 Adr 列表
+    """
+    adrs: list[Adr] = []
+    for path in sorted(adr_dir.glob("*.md")):
+        if path.name == "README.md":
+            continue
+        adr, _ = _parse_header(path)
+        adrs.append(adr)
+    return adrs
+
+
+def _status_head(raw_status: str) -> str:
+    """取 Status 的状态词（去掉反向指针等括号补充说明）。
+
+    Args:
+        raw_status: Status 字段原文，如 `Accepted（**决策 3 已被 ADR-0009 取代**，其余仍有效）`
+
+    Returns:
+        状态词，如 `Accepted`；`Superseded by 0009` 原样返回
+    """
+    head = raw_status.split("（", 1)[0].split("(", 1)[0].strip()
+    return head
+
+
+def _check_filenames_and_numbering(adrs: list[Adr]) -> list[AdrFinding]:
+    """A1/A2：文件名格式合法、编号四位递增不跳号。
+
+    Args:
+        adrs: 全部 ADR
+
+    Returns:
+        error 档列表
+    """
+    findings: list[AdrFinding] = []
+    numbers: list[str] = []
+    for adr in adrs:
+        if not adr.number:
+            findings.append(
+                AdrFinding(
+                    adr=adr.path.stem,
+                    line=0,
+                    message=f"文件名 {adr.path.name} 不符合 `NNNN-<kebab-case>.md`",
+                )
+            )
+            continue
+        numbers.append(adr.number)
+    expected = [f"{i:04d}" for i in range(1, len(numbers) + 1)]
+    if numbers != expected:
+        findings.append(
+            AdrFinding(
+                adr="index",
+                line=0,
+                message=f"编号不连续或跳号：实际 {numbers}，应为 {expected}",
+            )
+        )
+    return findings
+
+
+def _check_required_fields(adrs: list[Adr]) -> list[AdrFinding]:
+    """A3：Status / Date / Deciders 必须存在于头部。
+
+    Args:
+        adrs: 全部 ADR
+
+    Returns:
+        error 档列表
+    """
+    findings: list[AdrFinding] = []
+    for adr in adrs:
+        for field in _REQUIRED_FIELDS:
+            if field not in adr.fields:
+                findings.append(
+                    AdrFinding(
+                        adr=adr.number,
+                        line=0,
+                        message=f"头部缺少必填字段 `{field}`（见 README「取代关系与头部字段」）",
+                    )
+                )
+    return findings
+
+
+def _supersede_targets(raw: str) -> list[str]:
+    """从 Supersedes 字段值提取被取代的 ADR 编号。
+
+    Args:
+        raw: 字段原文
+
+    Returns:
+        去重后的四位编号列表（保持出现顺序）；「无 ADR」等无指向时返回空列表
+    """
+    targets: list[str] = []
+    for num in _ADR_REF_RE.findall(raw or ""):
+        if num not in targets:
+            targets.append(num)
+    return targets
+
+
+def _full_supersede_target(raw_status: str) -> str:
+    """从 Status 提取完全取代的反向指针编号（`Superseded by NNNN`）。
+
+    Args:
+        raw_status: Status 字段原文
+
+    Returns:
+        四位编号；非完全取代形态时返回 ""
+    """
+    match = re.match(r"^Superseded by\s+(\d{4})", raw_status.strip())
+    if not match:
+        return ""
+    return match.group(1)
+
+
+def _check_pointer_symmetry(
+    adrs: list[Adr], by_number: dict[str, Adr]
+) -> list[AdrFinding]:
+    """A4/A5：指针指向存在、且被取代方必须带反向指针。
+
+    A4：`Supersedes` 与完全取代的 `Status`（`Superseded by NNNN`）指向的编号必须
+        存在（防指向已删除的 ADR）。
+    A5：新 ADR 声明 `Supersedes` A，则 A 的 `Status` 必须提到新 ADR 的编号 ——
+        这是本次要根治的失效方式（缺反向指针会让后人把已被推翻的那条当成仍成立）。
+
+    Args:
+        adrs: 全部 ADR
+        by_number: 编号 → Adr 索引
+
+    Returns:
+        error 档列表
+    """
+    findings: list[AdrFinding] = []
+    for adr in adrs:
+        declared = _supersede_targets(adr.fields.get("Supersedes", ""))
+        lineno = adr.field_lines.get("Supersedes", 0)
+        full = _full_supersede_target(adr.fields.get("Status", ""))
+        if full:
+            declared.append(full)
+            lineno = adr.field_lines.get("Status", lineno)
+        for target in declared:
+            if target not in by_number:
+                findings.append(
+                    AdrFinding(
+                        adr=adr.number,
+                        line=lineno,
+                        message=f"取代指针指向 ADR-{target}，但该 ADR 不存在",
+                    )
+                )
+    for adr in adrs:
+        for target in _supersede_targets(adr.fields.get("Supersedes", "")):
+            old = by_number.get(target)
+            if old is None:
+                continue
+            old_status = old.fields.get("Status", "")
+            if f"ADR-{adr.number}" not in old_status and adr.number not in old_status:
+                findings.append(
+                    AdrFinding(
+                        adr=adr.number,
+                        line=adr.field_lines.get("Supersedes", 0),
+                        message=(
+                            f"本 ADR 声明取代 ADR-{target}，但 ADR-{target} 的 `Status` "
+                            f"没有反向指针（应写明「已被 ADR-{adr.number} 取代」）"
+                        ),
+                    )
+                )
+    return findings
+
+
+def _parse_index_statuses(index_file: Path) -> tuple[list[str], dict[str, str]]:
+    """解析 README 索引表的编号顺序与 Status 列。
+
+    数据行形如 `| [0003](0003-xxx.md) | 一句话 | Accepted | 取代关系 |`，
+    按 `|` 切分后第 1 段是链接、第 3 段是 Status。
+
+    Args:
+        index_file: 索引所在的 README 路径
+
+    Returns:
+        (索引中出现的编号列表, 编号 → Status 列原文)
+    """
+    order: list[str] = []
+    statuses: dict[str, str] = {}
+    if not index_file.exists():
+        return order, statuses
+    for line in index_file.read_text(encoding="utf-8").splitlines():
+        row = _INDEX_ROW_RE.match(line)
+        if not row:
+            continue
+        parts = line.split("|")
+        if len(parts) < 5:
+            continue
+        order.append(row.group(1))
+        statuses[row.group(1)] = parts[3].strip()
+    return order, statuses
+
+
+def _check_index(adrs: list[Adr], index_file: Path) -> list[AdrFinding]:
+    """A6：README 索引表覆盖全部 ADR，且 Status 列与文件头部一致。
+
+    Args:
+        adrs: 全部 ADR
+        index_file: 索引所在的 README 路径
+
+    Returns:
+        error 档列表
+    """
+    findings: list[AdrFinding] = []
+    order, statuses = _parse_index_statuses(index_file)
+    if not order:
+        if adrs:
+            findings.append(
+                AdrFinding(
+                    adr="index",
+                    line=0,
+                    message="README 索引表为空或解析失败（应列出全部 ADR）",
+                )
+            )
+        return findings
+    for adr in adrs:
+        if adr.number not in statuses:
+            findings.append(
+                AdrFinding(
+                    adr=adr.number,
+                    line=0,
+                    message=f"ADR-{adr.number} 未登记进 README 索引表",
+                )
+            )
+            continue
+        file_head = _status_head(adr.fields.get("Status", ""))
+        index_head = _status_head(statuses[adr.number])
+        if file_head != index_head:
+            findings.append(
+                AdrFinding(
+                    adr=adr.number,
+                    line=0,
+                    message=(
+                        f"README 索引 Status 列（{index_head}）与文件头部"
+                        f"（{file_head}）不一致"
+                    ),
+                )
+            )
+    if order != sorted(order):
+        findings.append(
+            AdrFinding(adr="index", line=0, message=f"索引表编号未升序：{order}")
+        )
+    return findings
+
+
+def main() -> None:
+    """CLI 入口 — 执行全部 ADR 头部检查并按 error 数决定退出码。"""
+    adrs = _load_adrs(_ADR_DIR)
+    by_number = {a.number: a for a in adrs if a.number}
+
+    findings: list[AdrFinding] = []
+    findings.extend(_check_filenames_and_numbering(adrs))
+    findings.extend(_check_required_fields(adrs))
+    findings.extend(_check_pointer_symmetry(adrs, by_number))
+    findings.extend(_check_index(adrs, _INDEX_FILE))
+
+    for f in findings:
+        location = f"ADR-{f.adr}" if f.adr != "index" else "docs/adr/README.md"
+        print(f"[error] {location}:{f.line} {f.message}")
+    print(f"\n{len(adrs)} 条 ADR，{len(findings)} error")
+    if findings:
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
