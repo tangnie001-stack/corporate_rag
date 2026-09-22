@@ -396,3 +396,48 @@ def test_finance_base_keeps_pointer_sentence_last():
 
     text = loader.get_content("base-financial").rstrip("\n")
     assert text.endswith("用户要求的其他来源与交付物属于任务本身。")
+
+
+def test_sources_general_has_evidence_sufficiency_rule():
+    """「证据足够即停止检索」必须存在（prompt-mapping §3，WeKnora grounding_prompt.go:78）。
+
+    它与 base 的「已完整返回过的内容不必再读」是两件事（spec「检索饱和与
+    不重复读取分属两段」），因此这里只断言 sources 侧这一条。
+    """
+    messages = build_system_prompt(
+        persona="",
+        kb_bound=False,
+        has_skills=False,
+        tool_names=frozenset(),
+    )
+    text = "\n".join(str(m.content) for m in messages)
+    assert "证据足够即停止检索" in text
+
+
+def test_sources_general_forbids_skipping_evidence_on_completion():
+    """sources 必须写明「不得以任务已完成为由跳过取证」(F2)。
+
+    spec <prompt-composition>「完成条件与取证互相约束」：与 runtime_contract 的
+    完成条件互为约束，缺任一条都会留下单向出口。P1 漏了这条，本任务补上。
+    """
+    messages = build_system_prompt(
+        persona="",
+        kb_bound=False,
+        has_skills=False,
+        tool_names=frozenset(),
+    )
+    text = "\n".join(str(m.content) for m in messages)
+    assert '不得以"任务已完成"为由跳过取证' in text
+
+
+def test_sources_general_covers_source_restriction_and_limits():
+    """来源限制与"只在影响答案时说明局限"两条来自 mapping §3 的目标文本。"""
+    messages = build_system_prompt(
+        persona="",
+        kb_bound=False,
+        has_skills=False,
+        tool_names=frozenset(),
+    )
+    text = "\n".join(str(m.content) for m in messages)
+    assert "遵守用户当前的来源限制与明确选择" in text
+    assert "只在影响答案时才说明局限" in text

@@ -173,17 +173,6 @@ def test_drift_copy_template_removed() -> None:
     assert "sources-kb-bound-discipline" not in loader.load_all()
 
 
-def test_evidence_sufficiency_stop_not_in_p1() -> None:
-    """P1 的 sources 段不得出现"证据足够即停止检索"（属 P2，task 3.3）。"""
-    from src.config.prompts import loader
-
-    templates = loader.load_all()
-    sources_text = "\n".join(
-        t.content for t in templates.values() if t.section == "sources"
-    )
-    assert "证据足够即停止检索" not in sources_text
-
-
 def test_base_financial_is_slimmed() -> None:
     """base 段只留角色 + 领域方法 + 默认检索方法 + 指针句；运行时内容已移出。"""
     from src.config.prompts import loader
