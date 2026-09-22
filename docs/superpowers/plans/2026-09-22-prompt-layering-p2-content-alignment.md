@@ -670,7 +670,7 @@ def test_domain_output_skeleton_stays_in_base_not_output():
     base-financial 含「关键指标与趋势 → 驱动因素 → 风险点 → 结论与建议」；
     output 段只能有通用形态。用 base-financial 的产出来反证两段不互为拷贝。
     """
-    from src.config.prompts.loader import loader
+    from src.config.prompts import loader
 
     base_text = loader.get_content("base-financial")
     assert "关键指标与趋势" in base_text
@@ -736,8 +736,11 @@ Expected: FAIL —— 找不到 `回答呈现：`
 - 该文件维护的 `migrated` id 集合里加入 `output-presentation`
 
 `docs/agents/prompt-ownership.md`：
-- §1 的模板清单补 `output-presentation`（属 `output` 段）
-- §3 的判据表补 `| 通用输出形态（格式/图片/URL 保真/完成前自检） | \`output-presentation\` | 无 | 无 |` 行，**并同时补上一贯漏登的 `output-citation` / `output-delegate-citation` 两行** —— 该表当前只列了 `sources` / `tools` / `runtime_contract` 的 9 条，`output` 段两条模板从未登记；而 §3 自称是"代码判据表与文案之间的唯一对照"，漏登记即违反该不变量
+- §3 的判据表补一行 `| 通用输出形态（格式/图片/URL 保真/完成前自检） | \`output-presentation\` | 无 | 无 |`。⚠ **`output-citation` / `output-delegate-citation` 两行早已在表内（`:51` / `:52`，建表时就在），不要重复补登** —— 本条曾因 pre-flight 使用截断读取（`sed` 范围不足）而误判为"从未登记"，已更正
+- §1 是「五段归属表」，**没有模板 id 清单**（模板 id 的唯一声明处是 §3）→ 这里只需按内容边界细化 `output` 行的 owner 描述、把新增的「通用输出形态」纳入，**不要凭空造一份 id 清单**
+
+`src/rag/prompt.py`（易漏，务必进 `git add`）：
+- `_SECTION_RULES["output"]` 加 `("output-presentation", _always)` 并置于首位（见 Step 3b）。漏了它就等于提交"模板已存在但判据未注册"的半成品，该用例仍红
 
 - [ ] **Step 5: 跑测试确认通过**
 
@@ -747,7 +750,7 @@ Expected: PASS
 - [ ] **Step 6: 提交**
 
 ```bash
-git add src/config/prompts/templates/output.yaml tests/rag/test_prompt_contract.py tests/config/prompts/test_templates_parse.py docs/agents/prompt-ownership.md
+git add src/config/prompts/templates/output.yaml src/rag/prompt.py tests/rag/test_prompt_contract.py tests/config/prompts/test_templates_parse.py docs/agents/prompt-ownership.md
 git commit -m "feat(prompt): output 段新增 output-presentation（通用输出形态四条）
 
 对齐 prompt-mapping §5（WeKnora prompt_instructions.go:102-113）。
@@ -790,7 +793,7 @@ def test_finance_base_covers_unit_scope_and_inference_split():
 
 def test_finance_base_keeps_pointer_sentence_last():
     """优先级指针句必须是 base 段的收尾句（spec「base 含运行时优先级指针」）。"""
-    from src.config.prompts.loader import loader
+    from src.config.prompts import loader
 
     text = loader.get_content("base-financial").rstrip("\n")
     assert text.endswith("用户要求的其他来源与交付物属于任务本身。")
