@@ -202,6 +202,8 @@ async def _stream_rag_response(
     ctx.abort_signal = abort_signal
 
     async def answer_builder() -> str:
+        # 根 observation 的 id 即 trace id；任务入口已 set 过 current_trace_id，
+        # 此处按调用时读取（任务与请求不共享 context，必须显式传）
         return await _run_generation(
             launch_ctx["session_id"],
             launch_ctx["kb_id"],
@@ -214,6 +216,9 @@ async def _stream_rag_response(
             partial_holder=partial_holder,
             abort_signal=abort_signal,
             direct_skill=launch_ctx["direct_skill"],
+            # @observe 包装器在调用前取走 langfuse_observation_id（静态签名看不到），
+            # 类型检查无法感知该 kwarg
+            langfuse_observation_id=current_trace_id.get() or "",  # type: ignore[reportCallIssue]
         )
 
     trace_id = current_trace_id.get() or ""

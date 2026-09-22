@@ -17,6 +17,7 @@ from typing import Any, TypeAlias
 
 from langchain_core.messages import BaseMessage
 from langchain_core.runnables.schema import StreamEvent
+from langfuse.decorators import langfuse_context, observe
 from langgraph.graph.state import CompiledStateGraph
 
 from src.agents.graph.state import (
@@ -547,6 +548,7 @@ async def _silence_watchdog(
         last_change = time.monotonic()  # 打印后重置，避免每轮轮询都刷
 
 
+@observe(name="chat_turn", capture_input=False)
 async def _run_generation(
     session_id: str,
     kb_id: str,
@@ -603,6 +605,16 @@ async def _run_generation(
     """
     if graph is None:
         raise ValueError("_run_generation 需显式传 graph（默认图由调用方注入）")
+    # trace 级字段：输入只写该写的（根函数入参含 ctx/manager/graph/abort_signal，
+    # 自动 capture 会把内部对象序列化进 trace，故装饰器已 capture_input=False）
+    trace_metadata: dict = {}
+    if direct_skill:
+        trace_metadata["direct_skill"] = direct_skill
+    langfuse_context.update_current_trace(
+        input={"query": query, "kb_id": kb_id, "deep_thinking": deep_thinking},
+        session_id=session_id,
+        metadata=trace_metadata,
+    )
     initial_state = AgentState.make_initial_state(
         session_id, kb_id, query, history, deep_thinking, direct_skill
     )
