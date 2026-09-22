@@ -65,6 +65,12 @@ trace 根 SHALL 覆盖"准备就绪后的整轮生成"（图事件循环的完�
 - **THEN** Langfuse 侧不新增任何 trace
 - **AND** 对话正常完成，SSE 事件序列与开启时一致
 
+#### Scenario: CLI 链路同样受控
+
+- **WHEN** 以 `LANGFUSE_ENABLE=false` 运行 `eval_ragas` 评估
+- **THEN** Langfuse 侧不新增任何 trace
+- **AND** 评估流程照常完成并产出 CSV（不因开关关闭而中断）
+
 #### Scenario: 后端不可达时对话不受影响
 
 - **WHEN** `LANGFUSE_ENABLE=true` 但 Langfuse 后端不可达
@@ -78,12 +84,18 @@ trace 根 SHALL 覆盖"准备就绪后的整轮生成"（图事件循环的完�
 
 ### Requirement: trace 保留与清理
 
-系统 SHALL 提供可重复执行的 trace 清理入口，删除创建时间早于保留期的 trace 及其附属数据。保留期 SHALL 为 30 天，且 SHALL 可通过命令行参数覆盖。清理 SHALL 支持仅预览不删除（dry-run）。
+系统 SHALL 提供可重复执行的 trace 清理入口，删除创建时间早于保留期的 trace 及其附属数据，**且 SHALL NOT 留下孤儿附属记录**（越期 trace 对应的 observation / score 等一并消失）。保留期 SHALL 为 30 天，且 SHALL 可通过命令行参数覆盖。清理 SHALL 支持仅预览不删除（dry-run）。
 
 #### Scenario: 超期数据被删除
 
 - **WHEN** 执行清理且 Langfuse 中存在创建时间早于保留期的 trace
 - **THEN** 这些 trace 及其附属 observation 被删除
+- **AND** 删除后不存在指向已删 trace 的孤儿附属记录
+
+#### Scenario: 清理后 UI 可正常浏览
+
+- **WHEN** 清理执行完毕后在 Langfuse UI 浏览剩余的 trace 列表与详情
+- **THEN** 页面正常渲染，无报错
 
 #### Scenario: 保留期内数据不受影响
 
