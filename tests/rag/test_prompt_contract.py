@@ -441,3 +441,40 @@ def test_sources_general_covers_source_restriction_and_limits():
     text = "\n".join(str(m.content) for m in messages)
     assert "遵守用户当前的来源限制与明确选择" in text
     assert "只在影响答案时才说明局限" in text
+
+
+def test_kb_ladder_present_only_when_bound_and_tool_registered():
+    """检索阶梯的复合判据：工具已注册 AND 适用域成立（F5）。"""
+    bound = build_system_prompt(
+        persona="",
+        kb_bound=True,
+        has_skills=False,
+        tool_names=frozenset({"retrieve_kb"}),
+        kb_domain="general",
+    )
+    unbound = build_system_prompt(
+        persona="",
+        kb_bound=False,
+        has_skills=False,
+        tool_names=frozenset({"retrieve_kb"}),
+        kb_domain="general",
+    )
+    assert "实质性提问先调用 retrieve_kb 检索再作答" in str(bound[0].content)
+    assert "实质性提问先调用 retrieve_kb 检索再作答" not in "\n".join(
+        str(m.content) for m in unbound
+    )
+
+
+def test_kb_ladder_keeps_our_supplemental_actions():
+    """我方的三处具体动作不得在对齐中丢失（mapping §3 标 S 的条目）。"""
+    messages = build_system_prompt(
+        persona="",
+        kb_bound=True,
+        has_skills=False,
+        tool_names=frozenset({"retrieve_kb", "search_web"}),
+        kb_domain="general",
+    )
+    content = "\n".join(str(m.content) for m in messages)
+    assert "top_k=10" in content
+    assert "该问题不在当前知识库范围内" in content
+    assert "含查询的至少一个核心实体" in content
