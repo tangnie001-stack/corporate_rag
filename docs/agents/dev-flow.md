@@ -20,7 +20,34 @@
 | ③ 出方案 | `openspec-propose` | `codebase-design`、`domain-modeling` | 需要定模块边界 / 领域模型时 |
 | ④ 验证可行性 | `architecture-review` | `prototype`（跑起来证伪）；`research` 或 `firecrawl-deep-research`（补外部事实） | **必配**；数值或状态类假设纸上推不准时加 `prototype` |
 | ⑤ 生成文件 | `writing-plans`（落 `docs/superpowers/plans/`）**或** `openspec-propose` 的 tasks | — | **二选一，不可都写**，否则一事两档 |
-| ⑥ 执行 | `executing-plans` 或 `openspec-apply-change` | `verification-before-completion` → `requesting-code-review`；收尾 `finishing-a-development-branch` | 两道闸门必走 |
+| ⑥ 执行 | `executing-plans` 或 `openspec-apply-change` | **worktree 前置**（新开 change 先问，见下节）→ `verification-before-completion` → `requesting-code-review`；收尾 `finishing-a-development-branch` | 两道闸门必走 |
+
+## 变更开工前置：先问「要不要建 worktree」
+
+**规定**：每次**新开一个 change**（`openspec-propose` 产出工件后转入执行、或接手一个在途 change），**先问一句"是否为本次 change 建隔离 worktree"**，不得默认就地开工。判据满足任一即建：
+
+| 判据 | 怎么看 |
+|---|---|
+| 主工作区已被占用 | `git status` 非空，或 `git log` 出现非本人的新提交 |
+| 本 change 会产生多次提交 | 每次提交都要过全量 doc 闸门，窗口长，与并发提交互踩 |
+| 跨会话 / 跨天推进 | 中途会被别的事打断 |
+
+建法与全部坑（`.env` / `.venv` 必须带过去、`openspec` symlink 会失效、Docker 不隔离、未跟踪文件不共享）见 `cookbook.md`「并行会话（worktree）」。
+
+**为什么要成文**：本仓 pre-commit 含全量 doc 闸门，**单次提交窗口实测 2～6 分钟**。这个长窗口里另一个会话提交会撞 `fatal: cannot lock ref 'HEAD'`；若它改了工作区文件，钩子会报 `files were modified by this hook`（**校验本身是过的**，失败只因窗口内并发写入）。2026-09-22 实测一次窗口 **6m27s**，期间 `dev-wsl` 被平行会话推着往前走了两个提交 —— 即该故障不是假设，是常态条件。
+
+**为什么这条挂在「动作」上而不是「状态」上**：本仓 `cookbook.md` 早就有「并行会话（worktree）」的完整操作步骤，但它的触发写在**场景**里 —— "同一台机器上多个会话/任务同时改这个仓库"。那是**状态**，需要人主动判断才能察觉；而"先想起来去判断一下我算不算在并行"这一步，**本身就是遗忘**。所以它长期没起过提示作用。改成挂在**动作**上（"新开 change"这个必然发生、且当场自知的事件）才有可能被触发。
+
+> **可复用判据**：写任何"防止忘记"的规定时，检查它的触发条件挂在哪一侧 ——
+
+| | 例子 | 为什么 |
+|---|---|---|
+| ✅ **动作**（必然发生 + 当场自知） | 新开 change / 改 API 响应结构 / 提交前 / 加新能力 | 到点就会碰上，不需要额外判断 |
+| ❌ **状态**（需主动判断才察觉） | 是否在并行 / 库里有没有数据 / 有没有别的会话在跑 | "想起来去判断"这一步就是遗忘本身 |
+
+> 一句话：**提示的触发条件必须挂在"动作"上，不能挂在"状态"上。挂在状态上的提示 ≈ 不存在。**
+
+**代价要知道，别把它当万能**：worktree **只隔离 git**（HEAD / index / 工作区 / 闸门扫描范围），**不隔离 Docker**（工程名、容器名、卷、端口全部写死）→ 两个工作区**不能各跑一套**容器；从 worktree 起 compose 会把 `app` / `nginx` 重建成指向 worktree 的 `src`。所以它解决的是"**提交与闸门互踩**"，不是"运行环境隔离"。
 
 ## ⑤ 的例外：分阶段变更是「change 承载规格 + plan 承载步骤」
 
