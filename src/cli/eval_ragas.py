@@ -23,11 +23,14 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from langfuse.decorators import langfuse_context, observe
+
 from src.config import settings
 from src.core import logging as core_logging
 from src.core.log_events import Event
 from src.core.logging import setup_logging
 from src.infra.llm.trace_context import current_trace_id
+from src.infra.llm.tracing import configure_tracing, flush_tracing
 
 setup_logging(configure_trace_id=True)
 
@@ -99,6 +102,52 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+@observe(name="eval_question", capture_input=False)
+async def _answer_one_question(
+    graph: Any,
+    kb_id: str,
+    session_id: str,
+    query: str,
+    trace_id: str,
+) -> tuple[str, list[str], list[dict]]:
+    """对单个问题跑一次图，返回 (answer, contexts, retrieval_details)。
+
+    trace 级输入显式写入 —— 与 `_run_generation` 同理，根函数入参含 graph 等
+    内部对象，不能靠自动捕获。
+
+    Args:
+        graph: LangGraph 编译后的图实例
+        kb_id: 知识库 UUID
+        session_id: 会话 ID
+        query: 该问题文本
+        trace_id: 该问题的 trace id（仅用于写入 trace 级 metadata）
+
+    Returns:
+        (回答文本, 渲染后的上下文列表, 结构化检索明细)
+    """
+    langfuse_context.update_current_trace(input={"query": query}, session_id=session_id)
+    final_state = await graph.ainvoke(
+        {
+            "kb_id": kb_id,
+            "session_id": session_id,
+            "query": query,
+            "trace_id": trace_id,
+            "_history": [],
+        }
+    )
+    answer = final_state.get("answer", "")
+    contexts = [c.to_prompt_text() for c in final_state.get("tool_contexts", [])]
+    details = [
+        {
+            "source": getattr(c, "source", ""),
+            "score": getattr(c, "score", 0.0),
+            "kind": getattr(c, "kind", "kb"),
+        }
+        for c in final_state.get("tool_contexts", [])
+    ]
+    return answer, contexts, details
+
+
 async def generate_answers_and_contexts(
     graph: Any,
     kb_id: str,
@@ -138,46 +187,25 @@ async def generate_answers_and_contexts(
         token = current_trace_id.set(trace_id)
 
         try:
-            final_state = await graph.ainvoke(
-                {
-                    "kb_id": kb_id,
-                    "session_id": session_id,
-                    "query": q,
-                    "trace_id": trace_id,
-                    "_history": [],
-                }
+            answer, ctx_list, details = await _answer_one_question(
+                graph,
+                kb_id,
+                session_id,
+                q,
+                trace_id,
+                # @observe 包装器在调用前取走 langfuse_observation_id（静态签名看不到），
+                # 类型检查无法感知该 kwarg
+                langfuse_observation_id=trace_id,  # type: ignore[reportCallIssue]
             )
-            full_answer = final_state.get("answer", "")
-            answers.append(full_answer)
-
-            # 提取上下文字段列表（用于 context_recall / context_precision 评估）
-            # 与生产 prompt（RAGContext.to_prompt_text）保持同一渲染格式，
-            # 让 RAGAS 的 NLI 看到与生成模型一致的上下文（含来源/页码锚点）
-            ctx_list = [
-                c.to_prompt_text() for c in final_state.get("tool_contexts", [])
-            ]
+            answers.append(answer)
             contexts.append(ctx_list)
-            # 结构化检索明细（detail_json 下钻用：rerank 后来源+分数+类型）
-            # getattr 兜底：tool_contexts 来自图状态，约定为 RAGContext，防御性
-            # 容忍异常对象，保证明细字段不缺键
-            retrieval_details.append(
-                [
-                    {
-                        "source": getattr(c, "source", ""),
-                        "score": getattr(c, "score", 0.0),
-                        "kind": getattr(c, "kind", "kb"),
-                    }
-                    for c in final_state.get("tool_contexts", [])
-                ]
-            )
-
+            retrieval_details.append(details)
             core_logging.log_event(
                 Event.QA_ANSWER_DONE,
                 index=i + 1,
-                answer_len=len(full_answer),
+                answer_len=len(answer),
                 contexts=len(ctx_list),
             )
-
         except Exception as e:  # noqa: BLE001
             core_logging.log_event(Event.QA_ANSWER_FAILED, index=i + 1, err=str(e))
             answers.append(f"[ERROR] {e}")
@@ -462,125 +490,136 @@ def main() -> None:
         return
 
     # ---- 评估模式（原有流程改造）----
-    session_id = args.session_id
-    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-    output_path = (
-        args.output or f"{settings.RAGAS_REPORT_DIR}/ragas_eval_{timestamp}.csv"
-    )
-
-    # 从 JSON 加载测试集
-    from src.cli.eval_ragas_generate import _load_latest_testset
-
+    # CLI 不经 main.py 的 lifespan：开关与 flush 都要自己做（D5 / D6）。
+    # configure 必须早于任何 flush（承接 Task 2 义务）：SDK 的 flush 经
+    # LangfuseSingleton 惰性构造客户端，先 flush 会造出 enabled 客户端、
+    # 绕过 settings.LANGFUSE_ENABLE。
+    configure_tracing()
     try:
-        questions, ground_truth = _load_latest_testset(
-            kb_id, version=args.testset_version
+        session_id = args.session_id
+        timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+        output_path = (
+            args.output or f"{settings.RAGAS_REPORT_DIR}/ragas_eval_{timestamp}.csv"
         )
-    except FileNotFoundError as e:
-        print(f"error: {e}")
-        sys.exit(1)
 
-    core_logging.log_event(Event.TESTSET_LOADED, count=len(questions))
-    core_logging.log_event(Event.EVALUATION_RUN, kb_id=kb_id)
+        # 从 JSON 加载测试集
+        from src.cli.eval_ragas_generate import _load_latest_testset
 
-    # ---- 初始化 RAG 组件 ----
-    # ragas 0.4.3 + langchain-community>=0.4 兼容：先建 vertexai stub 再导入 ragas
-    from src.cli.eval_ragas_generate import _ensure_vertexai_stub
+        try:
+            questions, ground_truth = _load_latest_testset(
+                kb_id, version=args.testset_version
+            )
+        except FileNotFoundError as e:
+            print(f"error: {e}")
+            sys.exit(1)
 
-    _ensure_vertexai_stub()
-    from datasets import Dataset  # noqa: F401
-    from ragas import evaluate  # noqa: F401
-    from ragas.embeddings import LangchainEmbeddingsWrapper
-    from ragas.llms import LangchainLLMWrapper
-    from ragas.metrics import (  # noqa: F401
-        answer_relevancy,
-        context_precision,
-        context_recall,
-        faithfulness,
-    )
+        core_logging.log_event(Event.TESTSET_LOADED, count=len(questions))
+        core_logging.log_event(Event.EVALUATION_RUN, kb_id=kb_id)
 
-    from src.agents.graph.workflow import build_graph
-    from src.infra.db.engine import run_and_dispose
-    from src.infra.db.vector_store import VectorStore
-    from src.infra.llm.prompt_manager import PromptManager
-    from src.models import get_embeddings, get_llm, get_rerank
+        # ---- 初始化 RAG 组件 ----
+        # ragas 0.4.3 + langchain-community>=0.4 兼容：先建 vertexai stub 再导入 ragas
+        from src.cli.eval_ragas_generate import _ensure_vertexai_stub
 
-    core_logging.log_event(Event.RAG_COMPONENT_INIT)
-    vector_store = VectorStore()
+        _ensure_vertexai_stub()
+        from datasets import Dataset  # noqa: F401
+        from ragas import evaluate  # noqa: F401
+        from ragas.embeddings import LangchainEmbeddingsWrapper
+        from ragas.llms import LangchainLLMWrapper
+        from ragas.metrics import (  # noqa: F401
+            answer_relevancy,
+            context_precision,
+            context_recall,
+            faithfulness,
+        )
 
-    if not settings.RAGAS_LLM_MODEL:
-        core_logging.log_event(Event.RAGAS_MODEL_MISSING)
-        sys.exit(1)
-    # 选手/裁判分离：
-    # - 选手（被测系统）= 生产模型 get_llm()（LLM_MODEL），评估结果反映线上质量
-    # - 裁判（评估器）  = RAGAS_LLM_MODEL，独立于选手评分，避免自我评价偏置
-    core_logging.log_event(
-        Event.EVAL_MODEL_INIT,
-        sut=settings.LLM_MODEL,
-        judge=settings.RAGAS_LLM_MODEL,
-    )
-    llm = get_llm()  # 选手：生产模型（含生产 temperature）
-    reranker = get_rerank()
-    embeddings = get_embeddings()
-    judge_llm = get_llm(model=settings.RAGAS_LLM_MODEL, temperature=0)
-    llm_wrapper = LangchainLLMWrapper(judge_llm, bypass_n=True)
-    embeddings_wrapper = LangchainEmbeddingsWrapper(embeddings)
+        from src.agents.graph.workflow import build_graph
+        from src.infra.db.engine import run_and_dispose
+        from src.infra.db.vector_store import VectorStore
+        from src.infra.llm.prompt_manager import PromptManager
+        from src.models import get_embeddings, get_llm, get_rerank
 
-    # 构建 LangGraph
-    prompt_manager = PromptManager()
-    graph = build_graph(vector_store, llm, reranker, prompt_manager)
+        core_logging.log_event(Event.RAG_COMPONENT_INIT)
+        vector_store = VectorStore()
 
-    async def _ensure_store_and_generate():
-        """空库检查与答案生成共用一个事件循环。
+        if not settings.RAGAS_LLM_MODEL:
+            core_logging.log_event(Event.RAGAS_MODEL_MISSING)
+            sys.exit(1)
+        # 选手/裁判分离：
+        # - 选手（被测系统）= 生产模型 get_llm()（LLM_MODEL），评估结果反映线上质量
+        # - 裁判（评估器）  = RAGAS_LLM_MODEL，独立于选手评分，避免自我评价偏置
+        core_logging.log_event(
+            Event.EVAL_MODEL_INIT,
+            sut=settings.LLM_MODEL,
+            judge=settings.RAGAS_LLM_MODEL,
+        )
+        llm = get_llm()  # 选手：生产模型（含生产 temperature）
+        reranker = get_rerank()
+        embeddings = get_embeddings()
+        judge_llm = get_llm(model=settings.RAGAS_LLM_MODEL, temperature=0)
+        llm_wrapper = LangchainLLMWrapper(judge_llm, bypass_n=True)
+        embeddings_wrapper = LangchainEmbeddingsWrapper(embeddings)
 
-        引擎连接池不可跨事件循环复用，故把两次存储访问（分块读取 + 图内检索）
-        放在同一次 asyncio.run 内；返回 None 表示知识库无分块。
-        """
-        chunks = await vector_store.get_all_chunks(kb_id)
-        if not chunks:
-            return None
-        return await generate_answers_and_contexts(
-            graph,
-            kb_id,
-            session_id,
+        # 构建 LangGraph
+        prompt_manager = PromptManager()
+        graph = build_graph(vector_store, llm, reranker, prompt_manager)
+
+        async def _ensure_store_and_generate():
+            """空库检查与答案生成共用一个事件循环。
+
+            引擎连接池不可跨事件循环复用，故把两次存储访问（分块读取 + 图内检索）
+            放在同一次 asyncio.run 内；返回 None 表示知识库无分块。
+            """
+            chunks = await vector_store.get_all_chunks(kb_id)
+            if not chunks:
+                return None
+            return await generate_answers_and_contexts(
+                graph,
+                kb_id,
+                session_id,
+                questions,
+            )
+
+        core_logging.log_event(Event.VECTOR_STORE_CHECK, kb_id=kb_id)
+        core_logging.log_event(Event.ANSWERS_GENERATION, count=len(questions))
+        generated = asyncio.run(run_and_dispose(_ensure_store_and_generate()))
+        if generated is None:
+            core_logging.log_event(Event.VECTOR_STORE_EMPTY, kb_id=kb_id)
+            print("Knowledge base is empty")
+            sys.exit(1)
+        answers, contexts, trace_ids, retrieval_details = generated
+        # 生成段结束即 flush：--gate 路径会提前 sys.exit，晚 flush 等于丢数据
+        flush_tracing()
+
+        result = run_evaluation(
             questions,
+            ground_truth,
+            answers,
+            contexts,
+            llm_wrapper,
+            embeddings_wrapper,
         )
 
-    core_logging.log_event(Event.VECTOR_STORE_CHECK, kb_id=kb_id)
-    core_logging.log_event(Event.ANSWERS_GENERATION, count=len(questions))
-    generated = asyncio.run(run_and_dispose(_ensure_store_and_generate()))
-    if generated is None:
-        core_logging.log_event(Event.VECTOR_STORE_EMPTY, kb_id=kb_id)
-        print("Knowledge base is empty")
-        sys.exit(1)
-    answers, contexts, trace_ids, retrieval_details = generated
+        # 指标均值输出到 stdout：compare_retrieval / compare_dedup 等 A/B 脚本以
+        # 子进程方式调用本脚本，靠 stdout 解析指标（parse_metrics）；logger 只写
+        # 文件不落 stdout，故此处显式 print。--gate 模式下 check_gate 已打印指标行。
+        if not args.gate:
+            _print_metric_averages(result)
 
-    result = run_evaluation(
-        questions,
-        ground_truth,
-        answers,
-        contexts,
-        llm_wrapper,
-        embeddings_wrapper,
-    )
+        output_path = save_results_csv(
+            result, questions, ground_truth, output_path, trace_ids
+        )
+        save_markdown_report(result, questions, output_path, trace_ids)
 
-    # 指标均值输出到 stdout：compare_retrieval / compare_dedup 等 A/B 脚本以
-    # 子进程方式调用本脚本，靠 stdout 解析指标（parse_metrics）；logger 只写
-    # 文件不落 stdout，故此处显式 print。--gate 模式下 check_gate 已打印指标行。
-    if not args.gate:
-        _print_metric_averages(result)
+        # _save_eval_report 需要 questions 长度
+        _save_eval_report(kb_id, result, len(questions), output_path, retrieval_details)
 
-    output_path = save_results_csv(
-        result, questions, ground_truth, output_path, trace_ids
-    )
-    save_markdown_report(result, questions, output_path, trace_ids)
+        if args.gate:
+            check_gate(result, questions)
 
-    # _save_eval_report 需要 questions 长度
-    _save_eval_report(kb_id, result, len(questions), output_path, retrieval_details)
-
-    if args.gate:
-        check_gate(result, questions)
-
-    core_logging.log_event(Event.EVALUATION_DONE)
+        core_logging.log_event(Event.EVALUATION_DONE)
+    finally:
+        # 异常退出 / --gate 的 sys.exit 路径也须 flush，否则缓冲事件丢失
+        flush_tracing()
 
 
 def _print_metric_averages(result: Any) -> None:
