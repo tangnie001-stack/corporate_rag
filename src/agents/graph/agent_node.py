@@ -6,8 +6,11 @@
 
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langfuse.decorators import langfuse_context, observe
+from langfuse.model import ModelUsage
 from langgraph.prebuilt import ToolNode
 
 from src.agents.graph.state import AgentState
@@ -155,6 +158,7 @@ def make_agent_model_node(llm, tools, prompt_manager) -> Callable:
     tool_names = frozenset(str(t.name) for t in tools)
     model = llm.bind_tools(tools)
 
+    @observe(name="agent_turn", as_type="generation", capture_input=False)
     async def agent_model(state: AgentState) -> dict:
         if state.messages:
             messages = state.messages
@@ -181,6 +185,7 @@ def make_agent_model_node(llm, tools, prompt_manager) -> Callable:
         # 临时取证埋点（systematic-debugging 走 A）：记录首个 chunk 到达时刻（TTFB），
         # 用于区分"服务端排队/首字节慢"与"生成本身长"；定位完成后删除。
         first_chunk_ms = -1
+        first_chunk_at: datetime | None = None
         if state.kb_id:
             temperature = settings.LLM_TEMPERATURE
             temp_source = "default"
@@ -189,6 +194,7 @@ def make_agent_model_node(llm, tools, prompt_manager) -> Callable:
             ):
                 if first_chunk_ms < 0:
                     first_chunk_ms = int((time.monotonic() - turn_start) * 1000)
+                    first_chunk_at = datetime.now(UTC)
                 chunks.append(chunk)
         else:
             temperature = settings.NON_KB_MAIN_TEMPERATURE
@@ -200,6 +206,7 @@ def make_agent_model_node(llm, tools, prompt_manager) -> Callable:
             ):
                 if first_chunk_ms < 0:
                     first_chunk_ms = int((time.monotonic() - turn_start) * 1000)
+                    first_chunk_at = datetime.now(UTC)
                 chunks.append(chunk)
         result = chunks[0]
         for chunk in chunks[1:]:
@@ -225,6 +232,27 @@ def make_agent_model_node(llm, tools, prompt_manager) -> Callable:
             model_name = ""
         if not isinstance(model_name, str):
             model_name = ""
+        # generation 字段回填（D8：input 必须显式写，不能靠自动捕获）
+        langfuse_context.update_current_observation(
+            model=model_name,
+            input=_messages_payload(messages),
+            output=_extract_text(result),
+            # ModelUsage 是 TypedDict 且字段声明为 Optional（键仍算必填），
+            # pyright 误判部分键构造非法；运行时 TypedDict 调用即普通 dict，SDK 接受
+            usage=ModelUsage(  # type: ignore[reportCallIssue]
+                input=usage_in,
+                output=usage_out,
+                total=usage_in + usage_out,
+            ),
+            completion_start_time=first_chunk_at,
+            metadata={
+                "iteration": iteration,
+                "usage_estimated": usage_estimated,
+                "temperature": temperature,
+                "temp_source": temp_source,
+                "kb_bound": bool(state.kb_id),
+            },
+        )
         core_logging.log_event(
             Event.MODEL_TURN,
             model=model_name,
@@ -345,6 +373,21 @@ def _extract_text(message: BaseMessage | None) -> str:
                 parts.append(str(block.get("text", "")))
         return "".join(parts)
     return str(content)
+
+
+def _messages_payload(messages: list[BaseMessage]) -> list[dict[str, str]]:
+    """把消息列表转成 Langfuse 输入载荷 [{role, content}]。
+
+    只取 role 与 content —— 消息对象上还挂着 id / response_metadata 等字段，
+    整对象交给序列化器会把不该进 trace 的东西带进去。
+
+    Args:
+        messages: LangChain 消息列表
+
+    Returns:
+        [{"role": <消息类型>, "content": <文本>}, ...]
+    """
+    return [{"role": m.type, "content": _extract_text(m)} for m in messages]
 
 
 def route_agent(state: AgentState) -> str:
