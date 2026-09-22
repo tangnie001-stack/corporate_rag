@@ -4,12 +4,19 @@
   - AppService / VectorStore 实例
   - 测试知识库生命周期（创建 / 销毁）
   - 测试文档路径和数据库验证辅助函数
+
+并且在导入任何业务模块之前**关停 Langfuse tracing**（见下）。
 """
 
 from __future__ import annotations
 
-import asyncio
 import os
+
+# ⚠️ 必须位于所有 src.* 导入之前：src/config/settings.py 在**导入时**读取环境变量，
+# 此后再设等于无效。没有这一行，测试会构造真实 Langfuse 客户端并向外上报。
+os.environ["LANGFUSE_ENABLE"] = "false"
+
+import asyncio
 import uuid
 from collections.abc import Generator
 
@@ -109,3 +116,23 @@ def corrupted_file_path(tmp_path) -> str:
         # 写入非 PDF 二进制头，不足以通过解析器校验
         f.write(b"\x00\x00\x00\x00corrupted content")
     return filepath
+
+
+# ==================== Langfuse tracing 兜底关停 ====================
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _disable_langfuse_tracing() -> Generator[None, None, None]:
+    """兜底关停 tracing，并保证退出前把 SDK 缓冲清掉。
+
+    上面那行环境变量是主手段（须早于导入）；本 fixture 是第二道保险 ——
+    防止将来有人重构 conftest 的导入顺序时静默失效。
+    """
+    from langfuse.decorators import langfuse_context
+
+    from src.config import settings
+
+    settings.LANGFUSE_ENABLE = False
+    langfuse_context.configure(enabled=False)
+    yield
+    langfuse_context.flush()
