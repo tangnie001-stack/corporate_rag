@@ -9,10 +9,10 @@
 | 段 | owner（内容边界） | 承载 | 可替换性 |
 |---|---|---|---|
 | `base` | 角色、领域方法（指标口径 / 报告期 / 同比等）、**该模式默认检索方法**、以优先级指针句收尾 | YAML `section: base` | **可替换**（三选一） |
-| `runtime_contract` | 数据·指令边界、完成条件、默认语言 | YAML `section: runtime_contract` | 不可替换，**无条件**注入 |
+| `runtime_contract` | 数据·指令边界、运行上下文、完成条件、默认语言 | YAML `section: runtime_contract` | 不可替换，**无条件**注入 |
 | `sources` | **来源选择与降级**：何时检索 / 何时换词再检 / 何时联网 / 何时如实说明；证据充分性判据 | YAML `section: sources` | 不可替换，**逐条**条件渲染 |
 | `tools` | 通用工具使用约定 + 单工具**调用时机**（具体参数留在工具 `description`） | YAML `section: tools` | 不可替换，**逐条**条件渲染 |
-| `output` | 输出形态与格式要求、引用编码、委派返回内容的引用规则 | YAML `section: output` | 不可替换，**无条件**（委派条为条件） |
+| `output` | **通用输出形态**（格式 / 图片 / URL 保真 / 完成前自检）、引用编码、委派返回内容的引用规则 | YAML `section: output` | 不可替换，**无条件**（委派条为条件） |
 | `skills` | 按需加载的方法论 | **工具描述（目录）+ 消息层（正文两分支）** | **不参与 system prompt 组装**（D6） |
 
 ## 2. 段数的最小性（为什么不合并）
@@ -47,7 +47,8 @@
 | 通用执行约定（只使用已提供工具 / 规划 / 并行与顺序 / 完成前检查结果 / 失败重试条件） | `tools-execution` | 无 | 无 |
 | 缺关键信息先澄清 | `tools-ask-user` | `ask_user` | 无 |
 | 何时委派、传什么材料 | `tools-delegate` | `delegate_task` | 无 |
-| 数据·指令边界、完成条件、默认语言 | `runtime-contract` | 无 | 无 |
+| 数据·指令边界、运行上下文、完成条件、默认语言 | `runtime-contract` | 无 | 无 |
+| 通用输出形态（格式 / 图片 / URL 保真 / 完成前自检） | `output-presentation` | 无 | 无 |
 | `[n]` 引用编码 | `output-citation` | 无 | 无 |
 | 委派返回内容的引用规则 | `output-delegate-citation` | `delegate_task` | 无 |
 

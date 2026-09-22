@@ -99,6 +99,7 @@ _SECTION_RULES: dict[str, tuple[tuple[str, RuleFn], ...]] = {
         ("tools-delegate", _delegate_available),
     ),
     "output": (
+        ("output-presentation", _always),
         ("output-citation", _always),
         ("output-delegate-citation", _delegate_available),
     ),

@@ -1,4 +1,14 @@
 templates:
+  - id: output-presentation
+    kind: section
+    section: output
+    content: |-
+      回答呈现：
+      - 遵循用户要求的语言、长度与输出格式。标题、列表、表格或散文在有助于表达时使用；用户要求 JSON、纯代码等精确格式时不要强加 Markdown。
+      - 检索到的图片若直接有助于回答且要求的格式支持图片，放在其支撑的文字附近；不因"检索到了"就展示装饰性或无关图片。用户要求纯文本时遵从。
+      - 复用来源图片时完整保留 Markdown 图片语法与 URL 原样（![说明](url)），不得臆造、缩短或替换 URL。
+      - 结束前静默自检：回答是否符合要求的格式、事实主张是否有支撑、是否准确区分了已完成动作与剩余工作。
+
   - id: output-citation
     kind: section
     section: output

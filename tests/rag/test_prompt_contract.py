@@ -322,3 +322,50 @@ def test_completion_condition_keeps_evidence_definition():
     content = str(messages[0].content)
     assert "仅有进度更新不算完成任务" in content
     assert "证据已经足够且已给出答案" in content
+
+
+def test_output_carries_presentation_rules():
+    """通用输出形态四条（格式 / 图片 / URL 保真 / 完成前自检）必须在。
+
+    依据 prompt-mapping §5：WeKnora 的 SourcedAnswerOutputPrompt
+    （internal/types/prompt_instructions.go:102-113）。
+    """
+    messages = build_system_prompt(
+        persona="",
+        kb_bound=False,
+        has_skills=False,
+        tool_names=frozenset(),
+    )
+    content = str(messages[0].content)
+    assert "回答呈现：" in content
+    assert "不要强加 Markdown" in content
+    assert "不得臆造、缩短或替换 URL" in content
+    assert "结束前静默自检" in content
+
+
+def test_presentation_precedes_citation_rules():
+    """呈现四条排在引用两条之前（保持 prompt-mapping §5 的条目顺序）。"""
+    messages = build_system_prompt(
+        persona="",
+        kb_bound=True,
+        has_skills=True,
+        tool_names=_KNOWN_TOOL_NAMES,
+    )
+    content = str(messages[0].content)
+    assert content.index("回答呈现：") < content.index("引用知识库文档或联网搜索结果时")
+
+
+def test_domain_output_skeleton_stays_in_base_not_output():
+    """领域输出骨架不得出现在 output 段（spec「段归属」的硬约束）。
+
+    base-financial 含「关键指标与趋势 → 驱动因素 → 风险点 → 结论与建议」；
+    output 段只能有通用形态。用 base-financial 的产出来反证两段不互为拷贝。
+    """
+    from src.config.prompts import loader
+
+    base_text = loader.get_content("base-financial")
+    assert "关键指标与趋势" in base_text
+    output_templates = loader.get_by_section("output")
+    assert output_templates, "output 段应至少有一个模板"
+    for template in output_templates:
+        assert "关键指标与趋势" not in template.content

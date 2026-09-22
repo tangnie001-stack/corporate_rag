@@ -1,4 +1,4 @@
-"""20 条模板文件可解析、字段合法、id 唯一。"""
+"""21 条模板文件可解析、字段合法、id 唯一。"""
 
 from pathlib import Path
 
@@ -24,9 +24,9 @@ def _all_templates() -> list[dict]:
 
 
 def test_template_count_and_migrated_ids() -> None:
-    """20 条 = 12 条搬运 + 1 条通用 base（base-general）+ 7 条新增段模板（runtime-contract / sources-general / sources-kb-web-rules / sources-kb-unbound-web / output-delegate-citation / tools-execution / tools-ask-user）。"""
+    """21 条 = 12 条搬运 + 1 条通用 base（base-general）+ 8 条新增段模板（runtime-contract / sources-general / sources-kb-web-rules / sources-kb-unbound-web / output-presentation / output-delegate-citation / tools-execution / tools-ask-user）。"""
     templates = _all_templates()
-    assert len(templates) == 20
+    assert len(templates) == 21
     migrated = {
         "tools-delegate",
         "base-financial",
@@ -40,8 +40,9 @@ def test_template_count_and_migrated_ids() -> None:
         "task-entity-system",
         "task-entity-user",
         "output-citation",
+        "output-presentation",
     }
-    assert migrated <= {t["id"] for t in templates}, "12 条搬运模板必须齐全"
+    assert migrated <= {t["id"] for t in templates}, "上述模板 id 必须齐全"
 
 
 def test_ids_are_unique() -> None:
@@ -75,7 +76,7 @@ def test_content_is_non_empty(tid: str) -> None:
 
 
 def test_runtime_contract_segment_exists_and_is_unconditional() -> None:
-    """runtime_contract 段存在，且含数据·指令边界与完成条件两条无条件规则。"""
+    """runtime_contract 段存在，且含数据·指令边界、运行上下文（含完成条件）与默认语言三条无条件规则。"""
     from src.config.prompts import loader
 
     template = loader.load_all()["runtime-contract"]
