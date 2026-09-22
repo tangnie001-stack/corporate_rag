@@ -47,7 +47,6 @@ _SKILLS_DIR = _PROJECT_ROOT / "skills"
 _DEFAULT_EXCLUDE_DOCS = {
     "requirements_pool.md",
     "reference-projects.md",
-    "codegraph-guide.md",  # 引用外部 codegraph.db，非本仓库 src
 }
 # 文档中允许指向"不存在代码"的路径前缀（如规划中的目录）
 _DEFAULT_EXCLUDE_PATHS: set[str] = set()

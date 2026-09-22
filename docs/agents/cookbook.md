@@ -281,7 +281,7 @@
   - **`git stash`**（仓库级唯一一条 ref，两边序号互相挤动）→ **跨工作区禁用 stash**，要暂存就提交到自己的分支
   - 分支/tag 删除、`git push --force`（全仓库范围）
   - **Docker**：工程名、8 个 `container_name`、5 个命名卷、端口全部写死 → 两个工作区**无法各跑一套**容器与数据；从不同工作区 `up -d` 操作的是同一套容器
-  - gitignore 的运行时产物：`.env`、`data/`、`logs/`、`.venv`、`.codegraph/`、`.superpowers/` 都不会带过去
+  - gitignore 的运行时产物：`.env`、`data/`、`logs/`、`.venv`、`.superpowers/` 都不会带过去
   - **未跟踪文件不共享**（只有被跟踪的才跨工作区可见）→ 先提交，再切过去用
 - 换目录起服务会重建 `app` / `nginx`（渲染出的 bind source 不同 → 配置哈希不同），属预期
 - 用完 `git worktree remove <路径>`；分支有未合并提交时需 `--force`

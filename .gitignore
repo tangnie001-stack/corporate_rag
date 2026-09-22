@@ -18,7 +18,6 @@ venv/
 .codebuddy/models.json
 
 # Generated indices (auto-regeneratable)
-.codegraph/
 .coverage
 .superpowers/
 .superprojects/

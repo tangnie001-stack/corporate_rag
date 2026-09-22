@@ -81,7 +81,7 @@ venv = ".venv"
 #   （事故档案中的历史函数名、API 数据枚举值等）
 # exclude_skill_tools: skill frontmatter allowed-tools 中允许引用但代码不存在的工具名
 #   （如文档/示例中的历史工具名）
-exclude_docs = ["requirements_pool.md", "reference-projects.md", "codegraph-guide.md"]
+exclude_docs = ["requirements_pool.md", "reference-projects.md"]
 exclude_symbols = [
     "ci_gate",
     "handle_chat",
