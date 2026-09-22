@@ -151,7 +151,7 @@
 - 中文「财务报表深度分析」skill（geeksfino/finskills，Apache-2.0）。法证财务分析师视角，9 步法：5 因子杜邦分解 → 盈利质量（应计比率 / 现金转化率红灯阈值）→ 财务健康评分（Altman Z / Piotroski F / Beneish M）→ 营运资本 CCC → 资产负债表隐性风险（商誉减值、关联交易、在建工程不转固、股权质押）→ 业务分部 → 同行基准 → 报告模板。
 - **A 股特化**：CAS vs US GAAP 差异、扣非净利润、政府补助依赖、"读附注"提醒、商业承兑汇票坏账风险。
 - **契约范例**：frontmatter 仅 `name` + `description` + `license`——与 claude-code / agency-agents 的 `skill-md` 转换一致，是"SKILL.md 标准最小集"的活样本。
-- **与本项目关系**：中文财务域，其方法论 / 公式 / 报告模板可直接参考，用于增强或对标 `skills/financial-statement-analyzer`；但它是**纯知识 skill**（无 `context`、无工具），搬运时需按本站契约（inline/fork、双轴）适配，且其"确认对象 → 取数"流程与本站"主 agent 先检索再委派"模式不同。
+- **与本项目关系**：中文财务域，其方法论 / 公式 / 报告模板可直接参考，用于增强或对标本项目 `skills/financial-statement-analyzer`；但它是**纯知识 skill**（无 `context`、无工具），搬运时需按本站契约（inline/fork、双轴）适配，且其"确认对象 → 取数"流程与本站"主 agent 先检索再委派"模式不同。
 - **配套技能**：文末推荐 `findata-toolkit-cn`（A 股实时行情 / 财务指标 / 北向资金，免费无 API key）。
-- **位置**：`~/.agents/skills/financial-statement-analyzer/`（`SKILL.md` + `references/analysis-methodology.md` + `references/output-template.md`）
-- **何时查阅**：写财务分析类 skill、或给 `financial-statement-analyzer` 补方法论 / 公式 / 报告模板时。
+- **位置**（已安装）：`~/.agents/skills/financial-statement-analyzer/`（`SKILL.md` + `references/analysis-methodology.md` + `references/output-template.md`）
+- **何时查阅**：写财务分析类 skill、或给本项目 `skills/financial-statement-analyzer` 补方法论 / 公式 / 报告模板时。

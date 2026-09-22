@@ -82,7 +82,7 @@
 
 ⚠ **明确接受的代价**：选定预设后，知识库领域方法不参与组装（"选了财务专家 + 绑定人事库"时人事领域方法消失）。系统记日志但不阻断。这是替换语义的既定代价，**不是缺陷** —— 后人不应把它当 bug 去修。
 
-## 6. 已知重复（本期只登记，不改）
+## 6. 已知重复（登记 / 已处置）
 
 | 重复项 | 位置 | 处置 |
 |---|---|---|
@@ -92,6 +92,6 @@
 | `search_web` docstring 的"何时调用"（检索空/不相关才联网、KB 能答不调）与 `sources` 段的联网规则逐条重复 | `src/agents/tools/web_tools.py:43-45` vs `sources-kb-web-rules` | 记入本表为已知重复，另开 change |
 | `ask_user` docstring 的"何时调用"（缺关键实体且无法推断才问）与 `tools` 段的澄清规则逐条重复 | `src/agents/tools/ask_tools.py:66-67` vs `tools-ask-user` | 记入本表为已知重复，另开 change |
 | `delegate_task` 的 `description` 的"何时调用"（需领域专家能力才委派、轻量自答）与 `tools` 段的委派规则逐条重复 | `src/agents/skills/delegate_task.py:59-63` vs `tools-delegate` | 记入本表为已知重复，另开 change |
-| `finance-analyst` skill 正文 4 条与系统段逐条重复 | `skills/finance-analyst/SKILL.md`（已删）vs `runtime-contract` 的数据·指令边界 + `base-financial` 的"不得编造"/口径/输出结构 + `output-citation`·`output-delegate-citation` 的 `[n]` 规则 | **2026-09-22 已删除**：4 条全部在系统段有等价物、无独占内容，且与 fork skill `financial-statement-analyzer` 功能重叠（同删 `finance-qa` 的判据）。连带处置依赖它的测试 |
+| `finance-analyst` skill 正文 4 条与 fork 子代理**实际接收的 prompt** 逐条重复 | `skills/finance-analyst/SKILL.md`（已删）vs `agents/finance-expert.md:9-12` 原则 1/2/3（第 1–3 条；第 3 条近乎逐字）+ `src/config/prompts/__init__.py:83` 执行者默认人设（第 4 条） | **2026-09-22 已删除**：fork 子代理的 system prompt 只有「执行者人设 + 执行契约」（`src/agents/skills/executor.py:279-295`），父级组装的 `base` / `output` / `runtime-contract` 段**从不进入**子代理上下文；4 条在上述两处均有对应、无独占内容。第 4 条"每个事实标注数据来源编号"与 `:83` 明确要求子代理**不**标注 `[n]`（`[n]` 由主 agent 按 `output-delegate-citation` 补）**语义相反**，删除即消除矛盾。另与存活 fork skill `financial-statement-analyzer` 功能重叠（同删 `finance-qa` 的判据）。连带处置依赖它的测试 |
 
 > **2026-09-21 审计**：`retrieve_kb` / `search_web` / `ask_user` / `delegate_task` 四个工具的 description 已逐条比对 `sources` / `tools` 段，四条均含"何时调用"表述重复（上表四行）。本期只审计、不改文案（工具 docstring 文本改写属 `design.md` 的明确不做项）。

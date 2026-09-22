@@ -145,6 +145,6 @@
   - **键盘与互斥**：Enter/Space 开合、↑/↓ 移动高亮、Enter 选中、Esc 关闭、焦点归还触发胶囊；两个菜单与引用抽屉、任务面板互斥单开
 - **端到端冒烟（真实后端）**：
   1. 智能体：选「财务专家」→ 发消息 → 断言顶栏智能体回显 + 请求体 `agent`
-  2. 技能：chip 选技能（若 `/api/skills` 暂无候选则手输 `/finance-analyst 任务`）验证补全与插入
+  2. 技能：chip 选技能（若 `/api/skills` 暂无候选则手输 `/financial-statement-analyzer 任务`）验证补全与插入
   3. 常规回归：不选智能体/技能发普通提问 → token 流式、citation、done 正常
   - `playwright-cli console` 断言无新增 error
