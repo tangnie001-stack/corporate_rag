@@ -43,15 +43,16 @@ Langfuse 已经在 **dev** 跑着（v2.95.11，复用既有 PostgreSQL 实例；
   - `src/infra/llm/langfuse_tracing.py` — 由自研 `LangfuseTracer` 封装改为 SDK 原语接线（或整体替换）
   - `src/services/agent_service.py` — `_run_generation`（trace 根落点；**生产侧唯一调用点**，且本身就在后台 task 内）
   - `src/agents/graph/agent_node.py` — 主 agent LLM 调用点的 generation（温度分档段 `:173-200` 与两个 `model.astream` 分支 `:184-203`）
-  - `src/middleware/trace_id.py` — **入站 trace id 校验**（新增白名单；不合法则服务端重生成）
+  - `src/middleware/trace_id.py` — **入站 trace id 校验**（新增白名单；不合法则静默重生成。**必须在 `set()` 之前**，否则响应头与 trace id 分叉 —— 见 D3）
+  - `src/config/settings.py` — **内置 `LANGFUSE_*` 默认值清理**（四个常量三方不一致；HOST 默认指向仓库内不存在的服务名，见 D19）
   - `src/main.py` — lifespan 接线（启用开关；关停时 flush 缓冲事件）
   - `src/cli/eval_ragas.py` — 每问一个 trace 根 + **CLI 侧开关与退出前 flush**
   - `src/cli/` — 新增 trace 清理 CLI（含 dry-run 与运行期护栏）
   - `src/rag/stream.py`、`src/infra/llm/trace_context.py` — 删死代码、迁 `estimate_usage`；`src/infra/llm/token_usage.py` 的 docstring 现引用 `end_generation`，须同步
   - `src/core/log_events.py` + `src/core/log_event_specs.py` — 删三个 `TRACE_*` 事件（**两处同名登记**）
-- **配置**：`.env`、`.env.template`、**`.env.example`**（其 `LANGFUSE_ENABLE` 现为空字符串＝等效 false，只改前两个会造成三处漂移）的 `LANGFUSE_ENABLE` 取值一致化
+- **配置**：`.env`、`.env.template`、**`.env.example`**（其 `LANGFUSE_ENABLE` 现为空字符串＝等效 false，只改前两个会造成三处漂移）的 `LANGFUSE_ENABLE` 取值一致化；并清掉 `settings.py` 内置的陈旧默认值（key 类改为空串、HOST 与模板对齐，见 D19）
 - **依赖**：无新增（`langfuse` 与 `langchain` 均已在 `pyproject.toml`）
-- **文档**：`docs/agents/glossary.md`（**`:207` 的「`trace 保留窗口`」条目现写"另案，尚未落地…当前 tracing 未接线"，本变更直接使其过时**，须改写；并登记开关的双重语义）、`docs/agents/code-map.md`（**本变更新增一个 CLI 模块、移除 `src/infra/llm/` 内一整套结构**，而它是「改动代码前定位文件」的唯一归属）、`docs/agents/api_contract.md`（如 trace 关联字段对外可见）、`docs/agents/logging-rules.md`（事件增减）、`docs/agents/data-flow.md`（接线后的链路）、`docs/agents/cookbook.md`（**`:315` 一段既过时、又把读者指向将被删除的 `LangfuseTracer`**）、**`docs/openspec/specs/token-usage-model/spec.md`（经本 change 的 delta 修改 —— 见 Modified Capabilities）**、`src/cli/README.md`（承诺兑现）、`docs/adr/`（**新 ADR**：trace 记原文 + 保留 30 天；**另记** ADR-0011 复查条件②的复评结论）
+- **文档**：`docs/agents/glossary.md`（**`:207` 的「`trace 保留窗口`」条目现写"另案，尚未落地…当前 tracing 未接线"，本变更直接使其过时**，须改写；**术语统一为「trace 保留期」并同步改条目名** —— 与 CLI 参数 `--retention-days` 同源；另 **`:13` 的 `trace_id` 条目须补两句**：它同时是 Langfuse 的 trace id、且来自请求头/查询参数属**不可信输入**须经白名单；并登记开关的双重语义）、`docs/agents/code-map.md`（**本变更新增一个 CLI 模块、移除 `src/infra/llm/` 内一整套结构**，而它是「改动代码前定位文件」的唯一归属）、`docs/agents/api_contract.md`（如 trace 关联字段对外可见）、`docs/agents/logging-rules.md`（事件增减）、`docs/agents/data-flow.md`（接线后的链路）、`docs/agents/cookbook.md`（**`:315` 一段既过时、又把读者指向将被删除的 `LangfuseTracer`**）、**`docs/openspec/specs/token-usage-model/spec.md`（经本 change 的 delta 修改 —— 见 Modified Capabilities）**、`src/cli/README.md`（承诺兑现）、`docs/adr/`（**新 ADR**：trace 记原文 + 保留 30 天；**另记** ADR-0011 复查条件②的复评结论）
 - **在途 change 的次序约束**：`turn-provenance-observability`（0/36）与本变更**落点重叠**（`agent_node.agent_model` 温度分档段 `:173-200`、两个 `astream` 分支 `:184-203`；`agent_service._run_generation`），两者**不可并行**。已定：**本变更先行**，`turn-provenance-observability` 后置，重启时按本变更落地后的实际代码复核其行号与做法。**注**：该 change 的 `tasks.md` 4.1 沿用了错误的行号 `:158-167`（那是函数头与迭代日志，非温度分档段），重启时一并改正。
 - **测试**：`tests/infra/llm/test_langfuse.py`（**须整体重写** —— 它测的是将被删除的 `LangfuseTracer`、断言了已不存在的属性，且 skip 条件本身是雷，见 What Changes）、**新增 autouse 会话级 fixture 全局关停 tracing**（否则既有 `tests/services/` 用例会真发网络）、新增接线用例（用替身 / mock，**不发真实网络**）、受影响的 `_run_generation` / `eval_ragas` 相关用例
 - **闸门盲区（本变更暴露，登记备查）**：`src/cli/check_docs.py` 只校验 `docs/agents/*.md`，**不扫 `docs/openspec/specs/`** —— 主规格里的失效引用（如本次的 `stream_answer`）没有机械闸门。本次靠人工系统性扫描发现（结果：主 specs 中仅此一处）。是否给闸门补上 openspec specs 的扫描范围，**不在本变更内**，登记为遗留。

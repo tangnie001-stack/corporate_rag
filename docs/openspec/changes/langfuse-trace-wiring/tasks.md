@@ -4,7 +4,7 @@
 
 | 执行档 | 载体 | 范围 | 完成标准（DoD） |
 |---|---|---|---|
-| **实施计划（唯一一份）** | `docs/superpowers/plans/2026-09-22-langfuse-trace-wiring.md`（⑤ 环节产出） | 测试重定（D14）→ 接线与开关（**服务侧 + CLI 侧两处**，D5；CLI 另需 flush，D6）→ **入站 trace id 校验**（D3）→ generation 字段回填（**`capture_input=False`**，D8）→ 清理 CLI 的**代码**（含运行期护栏，D7）→ 死代码清理 + **`token-usage-model` delta**（D9）→ 文档同步（含 `glossary.md` / `code-map.md` / `cookbook.md:315`）→ **新 ADR（D16）+ ADR-0011 复评记录（D10）**。全部是普通代码任务 | ① 测试重定先完成，**"pytest 全绿"才可被当作证据**（D14，须在全局关停 tracing 的前提下取得）；② **关闭态**：一轮对话行为与接线前逐项一致（SSE 事件序列、落库、引用）；③ **开启态**：dev 真实一轮对话的**四方 id 对齐**（响应头 / 日志行 / SSE done / Langfuse UI），主 agent generation 带 model / input / output / usage / 首 token 时间；④ **四条未验证断言已逐条验**：取消后 trace 仍在 / id 字符集被服务端接受 / 辅助 LLM 与 fork 自动嵌套 / 级联与 UI；⑤ **非法 `X-Trace-ID` 被拒且四方仍对齐**（D3）；⑥ **trace 输入里不含内部运行时对象**（`ctx` / `manager` / `graph` / 事件队列，D8）；⑦ 清理 CLI 的 `--dry-run`、保留期**下界拒绝**、**未确认不删**、**超上限中止**、**审计输出**、保留期内零改动、重复执行安全（D7）；⑧ CLI 的 trace 在 `--gate` / 异常退出路径下**也能落库**（D6 的 flush）；⑨ 已删符号全仓零引用（含 tests），**`token-usage-model` 主规格已由 delta 修正**，质量门禁全绿（`pytest` / `ruff` / `pyright` / `check_docs` / `check_adr`）；⑩ 文档不再出现"UI 里看不到数据是正常的"这类叙述，`glossary.md` 的「`trace 保留窗口`」条目已改写，D16 新 ADR 与 D10 复评记录可被独立读到 |
+| **实施计划（唯一一份）** | `docs/superpowers/plans/2026-09-22-langfuse-trace-wiring.md`（⑤ 环节产出） | 测试重定（D14）→ 接线与开关（**服务侧 + CLI 侧两处**，D5；CLI 另需 flush，D6）→ **入站 trace id 校验**（D3）→ generation 字段回填（**`capture_input=False`**，D8）→ 清理 CLI 的**代码**（含运行期护栏，D7）→ 死代码清理 + **`token-usage-model` delta**（D9）→ **`settings.py` 内置默认值清理**（D19）→ 文档同步（含 `glossary.md` 术语统一 / `code-map.md` / `cookbook.md:315`）→ **新 ADR（D16）+ ADR-0011 复评记录（D10）**。全部是普通代码任务 | ① 测试重定先完成，**"pytest 全绿"才可被当作证据**（D14，须在全局关停 tracing 的前提下取得）；② **关闭态**：一轮对话行为与接线前逐项一致（SSE 事件序列、落库、引用）；③ **开启态**：dev 真实一轮对话的**四方 id 对齐**（响应头 / 日志行 / SSE done / Langfuse UI），主 agent generation 带 model / input / output / usage / 首 token 时间；④ **四条未验证断言已逐条验**：取消后 trace 仍在 / id 字符集被服务端接受 / 辅助 LLM 与 fork 自动嵌套 / 级联与 UI；⑤ **非法 `X-Trace-ID` 被拒且四方仍对齐**（D3）；⑥ **trace 输入里不含内部运行时对象**（`ctx` / `manager` / `graph` / 事件队列，D8）；⑦ 清理 CLI 的 `--dry-run`、保留期**下界拒绝**、**未确认不删**、**超上限中止**、**审计输出**、保留期内零改动、重复执行安全（D7）；⑧ CLI 的 trace 在 `--gate` / 异常退出路径下**也能落库**（D6 的 flush）；⑨ 已删符号全仓零引用（含 tests），**`token-usage-model` 主规格已由 delta 修正**，质量门禁全绿（`pytest` / `ruff` / `pyright` / `check_docs` / `check_adr`）；⑩ 文档不再出现"UI 里看不到数据是正常的"这类叙述；**`glossary.md` 术语统一为「trace 保留期」并改条目名、`trace_id` 条目补写"同时是 Langfuse trace id + 不可信入站输入"**；D16 新 ADR 与 D10 复评记录可被独立读到；⑪ **配置四面一致**（`settings.py` 内置默认 / `.env` / `.env.template` / `.env.example`），内置 key 类默认为空串、HOST 不再指向不存在的服务名（D19） |
 | **计划外的部署动作** | 不落计划文件（部署与数据操作，按 ⑥「不适合走 SDD 的情形」执行） | ① **级联删除小规模验证**（不通过则不许接定时任务，D15）；② 清理任务**定时接入**（宿主 cron / systemd timer / compose 定时服务，开工前定）；③ **prod 侧落地**：同步 prod 机上的 `.env`（改模板 ≠ 改到机器）+ 确认 `langfuse-web` 在跑（D17）；④ **dev 侧开关的启用与回滚**是手工动作且 `.env` 跨工作区共享（D18）—— 先记录原值再改 | ① 删少量超期 trace 后 `observations` / `scores` / `dataset_run_items` **无孤儿**，UI 正常（D15）；若 API 不级联，清理 CLI 已按 D15 的约定显式删附属记录；② 定时任务在 dev 与 prod 各自可运行；③ 真删只影响早于保留期的 trace，保留期内零改动；④ prod 侧"后端不在跑"的情形已按故障隔离验收过；⑤ `.env` 原值已记录、改动可精确回退。**注意**：这五条仍是本 change 的 DoD（ADR-0011 复查条件③要求清理与接线一并落地），不可挪到 change 之外 |
 
 ## §1 为什么是「一份计划 + 一个计划外动作」
@@ -51,6 +51,7 @@
 | 6 | `turn-provenance-observability/tasks.md` 4.1 的行号 `:158-167` 是错的（应为 `:173-200`） | 该 change 重启时顺手改正（属对方工件，本变更不擅自改） |
 | 7 | 入站 trace id 白名单的**最终字符集** —— 须与服务端实际接受的字符集对齐后再钉死（客户端层结论不足） | 接线实跑时（DoD 第④条的第 2 项一起做） |
 | 8 | 是否给 `src/cli/check_docs.py` 补 `docs/openspec/specs/` 的扫描范围 —— 主规格的失效引用目前**没有机械闸门** | **不在本变更内**，登记为遗留 |
+| 9 | 是否给 `LANGFUSE_*` 加"缺配置即拒绝启动"的 fail-fast —— D19 只把默认值改空串，没加校验（加了会改启动失败语义，属部署面） | **不在本变更内**，登记为遗留 |
 
 ## §5 定稿期勘误（本轮审阅发现，已就地修正）
 
@@ -81,3 +82,24 @@
 - `.env.example` 的 `LANGFUSE_ENABLE` 为空串（等效 false），只改 `.env.template` 会造成三处漂移 → 配置项扩为三个文件一致化
 
 **评审的「未能验证」清单** → 未验证断言由 1 条扩为 4 条（写进 design 的 Risks），并在 DoD 第④条逐条验。另新增两条 open question：入站白名单的最终字符集（须与服务端实际接受的字符集对齐）、是否给 `check_docs` 补 openspec specs 的扫描范围（**不在本变更内**，登记为遗留）。
+
+## §7 grilling 轮的处置（2026-09-22，7 条决定全部采纳）
+
+按 `grilling` 的方式把设计树 frontier 逐条摆出、逐条收敛。其中 **5 条改变了设计或规格**（Q1/Q2/Q3/Q5/Q6），2 条是登记性约束（Q4/Q7）。
+
+| # | 问题 | 决定 | 落在哪 |
+|---|---|---|---|
+| Q1 | 入站 id 校验放哪一层 + 非法时"静默换"还是"400 拒" | **middleware、`set()` 之前；静默重生成、不返回 400** | D3（含依据）+ spec 新 scenario「校验发生在 id 生效之前」 |
+| Q2 | `settings.py` 内置 `LANGFUSE_*` 默认值要不要本次清 | **本次一并清**（key 类改空串、HOST 与模板对齐） | **新增 D19** + proposal 的代码/配置两处 |
+| Q3 | 清理 CLI 的三个具体阈值 | **下界 1 天 / 上限 1000 条 / 必须 `--yes`（不用交互输入）** | D7 + spec requirement 写死数值 |
+| Q4 | worktree 的 `.env` 保持软链还是改独立副本 | **保持软链**，只加"改前记录原值"的纪律 | D18（去掉原先悬置的"或独立副本"） |
+| Q5 | 术语：「保留期」还是「保留窗口」；`trace_id` 要不要点明双重身份 | **统一「保留期」**（与 `--retention-days` 同源）；`trace_id` 条目补"同时是 Langfuse trace id + 不可信入站输入" | proposal 文档清单 + DoD ⑩。**落地时才改 `glossary.md`** —— 它描述现状，现在写未来态会违"只写当前状态" |
+| Q6 | `eval_ragas` 的"每问一条 trace"怎么落 | **抽"处理单问"的小函数并 `@observe`**，循环里传 `langfuse_observation_id` | D2 补粒度与做法（含"v2 无上下文管理器"的依据） |
+| Q7 | 进程级默认 `trace_id` 会不会让非请求上下文的 trace 撞成一条 | **本次不改代码，登记约束**：新增根的前提是处于有 per-request id 的上下文 | **新增 D20** |
+
+**本轮查证的事实**（子代理实读代码所得，非推测）：
+
+- `middleware/trace_id.py:33` 回写响应头用的是**局部变量**，不重读 contextvar；`api/chat.py:193/248` 的 SSE `done` **是重读**的 → 这是 Q1 那条硬约束的来源
+- Langfuse v2 客户端对 trace id **零校验**（`TraceBody.id` 无 pattern/max_length），且 ingestion 异常被 `client.py:1511-1512` **吞掉只记日志** → 非法 id 的后果是**静默丢 trace**
+- RAGAS 裁判打分在生成循环**返回之后**的 `run_evaluation`（`:243`），逐问生成是**全串行 for**（无 gather）
+- `settings.py` / `.env` / `.env.template` 的四个 `LANGFUSE_*` **三方全不一致**；内置 HOST 指向仓库内**不存在的服务名**

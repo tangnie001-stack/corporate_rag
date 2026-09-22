@@ -74,7 +74,9 @@ HTTP 请求 → trace_id middleware → current_trace_id
 - 它是全仓**唯一**的生成入口（`api/chat.py:205` 的 `answer_builder` 闭包），且**本身就在后台 task 内** → 根与全部下游 observation 处于同一 context，**不存在跨 task 的 contextvar 继承问题**。
 - **否决 `_stream_rag_response`（HTTP 侧 SSE 生成器）**：生成在另一个 task 里跑，根会先于子树结束；跨 task 的父子关联依赖 `create_task` 的上下文拷贝，脆弱且语义错位。
 - **否决 `AgentService.stream_chat`**：该函数不跑生成（只取历史 + 建 `RequestContext`），根会开了就关。
-- CLI 侧在 `eval_ragas` 的每问循环内另开一条根（它不走 `_run_generation`）。
+- CLI 侧在 `eval_ragas` 的**每问循环内**另开一条根（它不走 `_run_generation`）。**粒度与做法已定**：把"处理单个问题"抽成一个小函数并 `@observe` 装饰，循环里调它并传 `langfuse_observation_id=<eval_<hex>>`。理由：v2 SDK **没有** `start_as_current_observation` 那样的上下文管理器（只有 `@observe` 装饰器与低层 client），所以"每问一条"只能靠装饰器；用低层 `client.trace(id=...)` 手开则回到"自研封装"的老路，而"整段生成一条 trace"会让 CSV 的 `trace_id` 列与 Langfuse 对不上、直接违背 id 对齐要求。
+
+> 已核实的位置事实：逐问生成在 `generate_answers_and_contexts`（`cli/eval_ragas.py:102`，**纯 for 循环、无并发**）内，而 RAGAS 裁判打分在**其返回之后**的 `run_evaluation`（`:243`）里 —— 所以按上述粒度开根，**裁判调用不会落进根内**（与 Non-Goals 一致，无需额外隔离）。
 
 ### D3 trace id 对齐用 `langfuse_observation_id` 入参
 
@@ -88,7 +90,20 @@ HTTP 请求 → trace_id middleware → current_trace_id
 - 任意 id 可注入 → 观测库可被污染，且保留 30 天
 - 若 id 外泄（截图、共享日志、CSV）→ 可被重放并**覆盖**同 id 的 trace
 
-**做法**：入站值先过白名单（建议 `^[A-Za-z0-9_-]{1,120}$`），不合法则**丢弃并服务端重新生成**（与缺失时的行为一致）。**四方对齐不受影响** —— 重生成的值会回写响应头、进日志、进 SSE `done`，仍是同一个 id 贯穿。备选是"一律服务端生成、彻底忽略入站值"，但那会破坏现有的"由调用方指定 trace_id 做端到端串联"能力（CLI 评测与联调都依赖它），故不选。
+**做法**：入站值先过白名单（`^[A-Za-z0-9_-]{1,120}$`；最终字符集须与"服务端实际接受什么"对齐后再钉死 —— 见 Open Questions 6），不合法则**静默丢弃并服务端重新生成**（与缺失时的行为一致），**不返回 400** —— `trace_id` 是诊断辅助标识而非安全令牌，调用方打错一个字符不该让请求失败。
+
+**校验位置是硬约束：必须在 `src/middleware/trace_id.py` 内、`current_trace_id.set()` 之前。** 依据（本次实读代码）：
+
+- `middleware/trace_id.py:33` 回写响应头用的是**第 19-23 行算出的局部变量**，**不重读 contextvar**；
+- 而 `api/chat.py:193/248` 的 SSE `done` 事件**是重读 contextvar** 的。
+
+两者取值来源不同 ⇒ **若把校验/重生成放在下游（chat handler 或 `_run_generation`），响应头会停留在未校验的旧值，而 SSE `done` 与 Langfuse 用新值 → 四方当场分叉**。放在 middleware 的 `set()` 之前，则从源头只有一个值，下游读谁都是它。
+
+代价（显式接受）：middleware 是全接口的，所以**任何接口**上带了非法 `X-Trace-ID` 都会被替换成服务端生成的 id。这是白名单的应有语义，不是副作用。
+
+备选"一律服务端生成、彻底忽略入站值"否决：会破坏"由调用方指定 trace_id 做端到端串联"的现有能力（CLI 评测与联调都依赖它）。
+
+> **补充事实（影响"非法 id 的后果")**：Langfuse v2 客户端**对 trace id 零校验**（`TraceBody.id` 只是 `Optional[str]`，无 pattern / max_length），且 ingestion 异常被 `client.py:1511-1512` **吞掉只记日志**。所以"非法 id"的真实后果不是报错，而是**该 trace 静默消失**——这正是必须在入站处拦住的原因。
 
 ### D4 主 agent generation 用"装饰节点闭包 + 函数内回填字段"
 
@@ -122,10 +137,10 @@ SDK 默认批量上报（`flush_at` / `flush_interval`）。lifespan 现只有 s
 - 形态：`src/cli/` 下新增清理入口，用 SDK 的 `client.api.trace.delete_multiple`（已确认可用）；**保留期 30 天**，可用参数覆盖；**支持 dry-run**（只输出将删数量与标识）。
 - 定时落地形态（宿主 cron / systemd timer / compose 定时服务）留待执行阶段决定，**不写进 capability 的 requirement**（避免把部署细节固化成规格）。
 - 保留期选 30 天的理由：能覆盖"发版后回看上一版对比"这类典型排查，库增长仍在可控量级（当前库仅 11 MB、traces=1）。
-- **本入口持有破坏性权限，必须有护栏**（原先只写了 dry-run 与可覆盖保留期，不足）：
-  - **保留期下界**：低于下界（建议 ≥1 天）直接拒绝 —— 防一条 `--retention-days 0` 删光运行库
-  - **显式确认**：非 dry-run 须 `--yes`（或交互确认），不接受"默认就删"
-  - **单次删除上限**：超过上限即中止并提示分批 —— 防误配把库删空而来不及发现
+- **本入口持有破坏性权限，必须有护栏**（原先只写了 dry-run 与可覆盖保留期，不足）。阈值已定：
+  - **保留期下界 = 1 天**：低于 1 天直接拒绝并退出 —— 防一条 `--retention-days 0` 删光运行库（这是最可能的误配）
+  - **显式确认 = 必须 `--yes`**：非 dry-run 不带 `--yes` 即拒绝执行、退出码非 0。**不用交互输入** —— 定时任务场景本来没有 TTY，交互式确认只会诱导人写 `echo y |` 绕过
+  - **单次删除上限 = 1000 条**：超过即中止且**不做任何删除**，提示用参数分批。依据：当前库总共 1 条 trace，30 天量级远小于此；超限说明要么配置错了、要么不该盲目删
   - **审计**：打印并将被删 trace 标识落日志 / 文件，事后可复盘"删了什么"
   - **执行环境约束**：仅允许在指定机器 / 环境变量下执行，防 dev 的配置误连 prod 库
 
@@ -229,7 +244,30 @@ SDK 默认批量上报（`flush_at` / `flush_interval`）。lifespan 现只有 s
 - 开关的**启用**与**回滚**都是**手工动作**，且要**先记录当前值**再改（便于精确回退）
 - 在 worktree 里做这一步前，先确认主工作区是否有会话在用（本仓平时就有并行会话）
 - `.env.template` / `.env.example` 的同步**是代码交付**（进 git），`.env` 的改动**不是** —— 两者的验收标准不同，Migration 里分开写
-- 若要彻底避免跨工作区影响：在 worktree 放一份独立的 `.env`（代价是两份要各自维护）
+- **决定：保持软链，不改成独立副本。** 理由：① 两个工作区**本来就共用同一套 Docker 容器**（worktree 不隔离 Docker），`.env` 分开反而让"我这一侧的开关状态"变得可疑；② 独立副本意味着两份要各自维护，迟早漂移。配套纪律见上两条（改前记录原值 + 确认另一侧没在用）。
+
+### D19 `settings.py` 的内置 `LANGFUSE_*` 默认值本次一并清理
+
+**事实**（实读三个文件）：四个常量的取值**三方全不一致** ——
+
+| 常量 | `settings.py` 默认 | `.env`（实际） | `.env.template` |
+|---|---|---|---|
+| SECRET_KEY | `sk-lf-8665d453-…` | `sk-lf-6258fb47-…` | `sk-lf-your-secret` |
+| PUBLIC_KEY | `pk-lf-96995ff8-…` | `pk-lf-17d7e3f1-…` | `pk-lf-your-public` |
+| HOST | `http://langfuse:3000` ← **仓库内不存在此服务名** | `http://langfuse-web:3000` | `http://langfuse-web:3000` |
+| ENABLE | `true` | `false` | `false` |
+
+**为什么必须现在处理**：无 `.env` 的环境（CI / 新 clone）会用**不存在的 host + 另一对 key** 构造客户端，而 D3 补充的事实表明 ingestion 失败是**静默吞掉**的 —— 于是变成"测试 / CI 静默连错后端"，这正是 F3 的另一半根因。ADR-0011 的复查条件④ 早已把这条 HOST 陈旧默认值登记为遗留、当时为维持 `src/` 零改动而刻意不碰；本变更本来就要动这三个文件，顺路做不扩大边界。
+
+**做法**：把内置默认值改为**不再假装有值** —— key 类默认改为**空串**（"没配就明确不可用"），HOST 默认与 `.env.template` 对齐（`http://langfuse-web:3000`），`ENABLE` 维持 `true`（D5 已定）。**不在代码默认值上加"key 非空否则拒绝启动"的 fail-fast** —— 那会在缺配置时直接拒绝启动，超出本变更范围（登记为遗留，见 Open Questions 8）。
+
+### D20 新增 trace 根的前提：必须处于有 per-request id 的上下文
+
+**事实**：`src/core/logging.py:102` 在**进程启动时**设了一个进程级默认 `trace_<uuid>`（仅当 contextvar 为空），由 `main.py:84` 调用。HTTP 请求由中间件覆盖它、CLI 由每问循环覆盖它 —— 所以现有两条根都安全。
+
+**但**：若将来有人给一个**不在请求 / CLI 上下文里**的函数加 `@observe` 根，它的 trace id 就是那个**进程常量** → **所有这类调用挤进同一条 trace**，而且**不报错**（只是数据混在一起，事后极难分辨）。
+
+**做法**：本次不改代码，只把约束写进 design 与（落地时的）代码注释 ——「**新增 trace 根的前提是处于有 per-request id 的上下文（HTTP 中间件或 CLI 循环）；进程默认值不是合法的根 id。**」之所以值得写下来，正因为它是**静默失败**。
 
 ## Risks / Trade-offs
 
@@ -271,3 +309,4 @@ SDK 默认批量上报（`flush_at` / `flush_interval`）。lifespan 现只有 s
 5. **开关是否拆成两个** —— 见 D13。当前不拆；若日后 prompt 名单加回，须重新评估，因为届时"开 trace 会连带开 prompt 远端"。
 6. **入站 trace id 白名单的最终字符集** —— D3 给了建议值 `^[A-Za-z0-9_-]{1,120}$`；最终须与验证项 2（v2 服务端实际接受的字符集）对齐后再钉死，**不能只按客户端层结论定**。
 7. **是否给文档闸门补 openspec specs 的扫描范围** —— `src/cli/check_docs.py` 今天不扫 `docs/openspec/specs/`，主规格的失效引用没有机械闸门（本次靠人工扫出）。**不在本变更内**，登记为遗留。
+8. **是否给 `LANGFUSE_*` 加"缺配置即拒绝启动"的 fail-fast** —— D19 只把默认值改成空串（去掉"假装有值"），没加校验。若加了，缺配置时进程直接起不来；不加，则是"能起来但 trace 全丢、只有日志能看出来"。**不在本变更内**（会改变启动失败语义，属 `observability-backend` 的部署面），登记为遗留。
