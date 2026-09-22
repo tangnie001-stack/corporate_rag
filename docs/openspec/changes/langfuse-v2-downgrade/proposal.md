@@ -10,7 +10,7 @@ v2 是最后一个「只需 PostgreSQL 即可自托管」的大版本。项目�
 
 - **服务端版本**：`langfuse/langfuse:3` → **`langfuse/langfuse:2.95.11`**（dev 与 prod 两份 compose 同构改动）。**注**：最终版 `2.95.12` **只有 GitHub release、没有 Docker tag**（实测 404）；浮动 `:2` 现解析为 `2.95.11`，故锁 `2.95.11` 更可复现。
 - **删除 v3 独有组件**：
-  - `langfuse-worker` 服务（v2 无 worker）——其承载的 compose 锚点 `&langfuse-env` / `&langfuse-depends` 迁到 `langfuse-web`。
+  - `langfuse-worker` 服务（v2 无 worker）——其承载的 compose 锚点 `&langfuse-env` / `&langfuse-depends` 随唯一消费者 `langfuse-web` **改为内联**（见 design D3，实施偏离已记明）。
   - `clickhouse` 服务 + `clickhouse_data` 卷 + `deploy/clickhouse/keeper_and_cluster.xml`。
   - `langfuse-web` 的 v3 专属 env：`CLICKHOUSE_*` / `REDIS_*` / `LANGFUSE_S3_*` / `LANGFUSE_ENABLE_BACKGROUND_MIGRATIONS`。
 - **保留不变**（它们不是 Langfuse 专属）：`minio`（同时是应用文档存储，`src/infra/db/file_store.py`）、`redis`（应用会话锁/流式状态）、`postgres`（应用库）。
@@ -19,7 +19,7 @@ v2 是最后一个「只需 PostgreSQL 即可自托管」的大版本。项目�
 - **跨容器可达**：v2 镜像不设 `HOSTNAME`、Next.js standalone 默认绑回环 → 必须显式设 `HOSTNAME=0.0.0.0`，否则 `app` 无法经 `langfuse-web:3000` 访问（且失败会静默走本地兜底）。
 - **凭据连续性**：库重建会清掉旧 Langfuse 数据，但 v2 支持经 `LANGFUSE_INIT_PROJECT_ID`（载体）+ `LANGFUSE_INIT_PROJECT_PUBLIC_KEY` / `SECRET_KEY` 直接播种 key → 现有 `.env` 那对 key **继续有效**，无需重新签发。**缺 `PROJECT_ID` 时 project 与 key 都不创建且不报错**（见 design D9#2b）。
 - **退役资源清理**：删除四个已核实为孤儿的命名卷（`corporate_rag_clickhouse_data` 439MB、`corporate_rag_chroma_data`、`corporate_rag_chroma_onnx_cache`、`financial_qa_app_logs`）与 MinIO 的 `langfuse` 桶；**不动**在用的 `corporate_rag_app_logs` 与 `postgres_data`/`redis_data`/`minio_data`。（用户 2026-09-21 决定直接删、不留回退）
-- **顺带修复的既有缺陷：prod 的 MinIO 镜像引用已失效**。`docker-compose.prod.yml:88` 用的 `minio/minio:latest` **已被上游删除镜像（实测 404）**——MinIO 于 2025.06 删 Web 管理界面、2025.12 进维护模式、2026.02 仓库不再维护、**2026.09 删除 Docker 镜像**，GitHub 仓库已存档（最后版本 `RELEASE.2025-04-22T22-12-26Z`）。本变更把 prod 改为与 dev 一致的 `cgr.dev/chainguard/minio`（Chainguard 自建的免费加固版，实测匿名可拉）。**须写明：这是既有缺陷被顺带修掉，非本变更引入**。
+- **顺带修复的既有缺陷：prod 的 MinIO 镜像引用已失效**。`docker-compose.prod.yml:88` 用的 `minio/minio:latest` **已被上游删除镜像（实测 404）**——MinIO 于 2025.06 删 Web 管理界面、2025.12 进维护模式、2026.02 仓库不再维护、**2026.09 删除 Docker 镜像**，GitHub 仓库已存档（最后版本 `RELEASE.2025-04-22T22-12-26Z`）。本变更把 prod 改为与 dev 一致的 `cgr.dev/chainguard/minio`（Chainguard 自建的免费加固版，实测匿名可拉），并把**两处统一按 index 摘要锁定**（该 registry 无版本 tag，只能锁 digest；见 ADR-0011）。**须写明：这是既有缺陷被顺带修掉，非本变更引入**。
 - **默认可用**：保留 `profiles: ["langfuse"]` 不删（仍可切换关闭），在 `.env` 设 `COMPOSE_PROFILES=langfuse`，使 dev `docker compose up -d` 默认启用；prod 本无 profile 门，天然默认启用。
 - **明确不做**：v2 → v3/v4 的升级（另案，走独立分支；升级时需经 `v3.29.0` 中转并搬运 trace）。
 - **未变**：`src/` 无代码改动。SDK 已是 v2；prompt 走 HTTP `/api/public/v2/prompts/{name}`（v2 线具备该端点）；tracing 封装使用 SDK v2 低层 API（legacy ingestion，v2/v3 均支持）；`LANGFUSE_HOST=http://langfuse-web:3000`（`.env:48`）不变。
@@ -40,10 +40,10 @@ v2 是最后一个「只需 PostgreSQL 即可自托管」的大版本。项目�
 ## Impact
 
 - **部署件**：`docker-compose.yml`、`docker-compose.prod.yml`、`.env`、`.env.template`、`.env.example`（加 `COMPOSE_PROFILES` 与 `LANGFUSE_INIT_PROJECT_*`、补齐 `LANGFUSE_*` 漂移键；`CLICKHOUSE_PASSWORD` 仅存在于 `.env.template:90`，删它）；删除 `deploy/clickhouse/`。
-- **镜像引用**：langfuse 由 `:3` 改为 `:2.95.11`；prod 的 MinIO 由失效的 `minio/minio:latest` 改为 `cgr.dev/chainguard/minio`。**拉取前提**：本项目依赖 `/etc/docker/daemon.json` 中的 3 个国内加速器（`auth.docker.io` 与 `registry-1.docker.io` 直连不通），Hub 镜像须经加速器拉取——该前提应写进部署文档。
+- **镜像引用**：langfuse 由 `:3` 改为 `:2.95.11`；MinIO 在**两份 compose 均**改为 `cgr.dev/chainguard/minio` 并按 **index 摘要**锁定（`sha256:a3c85091…`，含 amd64/arm64）。prod 原引用的 `minio/minio:latest` 已 404；dev 原为同一镜像的浮动 `latest`，本次一并对齐。**拉取前提**：本项目依赖 `/etc/docker/daemon.json` 中的 3 个国内加速器（`auth.docker.io` 与 `registry-1.docker.io` 直连不通），Hub 镜像须经加速器拉取——该前提应写进部署文档；`cgr.dev` **不经**加速器，是直连。
 - **数据**：drop + recreate Langfuse database（Langfuse 侧数据丢失，应用库不受影响）。**prod 从未部署过 v3**，丢失范围仅限 dev。
 - **既有资源的清理（范围外扩）**：本变更顺带删除 4 个孤儿命名卷 + 1 个 MinIO 桶（其中 `chroma_*` / `financial_qa_app_logs` 来自更早的 Chroma/旧项目退役，与 Langfuse 无关），另修复 prod 的失效 MinIO 引用。这几项是超出"Langfuse 退役"本身的动作，均**属既有缺陷的顺带修复**。
 - **文档**：新增 ADR（ADR-0004「trace 在 ClickHouse」将失真，按规则只追加不改旧）；`docs/agents/code-map.md:16,26` 服务清单与 deploy 树；`docs/agents/glossary.md` 登记「可观测后端」「凭据播种」等新术语；`docs/langfuse-v3-vs-v2-and-clickhouse-memory.md` 与 `docs/tmp/deep-research-langfuse-postgres-only.md` 标注被取代（冻结分析，不回写）。
 - **残留风险**：`2.95.11` 为 EOL 线，不再有安全补丁承诺；未来升级需经 `v3.29.0` 中转、跨两个大版本，且 v2 期间累积的 trace 不会自动上行（升级时应显式选择丢弃）；`clickhouse_data` 卷删除后，回退 v3 的数据面依据一并消失（用户已接受）；**MinIO 上游已存档，`cgr.dev/chainguard/minio` 是第三方加固重建，长期需另立议题换 S3 实现**。
-- **未验证项**：dev 内存余量、prod 侧无运行验证、prod 机器能否直连 `cgr.dev`（该 registry 不被国内加速器代理）。
+- **未验证项**：prod 侧无运行验证（无环境，见 design D9#5）；prod 机器能否直连 `cgr.dev`（该 registry 不被国内加速器代理）。**dev 内存余量已实测**（tasks 6.6：199 MiB / 512 MiB）。
 - **不动**：`src/`、`tests/`、`pyproject.toml`。

@@ -55,7 +55,7 @@
 - **v2.95.11 属 EOL 线，不再有安全补丁承诺**。缓解：端口仅绑回环，不对外暴露，不承载公网流量
 - **升级锁**：未来升 v3/v4 须经 `v3.29.0` 中转、跨两个大版本；且**v2 期间累积的 trace 不会自动上行**（官方 v2→v3 是后台 PG→ClickHouse 搬运）→ 明确接受"升级时丢弃历史 trace"
 - **回滚成本高**：切回 v3 需重新引入 ClickHouse/worker/S3 并重建库，实际是"重新部署 v3"。且 `clickhouse_data` 卷已按要求删除，**回退的数据面依据一并消失**（用户明确接受）→ 风险控制靠"独立分支 + 验证通过前不合入"
-- **`latest` 浮动 tag**：`cgr.dev/chainguard/minio` 只发布 `latest` / `latest-dev`，**无版本 tag**，无法按 tag 锁定（实测 `latest` 已在漂移：`sha256:a3c85091…` ≠ 本机 37 小时前拉取的 `sha256:a74b2956…`）。按 digest 锁定会静默冻结 Chainguard 的持续 CVE 重建，而本项目没有 bump 例行 → **保持 `latest`**，接受可复现性弱
+- **minio 镜像按 index 摘要锁定，代价是不再自动获得 CVE 重建**：`cgr.dev/chainguard/minio` 只发布 `latest` / `latest-dev`，**无版本 tag**（实测 1000 个 tag 中非签名 tag 仅此两个），因此"锁版本"只能锁 digest。**dev 与 prod 同锁 index 摘要** `sha256:a3c85091…`（index 含 amd64/arm64；**不锁平台摘要**，否则另一架构拉取会失败）。收益：可复现，且"dev 验过的 = prod 跑的"成立。代价：`latest` 原本会自动流入 Chainguard 的持续 CVE 重建，锁死后**须按 CVE 公告人工 bump**（步骤见复查条件⑥）
 - **prod 侧未运行验证**：prod 从未部署过 v3，本变更对 `docker-compose.prod.yml` 只做静态校验（`config` + 与 dev 同构对照）
 
 **不解决的问题**（明确列出，避免后人误以为本 ADR 管了它）：
@@ -71,4 +71,6 @@
 2. **Langfuse 首次被真正接入请求路径**（prompt 远端读取开启，或 tracing 接线）→ 重新评估本降级决策（这是选项 C 与先前调研的核心争点所在，届时它可能成立）
 3. **接线 tracing 的那次变更必须一并落地 trace 保留/清理机制**（承接上文"不解决的问题"）
 4. `src/config/settings.py:305` 的 `LANGFUSE_HOST` 陈旧默认值（`http://langfuse:3000`，仓库内无此服务名）另行清理 —— 本次未碰以维持 `src/` 零改动边界
-5. **`cgr.dev/chainguard/minio` 不可长期依赖** → MinIO 上游 2026.09 已删 Docker 镜像且仓库存档，该镜像为第三方加固重建。需另立议题替换 S3 实现（Garage / RustFS / VersityGW / SeaweedFS 等）；真部署前须先在 prod 机器验证可直连 `cgr.dev`（该 registry 不被国内加速器代理）
+5. **`cgr.dev/chainguard/minio` 不可长期依赖** → MinIO 上游 2026.09 已删 Docker 镜像且仓库存档，该镜像为第三方加固重建。需另立议题替换 S3 实现（Garage / RustFS / VersityGW / SeaweedFS 等）
+6. **minio 的 digest 需要人工 bump（这是锁定带来的例行义务）** → 当前锁 `sha256:a3c85091…`；Chainguard 的 CVE 重建**不会自动流入**。须定期、或见其 CVE 公告时更新，步骤：① 取 `latest` 的新 index 摘要 → ② `docker pull cgr.dev/chainguard/minio@<新摘要>` 验证可拉（**含目标架构**）→ ③ 改两份 compose → ④ 更新本条 ADR 与本文件记录的摘要 → ⑤ 重启后确认 `documents` 桶与原始上传文件可读
+   另：`cgr.dev` 不被国内加速器代理，是直连，**首次 prod 部署前必须先试一次 pull**

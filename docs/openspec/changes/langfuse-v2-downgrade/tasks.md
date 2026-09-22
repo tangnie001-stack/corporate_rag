@@ -10,7 +10,7 @@
 ## 2. dev compose 改造（`docker-compose.yml`）
 
 - [x] 2.1 `langfuse-web` 镜像 `langfuse/langfuse:3` → **`langfuse/langfuse:2.95.11`**（`:155`）
-- [x] 2.2 **锚点随之取消**（原计划"迁到 web"不可实现）：worker 删除后 `langfuse-web` 成为**唯一**消费者，而 YAML 不允许同一服务既定义 `&anchor` 又引用 `*anchor`（`environment` 的 `<<:` 自引用同样非法）→ 把 `&langfuse-env` / `&langfuse-depends` 的内容**直接内联**进 `langfuse-web`，不再保留锚点
+- [x] 2.2 **锚点取消（改为内联）**：worker 删除后 `langfuse-web` 成为**唯一**消费者；同一 mapping 内既定义 `&anchor` 又写 `<<: *anchor` 属**自引用、非法**（实测 `compose config` 报 `exceeds maximum node visit limit`）→ 把 `&langfuse-env` / `&langfuse-depends` 的内容**直接内联**进 `langfuse-web`。**注**：原计划写"迁到 web，否则 compose 校验失败"**立论过强** —— 顶层 `x-langfuse-env: &langfuse-env` + 服务内 `<<: *langfuse-env` 实测解析正常；单消费者下内联更简（少一层间接、语义不变）。该偏离已在 design D3 记明
 - [x] 2.3 删除 `langfuse-worker` 服务（`:110-152`）
 - [x] 2.4 `langfuse-web` 环境变量精简：删除 `CLICKHOUSE_*`（`:129-132`）、`REDIS_*`（`:133-135`）、`LANGFUSE_S3_*`（`:136-149`）、`LANGFUSE_ENABLE_BACKGROUND_MIGRATIONS`（`:167`）；保留 `DATABASE_URL`/`NEXTAUTH_URL`/`SALT`/`ENCRYPTION_KEY`/`LANGFUSE_INIT_*`
 - [x] 2.5 `langfuse-web.depends_on` 只保留 `postgres: { condition: service_healthy }`
@@ -21,7 +21,7 @@
 - [x] 2.10 minio 启动命令去掉 `mkdir -p /data/langfuse`（v2 不再用 S3 事件存储；minio 本身与应用的 `documents` bucket 保留）
 - [x] 2.11 `langfuse-web` 环境**新增** `HOSTNAME: "0.0.0.0"`（v2 默认绑回环，不设则 `app` 无法经 `langfuse-web:3000` 访问）
 - [x] 2.12 `langfuse-web` 环境**新增** `LANGFUSE_INIT_PROJECT_ID` / `LANGFUSE_INIT_PROJECT_PUBLIC_KEY` / `LANGFUSE_INIT_PROJECT_SECRET_KEY`（值取自 `.env`）——使库重建后**现有 API Key 继续有效**；**注意官方 gotcha：这些值不要加双引号**
-- [x] 2.13 **无法按 tag 锁定 → 保持隐式 `latest`**（用户 2026-09-22 决定）：实测该 registry 的非签名 tag **只有 `latest` / `latest-dev`**，没有任何版本 tag；且 `latest` 已在漂移（此刻 index 摘要 `sha256:a3c85091…` ≠ 本机 37 小时前拉取的 `sha256:a74b2956…`）。按 digest 锁定会静默冻结 Chainguard 的持续 CVE 重建、而本项目没有 bump 例行 → 保持 `latest`，理由与代价记入 ADR（7.1）
+- [x] 2.13 **无法按 tag 锁定 → 改按 index 摘要锁定**（用户 2026-09-22 复议后决定「B：dev+prod 同锁」）：实测该 registry 的非签名 tag **只有 `latest` / `latest-dev`**（1000 个 tag 中其余全是 cosign 的 `.sig`/`.att`），没有任何版本 tag；`latest` 已在漂移（index 摘要 `sha256:a3c85091…` ≠ 本机早先拉取的 `sha256:a74b2956…`）。故锁 `cgr.dev/chainguard/minio@sha256:a3c85091…`（**index 摘要**，含 amd64/arm64；**不用平台摘要**，否则另一架构拉取失败）。代价：不再自动获得 Chainguard 的 CVE 重建，须人工 bump（步骤见 ADR-0011 复查条件⑥）
 
 ## 3. prod compose 改造（`docker-compose.prod.yml`）
 
@@ -36,7 +36,7 @@
 - [x] 3.9 minio 启动命令去掉 `mkdir -p /data/langfuse`（与 dev 同步）
 - [x] 3.10 `langfuse-web` 环境**新增** `HOSTNAME: "0.0.0.0"`（同 2.11）
 - [x] 3.11 `langfuse-web` 环境**新增** `LANGFUSE_INIT_PROJECT_ID` / `LANGFUSE_INIT_PROJECT_PUBLIC_KEY` / `LANGFUSE_INIT_PROJECT_SECRET_KEY`（同 2.12，值不要加双引号）
-- [x] 3.12 **既有缺陷顺带修复**：`docker-compose.prod.yml:88` 的 `minio/minio:latest` **已被上游删除镜像**（实测 404，MinIO 2026.09 删镜像、仓库已存档）→ 改为 `cgr.dev/chainguard/minio`（与 dev 一致）；**不锁版本**，理由同 2.13
+- [x] 3.12 **既有缺陷顺带修复**：`docker-compose.prod.yml:88` 的 `minio/minio:latest` **已被上游删除镜像**（实测 404，MinIO 2026.09 删镜像、仓库已存档）→ 改为 `cgr.dev/chainguard/minio`（与 dev 一致）并**按同一 index 摘要锁定**，见 2.13
 
 ## 4. env 与 deploy 件
 
@@ -71,7 +71,8 @@
 - [x] 6.9 **端到端写入冒烟**（证明后端真的"可用"而非只是进程起来了）：用现有 `LangfuseTracer` **裸发一条 trace**（不经应用路径、不改 `src/`），在 UI 的 Traces 里确认可见，随后丢弃。**脚本要点**：容器内 `python -c` 显式 `current_trace_id.set(<uuid>)`——`start_trace`/`end_trace` 都读该 ContextVar，不设会各读 `None` 而产出**两条** trace；结束前 `flush`，否则批次事件可能暂不可见。**实测已写入 `trace_smoke_1790014782`（`name=v2_smoke_verify`、`output="smoke ok"`），在 langfuse 库 `traces` 表中可查** —— 证明 v2 后端的写入链路端到端可用，而不只是"进程起来了"
 - [x] 6.10 **凭据连续性验证**：确认 UI 里的 project 仍持有 `.env` 中那对 `pk-lf-…`/`sk-lf-…`（即 `LANGFUSE_INIT_PROJECT_*` 生效，无需重签 key）
 - [x] 6.11 **prod 静态验收**（prod 从未部署，无运行环境）：`docker compose -f docker-compose.prod.yml config` 通过，且与 dev 逐项同构对照（镜像 tag、env 差异项、端口、无 `profiles:`）。**前置**：prod compose 用 `${MINIO_ROOT_USER:?}` 等必填插值，而 `.env` 只有 `MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY`（实测当前直接跑 `config` 即 exit 1）→ 须用独立 `--env-file` 或临时环境提供缺失的 prod-only 变量，再执行校验
-- [x] 6.12 **镜像可拉取性验证**：`docker pull langfuse/langfuse:2.95.11` 成功（已实测可拉）；`docker pull cgr.dev/chainguard/minio:<锁定 tag>` 成功（cgr.dev 不被加速器代理，是直连，需确认 prod 机器可达）
+- [x] 6.12 **镜像可拉取性验证**：`docker pull langfuse/langfuse:2.95.11` 成功（实测 41s）；`cgr.dev/chainguard/minio` 可拉 —— 该 registry **无版本 tag**，故按 **index 摘要**锁定（见 2.13），拉取时须验证**目标架构**存在。`cgr.dev` 不被加速器代理、是直连，**prod 机器可达性待真部署前实测**。
+  **实测**：dev 已重建到该摘要 —— 容器 `ImageID` / `Config.Image` 均为 `sha256:a3c85091…`（容器内 minio 由 `RELEASE.2026-06-04` 变为 `RELEASE.2026-09-21`）；重建前后 `documents` 桶均为 **`8.0MiB / 34 objects`** 且应用健康正常 → **数据面无损**，"dev 验过的 = prod 跑的"成立
 
 ## 7. 文档与 ADR
 

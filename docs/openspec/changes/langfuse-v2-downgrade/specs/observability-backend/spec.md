@@ -39,6 +39,8 @@ Langfuse SHALL 复用应用所在的同一 PostgreSQL 实例的独立 database�
 
 `langfuse-web` SHALL 声明显式 `mem_limit`：dev 为 `512m`（并带 `mem_reservation: 256m`），prod 为 `2g`。dev 取值须相对**实测空载占用**留有可测余量（v2 首次启动后实测约 199 MiB，即 `256m` 上限下的 78%，余量不足）。
 
+> **实施后修订（记例外，非静默删除）**：本 requirement 获批时末尾还有一条 `- **AND** 两者的取值不因移除 ClickHouse 而上调`。实施中实测 `256m` 下空载即占 78%、余量不足，故把 dev 上调为 `512m` —— 这是对那条禁令的**显式例外**，而非把它删掉不提。例外成立的依据：本次上调的净效应仍是宿主内存占用**下降**（同时移除 clickhouse 与 worker 两个容器，其 dev 上限合计 512m），且 `mem_limit` 是硬上限、不预占。
+
 #### Scenario: 内存上限为确定值
 
 - **WHEN** 检查 `docker-compose.yml` 与 `docker-compose.prod.yml` 中 `langfuse-web` 的服务定义
@@ -78,7 +80,10 @@ Langfuse database 重建后，`.env` 中的 `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SE
 
 #### Scenario: 缺 PROJECT_ID 则凭据失效（负例）
 
-- **WHEN** 仅配置 `LANGFUSE_INIT_PROJECT_PUBLIC_KEY` / `LANGFUSE_INIT_PROJECT_SECRET_KEY` 而缺 `LANGFUSE_INIT_PROJECT_ID`
+> **前提**：**空库首次启动**（既有 project 时，缺 `PROJECT_ID` 不会使已存在的 key 失效）。
+> **依据**：上游 `initialize.ts` 的嵌套判断；**未做运行期复现** —— 复现需移除播种键并重启，与正例互斥。
+
+- **WHEN** 在空库上首次启动，仅配置 `LANGFUSE_INIT_PROJECT_PUBLIC_KEY` / `LANGFUSE_INIT_PROJECT_SECRET_KEY` 而缺 `LANGFUSE_INIT_PROJECT_ID`
 - **THEN** project 与 key 均不被创建，`.env` 中的 key 失效
 
 ### Requirement: 退役资源不遗留

@@ -74,9 +74,11 @@ graph LR
 
 **关键判断：MinIO 不是 Langfuse 专属**——应用通过 `src/infra/db/file_store.py` 用它存文档（`MINIO_DOC_BUCKET`）。Redis 是应用会话锁/流式状态的载体。PostgreSQL 是应用库。**只有 ClickHouse 与 worker 是纯 Langfuse v3 组件。**
 
-### D3：compose 锚点从 worker 迁到 web
+### D3：compose 锚点随 worker 删除而取消（改为内联）
 
-`&langfuse-env` 与 `&langfuse-depends` 目前定义在 `langfuse-worker` 上（dev `:117`/`:124`，prod `:117`/`:123`），由 `langfuse-web` 用 `*langfuse-depends` / `<<: *langfuse-env` 引用。删除 worker 后锚点会悬空，**必须先把定义搬到 `langfuse-web`**，否则 compose 校验失败。删 worker 后 `depends_on` 只留 `postgres(service_healthy)`。
+`&langfuse-env` 与 `&langfuse-depends` 原本定义在 `langfuse-worker` 上（dev `:117`/`:124`，prod `:117`/`:123`），由 `langfuse-web` 用 `*langfuse-depends` / `<<: *langfuse-env` 引用。**删除 worker 后 `langfuse-web` 成为唯一消费者**，而 YAML 不允许同一 mapping 内既定义 `&anchor` 又 `<<: *anchor` 自引用（实测 `compose config` 报 `exceeds maximum node visit limit`）→ 把两者的内容**直接内联**进 `langfuse-web`，不再保留锚点。删 worker 后 `depends_on` 只留 `postgres(service_healthy)`。
+
+> **实施偏离（已记明）**：原计划写的是"把锚点定义**迁到** `langfuse-web`，否则 compose 校验失败"。严格说**迁移可行**（把锚点提到顶层 `x-langfuse-env: &langfuse-env` 再在服务内 `<<: *langfuse-env`，实测解析正常），所以"否则校验失败"的立论过强。**单消费者下内联更简**（少一层间接、语义不变），故采用内联。
 
 ### D4：旧库直接 drop 重建
 
@@ -143,12 +145,12 @@ Langfuse 的 Data Retention 在自托管下属**企业版功能**；OSS v2 的�
 - **[库重建时误伤应用数据]** → 缓解：只对单个 database 执行 DROP/CREATE；沿用 compose 头部对 `down -v`/`volume prune` 的禁令；操作前确认 `postgres_data` 卷不被触碰。
 - **[v2 与本仓兼容性未实测]** → 缓解：SDK v2 与服务端 v2 为官方 Full 组合、HTTP prompt 端点存在于 v2 线（均有依据）；仍以实测为准（tasks 含验证步骤）。
 - **[回滚成本高]** 切回 v3 需重新引入 CH/worker/S3，且库要重建成 v3 schema —— 实际是"重新部署 v3"，不是回滚 → 缓解：改动在独立分支，验证通过前不合入。
-- **[dev 默认启用后测试机内存余量]** → 缓解：v2 仅一个 web 容器（256m）且复用已有 PG；移除 ClickHouse 后净减两个容器。
+- **[dev 默认启用后测试机内存余量]** → 缓解：v2 仅一个 web 容器，且复用已有 PG；移除 ClickHouse 后净减两个容器，宿主侧总量仍下降。**dev `mem_limit` 由 `256m` 上调为 `512m`**（实测空载约 199 MiB，即 256m 下的 78%，余量不足 —— 原值是从旧 compose 抄来的未测量值，提案闸门未抓出，属计划侧缺陷）。
 - **[先前调研明确"不建议上 v2.95.12"]** 调研（`docs/tmp/deep-research-langfuse-postgres-only.md` §9.4）主张"不建议为了只用 PG 而新上 EOL 的 v2"，优先"去掉 Langfuse / Phoenix / MLflow"。本变更**有据地推翻它**：Langfuse **不在请求路径上**——`LANGFUSE_ENABLE=false` + 本地兜底使 prompt 不依赖它，tracing 未接线且其唯一消费点 `rag/stream.py:stream_answer` 无任何调用方；因此"把 EOL 服务放进关键路径"这一核心反对意见在当前用法下不成立。→ **复查触发点**：Langfuse 首次被真正接入请求路径（prompt 远端读取开启，或 tracing 接线）时，重新评估本决策。
 - **[v2 默认绑回环，跨容器不可达]** 已确认 v2 的 `HOSTNAME` 默认 `localhost`（即绑回环）→ `app` 无法经 `langfuse-web:3000` 访问，且失败是静默的（走本地兜底）。→ 缓解：**显式设 `HOSTNAME=0.0.0.0`**（D9#2；tasks 2.11 / 3.10），并以 task 6.8 验证。
 - **[删除退役卷涉及非 Langfuse 资源]** D9#4 把清理范围扩到 `chroma_data` / `chroma_onnx_cache` / `financial_qa_app_logs`（更早的 Chroma 退役遗留），且用户要求不留回退。→ 缓解：删除前逐个用 `docker ps -a --filter volume=<name>` 复核 `LINKS=0`；**明确排除** `corporate_rag_app_logs`（正被 app 挂载）与 `postgres_data` / `redis_data` / `minio_data`。
 - **[镜像拉取依赖本机加速器配置]** Hub 镜像的拉取命脉是 `/etc/docker/daemon.json` 的 3 个加速器（`auth.docker.io` 与 `registry-1.docker.io` 直连不通）。→ 缓解：把该前置写入部署文档；`xuanyuan.me` 实测 403，不要列入依赖。
-- **[MinIO 上游已死，prod 曾引用已删镜像]** `minio/minio` 已 404；即便改用 `cgr.dev/chainguard/minio`，那也是**第三方加固重建**，且该 registry **不被国内加速器代理**、prod 机器能否直连未知。→ 缓解：prod 镜像本次修成 `cgr.dev/chainguard/minio` 并**锁版本**；把"换 S3 实现"登记为独立议题（task 7.5⑤）。
+- **[MinIO 上游已死，prod 曾引用已删镜像]** `minio/minio` 已 404；即便改用 `cgr.dev/chainguard/minio`，那也是**第三方加固重建**，且该 registry **不被国内加速器代理**、prod 机器能否直连未知。→ 缓解：prod 镜像本次修成 `cgr.dev/chainguard/minio`，并**按 index 摘要锁定**（dev 同锁同一摘要，见 ADR-0011；该 registry 无版本 tag，只能锁 digest）；把"换 S3 实现"登记为独立议题（task 7.5⑤）。
 
 ## Migration Plan
 

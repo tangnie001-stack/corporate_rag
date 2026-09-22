@@ -56,7 +56,7 @@ services:
       - app-network
 
   minio:
-    image: cgr.dev/chainguard/minio
+    image: cgr.dev/chainguard/minio@sha256:a3c850913c8b3713abeca590afb93744f5bbcd34a60850648d9a553801d1faad
     mem_limit: 256m
     mem_reservation: 128m
     container_name: corporate-rag-minio

@@ -61,7 +61,7 @@ services:
       - app-network
 
   minio:
-    image: cgr.dev/chainguard/minio
+    image: cgr.dev/chainguard/minio@sha256:a3c850913c8b3713abeca590afb93744f5bbcd34a60850648d9a553801d1faad
     mem_limit: 2g
     container_name: corporate-rag-minio
     restart: always
@@ -92,7 +92,8 @@ services:
     restart: always
     depends_on:
       postgres: { condition: service_healthy }
-    # 生产典型场景：通过反代暴露，或直接暴露供团队使用
+    # 仅回环：当前需经 SSH 隧道访问。若日后要供团队访问，需在 deploy/nginx/nginx.conf
+    # 加 langfuse 的 server block，并把此处改为对外绑定
     ports:
       - "127.0.0.1:3000:3000"
     environment:
