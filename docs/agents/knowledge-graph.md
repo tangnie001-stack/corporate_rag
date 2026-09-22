@@ -59,7 +59,8 @@ git diff --name-only -- . ; git diff --cached --name-only -- . ; git ls-files --
 ## 已知坑
 
 1. **收敛范围必须写进 `.ua/.understandignore`，不能只靠 CLI 参数**。`--exclude` 只对当次生效，增量更新只读该文件；否则文件集变化会让动作升级为 `FULL_UPDATE`（重建全图）。
-2. **增量重析会整块替换该文件的边**，而合并的符号校验**只验节点/符号、不验边** ⇒ 语义边可能被静默丢弃。凡增量结果里出现"某文件 0 边"，先核对该文件原先有无语义边，再决定是否需要重派 file-analyzer 按源码重新推导。
+2. **增量重析会丢失该文件的语义边，且是静默的**。根因有两层：① `incremental-symbol-baseline.json` **只携带节点/符号、不携带边**，所以被重析的 agent 无从知道该文件原有那些边，只能靠源码重新推导；② 合并用新批次**整块替换**该文件的边，而校验**只验节点/符号、不验边**（实测丢了 4 条边仍报 `Symbol validation passed`）。
+   ⇒ **做法**：派 file-analyzer 做增量时，显式把该文件**现有的边逐条列出**（从 `knowledge-graph.json` 里 `grep` 该节点 id），并要求"按当前源码逐条重推、仍成立的保留"；合并后务必对比候选与已保存图谱的边集合，确认 `丢失=0`。
 3. **只含生成物（`.ua/*`）的提交不推进基线**，`meta.gitCommitHash` 会落后于 HEAD，直到下一次含真实代码变更的提交才自愈。建议图谱产出与下一次真实代码变更一起提交；`--amend` 无用（amend 改哈希）。
 4. **重跑 `merge-batch-graphs.py` 会回退 assemble-reviewer 的修复**（其修复是就地改写批次产物）。重跑合并就要一并重跑 assemble-reviewer。
 

@@ -29,8 +29,8 @@
       "Docker Compose"
     ],
     "description": "金融文档智能问答助手（MVP）：基于 RAG 的财报问答系统，支持上传 PDF/DOCX/TXT 格式的财报文档，用户用自然语言提问后，由大语言模型基于检索到的文档片段生成带引用来源的回答。 注意：本项目源文件超过 100 个，建议将分析范围收窄到某个子目录以加快扫描速度。",
-    "analyzedAt": "2026-09-22T14:52:41.704Z",
-    "gitCommitHash": "ce898ef65bdf55ae3dc0284a66b7376875fadfc5"
+    "analyzedAt": "2026-09-22T16:16:11.930Z",
+    "gitCommitHash": "4ab60dfe9a8a6f84646939e8fcde136cd9dc4649"
   },
   "nodes": [
     {
@@ -25084,21 +25084,6 @@
       "complexity": "simple"
     },
     {
-      "id": "document:CLAUDE.md",
-      "type": "document",
-      "name": "CLAUDE.md",
-      "filePath": "CLAUDE.md",
-      "summary": "项目级 AI 协作指令：界定 Claude 的资深 Python 后端/AI 架构师角色与五条工作原则，给出技术栈、「一事一档」文档归属表、代码目录结构与层间调用规则、常用命令、TraceID 与日志简则、验证清单、代码注释标准和参考项目。",
-      "tags": [
-        "documentation",
-        "项目指令",
-        "架构规约",
-        "entry-point"
-      ],
-      "complexity": "moderate",
-      "languageNotes": "采用「常驻一句话规则 + 归属文档指针」两级组织，规则正文集中在 docs/agents/*，避免重复复制。"
-    },
-    {
       "id": "document:README.md",
       "type": "document",
       "name": "README.md",
@@ -29488,6 +29473,21 @@
       ],
       "complexity": "moderate",
       "languageNotes": "本地 hook 复用项目 .venv 而非隔离环境（否则缺 langchain 等包会误报 missing import）；doc/ADR 检查用 always_run + pass_filenames:false 做全量扫描（腐化多发生在「改了代码但没改文档」这类与文件无关的改动上）。check-added-large-files 的 exclude 用 ^\\.ua/ 锚定仓库根，只豁免顶层 .ua/，嵌套同名目录仍受默认 500KB 保护；ruff hook 的 rev 与 pyproject.toml 的 ruff==0.16.2 锁同一版本，避免两版本默认规则集差异导致误报。"
+    },
+    {
+      "id": "document:CLAUDE.md",
+      "type": "document",
+      "name": "CLAUDE.md",
+      "filePath": "CLAUDE.md",
+      "summary": "项目级 AI 协作指令：界定 Claude 的资深 Python 后端/AI 架构师角色与五条工作原则，给出技术栈、「一事一档」文档归属表（新增指向 docs/agents/knowledge-graph.md 的知识图谱查询规则行）、代码目录结构与层间调用规则、常用命令、TraceID 与日志简则、验证清单、代码注释标准和参考项目。",
+      "tags": [
+        "documentation",
+        "项目指令",
+        "架构规约",
+        "entry-point"
+      ],
+      "complexity": "moderate",
+      "languageNotes": "采用「常驻一句话规则 + 归属文档指针」两级组织，规则正文集中在 docs/agents/*，避免重复复制；本次变更在「文档组织」表中新增 docs/agents/knowledge-graph.md 一行（知识图谱查询配方 / 新鲜度判据 / 自动更新行为 / 已知坑），该文档路径被 .understandignore 排除，故不产生图内边。"
     }
   ],
   "edges": [
@@ -50303,48 +50303,6 @@
       "weight": 0.5
     },
     {
-      "source": "document:AGENTS.md",
-      "target": "document:CLAUDE.md",
-      "type": "documents",
-      "direction": "forward",
-      "weight": 0.5
-    },
-    {
-      "source": "document:CLAUDE.md",
-      "target": "file:src/main.py",
-      "type": "documents",
-      "direction": "forward",
-      "weight": 0.5
-    },
-    {
-      "source": "document:CLAUDE.md",
-      "target": "file:src/models.py",
-      "type": "documents",
-      "direction": "forward",
-      "weight": 0.5
-    },
-    {
-      "source": "document:CLAUDE.md",
-      "target": "file:src/config/settings.py",
-      "type": "documents",
-      "direction": "forward",
-      "weight": 0.5
-    },
-    {
-      "source": "document:CLAUDE.md",
-      "target": "file:deploy/nginx/nginx.conf",
-      "type": "documents",
-      "direction": "forward",
-      "weight": 0.5
-    },
-    {
-      "source": "document:CLAUDE.md",
-      "target": "service:docker-compose.yml",
-      "type": "documents",
-      "direction": "forward",
-      "weight": 0.5
-    },
-    {
       "source": "document:README.md",
       "target": "file:src/main.py",
       "type": "documents",
@@ -52502,6 +52460,48 @@
       "type": "triggers",
       "direction": "forward",
       "weight": 0.6
+    },
+    {
+      "source": "document:AGENTS.md",
+      "target": "document:CLAUDE.md",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:CLAUDE.md",
+      "target": "file:src/main.py",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:CLAUDE.md",
+      "target": "file:src/models.py",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:CLAUDE.md",
+      "target": "file:src/config/settings.py",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:CLAUDE.md",
+      "target": "file:deploy/nginx/nginx.conf",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:CLAUDE.md",
+      "target": "service:docker-compose.yml",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
     }
   ],
   "layers": [
