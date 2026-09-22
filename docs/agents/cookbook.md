@@ -285,6 +285,25 @@
 - **`core.symlinks=false`（本仓 git 配置）下，被跟踪的 symlink 会被写成普通文件**：`openspec` 在 git 里是 symlink（mode `120000`），检出到该环境却成了内容为 `docs/openspec` 的**文本文件** → `openspec` CLI 报 `Unknown item '<name>'`。修法：`rm openspec && ln -s docs/openspec openspec`（git 仍判定未变）。**任何新建的 worktree / clone 都会中这一条**。
 - **`.gitignore` 的 `/data/` 忽略不了同名 symlink**：尾斜杠只匹配目录，而 symlink 不是目录 → 把 `data` 整体 symlink 过去会以未跟踪文件冒出来，有被 `git add .` 带进提交的风险。改法：建**真目录** `data/`，只在里面 symlink 具体子目录（`data/ragas`）。
 
+## 可观测（Langfuse）
+
+### 本地打开 Langfuse UI（地址 / 账号 / 受限范围）
+
+**场景**：需要看 Langfuse 界面时 —— 确认播种出的 project 与 API Key、验证后端是否正常、将来查 trace。
+
+**步骤**：
+1. 确认容器在跑：`docker compose ps langfuse-web`。dev 下它由 `.env` 的 `COMPOSE_PROFILES=langfuse` 默认启用（profile 门保留，置空该变量即关闭）。
+2. 浏览器打开 **`http://localhost:3000`**，用 `.env` 的 `LANGFUSE_INIT_USER_EMAIL` / `LANGFUSE_INIT_USER_PASSWORD` 登录（本机当前值为 `admin@corprag.local` / `admin123456`）。
+
+**验证**：`curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000/` 返回 `200`。
+
+**注意事项**：
+- **只绑回环**：端口映射是 `127.0.0.1:3000->3000`，所以用非回环地址连不上是**预期**（`curl http://<LAN-IP>:3000/` → `000`）——这是 ADR-0011「暴露面收敛」的决定，不是故障。**不要**为了远程访问去改端口绑定；从 Windows 浏览器访问优先靠 WSL2 的 localhost 转发，不通则用 `ssh -L 3000:127.0.0.1:3000 <host>`。
+- 对照：前端 Nginx 绑的是 `0.0.0.0:80`（局域网可达），两者暴露面不同是有意为之。
+- **UI 里看不到数据是正常的**：应用默认不调用 Langfuse（`.env` 的 `LANGFUSE_ENABLE=false`，prompt 走本地兜底），且 tracing 尚未接线。要验证写入链路是否通，用 `LangfuseTracer` 裸发一条 trace，再查 `langfuse` 库的 `traces` 表。
+- 账号由 `.env` 的 `LANGFUSE_INIT_USER_*` 在**首次启动时播种**，故无需手工注册。**`LANGFUSE_INIT_PROJECT_ID` 是播种开关**：缺它则 project 与 key 都不建，而且**不报错**（静默失效）。库重建后正是靠它 + `_PUBLIC_KEY`/`_SECRET_KEY` 保住原有那对 key，因此这三个键必须与 `.env` 的 `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY` 是**同一对**。
+- 库重建后若 UI 里 project 名称是播种值（`Corporate RAG`）而非你后来改的名字，说明重建生效了，属预期。
+
 ## 分区命名
 
 按操作主题分区，例如：`## 评估`、`## 分块`、`## 部署`。新主题首次出现时新建分区。
