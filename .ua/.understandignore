@@ -81,3 +81,12 @@
 # Swift
 # **/Tests/**/*.swift
 # **/Specs/**/*.swift
+
+# --- 本项目实际采用的收敛范围 ---
+# 与首轮 /understand --exclude "docs/*,.venv/*,logs/*,data/*,.git/*" 一致；
+# 必须写在这里而不是只靠 CLI 参数：--exclude 只对当次生效，增量更新只读本文件，
+# 否则首次自动更新会因文件集从 419 涨到 1054 而升级为 FULL_UPDATE（重建全图）。
+docs/
+.venv/
+logs/
+data/
