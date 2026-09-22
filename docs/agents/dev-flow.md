@@ -67,6 +67,20 @@
 
 一句话判据：**SDD 要的是"能切成独立任务、能在 worktree 里评审、结尾能 merge"的代码工作**；三者缺一就别选它。（各执行器内部机制见其 `SKILL.md`。）
 
+### 执行器不代跑闸门
+
+⑥ 的两道闸门**不由执行器代跑**，而三个执行器内嵌它们的程度不同（实测各 `SKILL.md`）：
+
+| 执行器 | `verification-before-completion` | `requesting-code-review` | `finishing-a-development-branch` |
+|--------|:---:|:---:|:---:|
+| `subagent-driven-development` | ❌ | ✅（Final Review 派 reviewer） | ✅（Finish） |
+| `executing-plans` | ❌ | ❌ | ✅ |
+| `openspec-apply-change` | ❌ | ❌ | ❌（改为提示 `archive`） |
+
+`verification-before-completion` **三个执行器均未提及** —— 它是**贯穿式纪律**（任何"成功"声明前当场取证），不是某一步，不适用"被执行器带到"。
+
+**含义**：走 **openspec 线**时两道闸门**必须显式触发**（skill 不会替你跑）；走 SDD 时 code review 与收尾会被自动带到，但验证纪律仍须自己守。**换执行器换的是主 skill，不换闸门** —— 「两道闸门必走」是 ⑥ 的阶段级约束。
+
 ## 两条硬规则
 
 1. **审提案与审 diff 是两件事**：④ 用 `architecture-review`（写文件**之前**），⑥ 用 `requesting-code-review`（改完**之后**）。二者不可互替。
