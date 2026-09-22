@@ -369,3 +369,30 @@ def test_domain_output_skeleton_stays_in_base_not_output():
     assert output_templates, "output 段应至少有一个模板"
     for template in output_templates:
         assert "关键指标与趋势" not in template.content
+
+
+def test_finance_base_covers_unit_scope_and_inference_split():
+    """财务领域方法须含"单位/口径"与"观测 vs 推断"两条（data_analyst 口径）。
+
+    依据 prompt-mapping §1 的依据表：agent_system_prompt.yaml:76（data_analyst）
+    的"检查单位/时间范围/口径、区分观测与推断"。
+    """
+    messages = build_system_prompt(
+        persona="",
+        kb_bound=True,
+        has_skills=False,
+        tool_names=_BASE_TOOLS,
+        kb_domain="finance",
+    )
+    content = str(messages[0].content)
+    assert "单位" in content
+    assert "指标口径" in content
+    assert "区分材料陈述与自己的推断" in content
+
+
+def test_finance_base_keeps_pointer_sentence_last():
+    """优先级指针句必须是 base 段的收尾句（spec「base 含运行时优先级指针」）。"""
+    from src.config.prompts import loader
+
+    text = loader.get_content("base-financial").rstrip("\n")
+    assert text.endswith("用户要求的其他来源与交付物属于任务本身。")
