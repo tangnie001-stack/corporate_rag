@@ -4,8 +4,8 @@
 
 | 执行档 | 载体 | 范围 | 完成标准（DoD） |
 |---|---|---|---|
-| **实施计划（唯一一份）** | `docs/superpowers/plans/2026-09-22-langfuse-trace-wiring.md`（⑤ 环节产出） | 接线与开关（**服务侧 + CLI 侧两处**，D5）→ 测试重定（D14）→ 清理 CLI 的**代码** → 死代码清理 → 文档同步（含 `glossary.md` / `code-map.md` / `cookbook.md:315`）→ **新 ADR（D16）+ ADR-0011 复评记录（D10）**。全部是普通代码任务 | ① 测试重定先完成，**"pytest 全绿"才可被当作证据**（D14）；② **关闭态**：一轮对话行为与接线前逐项一致（SSE 事件序列、落库、引用）；③ **开启态**：dev 真实一轮对话的**四方 id 对齐**（响应头 / 日志行 / SSE done / Langfuse UI），主 agent generation 带 model / input / output / usage / 首 token 时间；④ **两件未实测的事已验**：取消一轮生成后 trace 仍在；后端停掉后对话仍正常完成（故障隔离）；⑤ 清理 CLI 的 `--dry-run` 正确、保留期内零改动、无超期数据时重复执行安全；⑥ 已删符号全仓零引用（含 tests），质量门禁全绿（`pytest` / `ruff` / `pyright` / `check_docs` / `check_adr`）；⑦ 文档不再出现"UI 里看不到数据是正常的"这类叙述，`glossary.md` 的「`trace 保留窗口`」条目已改写，D16 新 ADR 与 D10 复评记录可被独立读到 |
-| **计划外的部署动作** | 不落计划文件（部署与数据操作，按 ⑥「不适合走 SDD 的情形」执行） | ① **级联删除小规模验证**（不通过则不许接定时任务，D15）；② 清理任务**定时接入**（宿主 cron / systemd timer / compose 定时服务，开工前定）；③ **prod 侧落地**：同步 prod 机上的 `.env`（改模板 ≠ 改到机器）+ 确认 `langfuse-web` 在跑（D17） | ① 删少量超期 trace 后 `observations` / `scores` / `dataset_run_items` **无孤儿**，UI 正常（D15）；② 定时任务在 dev 与 prod 各自可运行；③ 真删只影响早于保留期的 trace，保留期内零改动；④ prod 侧"后端不在跑"的情形已按故障隔离验收过。**注意**：这四条仍是本 change 的 DoD（ADR-0011 复查条件③要求清理与接线一并落地），不可挪到 change 之外 |
+| **实施计划（唯一一份）** | `docs/superpowers/plans/2026-09-22-langfuse-trace-wiring.md`（⑤ 环节产出） | 测试重定（D14）→ 接线与开关（**服务侧 + CLI 侧两处**，D5；CLI 另需 flush，D6）→ **入站 trace id 校验**（D3）→ generation 字段回填（**`capture_input=False`**，D8）→ 清理 CLI 的**代码**（含运行期护栏，D7）→ 死代码清理 + **`token-usage-model` delta**（D9）→ 文档同步（含 `glossary.md` / `code-map.md` / `cookbook.md:315`）→ **新 ADR（D16）+ ADR-0011 复评记录（D10）**。全部是普通代码任务 | ① 测试重定先完成，**"pytest 全绿"才可被当作证据**（D14，须在全局关停 tracing 的前提下取得）；② **关闭态**：一轮对话行为与接线前逐项一致（SSE 事件序列、落库、引用）；③ **开启态**：dev 真实一轮对话的**四方 id 对齐**（响应头 / 日志行 / SSE done / Langfuse UI），主 agent generation 带 model / input / output / usage / 首 token 时间；④ **四条未验证断言已逐条验**：取消后 trace 仍在 / id 字符集被服务端接受 / 辅助 LLM 与 fork 自动嵌套 / 级联与 UI；⑤ **非法 `X-Trace-ID` 被拒且四方仍对齐**（D3）；⑥ **trace 输入里不含内部运行时对象**（`ctx` / `manager` / `graph` / 事件队列，D8）；⑦ 清理 CLI 的 `--dry-run`、保留期**下界拒绝**、**未确认不删**、**超上限中止**、**审计输出**、保留期内零改动、重复执行安全（D7）；⑧ CLI 的 trace 在 `--gate` / 异常退出路径下**也能落库**（D6 的 flush）；⑨ 已删符号全仓零引用（含 tests），**`token-usage-model` 主规格已由 delta 修正**，质量门禁全绿（`pytest` / `ruff` / `pyright` / `check_docs` / `check_adr`）；⑩ 文档不再出现"UI 里看不到数据是正常的"这类叙述，`glossary.md` 的「`trace 保留窗口`」条目已改写，D16 新 ADR 与 D10 复评记录可被独立读到 |
+| **计划外的部署动作** | 不落计划文件（部署与数据操作，按 ⑥「不适合走 SDD 的情形」执行） | ① **级联删除小规模验证**（不通过则不许接定时任务，D15）；② 清理任务**定时接入**（宿主 cron / systemd timer / compose 定时服务，开工前定）；③ **prod 侧落地**：同步 prod 机上的 `.env`（改模板 ≠ 改到机器）+ 确认 `langfuse-web` 在跑（D17）；④ **dev 侧开关的启用与回滚**是手工动作且 `.env` 跨工作区共享（D18）—— 先记录原值再改 | ① 删少量超期 trace 后 `observations` / `scores` / `dataset_run_items` **无孤儿**，UI 正常（D15）；若 API 不级联，清理 CLI 已按 D15 的约定显式删附属记录；② 定时任务在 dev 与 prod 各自可运行；③ 真删只影响早于保留期的 trace，保留期内零改动；④ prod 侧"后端不在跑"的情形已按故障隔离验收过；⑤ `.env` 原值已记录、改动可精确回退。**注意**：这五条仍是本 change 的 DoD（ADR-0011 复查条件③要求清理与接线一并落地），不可挪到 change 之外 |
 
 ## §1 为什么是「一份计划 + 一个计划外动作」
 
@@ -45,10 +45,12 @@
 |---|---|---|
 | 1 | 辅助 LLM（`rewrite_query` / `parse_temporal` / 分类）与 fork 子代理的 generation 是否纳入 | 实施计划首轮实跑后：若"缺这两块就看不明白一轮对话"则提前；否则维持 Non-Goal |
 | 2 | 清理的定时落地形态（宿主 cron / systemd timer / compose 定时服务），dev 与 prod 是否同方案 | 计划外部署动作开工前 |
-| 3 | `estimate_usage` 的最终宿主（并入 `src/infra/llm/token_usage.py` 或保留 `rag/stream.py` 作薄模块） | 死代码清理那一步开工前 |
+| 3 | ~~`estimate_usage` 的最终宿主~~ → **已定：并入 `src/infra/llm/token_usage.py`，删除 `rag/stream.py`**（D9） | 已收敛 |
 | 4 | ADR-0011 复查条件②的复评记录形式（写在 change design 内 vs 追加新 ADR）—— 注意与 D16 的新 ADR **是两件事**，不要合并 | 实施计划收尾前 |
 | 5 | `LANGFUSE_ENABLE` 是否拆成两个开关（prompt 远端 / trace 产出）—— 见 D13，当前不拆 | 日后把 prompt 名单加回 `PROMPT_NAMES` 时**必须**重评 |
 | 6 | `turn-provenance-observability/tasks.md` 4.1 的行号 `:158-167` 是错的（应为 `:173-200`） | 该 change 重启时顺手改正（属对方工件，本变更不擅自改） |
+| 7 | 入站 trace id 白名单的**最终字符集** —— 须与服务端实际接受的字符集对齐后再钉死（客户端层结论不足） | 接线实跑时（DoD 第④条的第 2 项一起做） |
+| 8 | 是否给 `src/cli/check_docs.py` 补 `docs/openspec/specs/` 的扫描范围 —— 主规格的失效引用目前**没有机械闸门** | **不在本变更内**，登记为遗留 |
 
 ## §5 定稿期勘误（本轮审阅发现，已就地修正）
 
@@ -58,3 +60,24 @@
 | `tests/infra/llm/test_langfuse.py` 的 skip 条件 | 视为"条件需随开关语义重定" | **是必须修的雷**：代码默认 `true` + 无 `.env` → 不 skip → 真发网络 | 升格为 design D14 + DoD 第①条 |
 | retention 删除 | 视为"能力已确认可用" | 只确认了**方法存在**，未验证级联与孤儿 | 升格为 design D15 + 计划外动作第①步（**前置**） |
 | spec 的取消 scenario | 已写入但未实测 | **纸面断言** | 保留契约，列为首个验证项（Risks 首条 + DoD 第④条） |
+
+## §6 独立架构评审的处置（2026-09-22，结论 `Request changes` → 已全部收进本 change）
+
+由**未参与撰写本提案**的独立只读子代理完成（已核对：评审期间工作区零写入）。无 Blocker，7 条 Important，全部采纳。
+
+| # | 发现 | 处置 |
+|---|---|---|
+| F1 | 不可信请求头直接成为 Langfuse trace 主键（`X-Trace-ID` 零校验；`client.trace(id=)` 是 upsert → 非法的静默丢失、任意的可注入、泄露的可被覆盖） | → **D3 补入站白名单**（不合法则服务端重生成，四方对齐不受影响）+ spec 新 scenario + 实现落 `src/middleware/trace_id.py` |
+| F2 | 破坏性清理缺运行期护栏（保留期无下界、无确认、无上限、无审计、无环境约束） | → **D7 补五条护栏** + spec 四条新 scenario + DoD 第⑦条 |
+| F3 | 测试默认会连真实后端，**范围远大于一个文件**（`settings.py` 内置真实 key 默认值 → 所有走 `_run_generation` / `agent_model` 的既有用例都发网络） | → **D14 扩为全局 autouse fixture**，"pytest 全绿"须在关停前提下取得；DoD 第①条 |
+| F4 | 删 `stream_answer` 与主规格 `token-usage-model:15` 冲突，「Modified Capabilities: 无」不准确 | → proposal 登记 **Modified Capabilities** + 新增 delta `specs/token-usage-model/spec.md`；顺手修同文件已陈旧的 `generate_node`；D9 补同步说明 |
+| F5 | `@observe` 默认 `capture_input=True` 会把 `ctx / manager / graph / 事件队列` 等内部对象与整段历史写进 trace，且 `update_current_observation(input=)` 只覆盖最终值、救不了 | → **D8 改写**（原"数据面无新增暴露"的论证被推翻）+ spec 新 requirement 措辞 + 新 scenario；DoD 第⑥条 |
+| F6 | CLI 没有 flush 收口（`--gate` 提前 `sys.exit` / 异常退出 → trace 时有时无，DoD 项不可靠） | → **D6 扩到 CLI 侧**（含 `finally` / `atexit`）；DoD 第⑧条 |
+| F7 | worktree 的 `.env` 是指向主工作区的软链 → 在该处"改 `.env`"会改到另一个会话正在用的配置；且 `.env` 不受版本控制，启用不可复现、回滚不完整 | → **新增 D18** + 计划外动作第④条（先记录原值再改）+ Migration 分开写"代码交付"与"手工动作" |
+
+**评审顺带纠正的三处事实错**（已改）：
+- `proposal.md:3` 原写「Langfuse 已经跑在 **dev/prod**」与 D17 / ADR-0011「prod 从未部署、未运行验证」矛盾 → 改为"dev 已跑、prod 未验证"
+- 「`_run_generation` **全仓**唯一调用点」措辞不严（测试有约 20 处直调）→ 改为"**生产侧**唯一调用点"
+- `.env.example` 的 `LANGFUSE_ENABLE` 为空串（等效 false），只改 `.env.template` 会造成三处漂移 → 配置项扩为三个文件一致化
+
+**评审的「未能验证」清单** → 未验证断言由 1 条扩为 4 条（写进 design 的 Risks），并在 DoD 第④条逐条验。另新增两条 open question：入站白名单的最终字符集（须与服务端实际接受的字符集对齐）、是否给 `check_docs` 补 openspec specs 的扫描范围（**不在本变更内**，登记为遗留）。

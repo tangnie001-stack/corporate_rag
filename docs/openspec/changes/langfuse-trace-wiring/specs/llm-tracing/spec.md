@@ -4,6 +4,8 @@
 
 应用层 SHALL 为每一轮对话生成恰好一个 Langfuse trace。该 trace 的 id SHALL 与请求级 `trace_id`（形如 `trace_<uuid>`，由 `X-Trace-ID` 请求头或查询参数决定，缺失时自动生成）**逐字相同**，使日志行、响应头、SSE `done` 事件与 Langfuse 四方指向同一条链路。
 
+**入站 id 是不可信输入**：`X-Trace-ID` / `?trace_id` 完全由客户端提供。系统 SHALL 在使用前做字符集与长度白名单校验；**不合法时 SHALL 丢弃该值并服务端重新生成**（与缺失时的行为一致）。重新生成的值成为四方一致的那个 id —— 即"对齐"要求不受影响，被拒的只是调用方指定的那个字符串。
+
 #### Scenario: 正常一轮对话的 id 对齐
 
 - **WHEN** 客户端发起一轮对话并收到完整 SSE 响应
@@ -14,6 +16,12 @@
 
 - **WHEN** 从日志中取得某个 `trace_<uuid>`
 - **THEN** 可在 Langfuse 中按该 id 检索到对应的 trace
+
+#### Scenario: 非法入站 id 被拒且不污染观测库
+
+- **WHEN** 请求携带含非法字符或超长的 `X-Trace-ID`（例如带空格、斜杠、或超长串）
+- **THEN** 该值 SHALL NOT 成为 Langfuse 的 trace id（既不写入也不报错失败）
+- **AND** 服务端重新生成一个合法 id，响应的 `X-Trace-ID`、日志行与该 trace 的 id 三者仍一致
 
 #### Scenario: CLI 评测链路的 id 对齐
 
@@ -86,6 +94,14 @@ trace 根 SHALL 覆盖"准备就绪后的整轮生成"（图事件循环的完�
 
 系统 SHALL 提供可重复执行的 trace 清理入口，删除创建时间早于保留期的 trace 及其附属数据，**且 SHALL NOT 留下孤儿附属记录**（越期 trace 对应的 observation / score 等一并消失）。保留期 SHALL 为 30 天，且 SHALL 可通过命令行参数覆盖。清理 SHALL 支持仅预览不删除（dry-run）。
 
+**这是不可逆的破坏性操作，入口 SHALL 带运行期护栏**：
+
+- 保留期参数 SHALL 有**下界**（低于下界直接拒绝，不得执行删除）
+- 非 dry-run 的执行 SHALL 要求**显式确认**（不接受默认即删）
+- SHALL 有**单次删除数量上限**，超限即中止并提示分批
+- SHALL 输出**审计**信息（将被删 trace 的数量与标识写入输出或日志，事后可复盘删了什么）
+- SHALL 约束**执行环境**（仅允许在指定机器 / 环境变量下执行，防误连另一环境的库）
+
 #### Scenario: 超期数据被删除
 
 - **WHEN** 执行清理且 Langfuse 中存在创建时间早于保留期的 trace
@@ -112,14 +128,42 @@ trace 根 SHALL 覆盖"准备就绪后的整轮生成"（图事件循环的完�
 - **WHEN** 在无超期数据的情况下再次执行清理
 - **THEN** 命令正常结束且不报错
 
+#### Scenario: 越界的保留期被拒绝
+
+- **WHEN** 传入低于下界的保留期（例如 0 天或负数）
+- **THEN** 命令**拒绝执行并报错退出**，不删除任何 trace
+
+#### Scenario: 未确认时不删除
+
+- **WHEN** 以非 dry-run 执行但未提供显式确认
+- **THEN** 命令不执行删除（提示需要确认），退出码非 0
+
+#### Scenario: 超过单次上限时中止
+
+- **WHEN** 待删 trace 数量超过单次上限
+- **THEN** 命令中止且**不做任何删除**，提示需要分批执行
+
+#### Scenario: 删除留有审计
+
+- **WHEN** 一次真删执行完成
+- **THEN** 输出或日志中可找到本次被删 trace 的数量与标识
+
 ### Requirement: trace 内容记录范围
 
-trace 的 generation SHALL 记录 LLM 的输入与输出原文（含 system prompt、检索上下文与回答），使链路可完整回放。该行为 SHALL 在文档中作为已知事实登记，并说明 trace 的保留期可能与对话记录的保留期不一致。
+trace 的 generation SHALL 记录该次 LLM 调用的输入与输出原文（含 system prompt、检索上下文与回答），使链路可完整回放。记录输入 SHALL 采用**显式写入**方式；被装饰函数的**内部运行时对象 SHALL NOT 进入 trace**（如请求上下文对象、流式管理器、编译后的图、事件与队列等）。
+
+该行为 SHALL 在文档中作为已知事实登记，并说明 trace 的保留期可能与对话记录的保留期不一致。
 
 #### Scenario: 原文可回放
 
 - **WHEN** 在 Langfuse 中打开某条 trace 的主 agent generation
 - **THEN** 可看到该次调用的完整输入消息与输出文本
+
+#### Scenario: 内部运行时对象不进 trace
+
+- **WHEN** 检查某条 trace 的根 observation 或其 generation 的输入字段
+- **THEN** 其中只包含该记的业务输入（查询文本 / 消息列表等）
+- **AND** 不出现请求上下文对象、流式管理器、编译后的图、事件或队列等内部对象的序列化结果
 
 #### Scenario: 记录范围有明确文档说明
 
