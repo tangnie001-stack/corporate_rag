@@ -1,16 +1,21 @@
 # langfuse-trace-wiring —— 执行档索引
 
-> **本文件不承载任务清单。** 本变更跨子系统且需分阶段交付，按 `docs/agents/dev-flow.md` 的 ⑤ 环节规定（`writing-plans` 与 openspec tasks **二选一，不可都写**），执行档按阶段拆为实施计划，落在 `docs/superpowers/plans/`：
->
-> | 阶段 | 计划文件（⑤ 环节产出） | 范围 | 完成标准（DoD） |
-> |---|---|---|---|
-> | **P1** | `docs/superpowers/plans/2026-09-22-langfuse-trace-wiring-p1-instrument.md` | 接线与开关：死代码与新模块的分界 → `_run_generation` 落 trace 根（trace id 走 `langfuse_observation_id`）→ `agent_model` 闭包加 generation 与字段回填 → `eval_ragas` 每问根 → `main.py` lifespan 接开关与关停 flush → **开关保持 `false`** 先验证零行为变化 → 再置 `true` 实跑核对 | ① 关闭态：一轮对话的行为与接线前逐项一致（SSE 事件序列、落库、引用），`pytest` 全绿；② 开启态：dev 真实一轮对话的**四方 id 对齐**（响应头 / 日志行 / SSE done / Langfuse UI），主 agent generation 带 model / input / output / usage / 首 token 时间 |
-> | **P2** | `docs/superpowers/plans/2026-09-22-langfuse-trace-wiring-p2-retention.md` | trace 保留与清理：清理 CLI（保留期参数、`--dry-run`、幂等）+ 定时落地形态选定与接入 | ① `--dry-run` 输出待删条数与标识且不删任何数据；② 真删只影响早于保留期的 trace，保留期内零改动；③ 无超期数据时重复执行正常结束；④ 定时落地方案在 dev 与 prod 各自可运行 |
-> | **P3** | `docs/superpowers/plans/2026-09-22-langfuse-trace-wiring-p3-cleanup-and-docs.md` | 收尾：删 `LangfuseTracer` / `@traced` / `current_tracer` / `stream_answer` / 三个 `TRACE_*` 事件（`log_events.py` 与 `log_event_specs.py` 两处同名）→ `estimate_usage` 迁宿主并同步两个 import 点 → 文档同步（`api_contract` / `logging-rules` / `data-flow` / `cookbook` / `src/cli/README.md`）→ 落 ADR-0011 复查条件②的复评记录 | ① 全仓对已删符号零引用（含 tests）；② 质量门禁全绿（`pytest` / `ruff` / `pyright` / `check_docs` / `check_adr`）；③ 文档不再出现"UI 里看不到数据是正常的"这类已过时叙述；④ 复评记录可被独立读到 |
->
-> **分阶段的原因**：① 跨 ≥2 个独立模块（`src/infra/llm` + `src/services` + `src/agents/graph` + `src/cli` + `src/main.py` + `src/core`）；② 硬顺序依赖（清理与删死代码必须在接线验证之后，否则删掉的正是唯一可用的观测依据）；③ **各阶段验收标准不同**（P1 看 trace 是否产出与 id 是否对齐，P2 看清理是否幂等且不误删，P3 看是否还有残留引用与文档一致性）；④ 与在途 change `turn-provenance-observability` 重叠，已声明**本变更先行**。
+> **本文件不承载任务清单。** 按 `docs/agents/dev-flow.md` 的 ⑤ 环节规定（`writing-plans` 与 openspec tasks **二选一，不可都写**），本 change 的执行档由**一份实施计划**承载，另有一个**计划外的部署动作**。
 
-## §1 前置事实（本变更定稿时的实测结论）
+| 执行档 | 载体 | 范围 | 完成标准（DoD） |
+|---|---|---|---|
+| **实施计划（唯一一份）** | `docs/superpowers/plans/2026-09-22-langfuse-trace-wiring.md`（⑤ 环节产出） | 接线与开关 → 清理 CLI 的**代码** → 死代码清理 → 文档同步与 ADR-0011 复评记录。全部是普通代码任务 | ① **关闭态**：一轮对话的行为与接线前逐项一致（SSE 事件序列、落库、引用），`pytest` 全绿；② **开启态**：dev 真实一轮对话的**四方 id 对齐**（响应头 / 日志行 / SSE done / Langfuse UI），主 agent generation 带 model / input / output / usage / 首 token 时间；③ 清理 CLI 的 `--dry-run` 正确、保留期内零改动、无超期数据时重复执行安全；④ 已删符号全仓零引用（含 tests），质量门禁全绿（`pytest` / `ruff` / `pyright` / `check_docs` / `check_adr`）；⑤ 文档不再出现"UI 里看不到数据是正常的"这类已过时叙述，复评记录可被独立读到 |
+| **计划外的部署动作** | 不落计划文件（部署与数据操作，按 ⑥「不适合走 SDD 的情形」执行） | ① 清理任务**定时接入**（宿主 cron / systemd timer / compose 定时服务，开工前定）；② **真删验证**（对运行中的 langfuse 库实际删除超期 trace） | ① 定时任务在 dev 与 prod 各自可运行；② 真删只影响早于保留期的 trace，保留期内零改动。**注意**：这两条仍是本 change 的 DoD（ADR-0011 复查条件③要求清理与接线一并落地），不可挪到 change 之外 |
+
+## §1 为什么是「一份计划 + 一个计划外动作」
+
+判据取自 `dev-flow.md`「判据二」的**收紧版** —— 只在「存在可独立结束的边界」时拆，满足任一：**A 执行器不同 / B 可独立交付 / C 体量或接手**。
+
+- **接线 / 开关 / 清理 CLI 代码 / 死代码 / 文档** 五段全是普通代码任务，**执行器相同**（走 SDD），彼此的先后在单份计划内用前置行即可表达 → 命中「**不构成拆分理由**」里的**硬顺序依赖**与**任务证据形式不同**两条 → **不拆**。
+- **只有「定时接入 + 真删验证」命中判据 A**：它是纯部署/配置 + 含破坏性删数据，落在 ⑥「不适合走 SDD 的情形」第 1、2 条 —— worktree 隔离与结尾 merge 对「改宿主 cron + 真删 langfuse 库数据」没有意义，且破坏性操作是 SDD 的停止条件 → **必须换执行器，故单独成档**（此处即"计划外动作"）。
+- **反例对照**：`langfuse-v2-downgrade`（60 任务不拆）是纯部署/配置，按 ⑥ 本就不该走 SDD；`postgres-storage-consolidation`（拆 P1–P4）含数据搬迁、存量全量重写与**删卷**，四段里三段命中 A → 拆得对。
+
+## §2 前置事实（本变更定稿时的实测结论）
 
 均为本次在 `corporate-rag-app` 容器内、打真实 v2 服务端所得，探针数据已按 id 精确清理（库回到 `traces=1 / observations=0`）。
 
@@ -26,7 +31,7 @@
 | `estimate_usage` 消费者 | 两个活消费者（`agent_node.py:215`、`fork_stream.py:327`），第三个在待删的 `stream_answer` 内 | D9（连带项） |
 | Langfuse 库现状 | dev 库 11 MB、`traces=1`（降级验证时的 smoke）、`observations=0` | D7（保留期取值） |
 
-## §2 实施期修正记录
+## §3 实施期修正记录
 
 执行阶段若发现与设计不符的事实，逐条登记于此（格式：日期 / 落点 / 事实 / 处置 / 是否回改 `design.md`）。**不要直接改写 `design.md` 的既有决策叙述** —— 决策的修订走正常流程并在此留索引。
 
@@ -34,11 +39,11 @@
 |---|---|---|---|---|
 | — | — | — | — | — |
 
-## §3 未决项（承接 `design.md` 的 Open Questions）
+## §4 未决项（承接 `design.md` 的 Open Questions）
 
 | # | 未决项 | 何时必须收敛 |
 |---|---|---|
-| 1 | 辅助 LLM（`rewrite_query` / `parse_temporal` / 分类）与 fork 子代理的 generation 是否纳入 | P1 实跑后：若"缺这两块就看不明白一轮对话"则提前；否则维持 Non-Goal |
-| 2 | 清理的定时落地形态（宿主 cron / systemd timer / compose 定时服务），dev 与 prod 是否同方案 | P2 开工前 |
-| 3 | `estimate_usage` 的最终宿主（并入 `src/infra/llm/token_usage.py` 或保留 `rag/stream.py` 作薄模块） | P3 开工前 |
-| 4 | ADR-0011 复查条件②的复评记录形式（写在 change design 内 vs 追加新 ADR） | P3 收尾前 |
+| 1 | 辅助 LLM（`rewrite_query` / `parse_temporal` / 分类）与 fork 子代理的 generation 是否纳入 | 实施计划首轮实跑后：若"缺这两块就看不明白一轮对话"则提前；否则维持 Non-Goal |
+| 2 | 清理的定时落地形态（宿主 cron / systemd timer / compose 定时服务），dev 与 prod 是否同方案 | 计划外部署动作开工前 |
+| 3 | `estimate_usage` 的最终宿主（并入 `src/infra/llm/token_usage.py` 或保留 `rag/stream.py` 作薄模块） | 死代码清理那一步开工前 |
+| 4 | ADR-0011 复查条件②的复评记录形式（写在 change design 内 vs 追加新 ADR） | 实施计划收尾前 |

@@ -264,14 +264,15 @@
 **步骤**：
 1. 建 worktree —— **必须配新分支**（`dev-wsl` 已被主工作区签出，git 拒绝同一分支签出两处）：
    ```bash
-   git worktree add -b <新分支> /mnt/d/code/demo/AIAgent/corporate_rag-<名字> dev-wsl
+   git worktree add -b feat/<change 名> /mnt/d/code/demo/AIAgent/corporate_rag-<名字> dev-wsl
    ```
-   目录由 git 创建，**不能预先存在**。
-2. 若要在该 worktree 里跑 compose / pytest，把 gitignore 的运行时文件带过去（至少 `.env`，否则 compose 的 `${POSTGRES_PASSWORD:?}` 直接报错）：
+   目录由 git 创建，**不能预先存在**。分支名用 **`feat/<change 名>`** —— 与历史特性分支 `feat/langfuse-v2`、`feat/intent-routing-upgrade` 一致（`dev-wsl` / `dev-adv-rag` / `dev-wsl-chroma` 是长期环境分支，不属这一类）。
+2. 若要在该 worktree 里跑 compose / pytest，把 gitignore 的运行时文件带过去：
    ```bash
-   ln -s /mnt/d/code/demo/AIAgent/corporate_rag/.env \
-         /mnt/d/code/demo/AIAgent/corporate_rag-<名字>/.env
+   ln -s /mnt/d/code/demo/AIAgent/corporate_rag/.env  /mnt/d/code/demo/AIAgent/corporate_rag-<名字>/.env
+   ln -s /mnt/d/code/demo/AIAgent/corporate_rag/.venv /mnt/d/code/demo/AIAgent/corporate_rag-<名字>/.venv
    ```
+   两个都不能少：缺 `.env` → compose 的 `${POSTGRES_PASSWORD:?}` 直接报错；缺 `.venv` → 跑不了 `pytest` / `ruff` / `pyright` / `pre-commit`（等于只能在里面空编辑）。
 3. 在新目录里正常编辑、提交。
 
 **验证**：`git worktree list` 列出两个工作区；新目录内 `git branch --show-current` 是新分支。
@@ -287,7 +288,14 @@
 - 用完 `git worktree remove <路径>`；分支有未合并提交时需 `--force`
 - 前提：override 的挂载须是相对路径（本仓 2026-09-21 已改），否则 worktree 里改代码静默失效（见 defensive-patterns.md「部署」）
 - **`core.symlinks=false`（本仓 git 配置）下，被跟踪的 symlink 会被写成普通文件**：`openspec` 在 git 里是 symlink（mode `120000`），检出到该环境却成了内容为 `docs/openspec` 的**文本文件** → `openspec` CLI 报 `Unknown item '<name>'`。修法：`rm openspec && ln -s docs/openspec openspec`（git 仍判定未变）。**任何新建的 worktree / clone 都会中这一条**。
-- **`.gitignore` 的 `/data/` 忽略不了同名 symlink**：尾斜杠只匹配目录，而 symlink 不是目录 → 把 `data` 整体 symlink 过去会以未跟踪文件冒出来，有被 `git add .` 带进提交的风险。改法：建**真目录** `data/`，只在里面 symlink 具体子目录（`data/ragas`）。
+- **`.gitignore` 里带尾斜杠的条目忽略不了同名 symlink**：`/data/` 与 `.venv/` 都是这个形态，尾斜杠只匹配**目录**，而 symlink 不是目录 → 整体 symlink 过去会以**未跟踪文件**冒出来（`?? .venv`），有被 `git add .` 带进提交的风险。
+  - `data`：改法是建**真目录** `data/`，只在里面 symlink 具体子目录（`data/ragas`）。
+  - `.venv`：不能改成真目录（要的就是同一个 venv）。**做法是提交时坚持显式 pathspec、永不 `git add .`**；或把 `.gitignore` 的 `.venv/` 改为不带斜杠的 `.venv`（仓库级改动，需单独决定）。
+- **venv 里有指向主工作区的 editable 安装**：`.venv` 内存在 `__editable__.corporate_rag-0.1.0.pth` → `<主工作区>/src`。于是「从 worktree 跑测试」是否真用到 worktree 的代码，**取决于 cwd** ——
+  - 从 worktree **根目录**跑（`-c` / 脚本会把 cwd 放进 `sys.path[0]`）→ 解析到 **worktree 的 `src`** ✅
+  - **cwd 一旦变化 → 静默回落主工作区的 `src`**，测试跑的是别人的代码而你不自知（无报错、结果看似正常）
+  - 一行验证：`.venv/bin/python -c "import src; print(src.__file__)"`，应打印 **worktree** 路径
+  - 要确定性时显式加 `PYTHONPATH=<worktree 根>`
 
 ## 可观测（Langfuse）
 
