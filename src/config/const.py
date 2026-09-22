@@ -313,6 +313,17 @@ class SSEInteractionTexts:
     CONFIRM_QUESTION_TMPL: str = "执行该技能需要你确认：{question}"
 
 
+# ── Langfuse trace 保留期清理（purge_langfuse_traces CLI）──
+# 来源：langfuse-trace-wiring change（D7）；对运行中观测库的不可逆删除，
+# 下界/上限/武装变量集中在此，CLI 只负责护栏编排与审计输出
+PURGE_DEFAULT_RETENTION_DAYS: int = 30  # 默认保留期（天）
+# 保留期下界：低于它一律拒绝，防 `--retention-days 0` 删光运行库
+PURGE_MIN_RETENTION_DAYS: int = 1
+PURGE_MAX_DELETE_PER_RUN: int = 1000  # 单次删除上限：超过即中止且不删任何数据
+# 真删所需武装变量（防 dev 配置误连 prod 库）
+PURGE_ALLOW_ENV_VAR: str = "LANGFUSE_PURGE_ALLOW"
+
+
 # ── 来源权威分级（source-tier-labeling change）──
 # KB 内部文档固定档：resolve_source_tier 对 kind=kb 返回，不走域名解析
 SOURCE_TIER_KB: int = 0
