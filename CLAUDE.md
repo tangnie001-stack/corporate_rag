@@ -27,6 +27,7 @@ Python 3.11+ / FastAPI / ChromaDB / LangChain / DashScope / MySQL 8.0 / Redis 7 
 | docs/agents/prompt-ownership.md | prompt 段归属规则唯一归属：五段归属表 / 段数最小性判据 / 逐条条件判据表 / base-vs-sources 判别例 / 领域 base 与预设的定位差异 | 改段模板、加条件规则、判定某条文案该住哪段前 |
 | docs/agents/api_contract.md | 接口契约：参数语义、返回值格式、历史踩坑 | 改 API / 公共方法签名前；前端页面对接接口时 |
 | docs/agents/code-map.md | 代码结构唯一归属：顶层目录 / 后端 `src/` 分层与模块职责 / 前端 `deploy/nginx/html` 页面与 SSE 消费 / 常见改动落点速查 | **改动代码前定位文件时必读** |
+| docs/agents/knowledge-graph.md | 知识图谱（`.ua/knowledge-graph.json`）的查询配方 / 新鲜度判据 / 自动更新行为 / 已知坑 | **查代码关系、调用方、改动影响面前**（用 `/understand-chat` 或按 id grep + 1-hop 取子图，**勿整包读图**）；图谱疑似过期或需刷新时 |
 | docs/agents/data-flow.md | 数据流链路 | 排查问题、理解系统流程 |
 | docs/agents/glossary.md | 领域词汇表：核心标识符 / 响应信封 / RAG 流水线 / RAGAS 指标等规范术语 | 术语含义不确定、写文档或命名时查阅 |
 | docs/agents/chunking-issues.md | 分块问题排查与修复记录 | 遇到分块问题优先查阅 |
