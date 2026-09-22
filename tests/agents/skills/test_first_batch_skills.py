@@ -4,13 +4,13 @@ from pathlib import Path
 
 from src.agents.skills.loader import SkillLoader
 from src.agents.skills.models import SkillContext
-from src.config.const import DELEGATE_RESULT_LIMIT, INLINE_PROMPT_MAX_CHARS
+from src.config.const import INLINE_PROMPT_MAX_CHARS
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SKILLS_DIR = PROJECT_ROOT / "skills"
 
-# 当前 skill 集：两个 fork（长文领域内容走独立子代理上下文，不占主对话历史）
-FORK_SKILLS = ("finance-analyst", "financial-statement-analyzer")
+# 当前 skill 集：fork（长文领域内容走独立子代理上下文，不占主对话历史）
+FORK_SKILLS = ("financial-statement-analyzer",)
 
 
 def test_skill_files_present():
@@ -20,7 +20,7 @@ def test_skill_files_present():
 
 
 def test_loads_with_expected_context():
-    """两个 skill 均解析为 fork（材料由主 agent 预检索随 task 传入）。"""
+    """每个 fork skill 均解析为 fork（材料由主 agent 预检索随 task 传入）。"""
     records = {r.name: r for r in SkillLoader(SKILLS_DIR).load_all()}
     for name in FORK_SKILLS:
         assert records[name].context == SkillContext.FORK
@@ -52,19 +52,6 @@ def test_fork_prompt_must_not_mention_tool_names():
         body = records[name].fork_body or ""
         for tool_name in ("retrieve_kb", "search_web", "ask_user", "delegate_task"):
             assert tool_name not in body, f"{name} 正文不应出现工具名 {tool_name}"
-
-
-def test_finance_analyst_prompt_under_delegate_result_limit():
-    """简短任务型 fork skill 的正文控制在 DELEGATE_RESULT_LIMIT 规模内。
-
-    仅覆盖 `finance-analyst`：它是"短任务 + 主 agent 预检索材料"的形态，正文规模应
-    与材料同量级。`financial-statement-analyzer` 的正文是九步方法论（约 3K 字符），
-    规模由内容决定；DELEGATE_RESULT_LIMIT 约束的是**子代理结果回流**，不是子代理
-    输入，故不适用于它。
-    """
-    records = {r.name: r for r in SkillLoader(SKILLS_DIR).load_all()}
-    body = records["finance-analyst"].fork_body or ""
-    assert len(body) <= DELEGATE_RESULT_LIMIT
 
 
 def test_no_duplicate_of_system_rules():

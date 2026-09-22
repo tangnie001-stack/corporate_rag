@@ -31,8 +31,8 @@
 - **THEN** 该轮只产出一条 `turn_skill` 事件，`message` 按声明顺序列出全部名称（顿号分隔），而非逐条产出
 
 #### Scenario: fork 技能使用专门措辞
-- **WHEN** 用户以 `/finance-analyst 任务` 触发命中 fork 技能并由子代理执行
-- **THEN** 该轮产出 `stage=turn_skill`、`message="使用技能：/finance-analyst（子代理执行）"` 的事件（不称"加载"）
+- **WHEN** 用户以 `/financial-statement-analyzer 任务` 触发命中 fork 技能并由子代理执行
+- **THEN** 该轮产出 `stage=turn_skill`、`message="使用技能：/financial-statement-analyzer（子代理执行）"` 的事件（不称"加载"）
 
 #### Scenario: 命令失败不声明
 - **WHEN** 用户以未注册命令（如 `/ghost 任务`）开始一轮

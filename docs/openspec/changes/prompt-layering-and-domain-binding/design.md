@@ -191,7 +191,7 @@ P1 的契约测试要求遍历所有能力组合断言这两条都在，规则�
 | **正文**（`context: inline`） | 渲染后写成 `[[skill-injection]]` 前缀的隐藏 user 消息，落 Redis+MySQL、**跨轮持久**，主 agent 自行执行 | `agent_service.py:977-998`、`:1096-1117` |
 | **正文**（`context: fork`） | **不进主 agent 上下文**；作为子代理的 user message（`fork_body`），主 agent 只见 `delegate_task` 的返回文本 | `loader.py:142-146`、`executor.py:91+` |
 
-当前两个技能（`finance-analyst`、`financial-statement-analyzer`）均为 `context: fork`，且 `agents/finance-expert.md` 已去掉 `skills:` 预绑定 —— `_inject_skill_message` 的两个调用点（`/xxx` 且 context=inline、预设首轮预加载）**当前均不触发**，该通道实际处于闲置状态。
+当前技能 `financial-statement-analyzer` 为 `context: fork`，且 `agents/finance-expert.md` 已去掉 `skills:` 预绑定 —— `_inject_skill_message` 的两个调用点（`/xxx` 且 context=inline、预设首轮预加载）**当前均不触发**，该通道实际处于闲置状态。
 
 **本期不改**：改动任一通道都会影响 skill 的跨轮持久语义与既有测试，且与本变更目标（段归属）无关。
 

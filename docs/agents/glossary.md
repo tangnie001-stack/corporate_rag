@@ -131,7 +131,7 @@
 
 **关系**：agent 拿着 skill（说明书）调用 tool（工具）干活。skill 是静态文本，离开 agent 无意义；tool 是动作，skill 是方法。
 
-**关键坑：fork skill 会"长出"一个 agent**——`skills/finance-analyst/SKILL.md` 是 **skill**（静态文件），被执行时 `SkillExecutor` 以执行者人设作 system prompt、skill 正文（任务已注入）作初始 user message，经 `create_agent` 生成一个 **subagent**（执行体）。同一名字，文件是 skill、跑起来的是 agent；inline skill 不生成新 agent（正文注入主 agent）。
+**关键坑：fork skill 会"长出"一个 agent**——`skills/financial-statement-analyzer/SKILL.md` 是 **skill**（静态文件），被执行时 `SkillExecutor` 以执行者人设作 system prompt、skill 正文（任务已注入）作初始 user message，经 `create_agent` 生成一个 **subagent**（执行体）。同一名字，文件是 skill、跑起来的是 agent；inline skill 不生成新 agent（正文注入主 agent）。
 
 **参考项目辨析**：`github/agency-agents` 的 319 个 `.md` 是 **agent 人设定义**（frontmatter：name/description/color/emoji/vibe/tools），**不是 skill**；其 `scripts/convert.sh` 生成 SKILL.md 时只保留 `name` + `description`（标准最小集）。
 

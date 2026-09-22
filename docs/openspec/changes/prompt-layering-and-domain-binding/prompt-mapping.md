@@ -284,7 +284,7 @@
 | **正文**（`context: inline`） | 渲染后写成 `[[skill-injection]]` 隐藏 user 消息，落 Redis+MySQL、跨轮持久，主 agent 自行执行（`agent_service.py:977-998`、`:1096-1117`） | 模型按需 `read_file` 读 SKILL.md 全文（渐进披露） |
 | **正文**（`context: fork`） | **不进主 agent 上下文**；作为子代理的 user message（`fork_body`），主 agent 只见 `delegate_task` 的返回文本（`loader.py:142-146`、`executor.py:91+`） | 无对应形态 |
 
-**当前两个技能均为 `context: fork`**（`skills/finance-analyst/SKILL.md`、`skills/financial-statement-analyzer/SKILL.md`），且 `agents/finance-expert.md` 已去掉 `skills:` 预绑定 —— 因此 `_inject_skill_message` 的两个调用点（`/xxx` 且 context=inline、预设首轮预加载）**当前都不触发**，skill-injection 通道事实上闲置。
+**当前技能为 `context: fork`**（`skills/financial-statement-analyzer/SKILL.md`），且 `agents/finance-expert.md` 已去掉 `skills:` 预绑定 —— 因此 `_inject_skill_message` 的两个调用点（`/xxx` 且 context=inline、预设首轮预加载）**当前都不触发**，skill-injection 通道事实上闲置。
 
 | 项 | 我们本期 | WeKnora |
 |---|---|---|

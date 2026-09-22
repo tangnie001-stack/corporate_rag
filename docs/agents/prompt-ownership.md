@@ -92,5 +92,6 @@
 | `search_web` docstring 的"何时调用"（检索空/不相关才联网、KB 能答不调）与 `sources` 段的联网规则逐条重复 | `src/agents/tools/web_tools.py:43-45` vs `sources-kb-web-rules` | 记入本表为已知重复，另开 change |
 | `ask_user` docstring 的"何时调用"（缺关键实体且无法推断才问）与 `tools` 段的澄清规则逐条重复 | `src/agents/tools/ask_tools.py:66-67` vs `tools-ask-user` | 记入本表为已知重复，另开 change |
 | `delegate_task` 的 `description` 的"何时调用"（需领域专家能力才委派、轻量自答）与 `tools` 段的委派规则逐条重复 | `src/agents/skills/delegate_task.py:59-63` vs `tools-delegate` | 记入本表为已知重复，另开 change |
+| `finance-analyst` skill 正文 4 条与系统段逐条重复 | `skills/finance-analyst/SKILL.md`（已删）vs `runtime-contract` 的数据·指令边界 + `base-financial` 的"不得编造"/口径/输出结构 + `output-citation`·`output-delegate-citation` 的 `[n]` 规则 | **2026-09-22 已删除**：4 条全部在系统段有等价物、无独占内容，且与 fork skill `financial-statement-analyzer` 功能重叠（同删 `finance-qa` 的判据）。连带处置依赖它的测试 |
 
 > **2026-09-21 审计**：`retrieve_kb` / `search_web` / `ask_user` / `delegate_task` 四个工具的 description 已逐条比对 `sources` / `tools` 段，四条均含"何时调用"表述重复（上表四行）。本期只审计、不改文案（工具 docstring 文本改写属 `design.md` 的明确不做项）。

@@ -26,16 +26,3 @@ def test_repo_skills_all_load_and_are_named_ascii():
     assert len(records) == len(list((REPO_ROOT / "skills").glob("*/SKILL.md")))
     for record in records:
         assert record.name.isascii()
-
-
-def test_finance_analyst_is_methodology_not_persona():
-    """finance-analyst 已改写为方法论：正文不含"你是一名"式人设。"""
-    records = SkillLoader(REPO_ROOT / "skills").load_all()
-
-    record = next(r for r in records if r.name == "finance-analyst")
-    if record.fork_body is not None:
-        body = record.fork_body
-    else:
-        body = record.inline_prompt
-    assert body is not None
-    assert "你是一名" not in body
