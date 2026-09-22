@@ -1,5 +1,7 @@
 # Langfuse v3 vs v2 差异 & ClickHouse 最小内存评估
 
+> **状态：其路线已被 ADR-0011 取代（2026-09-22）。** 本文是决策前的**冻结分析**，数字与结论**不回写**。实际采纳的是「降至 v2 线」，但版本为 `langfuse/langfuse:2.95.11`（`2.95.12` 只有 GitHub release、**无 Docker tag**）；且**未采用**本文建议的「给 ClickHouse 去 Keeper / 设 `CLUSTER_ENABLED=false`」—— 那条建议的前提是仍用 v3，而现行决策已**整体移除 ClickHouse**。现行决策与代价见 `docs/adr/0011-langfuse-v2-downgrade.md`。
+
 > 适用对象：本项目 `corporate_rag` 的 Langfuse 接入（镜像 tag `:3`，全部服务在 `profiles: ["langfuse"]` 下）。
 > 参考对象：`../github/WeKnora`（同为 Langfuse v3 自托管）。
 > 来源标注：`【官】`= Langfuse / ClickHouse 官方文档、官方仓库、官方 Changelog/博客；`【项】`= 本项目源码/配置；`【二】`= 二手来源；`【推】`= 基于官方事实的推理。
