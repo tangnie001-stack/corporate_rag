@@ -29,8 +29,10 @@ The `total_tokens` field SHALL always be the sum of `prompt_tokens + completion_
 
 #### Scenario: total_tokens 恒为两项之和
 
-- **WHEN** 以任意 `prompt_tokens` / `completion_tokens` 构造或估算出一个 `TokenUsage` 实例
-- **THEN** `usage.total_tokens` SHALL 等于两者之和
+- **WHEN** 经由 `estimate_usage()` 或主 agent 推理点的 usage 映射得到一个 `TokenUsage` 实例
+- **THEN** `usage.total_tokens` SHALL 等于 `usage.prompt_tokens + usage.completion_tokens`
 - **AND** `usage.get("total", 0)` 这类字典取值写法 SHALL NOT 出现在代码中
 
-> 原场景以已不存在的 `generate_node` 为读取点。本变更另删除了两个 `total_tokens` 的消费者（`stream_answer` 内部、`LangfuseTracer.end_generation`），因此该不变量改为**直接断言 dataclass 属性**来验证，不再依赖某个特定调用点。
+> `TokenUsage` 是**普通 dataclass**、不做字段间推导（`total_tokens` 默认 `0`），所以该不变量由**构造点**保证：构造时必须显式传入与两项之和相等的 `total_tokens`。故本场景的断言对象是"**经由既有构造入口产出的实例**"，而不是"任意手工构造的实例" —— 后者可以为假且不代表任何真实路径。
+>
+> 原场景以已不存在的 `generate_node` 为读取点。本变更另删除了两个 `total_tokens` 的构造/消费点（`stream_answer` 内部、`LangfuseTracer.end_generation`），存留的构造入口见 `estimate_usage()`。
