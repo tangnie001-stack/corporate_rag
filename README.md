@@ -328,9 +328,6 @@ uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
 ### 运行测试
 pytest tests/ -v
 
-### 结构图谱
-codegraph init
-
 ### 工作流程
 大需求流程：explore → grill-me → opsx:propose → brainstorming → grill-me → writing-plans → subagents → playwright-cli
 
