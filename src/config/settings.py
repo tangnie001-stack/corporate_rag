@@ -293,17 +293,14 @@ MINIO_DOC_BUCKET: str = os.getenv("MINIO_DOC_BUCKET", "documents")
 AUTH_TOKEN_TTL: int = int(os.getenv("AUTH_TOKEN_TTL", "2592000"))
 
 # ====== Langfuse ======
-# LLM 可观测性平台配置，用于 trace 检索→重排序→生成的完整链路
-# 首次启动需手动在 Langfuse UI (http://localhost:3000) 创建 API Key
-LANGFUSE_SECRET_KEY: str = os.getenv(
-    "LANGFUSE_SECRET_KEY", "sk-lf-8665d453-271d-4ce2-9f3b-5b471dad5ce2"
-)
-LANGFUSE_PUBLIC_KEY: str = os.getenv(
-    "LANGFUSE_PUBLIC_KEY", "pk-lf-96995ff8-f6e4-4205-b02d-eba6e5ed94c8"
-)
-# 注意：Docker 内部使用容器名 langfuse:3000，宿主机访问用 localhost:3000
-LANGFUSE_HOST: str = os.getenv("LANGFUSE_HOST", "http://langfuse:3000")
-# 全局开关：false 时完全跳过 Langfuse 初始化
+# 自托管后端见 docs/adr/0011-langfuse-v2-downgrade.md。
+# **内置默认值刻意留空**：K8s/CI/新 clone 若没有 .env，应表现为"明确不可用"，
+# 而不是拿一个不存在的服务名与另一对 key 去连（那会静默失败、只留日志）。
+LANGFUSE_SECRET_KEY: str = os.getenv("LANGFUSE_SECRET_KEY", "")
+LANGFUSE_PUBLIC_KEY: str = os.getenv("LANGFUSE_PUBLIC_KEY", "")
+# 容器内地址为 compose 服务名 langfuse-web:3000；宿主机访问用 127.0.0.1:3000
+LANGFUSE_HOST: str = os.getenv("LANGFUSE_HOST", "http://langfuse-web:3000")
+# 全局开关：false 时完全不产出 trace（且不影响对话）
 LANGFUSE_ENABLE: bool = os.getenv("LANGFUSE_ENABLE", "true").lower() == "true"
 
 # ====== 分块质量评估 ======

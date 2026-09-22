@@ -10,39 +10,35 @@ import src.config.settings as config
 
 
 def test_langfuse_secret_key_defaults_to_empty():
-    """LANGFUSE_SECRET_KEY defaults to sk-lf-... (code default)."""
+    """LANGFUSE_SECRET_KEY 内置默认值为空串（code default，不假装有值）。"""
     assert hasattr(config, "LANGFUSE_SECRET_KEY")
     import src.config.settings as _s
 
     with patch("dotenv.load_dotenv"), patch.dict(os.environ):
         os.environ.pop("LANGFUSE_SECRET_KEY", None)
         reloaded = reload(_s)
-        assert (
-            reloaded.LANGFUSE_SECRET_KEY == "sk-lf-8665d453-271d-4ce2-9f3b-5b471dad5ce2"
-        )
+        assert reloaded.LANGFUSE_SECRET_KEY == ""
 
 
 def test_langfuse_public_key_defaults_to_empty():
-    """LANGFUSE_PUBLIC_KEY defaults to pk-lf-... (code default)."""
+    """LANGFUSE_PUBLIC_KEY 内置默认值为空串（code default，不假装有值）。"""
     assert hasattr(config, "LANGFUSE_PUBLIC_KEY")
     import src.config.settings as _s
 
     with patch("dotenv.load_dotenv"), patch.dict(os.environ):
         os.environ.pop("LANGFUSE_PUBLIC_KEY", None)
         reloaded = reload(_s)
-        assert (
-            reloaded.LANGFUSE_PUBLIC_KEY == "pk-lf-96995ff8-f6e4-4205-b02d-eba6e5ed94c8"
-        )
+        assert reloaded.LANGFUSE_PUBLIC_KEY == ""
 
 
 def test_langfuse_host_default():
-    """LANGFUSE_HOST defaults to http://langfuse:3000 (Docker internal)."""
+    """LANGFUSE_HOST 内置默认值指向 compose 中真实存在的服务名 langfuse-web。"""
     import src.config.settings as _s
 
     with patch("dotenv.load_dotenv"), patch.dict(os.environ):
         os.environ.pop("LANGFUSE_HOST", None)
         reloaded = reload(_s)
-        assert reloaded.LANGFUSE_HOST == "http://langfuse:3000"
+        assert reloaded.LANGFUSE_HOST == "http://langfuse-web:3000"
 
 
 def test_langfuse_enable_default_true():
@@ -112,3 +108,39 @@ def test_non_kb_temperature_default():
         os.environ.pop("NON_KB_MAIN_TEMPERATURE", None)
         reloaded = reload(_s)
         assert reloaded.NON_KB_MAIN_TEMPERATURE == 0.6
+
+
+def test_langfuse_defaults_do_not_point_to_nonexistent_host():
+    """内置 HOST 默认值不得指向仓库内不存在的服务名（D19）。
+
+    reload 前必须把 `dotenv.load_dotenv` 打成 no-op：`src.config.settings`
+    在**导入时**调用它，而本 worktree 的 `.env`（软链）定义了 `LANGFUSE_HOST`，
+    否则 reload 会重新灌回 .env 的值 —— 那是在测 .env，不是在测内置默认值。
+    """
+    import importlib
+
+    import src.config.settings as settings_mod
+
+    with patch("dotenv.load_dotenv"), patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("LANGFUSE_HOST", None)
+        reloaded = importlib.reload(settings_mod)
+        assert "langfuse:3000" not in reloaded.LANGFUSE_HOST
+        assert reloaded.LANGFUSE_HOST == "http://langfuse-web:3000"
+
+
+def test_langfuse_key_defaults_are_empty():
+    """内置 key 默认值为空串 —— 没配就明确不可用，不假装有值（D19）。
+
+    同上的 `.env` reload 陷阱：必须把 `dotenv.load_dotenv` 打成 no-op，
+    否则 reload 会从软链 .env 重新灌回真实的 SECRET/PUBLIC key。
+    """
+    import importlib
+
+    import src.config.settings as settings_mod
+
+    with patch("dotenv.load_dotenv"), patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("LANGFUSE_SECRET_KEY", None)
+        os.environ.pop("LANGFUSE_PUBLIC_KEY", None)
+        reloaded = importlib.reload(settings_mod)
+        assert reloaded.LANGFUSE_SECRET_KEY == ""
+        assert reloaded.LANGFUSE_PUBLIC_KEY == ""

@@ -26,6 +26,7 @@ from src.config.response_codes import Code
 from src.core import logging as core_logging
 from src.core.log_events import Event
 from src.core.logging import setup_logging
+from src.infra.llm.tracing import configure_tracing, flush_tracing
 from src.middleware.auth import auth_middleware
 from src.middleware.response_processor import response_processor_middleware
 from src.middleware.trace_id import trace_id_middleware
@@ -43,13 +44,21 @@ async def lifespan(app: FastAPI):
 
     启动阶段清空残留的 chat_lock:* 键：重启后进程内无任何生成任务，
     残留锁（来自被杀进程，TTL 兜底 180s）会阻塞新请求的并发锁获取。
+
+    tracing 开关生效点（服务侧）：CLI 侧不经 lifespan，由 eval_ragas 自行调用
+    `configure_tracing()`。configure 必须在任何 flush 之前 —— SDK 的 flush 经
+    `LangfuseSingleton` 惰性构造客户端，先 flush 会造出默认 enabled=True 的客户端，
+    绕过 `settings.LANGFUSE_ENABLE`。
     """
     core_logging.log_event(Event.APP_STARTING)
     section_chars = validation.validate_all()
     core_logging.log_event(Event.PROMPT_VALIDATED, section_chars=section_chars)
     await _clear_stale_chat_locks()
+    configure_tracing()
     yield
     core_logging.log_event(Event.APP_STOPPING)
+    # 关停前上报缓冲事件，否则最后一批 trace 随进程消失
+    flush_tracing()
 
 
 async def _clear_stale_chat_locks() -> None:

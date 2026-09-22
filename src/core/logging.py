@@ -97,9 +97,9 @@ def _setup_trace_id_patcher() -> None:
 
     # CLI 模式：没有外部传入的 trace_id 时自动生成
     if not _trace_var.get():
-        import uuid
+        from src.infra.llm.tracing import new_trace_id
 
-        _trace_var.set(f"trace_{uuid.uuid4()}")
+        _trace_var.set(new_trace_id())
 
     def _patcher(record):
         from src.infra.llm.trace_context import (
