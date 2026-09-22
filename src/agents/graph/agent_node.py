@@ -13,6 +13,7 @@ from langfuse.decorators import langfuse_context, observe
 from langfuse.model import ModelUsage
 from langgraph.prebuilt import ToolNode
 
+from src.agents.graph.message_payload import _extract_text, _messages_payload
 from src.agents.graph.state import AgentState
 from src.agents.skills.prefix import clean_prefix
 from src.config import settings
@@ -158,7 +159,15 @@ def make_agent_model_node(llm, tools, prompt_manager) -> Callable:
     tool_names = frozenset(str(t.name) for t in tools)
     model = llm.bind_tools(tools)
 
-    @observe(name="agent_turn", as_type="generation", capture_input=False)
+    # capture_output=False：模型只发 tool_calls、文本为空时，显式写入的 output 为空串
+    # （falsy），会走 SDK 的自动捕获回落；关掉自动捕获后回落得到 None，避免把节点返回的
+    # state dict（messages/_agent_iterations/...）写进 trace。显式非空 output 仍优先。
+    @observe(
+        name="agent_turn",
+        as_type="generation",
+        capture_input=False,
+        capture_output=False,
+    )
     async def agent_model(state: AgentState) -> dict:
         if state.messages:
             messages = state.messages
@@ -349,45 +358,6 @@ def make_agent_finalize_node() -> Callable:
         }
 
     return agent_finalize
-
-
-def _extract_text(message: BaseMessage | None) -> str:
-    """从 AIMessage 提取文本 content（str 或 content blocks）。
-
-    Args:
-        message: 消息对象，None 时返回空字符串
-
-    Returns:
-        content 的纯文本形式：str 直接返回；list 拼接 dict blocks 中 type=="text" 的 text；
-        其他类型 str() 兜底
-    """
-    if message is None:
-        return ""
-    content = message.content
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for block in content:
-            if isinstance(block, dict) and block.get("type") == "text":
-                parts.append(str(block.get("text", "")))
-        return "".join(parts)
-    return str(content)
-
-
-def _messages_payload(messages: list[BaseMessage]) -> list[dict[str, str]]:
-    """把消息列表转成 Langfuse 输入载荷 [{role, content}]。
-
-    只取 role 与 content —— 消息对象上还挂着 id / response_metadata 等字段，
-    整对象交给序列化器会把不该进 trace 的东西带进去。
-
-    Args:
-        messages: LangChain 消息列表
-
-    Returns:
-        [{"role": <消息类型>, "content": <文本>}, ...]
-    """
-    return [{"role": m.type, "content": _extract_text(m)} for m in messages]
 
 
 def route_agent(state: AgentState) -> str:
