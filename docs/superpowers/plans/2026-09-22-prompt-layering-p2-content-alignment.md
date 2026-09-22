@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 把五个 system 段的正文按 WeKnora 口径补齐（运行上下文、证据充分性、通用输出形态、领域方法），并建立"RAGAS 指标 + 三个原始症状指标"的 P1-后基线→P2-后对比链路，回答"模型是否还在盲试、是否仍然给不出答案"。
+**Goal:** 把五个 system 段的正文按 WeKnora 口径补齐（运行上下文、证据充分性、通用输出形态、领域方法），并建立"RAGAS 四指标 + 三个原始症状指标"的**采集与留档**能力 —— 既回答"模型是否还在盲试、是否仍然给不出答案"，也记下 P2 交付时我们自己的绝对水平，供将来回头复采对照。
 
 **Architecture:** 模板正文改动是**纯数据变更**（`src/config/prompts/templates/*.yaml`），不改组装器与判据；每次改动由 `tests/rag/test_prompt_contract.py` 的载荷断言驱动（TDD）。度量侧新增一个只读日志聚合 CLI（`src/cli/symptom_metrics.py`），与 RAGAS 共用同一批 eval 请求，不新增埋点、不改日志格式。
 
@@ -12,25 +12,36 @@
 
 ---
 
-## ⚠ 执行顺序注记（先读这一节，决定你能开工到哪一步）
+## ⚠ 执行顺序与基线口径（先读这一节）
 
-**P2 整体排在对端 change `retrieval-fetch-and-dedup` 之后**（`design.md` Migration Plan：P1/P2 各要重采一次基线，而基线所测的 context 内容正是对端在改的东西，先采会直接作废）。对端当前 **0/33，尚未开工**。
+**本计划已按"不等对端"调整，与 `design.md` Migration Plan 的原始约束有意不同。**
 
-同一依赖还挂在另外两处：
+原设计是"改前采基线 → 改正文 → 复采对比"，那要求先等 `retrieval-fetch-and-dedup` 落地
+（否则基线所测的 context 内容正是对端在改的东西，先采作废）。该 change 当前 **0/33 且优先级不高**，
+因此改为：
 
-| 阻塞点 | 依赖 | 影响的任务 |
-|---|---|---|
-| P2 整体 | `retrieval-fetch-and-dedup` 落地 | T7（采基线）、T8（复采对比）必须在对端之后 |
-| `sources` 检索阶梯措辞 | 对端**第 5 节产出**（"库内有无内容"的双形态判据与分数区间）—— `design.md` OQ-1 明写"该结论未出之前不应定稿 `sources` 段的措辞" | **T5b** |
-| 人工回归项 | change `e2e-playwright-regression`（**0/30，e2e/ 目录尚不存在**） | **T9** |
+| 原设计 | 现在 |
+|---|---|
+| 内容对齐等对端定稿 `sources` 措辞 | **直接按 WeKnora 完整形态定稿**（`prompt-mapping.md` §3 已有初稿） |
+| 改前采基线 → 改后复采 → 对比归因 | **只在 P2 完成后采一次我们自己的值，留档**；不做归因对比 |
+| 人工回归项随 P2 一起做 | **延后**（T9 标 pending） |
 
-**可在阻塞期先做的部分**（不触碰 prompt 行为、不产生需要基线的中间态）：
+**为什么可以不等**：内容对齐的依据是 WeKnora 原文（`design.md` D11 的既定决策）—— 它是
+成熟项目的生产验证形态，**不依赖我们的历史数值**。基线的作用只是回答"这次改动带来了多少变化"，
+而我们选择先不回答这个问题。
 
-- ✅ **T1**（症状指标脚本）——新增只读工具，与 prompt 无关
-- ✅ **T2 / T3 / T4 / T5a / T6** ——五个段的正文对齐，产出的是**最终形态**而非中间态；它们改完后 T7 才采基线，顺序天然正确
-- ❌ **T5b / T7 / T8 / T9** ——等对端或等 e2e change
+**代价（明确接受，须写进留档文件）**：P2 完成后**无法归因**"质量变化里有多少来自本次改动"。
+等 `retrieval-fetch-and-dedup` 与 `e2e-playwright-regression` 落地后，回头跑 T8 / T9 补齐。
 
-> ⚠ **不要把 T2–T6 的改动与"采基线"的顺序颠倒**。基线必须是"对端落地 + P1 完成 + P2 正文未改"那一刻的状态快照；先改正文会让基线测到混合态，P2 的归因依据就没了。
+| 任务 | 现在能不能做 |
+|---|---|
+| **T1 – T7** | ✅ 全部可执行（T7 = 采集一次我们自己的值并留档） |
+| **T8**（对端落地后复采对比） | ⏸ **pending**，等 `retrieval-fetch-and-dedup` |
+| **T9**（端到端人工回归） | ⏸ **pending**，等 `e2e-playwright-regression` |
+
+> ⚠ **T7 的位置不能提到 T2–T5b 之前**。它采的是"P2 正文已改完"的值；若在改动前跑，采到的
+> 就是 P1 的旧状态 —— 那才是"基线"，而本轮明确不要基线。留档文件命名也据此区分：
+> `p2-metrics-*.md`（P2 交付时的一次测量记录），**不是** `p2-baseline-*.md`。
 
 ---
 
@@ -54,7 +65,7 @@
 |---|---|
 | `src/cli/symptom_metrics.py` | 只读日志聚合 CLI：从 `app_*.log` 统计三个症状指标（迭代触顶率 / 每请求 `retrieve_kb` 次数分布 / `answer_len=0` 占比）。不含写库、不含网络 |
 | `tests/cli/test_symptom_metrics.py` | 上述脚本的单元测试（合成日志行，不读真实日志目录） |
-| `docs/tmp/p2-baseline-<YYYYMMDD>.md` | **P1-后基线冻结记录**：RAGAS 四指标 + 三症状指标 + 段体积。只读产物，数字不随代码回写 |
+| `docs/tmp/p2-metrics-<YYYYMMDD>.md` | **P2 交付时的度量留档**：我们自己的 RAGAS 四指标 + 三症状指标 + 段体积，与门禁阈值和同类项目量级对照。**这是那次测量的一次记录，不是对比基线**，数字不随后续代码回写 |
 
 **修改**
 
@@ -131,10 +142,10 @@ def build_system_prompt(
 `src/cli/eval_ragas.py:136` 为每题生成 `eval_<hex>` trace_id，且 `setup_logging(configure_trace_id=True)` 让所有行都带它。
 
 **F10. 选手与裁判模型同族（`qwen3.8-27b` / `qwen3.8-max`），这是既有状况、本计划不改。**
-RAGAS 官方建议用不同模型族避免 self-bias。**记录为已知局限**（写进 T7 的基线记录），不在本计划内更换——换模型会让新基线与 8 月的历史报告不可比。
+RAGAS 官方建议用不同模型族避免 self-bias。**记录为已知局限**（写进 T7 的留档记录），不在本计划内更换 —— 换模型会让本次数值与 8 月的报告不再可参照。
 
 **F11. 8 月的 11 份 RAGAS 报告不可用作对比基线。**
-它们产生于 `TOP_K_RETRIEVAL=8` / `TOP_K_RERANK=5`（现为 30 / 5），且早于 P0/P1。只能说"历史上同量级"，不能当 P1-后基线。
+它们产生于 `TOP_K_RETRIEVAL=8` / `TOP_K_RERANK=5`（现为 30 / 5），且早于 P0/P1。只能说"历史上有过这个量级"，**不能拿来算 Δ**。
 
 **F12. `finance-analyst` skill 的 4 条正文全部与系统段重复（T6 要处置）。**
 逐条对照：③「结构化输出」= `base-financial.yaml:18` 逐字重复；②「指标口径先行」= `base-financial.yaml:15`；④「每事实标来源编号」= `output.yaml` 的 `output-citation`；①「只基于给定材料」≈ `runtime-contract.yaml:6-8` + `base-financial.yaml:17`。
@@ -420,7 +431,7 @@ def _pct(numerator: int, denominator: int) -> str:
 
 
 def format_report(stats: SymptomStats) -> str:
-    """把聚合结果渲染为纯文本报告（与 T7 基线记录的表格同口径）。"""
+    """把聚合结果渲染为纯文本报告（与 T7 留档记录的表格同口径）。"""
     lines = [
         "症状指标（prompt-layering P2）",
         f"有 agent 行为的请求数（trace）：{stats.traces_total}",
@@ -906,38 +917,33 @@ git commit -m "feat(prompt): sources 通用段补证据充分性与取证约束
 
 ---
 
-### Task 5b: `sources` 检索阶梯对齐（⚠ 依赖对端 change）
+### Task 5b: `sources` 检索阶梯按 WeKnora 完整形态定稿
 
 **Files:**
 - Modify: `src/config/prompts/templates/sources.yaml`（`sources-kb-ladder`）
+- Modify: `docs/openspec/changes/prompt-layering-and-domain-binding/{prompt-mapping.md,design.md}`
 - Test: `tests/rag/test_prompt_contract.py`
 
 **Interfaces:**
-- Consumes: 对端 change `retrieval-fetch-and-dedup` **第 5 节**的产出 —— "库内有无内容"的双形态判据与分数区间
-- Produces: `sources-kb-ladder` 的最终措辞
+- Produces: `sources-kb-ladder` 的定稿措辞
 
-- [ ] **前置检查（开工前必做）**
+- [ ] **Step 1: 确定定稿依据（本任务不等对端）**
 
-Run:
-```bash
-openspec list | grep retrieval-fetch-and-dedup
-ls docs/openspec/changes/retrieval-fetch-and-dedup/ 2>/dev/null
-```
-Expected: 该 change 已完成或至少其第 5 节产出已写入其 `design.md`。
+`design.md` 的 **OQ-1** 原本要求等 `retrieval-fetch-and-dedup` 第 5 节的产出（"库内有无内容"的
+双形态判据与分数区间）再定稿 `sources` 措辞。**本计划明确不等它**：该 change 优先级不高，
+而 `prompt-mapping.md` §3 已按"**完整保留**"给出初稿（该文件自己写着"待该结论后再定稿"）。
 
-**若它仍是 0 tasks / 无第 5 节结论 → 立即停止本任务**，向控制者报告"OQ-1 未解除阻塞"，不要凭现有 5 条自行定稿。`design.md` Open Question 1 的原话是"该结论未出之前**不应定稿** `sources` 段的措辞"。
+做法：以 `prompt-mapping.md` §3 的 `sources` 目标文本为准，并**保留其中标 S 的三处我方动作**
+（"含查询的至少一个核心实体才算相关"、"第二次显式传 `top_k=10`"、"该问题不在当前知识库范围内"
+→ 联网）。
 
-- [ ] **Step 1: 读对端结论，确定阶梯条数**
+**明确接受的代价**：拿到对端结论前，"检索为空"只能笼统处理 —— **不区分**"库内没有内容"与
+"库内有内容但措辞未命中"。这是选择不等对端的直接后果，须在 Step 6 登记，并在 `design.md`
+OQ-1 旁标注"因优先级调整提前定稿，结论落地后回头复核"。
 
-读 `docs/openspec/changes/retrieval-fetch-and-dedup/design.md` 的第 5 节，确认：
-- 是否需要区分"库内无内容"与"库内有内容但未命中"两种形态
-- 是否有分数区间的具体数值
+- [ ] **Step 2: 写失败测试**
 
-据此决定 `sources-kb-ladder` 是保留现有 2 条动作，还是拆成 3–4 条。
-
-- [ ] **Step 2: 写失败测试（按第 1 步的结论填断言）**
-
-追加到 `tests/rag/test_prompt_contract.py`（下面给出"保留 2 条"形态的版本；若对端要求双形态，把断言换成对应的两条**实际措辞**）：
+追加到 `tests/rag/test_prompt_contract.py`：
 
 ```python
 def test_kb_ladder_present_only_when_bound_and_tool_registered():
@@ -956,41 +962,56 @@ def test_kb_ladder_present_only_when_bound_and_tool_registered():
     )
 
 
-def test_kb_ladder_keeps_top_k_action():
-    """第二次检索显式 top_k=10 的具体动作是我方补充，不得在对齐中丢失。"""
+def test_kb_ladder_keeps_our_supplemental_actions():
+    """我方的三处具体动作不得在对齐中丢失（mapping §3 标 S 的条目）。"""
     messages = build_system_prompt(
         persona="", kb_bound=True, has_skills=False,
-        tool_names=frozenset({"retrieve_kb"}), kb_domain="general",
+        tool_names=frozenset({"retrieve_kb", "search_web"}), kb_domain="general",
     )
-    assert "top_k=10" in str(messages[0].content)
+    content = "\n".join(str(m.content) for m in messages)
+    assert "top_k=10" in content
+    assert "该问题不在当前知识库范围内" in content
+    assert "含查询的至少一个核心实体" in content
 ```
+
+⚠ **`search_web` 必须同时在 `tool_names` 里**：联网三条的判据是 `search_web` AND `kb_bound`，
+只给 `retrieve_kb` 拿不到它们（F5）。
 
 - [ ] **Step 3: 跑测试确认失败**
 
 Run: `pytest tests/rag/test_prompt_contract.py -q -k "ladder"`
-Expected: 视第 2 步断言而定；若只是核对现有措辞，可能全 PASS —— 那种情况下本任务的产出是"核对结论 + 在 `prompt-mapping.md` §3 登记已定稿"，无需改模板
+Expected: 第 1 条应 PASS（P1 已落）；第 2 条视现有措辞而定 —— 若 PASS 说明三个动作都在，
+本任务的产出就是"核对结论 + 在 `prompt-mapping.md` §3 登记已定稿"，无需改模板
 
-- [ ] **Step 4: 改模板（仅在需要时）**
+- [ ] **Step 4: 改模板（若 Step 3 显示缺失）**
 
-`src/config/prompts/templates/sources.yaml` 的 `sources-kb-ladder`：按第 1 步结论调整条目数与措辞。⚠ 该模板的 `content` 是转义字符串且**以 `\n\n` 开头**（组内分隔符，F14），保持该形态。
+`src/config/prompts/templates/sources.yaml` 的 `sources-kb-ladder`：补齐 Step 2 断言中缺失的动作。
+⚠ 该模板的 `content` 是转义字符串且**以 `\n\n` 开头**（组内分隔符，F14），保持该形态。
 
 - [ ] **Step 5: 跑测试确认通过**
 
 Run: `pytest tests/rag/test_prompt_contract.py tests/config/ -q`
 Expected: PASS
 
-- [ ] **Step 6: 在 `prompt-mapping.md` §3 尾部登记定稿结论**
+- [ ] **Step 6: 在 `prompt-mapping.md` 与 `design.md` 登记本次取舍**
 
-追加一行说明：检索阶梯已按对端第 5 节产出定稿、条数、以及 OQ-1 的关闭日期。
+- `prompt-mapping.md` §3 尾部追加：检索阶梯已于 `<日期>` 按 WeKnora 完整形态定稿（**未等对端**），
+  并写明"库空 vs 未命中仍是粗粒度"这一接受的代价
+- `design.md` 的 OQ-1 旁**追加**一行（不改原文）："因 `retrieval-fetch-and-dedup` 优先级调整，
+  已提前定稿；该结论落地后回头复核"
+
+⚠ 决策记录**只追加不改写**（与 ADR 的"只追加"同源纪律）。
 
 - [ ] **Step 7: 提交**
 
 ```bash
-git add src/config/prompts/templates/sources.yaml tests/rag/test_prompt_contract.py docs/openspec/changes/prompt-layering-and-domain-binding/prompt-mapping.md
-git commit -m "feat(prompt): sources 检索阶梯按对端第 5 节结论定稿
+git add src/config/prompts/templates/sources.yaml tests/rag/test_prompt_contract.py docs/openspec/changes/prompt-layering-and-domain-binding/prompt-mapping.md docs/openspec/changes/prompt-layering-and-domain-binding/design.md
+git commit -m "feat(prompt): sources 检索阶梯按 WeKnora 完整形态定稿
 
-关闭 design.md OQ-1。判据仍为"工具已注册 AND 适用域成立"，top_k=10
-的具体动作保留。"
+不等 retrieval-fetch-and-dedup（优先级调整）：以 prompt-mapping §3 的
+目标文本为基础定稿，保留我方三处具体动作（top_k=10 / 越界声明 /
+核心实体判据）。接受"库空 vs 未命中"仍为粗粒度，已在 design.md OQ-1
+旁追加登记，结论落地后回头复核。"
 ```
 
 ---
@@ -1061,27 +1082,28 @@ git commit -m "chore(prompt): 复核 skill 正文重复并核实 3.8/3.10
 
 ---
 
-### Task 7: 采集 P1-后基线（⚠ 依赖对端 change 落地）
+### Task 7: 采集并留档 P2 后的度量（不等对端）
 
 **Files:**
-- Create: `docs/tmp/p2-baseline-<YYYYMMDD>.md`
+- Create: `docs/tmp/p2-metrics-<YYYYMMDD>.md`
 - Modify: `docs/openspec/changes/prompt-layering-and-domain-binding/tasks.md`
 
 **Interfaces:**
 - Consumes: `src/cli/symptom_metrics.collect/format_report`（T1）、`src/cli/eval_ragas.py`（既有）
-- Produces: 基线记录（RAGAS 四指标 + 三症状指标 + 段体积），供 T8 对比
+- Produces: **我们自己的度量记录**（RAGAS 四指标 + 三症状指标 + 段体积），与门禁阈值、同类项目量级对照
 
-- [ ] **Step 1: 确认前置条件全部就绪**
+- [ ] **Step 1: 确认能跑（不需要等对端）**
 
 Run:
 ```bash
-openspec list | grep -E "retrieval-fetch-and-dedup|prompt-layering"
 ls data/ragas/testset/ | grep b9e74e82
 docker compose ps | grep -E "postgres|app"
 grep -n "POSTGRES_HOST\|LANGFUSE_ENABLE\|TOP_K_RETRIEVAL\|LLM_MODEL\|RAGAS_LLM_MODEL" .env
+pytest tests/cli/test_symptom_metrics.py -q
 ```
-Expected: 对端已完成；`b9e74e82` 的 testset 存在；postgres 容器 Up；env 与记录一致。
-**任何一项不满足即停止** —— 基线采在错误状态上会让 T8 的对比失效。
+Expected: testset 存在；postgres 容器 Up；env 与下方记录表一致；T1 的脚本测试绿。
+
+**本任务不等 `retrieval-fetch-and-dedup`** —— 它采的是"P2 交付时我们自己的水平"，不是对比基线。
 
 - [ ] **Step 2: 跑 RAGAS eval**
 
@@ -1090,17 +1112,19 @@ Run（WSL 宿主必须覆盖 `POSTGRES_HOST`，`.env` 里是容器名 `postgres`
 POSTGRES_HOST=localhost .venv/bin/python -m src.cli.eval_ragas \
   --kb-id b9e74e820e0a4bad8472304446e54f5c \
   --testset-version 2 \
-  --output data/ragas/reports/p2_baseline
+  --output data/ragas/reports/p2_metrics
 ```
-Expected: 生成 `data/ragas/reports/p2_baseline.csv` 与 `.md`；记录四个指标值（faithfulness / answer_relevancy / context_recall / context_precision）。
-⚠ 门禁阈值（`src/cli/eval_ragas.py:35-40`）：faithfulness 0.85 / context_precision 0.80 / context_recall 0.70 / answer_relevancy 0.85。**本步只记录，不以门禁判成败**（P2 的判据是"对比"，不是"达标"）。
+Expected: 生成 `data/ragas/reports/p2_metrics.csv` 与 `.md`；记录四个指标值（faithfulness / answer_relevancy / context_recall / context_precision）。
+
+⚠ 门禁阈值（`src/cli/eval_ragas.py:35-40`）：faithfulness 0.85 / context_precision 0.80 / context_recall 0.70 / answer_relevancy 0.85。
+**本步的判读是"与阈值比绝对值"**（达没达标），不是"与改前比变化"—— 本轮没有改前的点。
 
 - [ ] **Step 3: 采集三个症状指标**
 
 Run:
 ```bash
-python -m src.cli.symptom_metrics --log-dir logs --out docs/tmp/p2-baseline-symptoms.txt
-cat docs/tmp/p2-baseline-symptoms.txt
+python -m src.cli.symptom_metrics --log-dir logs --out docs/tmp/p2-metrics-symptoms.txt
+cat docs/tmp/p2-metrics-symptoms.txt
 ```
 Expected: 三个指标都有值。若 `traces_total` 为 0，说明日志目录不对（容器内是 `/data/logs`，走 `docker compose exec app cat /data/logs/...` 或挂载卷取）。
 
@@ -1115,16 +1139,20 @@ Expected: 得到形如 `section_chars={"base":1234,"runtime_contract":890,...}` 
 
 ⚠ **`section_chars` 的口径**（`docs/agents/logging-rules.md`）：**不含**日期行与态 A 第二条未绑定消息，因此占比估算系统性偏低，属预期而非缺陷（不要当 bug 修）。
 
-- [ ] **Step 5: 写基线记录**
+- [ ] **Step 5: 写留档记录**
 
-创建 `docs/tmp/p2-baseline-<YYYYMMDD>.md`，含：
+创建 `docs/tmp/p2-metrics-<YYYYMMDD>.md`，含：
 
 ```markdown
-# prompt-layering P2 基线（P1 完成后、P2 正文改动前）
+# prompt-layering P2 度量留档（P2 交付时）
 
 **采集日期**：<YYYY-MM-DD>
-**代码状态**：`<git rev-parse --short HEAD>`（P1 收尾 + 对端 change 已落地）
-**对端 change**：`retrieval-fetch-and-dedup` @ `<其收尾提交>`
+**代码状态**：`<git rev-parse --short HEAD>`（P2 正文改动已全部落地）
+
+> ⚠ **这不是对比基线**。本轮没有采"改前"那个点（`retrieval-fetch-and-dedup` 优先级调整，
+> 见实施计划的「执行顺序与基线口径」）。本文件的用途只有两个：
+> ① 记录 P2 交付时的绝对水平；② 作为将来回头复采（T8）的对照起点。
+> **不可用于归因"P2 的改动带来了多少变化"。**
 
 ## 环境（必须原样记录，否则不可比）
 
@@ -1137,8 +1165,8 @@ Expected: 得到形如 `section_chars={"base":1234,"runtime_contract":890,...}` 
 | 日志目录 | `logs/`（容器内 `/data/logs`） |
 
 > ⚠ **已知局限**：选手与裁判同族（`qwen3.8-27b` / `qwen3.8-max`），RAGAS 建议异族以避免
-> self-bias。本基线保持与 8 月历史报告一致的模型配置，**不更换**（换了就不可比）。
-> 8 月的 11 份历史报告产生于 `TOP_K=8/5`，**不可作为本次对比基线**。
+> self-bias。本次保持与 8 月历史报告一致的模型配置，**不更换**（换了任何历史值都不再可参照）。
+> 8 月的 11 份历史报告产生于 `TOP_K=8/5`，量级可参考但**不可拿来算 Δ**。
 
 ## RAGAS 四指标
 
@@ -1175,28 +1203,42 @@ Expected: 得到形如 `section_chars={"base":1234,"runtime_contract":890,...}` 
 > 本项目启动期只有 50,000 字符的**事故兜底**，不是预算闸门。
 ```
 
-- [ ] **Step 6: 提交**
+- [ ] **Step 6: 勾选 `tasks.md`**
+
+- `3.7`（段体积记录）：本任务已产出 → 勾选
+- `3.6`（RAGAS eval + 三症状指标）：本任务已产出**绝对值**，但"与基线对比"那半句本轮不做 →
+  **勾选并在行内注明**"本轮只采绝对值；对比延后至对端 change 落地后，见实施计划 T8"
+
+- [ ] **Step 7: 提交**
 
 ```bash
-git add docs/tmp/p2-baseline-*.md docs/tmp/p2-baseline-symptoms.txt
-git commit -m "chore(measure): 冻结 P1-后基线（RAGAS + 三症状指标 + 段体积）
+git add docs/tmp/p2-metrics-*.md docs/tmp/p2-metrics-symptoms.txt docs/openspec/changes/prompt-layering-and-domain-binding/tasks.md
+git commit -m "chore(measure): 记录 P2 交付时的度量（RAGAS + 三症状指标 + 段体积）
 
-作为 P2 内容对齐的对比基准。环境配置与已知局限一并记录。
-本文件是那一次采集的冻结记录，不随后续代码改动回写数字。"
+不等对端：本记录不是对比基线，只是 P2 交付时我们自己的绝对水平留档，
+供将来回头复采（T8）作对照起点。环境配置与已知局限一并记录。
+数字是那一次测量的冻结值，不随后续代码改动回写。"
 ```
 
 ---
 
-### Task 8: 复采、对比、写结论
+### Task 8: 对端落地后的复采对比（⏸ pending —— 本轮不执行）
+
+> **本轮不执行本任务。** 它等 `retrieval-fetch-and-dedup` 落地后回头跑。触发条件：
+> `openspec list` 显示该 change 已归档。
+>
+> ⚠ **注意它的定位**：那时的对照组是"P2 已交付 + 对端未落地" vs "P2 已交付 + 对端已落地"，
+> 所以本任务衡量的是**对端 change 的效果 + P2 绝对水平没被带坏**，**不是 P2 的效果**
+> （P2 的效果本轮已明确放弃归因，见「执行顺序与基线口径」）。
 
 **Files:**
-- Modify: `docs/tmp/p2-baseline-<YYYYMMDD>.md`（**追加**对比章节，不改基线数字）
+- Modify: `docs/tmp/p2-metrics-<YYYYMMDD>.md`（**追加**对比章节，不改 T7 记录的数字）
 - Modify: `docs/openspec/changes/prompt-layering-and-domain-binding/design.md`
 - Modify: `docs/openspec/changes/prompt-layering-and-domain-binding/tasks.md`
 
 **Interfaces:**
-- Consumes: T7 的基线记录、T2–T6 的正文改动
-- Produces: P2 闸门结论
+- Consumes: T7 的留档记录、对端 change 落地后的代码状态
+- Produces: 对端落地后的回归结论
 
 - [ ] **Step 1: 用与 T7 完全相同的参数复采**
 
@@ -1211,20 +1253,22 @@ grep -o 'section_chars={[^}]*}' logs/app_*.log | tail -20
 ```
 Expected: 三份新数据。**参数必须与 T7 逐字相同**（同一 kb、同一 testset 版本、同一 top_k）—— 任一不同则对比无意义。
 
-- [ ] **Step 2: 在基线文件追加对比章节**
+- [ ] **Step 2: 在 T7 的留档文件末尾追加对比章节**
 
-在 `docs/tmp/p2-baseline-<YYYYMMDD>.md` **末尾追加**（不改已有数字）：
+在 `docs/tmp/p2-metrics-<YYYYMMDD>.md` **末尾追加**（不改 T7 记录的数字）：
 
 ```markdown
 ---
 
-## P2 复采对比（<YYYY-MM-DD>，代码状态 `<新 HEAD>`）
+## 对端落地后的复采对比（<YYYY-MM-DD>，代码状态 `<新 HEAD>`）
 
-⚠ 本节是第二次采集的**对照记录**；上方基线数字是 P1-后那一刻的冻结值，**不回写**。
+⚠ 本节是第二次采集的**对照记录**；上方数字是 P2 交付时的冻结值，**不回写**。
+⚠ **对照组含义**：两列分别是"P2 已交付 + 对端未落地"与"P2 已交付 + 对端已落地"，
+因此本表衡量的是**对端 change 的效果**，以及 P2 的绝对水平是否被带坏 —— **不是 P2 的效果**。
 
 ### RAGAS 四指标
 
-| 指标 | P1 后 | P2 后 | Δ | 门禁 |
+| 指标 | 复采前 | 复采后 | Δ | 门禁 |
 |---|---|---|---|---|
 | faithfulness | | | | 0.85 |
 | answer_relevancy | | | | 0.85 |
@@ -1233,7 +1277,7 @@ Expected: 三份新数据。**参数必须与 T7 逐字相同**（同一 kb、�
 
 ### 三个症状指标
 
-| 指标 | P1 后 | P2 后 | Δ | 判读 |
+| 指标 | 复采前 | 复采后 | Δ | 判读 |
 |---|---|---|---|---|
 | `iteration limit` 触顶率 | | | | 下降 = 模型更少盲试 |
 | 每请求检索次数分布 | | | | 左移 = 更少无谓检索 |
@@ -1260,9 +1304,10 @@ Expected: 三份新数据。**参数必须与 T7 逐字相同**（同一 kb、�
 
 在 `design.md` 的 D5 成功度量表下方（或 P2 相关段落）追加一段"P2 度量结论"，内容与 Step 2 的结论一致，并注明数据文件路径。**不改 D5 的决策本身**（规格/决策只追加不改写）。
 
-- [ ] **Step 4: 勾选 `tasks.md` 的 `3.6` / `3.7`**
+- [ ] **Step 4: 在留档文件与 `tasks.md` 登记对比结论**
 
-`3.6`（RAGAS + 三指标）与 `3.7`（段体积记录）在结论落定后勾选。
+`3.6` / `3.7` 已在 **T7** 勾选。本步只把对比结论落到 `docs/tmp/p2-metrics-<日期>.md` 的对比章节，
+并在 `tasks.md` 的 `3.6` 行内补一行指针指向它。
 
 - [ ] **Step 5: 跑全量非 DB 测试确认未回归**
 
@@ -1272,16 +1317,26 @@ Expected: 全绿 / 0 error
 - [ ] **Step 6: 提交**
 
 ```bash
-git add docs/tmp/p2-baseline-*.md docs/tmp/p2-after-symptoms.txt docs/openspec/changes/prompt-layering-and-domain-binding/design.md docs/openspec/changes/prompt-layering-and-domain-binding/tasks.md
-git commit -m "docs(measure): P2 复采对比与结论
+git add docs/tmp/p2-metrics-*.md docs/openspec/changes/prompt-layering-and-domain-binding/design.md docs/openspec/changes/prompt-layering-and-domain-binding/tasks.md
+git commit -m "docs(measure): 对端落地后的复采对比与结论
 
-RAGAS 四指标 + 三症状指标 + 段体积净增量。基线数字保持冻结，对比为追加记录。
+RAGAS 四指标 + 三症状指标 + 段体积。衡量的是对端 change 的效果，以及
+P2 的绝对水平是否被带坏 —— 不归因 P2。留档数字保持冻结，对比为追加记录。
 <结论摘要一句话>"
 ```
 
 ---
 
-### Task 9: 人工层回归项（⚠ 依赖 change `e2e-playwright-regression`）
+### Task 9: 端到端人工回归（⏸ pending —— 本轮不执行）
+
+> **本轮不执行本任务。** 触发条件：change `e2e-playwright-regression` 落地（当前 **0/30**，
+> `e2e/` 目录尚不存在）—— 到那时才有可跑的东西。
+>
+> ⚠ `tasks.md:88` 说这条回归项"已固化"**与实际不符**：它目前只存在于
+> `e2e-playwright-regression/proposal.md:22` 的文字登记，**没有任何测试文件**。
+> 本轮把它作为**缺口**记入 `tasks.md` 的 `3.6b`（见 T10 Step 3），不要当已具备的能力去执行。
+>
+> 下面保留步骤供将来执行时使用。
 
 **Files:**
 - Modify: `docs/openspec/changes/prompt-layering-and-domain-binding/tasks.md`
@@ -1290,7 +1345,7 @@ RAGAS 四指标 + 三症状指标 + 段体积净增量。基线数字保持冻�
 - Consumes: change `e2e-playwright-regression` 已落地的端到端用例
 - Produces: "绑 KB + 选预设 → 答案仍带 `[n]`" 的执行记录
 
-- [ ] **前置检查（开工前必做）**
+- [ ] **前置检查（执行本任务时必做）**
 
 Run:
 ```bash
@@ -1300,7 +1355,7 @@ grep -rn "绑 KB + 选预设" docs/openspec/changes/e2e-playwright-regression/
 ```
 Expected: 该 change 已实施，且 `e2e/` 下存在覆盖"绑 KB + 选预设 → 答案带 `[n]`"的用例。
 
-**若它仍是 0 tasks（当前状态）→ 停止本任务**并在 `tasks.md` 的 `3.6b` 下记一行"阻塞于 `e2e-playwright-regression`（0/30）"。`tasks.md:88` 称该回归项"已固化"**与实际不符** —— 它目前只存在于 `e2e-playwright-regression/proposal.md:22` 的文字登记，`e2e/` 目录尚不存在、无任何测试文件。**不要把它当已具备的能力去执行。**
+**若它仍是 0 tasks → 停止本任务**，在 `tasks.md` 的 `3.6b` 行内维持"阻塞于 `e2e-playwright-regression`"的记录。
 
 - [ ] **Step 1: 跑该端到端用例**
 
@@ -1331,24 +1386,26 @@ git commit -m "test(prompt): 执行 3.6b 人工回归项（绑 KB + 选预设 �
 - Modify: `docs/agents/requirements_pool.md`（仅当 T8 发现需要另开 change 的议题）
 
 **Interfaces:**
-- Consumes: T2–T9 的全部产出
-- Produces: §3 全勾选、文档一致
+- Consumes: T1–T7 的全部产出（T8 / T9 为 pending，不在本轮）
+- Produces: §3 可勾选项全勾选、文档一致、两处 pending 缺口已登记
 
 - [ ] **Step 1: 按 CLAUDE.md 的「文档登记自检」逐项过一遍**
 
 本次改动是否产生：
 - **新术语** → `glossary.md`？（`output-presentation` 是否值得立术语？运行上下文块？—— 倾向**不立**，它们是模板正文而非领域术语）
 - **新可复发缺陷类别** → `defensive-patterns.md`？（"照抄旧目标文本导致丢新要求"是 F1 类；若 T2 真踩到过，登记；没踩到不预告）
-- **新可复用操作流程** → `cookbook.md`？（"采 RAGAS 基线 + 三症状指标"是可复用流程，值得登记一条）
+- **新可复用操作流程** → `cookbook.md`？（"采 RAGAS + 三症状指标的度量留档"是可复用流程，值得登记一条）
 
 - [ ] **Step 2: 判定是否需要在 `logging-rules.md` 登记三指标口径**
 
 T1 的脚本**不新增日志事件、不改格式**，所以按规约不需登记"日志格式"。但"三个症状指标"是**度量口径**，若不登记，后人会重新发明。
 → 建议在 `logging-rules.md` 加**一节**（不是新事件）：三个指标的来源事件、分组口径（按 trace / 按事件）、以及"检索次数取 `retrieve done` 而非 `retrieval_signal`"的理由（F6）。
 
-- [ ] **Step 3: 勾选 `tasks.md` §3 剩余项**
+- [ ] **Step 3: 勾选 `tasks.md` §3 可勾选项，并登记两处 pending 缺口**
 
-`3.1` / `3.2` / `3.3` / `3.4` 若已在 P1 或本计划中完成，逐条核实后勾选（**不要为了让清单好看而勾**；`3.2` / `3.4` 实际由 P1 的 T2 完成）。
+- `3.1` / `3.2` / `3.3` / `3.4`：逐条核实后勾选（**不要为了让清单好看而勾**；`3.2` / `3.4` 实际由 P1 的 T2 完成）
+- `3.5` / `3.6` / `3.7` / `3.8` / `3.9` / `3.10`：应在 T3–T7 已勾选，核对一遍
+- `3.6b`：**保持未勾**，在行内注明"阻塞于 `e2e-playwright-regression`（0/30）；该 change 所称'已固化'与实情不符 —— 回归项目前只是其一 `proposal.md` 的文字登记，无测试文件"
 
 - [ ] **Step 4: 跑全部闸门**
 
@@ -1369,7 +1426,7 @@ git add docs/agents/ docs/openspec/changes/prompt-layering-and-domain-binding/ta
 git commit -m "docs(prompt): P2 文档登记与 §3 收口
 
 登记三个症状指标的度量口径（来源事件 + 分组方式 + 为何不用 retrieval_signal）；
-cookbook 补"基线采集"流程；核实并勾选 §3 剩余项。"
+cookbook 补"度量采集"流程；核实并勾选 §3，登记 3.6b 的 pending 缺口。"
 ```
 
 ---
@@ -1385,14 +1442,14 @@ cookbook 补"基线采集"流程；核实并勾选 §3 剩余项。"
 | 3.3 `sources` 补"证据足够即停止检索" | T5a Step 3（并入通用段倒数第 3 条） |
 | 3.4 `runtime_contract` 补数据·指令边界 | **已由 P1 的 T2 完成**；T2 保留该块不动 |
 | 3.5 skill 正文复核 | T6（F12 已给出逐条对照，处置二选一） |
-| 3.6 RAGAS + 三症状指标 | T1（脚本）+ T7（基线）+ T8（复采对比） |
-| 3.6b 人工回归项 | T9（**阻塞于 `e2e-playwright-regression` 0/30**） |
-| 3.7 段体积记录 | T7 Step 4-5 + T8 Step 2 |
+| 3.6 RAGAS + 三症状指标 | T1（脚本）+ T7（**采绝对值并留档**，本轮不采基线）；"与基线对比"归 T8（⏸ pending） |
+| 3.6b 人工回归项 | T9（⏸ pending —— 依赖 `e2e-playwright-regression`，该 change 0/30，且所称"已固化"与实情不符） |
+| 3.7 段体积记录 | T7 Step 4-5 |
 | 3.8 删除笼统禁令 | **已完成**（F13）；T6 Step 1 核实后勾选 |
 | 3.9 `output` 补四条 | T3 |
 | 3.10 marker 确认 | **已完成**（F13）；T6 Step 1 核实后勾选 |
 
-**2. 占位符扫描** —— 无 TBD / "稍后补" / "参照 Task N"。唯一有条件分叉的是 T5b（依赖对端结论）与 T6 Step 3（二选一），两者的**判据与两个分支的具体动作都已写明**。
+**2. 占位符扫描** —— 无 TBD / "稍后补" / "参照 Task N"。两处受外部依赖影响的任务已按"不等对端"重写（T5b 直接按 WeKnora 定稿）并留了取舍登记点；T6 Step 3 是二选一，两个分支的具体动作都已写明；T8 / T9 标 **pending** 并写清触发条件，不是留白。
 
 **3. 类型与命名一致性** —— `SymptomStats` 的五个字段在 T1 的测试、实现、T7/T8 的记录表中同名同义；`build_system_prompt` 的五个形参与 F4 一致；新模板 id `output-presentation` 在 T3 的测试、模板、文档三处同名。
 
@@ -1402,7 +1459,9 @@ cookbook 补"基线采集"流程；核实并勾选 §3 剩余项。"
 
 ## 执行交接
 
-**先读「⚠ 执行顺序注记」**：本计划有 3 个任务被外部 change 阻塞，另有 6 个任务可在阻塞期先做。开工前先跑一遍前置检查，确认你处在哪一档。
+**先读「⚠ 执行顺序与基线口径」**：**T1–T7 与 T10 现在就可以全部执行**（共 9 个任务）；
+T8 / T9 标 `⏸ pending`，等各自的 change 落地后回头做。本计划**不采改前基线**，
+所以没有任何任务需要"等对端"才能开工。
 
 **每个任务开跑前的固定动作**：
 1. 跑 `pytest tests/ -q --ignore=tests/infra/db` 确认当前基线绿
