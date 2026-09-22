@@ -6,7 +6,20 @@
 钉成可回归的契约。
 """
 
+import os
+
 from src.config import settings
+
+
+def test_langfuse_env_var_set_before_import():
+    """守护 conftest 顶部的 import 期环境变量 —— 这是主手段，也是唯一能被删掉而不被察觉的一环。
+
+    下面两条断言都被 conftest 的 fixture 兜住：删掉 conftest 顶部那行
+    `os.environ["LANGFUSE_ENABLE"] = "false"`，它们依然全绿。只有本断言会在
+    无 `.env` 的环境（CI / 新 clone / worktree）暴露主手段的缺失（直接下标取值，
+    键不存在即 KeyError）。
+    """
+    assert os.environ["LANGFUSE_ENABLE"] == "false"
 
 
 def test_langfuse_disabled_in_tests():

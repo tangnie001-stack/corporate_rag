@@ -125,8 +125,9 @@ def corrupted_file_path(tmp_path) -> str:
 def _disable_langfuse_tracing() -> Generator[None, None, None]:
     """兜底关停 tracing，并保证退出前把 SDK 缓冲清掉。
 
-    上面那行环境变量是主手段（须早于导入）；本 fixture 是第二道保险 ——
-    防止将来有人重构 conftest 的导入顺序时静默失效。
+    上面那行环境变量是主手段（须早于导入）；本 fixture 是第一道保险 ——
+    防止将来有人重构 conftest 的导入顺序时静默失效。真正需要会话级的是末尾的
+    `flush()`（把 SDK 缓冲清掉只能在整个会话结束时做）。
     """
     from langfuse.decorators import langfuse_context
 
@@ -136,3 +137,24 @@ def _disable_langfuse_tracing() -> Generator[None, None, None]:
     langfuse_context.configure(enabled=False)
     yield
     langfuse_context.flush()
+
+
+@pytest.fixture(autouse=True)
+def _rearm_langfuse_kill_switch() -> Generator[None, None, None]:
+    """每个用例前重新压上关停开关（会话级那次会被中途重新武装掉）。
+
+    为什么必须每例重设，而不是只靠上面的会话级 fixture：
+    `tests/config/test_settings.py::test_langfuse_enable_default_true` 会
+    `reload(src.config.settings)`（并临时 `pop` 掉 `LANGFUSE_ENABLE`）；reload 会
+    重新执行模块里的 `os.getenv("LANGFUSE_ENABLE", "true")` 赋值，把
+    `settings.LANGFUSE_ENABLE` 变回 `True` 并一直保留到会话结束。若只在会话开头
+    关停一次，该用例之后的所有用例都会在 tracing 打开的状态下运行 —— 本任务要立
+    的「恒为关停」不再成立。`configure` 开销约 0.2 ms，逐例重设可忽略。
+    """
+    from langfuse.decorators import langfuse_context
+
+    from src.config import settings
+
+    settings.LANGFUSE_ENABLE = False
+    langfuse_context.configure(enabled=False)
+    yield
