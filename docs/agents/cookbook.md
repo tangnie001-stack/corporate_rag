@@ -46,6 +46,25 @@
 **验证**：检查输出 CSV/Markdown，确认 `eval_report` 表有记录
 **注意事项**：需要 `DASHSCOPE_API_KEY`；测试集生成前会脱敏
 
+### 采一次 prompt 度量（RAGAS + 三症状指标 + 段体积）
+
+**场景**：改动 system prompt（段正文 / 模板）后记录当时的**绝对水平**，作为阶段性留档。
+**步骤**：
+1. RAGAS：`POSTGRES_HOST=localhost .venv/bin/python -m src.cli.eval_ragas --kb-id <kb_id> --testset-version <N> --output data/ragas/reports/<name>`
+2. 三症状指标：`python -m src.cli.symptom_metrics --log-dir logs --out docs/tmp/<name>-symptoms.txt`
+3. 段体积：从同批请求日志取 `section_chars` —— `grep -o 'section_chars={[^}]*}' logs/app_*.log | tail -20`
+**验证**：留档文件里四类数据（RAGAS / 三症状 / 段体积 / 环境）都有值；`symptom_metrics` 的
+`traces_total ≠ 0`（为 0 说明日志目录读错了）
+**注意事项**：
+- ⚠ **跑完先看 `contexts=` 是不是 0** —— 截至 2026-09-22，`eval_ragas` 不设置 `RequestContext`，
+  `agent_finalize` 取不到检索上下文，导致 `context_precision` / `context_recall` 恒 0、
+  `faithfulness`=nan（详见 `requirements_pool.md` 的 F-32）。**这几项在修复前不可用作质量结论。**
+- 宿主跑必须 `POSTGRES_HOST=localhost`（`.env` 里是 compose 服务名 `postgres`，宿主解析不了）
+- 症状指标的采集范围是**本机全量日志**（`logs/app_*.log` 自最初累计），不是仅本轮请求 ——
+  留档时必须写明范围，否则数字会被误读成"本次改动的结果"
+- `section_chars` **不含**日期行与态 A 第二条未绑定消息，占比估算系统性偏低属预期（见 `logging-rules.md`）
+- 指标口径（分组键、分母）见 `logging-rules.md` 的「症状指标口径」一节
+
 ### 新增一个分块策略
 
 **场景**：需要为新的文档类型定制分块方式
@@ -127,6 +146,25 @@
 - 缓冲只保留该会话**最近一次**生成的帧
 - 接口有属主校验：session 不属于该账号返回 404
 - **密码/token 不写入任何会提交的文档**；`.env` 不在 git 跟踪范围
+
+### 取证时不要截断读取
+
+**场景**：为判断"某符号/路径/提交是否还在"或"最早已于何时引入"而去查证时。
+本项目已**三次**因截断读取产出与事实相反或时点错误的结论（记在这里防止第四次）：
+
+1. `sed -n 'X,+16p'` 取表格，表格有 20 行 → 漏掉尾部若干行，据此断言"某表从未登记某行"（实为早已登记）；
+2. `grep -rln <symbol> ... | head -20` 只看到前 20 行 → 漏掉第 21 个起的文件，据此断言"其余引用都是无害的名义引用"（实为还有第二处真实依赖）；
+3. `git log -- <file>` 直接看最后一屏 → 那是**最新**提交，据此断言"缺陷由 9-12 的某次重构引入"（实为 8-26）。
+
+**规则**：凡结论建立在"全部/没有/最早/最全"这类量词上，先**拿到总数**再下判断：
+- 计数用 `grep -c` / `grep -l | wc -l`，**不要**对结论性证据用 `head`；
+- 取最早/最晚提交用 `git log --format='%h %ad %s' --date=short <file> | tail -1`（或 `--reverse | head -1`），不要凭默认分页的最后一屏；
+- 读取范围不确定时用完整读取或先 `wc -l` 确认行数。
+
+**为什么危险**：截断的输出**看起来是完整的** —— 没有报错、没有提示，只是尾巴被切掉了。
+人眼不会察觉，而基于它的判断是"确定语气"的，会写进文档与冻结记录。
+
+**验证**：下结论前复述一次"我这个结论依赖的是全量还是片段"，并给出取总数的命令。
 
 ## 来源等级（source-tier-labeling）
 

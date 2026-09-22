@@ -27,7 +27,7 @@ def test_template_count_and_migrated_ids() -> None:
     """21 条 = 12 条搬运 + 1 条通用 base（base-general）+ 8 条新增段模板（runtime-contract / sources-general / sources-kb-web-rules / sources-kb-unbound-web / output-presentation / output-delegate-citation / tools-execution / tools-ask-user）。"""
     templates = _all_templates()
     assert len(templates) == 21
-    migrated = {
+    required_ids = {
         "tools-delegate",
         "base-financial",
         "sources-kb-unbound",
@@ -42,7 +42,7 @@ def test_template_count_and_migrated_ids() -> None:
         "output-citation",
         "output-presentation",
     }
-    assert migrated <= {t["id"] for t in templates}, "上述模板 id 必须齐全"
+    assert required_ids <= {t["id"] for t in templates}, "上述模板 id 必须齐全"
 
 
 def test_ids_are_unique() -> None:

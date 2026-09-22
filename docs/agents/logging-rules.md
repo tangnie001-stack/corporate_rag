@@ -83,6 +83,25 @@
 **不再扩 `iteration done`**：其「消息数拆分」意图已由 `prompt messages` 在组装点承载，
 不重复记录同一事实（避免后人再提）。
 
+## 症状指标口径（度量层，非日志事件）
+
+以下三个指标由 `src/cli/symptom_metrics.py` 从**既有事件**聚合，**不新增事件、不改格式**；
+登记在此仅为避免后人重新发明口径。分组键是 `trace_id`（日志行第 3 段），即"每请求"。
+
+| 指标 | 来源事件 | 分组口径 |
+|---|---|---|
+| `iteration limit` 触顶率 | `[agent] iteration limit` | **按 trace 计**：出现该事件的 trace 数 ÷ **有 agent 行为的 trace 数** |
+| 每请求 `retrieve_kb` 调用次数 | `[retrieval] retrieve done` | **按 trace 计**：该 trace 下 `retrieve done` 的**行数** |
+| `answer_len=0` 占比 | `[verify] completeness check` | **按事件计**：`answer_len=0` 的条数 ÷ 该事件的条数 |
+
+⚠ **触顶率的分母不是"全部请求数"**：日志里没有"请求开始"的统一锚点，分母取"出现任一已知
+agent 事件（触顶 ∪ 检索 ∪ 完整性检查）的 trace"。应读作"在有 agent 行为的请求里有多少触顶"，
+纯闲聊类请求不进分母；三个指标共用这一分母以便互相参照。
+
+⚠ **检索次数为什么不取 `retrieval_signal`**：eval 链路（`src/cli/eval_ragas.py`）全程不设置
+`RequestContext` → `retrieve_call_seq` 恒 0，`empty_result` / `reretrieve` 行为信号在 eval 请求下
+**不产生**；而 `retrieve done` 是检索工具内无条件落的事件，生产与 eval 两条路径下都可用。
+
 ## 已知例外
 - `retrieval_signal:` 为 P1 Change 2 既有契约保留前缀，检索域聚合需
   `[retrieval]` + `retrieval_signal:` 两条 grep 模式；待前缀体系重构时统一
