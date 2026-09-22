@@ -1,0 +1,16 @@
+症状指标（prompt-layering P2）
+有 agent 行为的请求数（trace）：229
+
+① agent 循环触顶
+  iteration limit 触顶率：95.6%（219/229）
+
+② 每请求 retrieve_kb 调用次数分布
+  0: 2
+  1: 2
+  2: 1
+  4: 3
+  12: 32
+  13: 189
+
+③ verify 空答案
+  answer_len=0 占比：0.0%（3/6879）
