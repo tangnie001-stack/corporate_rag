@@ -626,8 +626,9 @@ git commit -m "feat(prompt): runtime_contract 补运行上下文块
 
 **Files:**
 - Modify: `src/config/prompts/templates/output.yaml`
+- Modify: `src/rag/prompt.py`（`_SECTION_RULES["output"]`）
 - Modify: `tests/config/prompts/test_templates_parse.py`（计数 20 → 21 + docstring）
-- Modify: `docs/agents/prompt-ownership.md`（§1 模板清单）
+- Modify: `docs/agents/prompt-ownership.md`（§1 模板清单 + §3 判据表）
 - Test: `tests/rag/test_prompt_contract.py`
 
 **Interfaces:**
@@ -686,9 +687,9 @@ def test_domain_output_skeleton_stays_in_base_not_output():
 Run: `pytest tests/rag/test_prompt_contract.py -q -k "presentation or presentation_precedes or skeleton"`
 Expected: FAIL —— 找不到 `回答呈现：`
 
-- [ ] **Step 3: 改模板**
+- [ ] **Step 3: 改模板并注册判据（两步都要做）**
 
-在 `src/config/prompts/templates/output.yaml` 的 `templates:` 列表**最前面**插入（保持"通用形态 → 引用 → 委派引用"的阅读顺序）：
+**3a. 模板** —— 在 `src/config/prompts/templates/output.yaml` 的 `templates:` 列表**最前面**插入：
 
 ```yaml
   - id: output-presentation
@@ -704,14 +705,39 @@ Expected: FAIL —— 找不到 `回答呈现：`
 
 ⚠ 现有两条的 `content` 风格**不要动**（F14）：`output-citation` 保持转义字符串、`output-delegate-citation` 保持 `|-`。
 
-- [ ] **Step 4: 同步模板计数**
+**3b. 注册判据（漏了这一步 = 静默不生效）** —— `src/rag/prompt.py` 的 `_SECTION_RULES["output"]` 当前是：
+
+```python
+    "output": (
+        ("output-citation", _always),
+        ("output-delegate-citation", _delegate_available),
+    ),
+```
+
+改为：
+
+```python
+    "output": (
+        ("output-presentation", _always),
+        ("output-citation", _always),
+        ("output-delegate-citation", _delegate_available),
+    ),
+```
+
+⚠ **段内的渲染顺序由 `_SECTION_RULES` 的条目顺序决定，不是 YAML 文件里的顺序**（`_render_section` 按规则表逐条取文再 join）。`output-presentation` 必须排在 `output-citation` **之前**，否则 `test_presentation_precedes_citation_rules` 失败。YAML 里的顺序只影响可读性，请与规则表保持一致。
+
+⚠ **不注册的后果是静默的**：模板文件存在、`loader.get_by_section("output")` 读得到、模板计数也已 +1，但组装时**根本不会渲染它** —— `test_output_carries_presentation_rules` 会一直 RED，而其余测试全绿。这正是"判据留代码"这条不变量要防的东西。
+
+- [ ] **Step 4: 同步模板计数与两份归属表**
 
 `tests/config/prompts/test_templates_parse.py`：
 - 模块 docstring `:1` 与 `:27` 的说明里的条数：20 → 21
 - `test_template_count_and_migrated_ids` 的 `assert len(templates) == 20`（该文件 `:29`）→ `== 21`
 - 该文件维护的 `migrated` id 集合里加入 `output-presentation`
 
-`docs/agents/prompt-ownership.md` §1 的模板清单同理补 `output-presentation`（属 `output` 段）。
+`docs/agents/prompt-ownership.md`：
+- §1 的模板清单补 `output-presentation`（属 `output` 段）
+- §3 的判据表补 `| 通用输出形态（格式/图片/URL 保真/完成前自检） | \`output-presentation\` | 无 | 无 |` 行，**并同时补上一贯漏登的 `output-citation` / `output-delegate-citation` 两行** —— 该表当前只列了 `sources` / `tools` / `runtime_contract` 的 9 条，`output` 段两条模板从未登记；而 §3 自称是"代码判据表与文案之间的唯一对照"，漏登记即违反该不变量
 
 - [ ] **Step 5: 跑测试确认通过**
 
@@ -861,7 +887,7 @@ def test_sources_general_forbids_skipping_evidence_on_completion():
         persona="", kb_bound=False, has_skills=False, tool_names=frozenset(),
     )
     text = "\n".join(str(m.content) for m in messages)
-    assert "不得以任务已完成为由跳过取证" in text
+    assert '不得以"任务已完成"为由跳过取证' in text
 
 
 def test_sources_general_covers_source_restriction_and_limits():
