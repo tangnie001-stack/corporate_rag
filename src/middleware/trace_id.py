@@ -19,13 +19,17 @@ async def trace_id_middleware(
     #    入站值是不可信输入：接线后它会成为 Langfuse 的 trace 主键（upsert），
     #    非法值必须在此拦下并换成服务端生成值 —— 若留到下游再换，响应头（用的是
     #    下面的局部变量）会与 SSE done / Langfuse（都重读 contextvar）分叉。
+    #    白名单作用在解析链的每个候选值上：非法 header 不短路 query，仅当两者都
+    #    缺失或都非法时才服务端生成。
     inbound = request.headers.get("X-Trace-ID")
-    if not inbound:
-        inbound = request.query_params.get("trace_id")
     if inbound and is_valid_trace_id(inbound):
         trace_id = inbound
     else:
-        trace_id = new_trace_id()
+        fallback = request.query_params.get("trace_id")
+        if fallback and is_valid_trace_id(fallback):
+            trace_id = fallback
+        else:
+            trace_id = new_trace_id()
 
     # 2. 注入 request.state 和 contextvar
     request.state.trace_id = trace_id

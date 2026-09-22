@@ -42,6 +42,18 @@ def test_illegal_inbound_id_is_replaced_and_aligned():
     assert resp.json()["trace_id"] == replaced
 
 
+def test_illegal_header_falls_back_to_valid_query_param():
+    """非法请求头不短路查询参数：回落到合法 ?trace_id，且三方取同一值。"""
+    client = TestClient(_app())
+    resp = client.get(
+        "/ping",
+        headers={"X-Trace-ID": "!!!bad!!!"},
+        params={"trace_id": "trace_from-query_1"},
+    )
+    assert resp.headers["X-Trace-ID"] == "trace_from-query_1"
+    assert resp.json()["trace_id"] == "trace_from-query_1"
+
+
 def test_missing_id_is_generated():
     """缺失时生成，响应头与上下文一致。"""
     client = TestClient(_app())
