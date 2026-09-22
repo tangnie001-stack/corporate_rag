@@ -134,7 +134,7 @@ Nginx 容器把本目录挂到 `/usr/share/nginx/html` 直接托管，**无 npm 
 | 文件 | 行数 | 用途 | 依赖 |
 |------|------|------|------|
 | `chat.html` | ~3030 | **对话问答页**（主页面，Nginx 默认 index）| 自包含内联 CSS/JS；仅外链 `vendor/marked.min.js`、`vendor/purify.min.js`、Google Fonts |
-| `index.html` | ~1261 | **知识库管理页**（KB/文档增删、上传、分块预览、RAGAS 徽标）| 自包含；外链 `js/api.js` |
+| `index.html` | ~1269 | **知识库管理页**（KB/文档增删、上传、分块预览、RAGAS 徽标）| 自包含；外链 `js/api.js` |
 | `login.html` | ~44 | 登录页 | — |
 | `js/api.js` | 209 | REST API 请求封装（统一错误处理 / trace_id） | 被 `index.html` 引用 |
 | `js/chat.js` | 809 | 早期 SSE 聊天控制器（外部 JS 版） | **当前页面未引用**（chat.html 已自包含），历史遗留 |
@@ -207,7 +207,7 @@ Nginx 容器把本目录挂到 `/usr/share/nginx/html` 直接托管，**无 npm 
 
 | 我要改… | 落点 |
 |------|------|
-| 加/改一个 HTTP 接口 | `src/api/<模块>.py`（路由）+ `src/api/model/request.py`/`response.py`（契约）+ 对应 `services/` 编排；同步 `docs/agents/api_contract.md` 与测试断言 |
+| 加/改一个 HTTP 接口 | `src/api/<模块>.py`（路由）+ `src/api/model/request.py`/`response.py`（契约）+ 对应 `services/` 编排；同步 `docs/agents/api_contract.md` + 测试断言 + **前端消费方 `deploy/nginx/html/`** |
 | 改一次生成的编排 / 事件转换 | `src/services/agent_service.py`（`_run_generation` / `_convert_event`） |
 | 改 agent 循环 / 提示词 | 文案改 `src/config/prompts/templates/*.yaml`（经 `loader.py` 唯一读取）；规则挂载点改 `src/agents/graph/agent_node.py`、`nodes.py`、`src/rag/prompt.py` |
 | 加/改工具 | `src/agents/tools/`（实现 + 在 `rag_tools.py` 注册）；工具描述文案入 `src/config/` |

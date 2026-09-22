@@ -1,6 +1,6 @@
 # 防御性模式
 
-> 真实发生/差点发生的缺陷类别，写成防复发规则。写并发、进程级注册表、SSE 流式、精排、实体、prompt、数据库、部署相关代码前先读。
+> 真实发生/差点发生的缺陷类别，写成防复发规则。写并发、进程级注册表、SSE 流式、精排、实体、prompt、接口契约、数据库、部署相关代码前先读。
 
 ## 并发
 
@@ -113,6 +113,16 @@
 无残留转义"的守卫测试。
 
 **历史实例**：classifier / rewrite / entity 三个远端模板各有一条（提交 `0aab2e9`、`005c572`）。
+
+## 接口契约
+
+### 前端消费的响应形状必须以契约文档为准，且形状漂移只能降级不能抛错
+
+**现象**：知识库管理页文档行的「详情」按钮点了没反应 —— `showEvalModal` 按**扁平**键读（`data.table_score`、`data.granularity_cv.toFixed(2)`），而后端 `eval_detail` 是**嵌套**结构（`structure_integrity.table.score`、`sbr.broken_boundaries[]`，且 `granularity_cv` 是对象不是数字）。`data.granularity_cv` 命中的是模块对象，`.toFixed` 抛 `TypeError`；该行位于 `sections` 构建期，**早于** `body.innerHTML` 与 `classList.add('show')` ⇒ 弹窗永不打开，且除控制台外无任何迹象（列表行上的 `分块评分 0.90 ✓` 反而正常，因为 `overall_score` 恰好在顶层）。缺陷存活 71 天（2026-07-12 引入 → 2026-09-22 发现）；同源的二级弹窗 `showEvalBroken` 三个分支全错，一级弹窗的断裂链接还传错键（传 `sec.key='structure'`，而查询表的键是 `'table'`）。
+
+**规则**：前端读任何接口返回值前，形状以 `docs/agents/api_contract.md` 对应小节为准，**不靠猜字段名**（尤其别把后端局部变量名当 JSON 键）；改动消费同一字段的前端代码后，按 CLAUDE.md「契约同步」同时过 `tests/` 与 `deploy/nginx/html/` 两条消费链。另外对"取到的值再调数值方法"处加类型守卫（`typeof v === 'number' ? v.toFixed(2) : '—'`）—— **形状漂移只该降级成占位符，不该让整个组件不渲染**。
+
+**历史实例**：`deploy/nginx/html/index.html` 的 `showEvalModal` / `showEvalBroken`（提交 `e503375` 引入；修复后同一契约形状见 `api_contract.md` §2.2.1）。
 
 ## 数据库
 

@@ -97,7 +97,57 @@ Success:
 | `created_at` | str | 上传时间 |
 | `eval_score` | float\|null | 分块质量综合评分（0-1，需开启 `CHUNK_EVAL_ENABLED`） |
 | `eval_passed` | bool\|null | 质量是否达标（阈值 ≥ 0.70） |
-| `eval_detail` | dict\|null | 评估详情 JSON，含 structure_integrity / sbr / granularity_cv 三个模块的分数和断裂明细 |
+| `eval_detail` | dict\|null | 评估详情 JSON，含 structure_integrity / sbr / granularity_cv 三个模块的分数和断裂明细（完整形状见下） |
+
+**`eval_detail` 完整形状**（`meta_info.eval` 原样直通，产出方 `src/chunking/scorer.py`，**中间无映射层**）：
+
+```json
+{
+  "version": 1,
+  "enabled": true,
+  "overall_score": 0.8975,
+  "passed": true,
+  "structure_integrity": {
+    "score": 0.9048,
+    "table": {"score": 0.7142857142857143, "total": 7, "broken": [
+      {"index": 0, "chunks": [32, 33], "pages": ["?"],
+       "break_position": "chunk 32: 14 行 / chunk 33: 12 行", "preview": "|  |  |  | 已报告 |"}
+    ]},
+    "heading": {"score": 1.0, "total": 9, "broken": []},
+    "clause": {"score": 1.0, "total": 17, "broken": []}
+  },
+  "sbr": {
+    "score": 0.963, "total_boundaries": 27,
+    "broken_boundaries": [
+      {"index": 3, "similarity": 0.3392,
+       "preview_before": "…前一段前 50 字…", "preview_after": "…后一段前 50 字…",
+       "page_before": 1, "page_after": 2}
+    ]
+  },
+  "granularity_cv": {
+    "score": 0.5696, "cv": 0.8607, "min_tokens": 77, "max_tokens": 987,
+    "extreme_chunks": [{"index": 32, "tokens": 971, "type": "oversized"}]
+  }
+}
+```
+
+| 键 | 类型 | 说明 |
+|----|------|------|
+| `version` / `enabled` | int / bool | 结构版本号；评估是否启用 |
+| `overall_score` | float\|null | 综合分（结构·SBR·粒度三重加权）；三项全失败时为 `null` |
+| `passed` | bool | `overall_score >= 0.70` |
+| `structure_integrity.score` | float\|null | 结构完整性总评 |
+| `structure_integrity.table` / `.heading` / `.clause` | dict | 三个子项，各含 `score` / `total` / `broken[]` |
+| `structure_integrity.*.broken[]` | list[dict] | 断裂项：`index` / `chunks`（跨块下标对）/ `pages` / `break_position` / `preview`（正文前 50 字） |
+| `sbr.score` | float\|null | 语义断裂率得分（`1 - 断裂边界数 / 边界总数`） |
+| `sbr.total_boundaries` | int | 参与计算的相邻块边界数 |
+| `sbr.broken_boundaries[]` | list[dict] | 断裂边界：`index` / `similarity` / `preview_before` / `preview_after` / `page_before` / `page_after` |
+| `granularity_cv.score` | float\|null | 粒度均匀性得分（`1 - min(cv, 1)`） |
+| `granularity_cv.cv` | float\|null | 原始变异系数（token 数的 `std/mean`） |
+| `granularity_cv.min_tokens` / `.max_tokens` | int | 分块 token 数极值 |
+| `granularity_cv.extreme_chunks[]` | list[dict] | 极端分块：`index` / `tokens` / `type`（`tiny` \| `oversized`） |
+
+⚠️ **消费方注意（历史踩坑）**：该字段**没有扁平化** —— 不存在 `table_score` / `sbr_score` / `granularity_tiny` 这类一级键，且 `structure_integrity` / `sbr` / `granularity_cv` 的值是**对象不是数字**。2026-07-12 前端曾按扁平键读，`data.granularity_cv.toFixed()` 抛 `TypeError` 使弹窗渲染中断（`deploy/nginx/html/index.html` 的 `showEvalModal`）。另外任一模块整体失败时会被降级为 `{"score": null, "error": "..."}`（`_safe_call`），其下子键**缺失**，消费方须按可选链取值。
 
 #### 2.2.2 `POST /api/kbs/documents/upload → 202`
 

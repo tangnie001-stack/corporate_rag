@@ -56,6 +56,7 @@
 | D-04 | 配置管理规范化 | 环境变量集中管理，不散落在代码中 | P1 | 低 | 无 |
 | D-05 | 日志结构化 | 统一日志格式，支持 request_id 串联 | P1 | 低 | 无 |
 | D-06 | DDD 领域驱动重写业务层 | 按限界上下文拆分模块（知识管理/对话/检索），引入聚合根和领域事件 | P3 | 高 | D-03 |
+| D-07 | **dev 库迁移无人应用、也无版本守卫** | `alembic heads` = `0002`，而 dev 库长期停在 `0001`（`0002_kb_domain.py` 2026-09-21 就已写好、从未 apply）。容器**不跑**迁移（`/app` 下没有 `alembic/`，迁移是宿主侧手工操作），也没有任何启动期检查 ⇒ 2026-09-22 并行会话重建 app 容器后，新代码 `SELECT knowledge_base.domain` 而列不存在，`/api/kbs/list` 直接 500、知识库页整页不可用（旧容器已跑 41 小时、进程内仍是旧代码，故此前一直"看起来正常"）。**已处置**：宿主侧 `alembic upgrade head` → `0002`。**建议**：加一条启动/部署期 `alembic current == heads` 的守卫（或容器 entrypoint 自动 upgrade），让"代码前进了、库没迁移"当场暴露，而不是等下一次重建容器 | 2026-09-22 恢复「详情」缺陷验证时发现 | P1 | 低 | 无 |
 
 ## E. 文档处理增强
 
@@ -70,6 +71,7 @@
 | E-07 | **Hybrid Search（BM25 + Dense 混合检索）** | 当前纯 Dense 语义检索，数值/时间/代码类精确查询匹配差。增加 BM25 稀疏检索，双路结果通过 RRF (k=60) 融合。轻量方案：rank_bm25 纯 Python 库；进阶方案：Qdrant 原生 sparse+dense。**业界 2026 年共识：Hybrid Search 是生产必备** | **P0** | 中 | 无 |
 | E-08 | **Parent-Child 分块策略** | 当前单一粒度分块（512 chars）。改为 child chunks（256 tokens）精准检索 + parent chunks（1024 tokens）完整上下文。child 命中时同时返回 parent 作为 LLM 上下文。**2026 年已成为生产默认策略**，PwC 论文验证 65% 胜率、+0.2s 额外延迟 | **P0** | 中 | E-05 |
 | E-09 | **文档后台处理重试机制** | 当前 `asyncio.create_task()` fire-and-forget，向量化失败（DashScope 超时/PostgreSQL 写入失败）直接标记 `failed`，无重试。增加指数退避重试（初始 100ms，倍数 2，最大 5s，加随机 jitter），最多重试 2-3 次后标记 `failed`。**不重试**：解析失败（文件损坏）、扫描件检测（不可恢复）。**只重试**：网络超时、API 限流（429）、向量库临时不可用等可恢复错误 | P1 | 低 | 无 |
+| E-10 | **分块质量评估的口径漂移与规格缺口** | ① **权重不一致**：归档 spec 写 `0.40 × structure_integrity.score + 0.30 × sbr.score + 0.30 × granularity_cv.score`（`docs/openspec/changes/archive/2026-07-17-retrieval-and-chunking/chunk-evaluation-system/specs/chunk-quality-scorer/spec.md:83`），代码是 `0.45 / 0.45 / 0.10`（`src/chunking/scorer.py:410-414`），且**无任何测试断言权重** —— 改哪边都会改变 `overall_score` 数值、进而影响历史「分块评分」的可比性，须先裁定以哪边为准。② **主规格缺失**：`docs/openspec/specs/` 下**没有** `chunk-quality-scorer`，该 change 归档时未把 delta 同步进主规格，所以三个模块的字段形状至今只存在于归档里（`eval_detail` 的实际形状已补进 `docs/agents/api_contract.md` §2.2.1，但那是接口契约、不是能力规格） | 2026-09-22 排查「详情」弹窗缺陷时顺带发现 | P2 | 低 | 无 |
 
 ## F. AI / Agent 能力
 
@@ -119,6 +121,8 @@
 | G-05 | **LaTeX 数学公式** | chat-markdown-rendering 后置项。助手消息中 KaTeX 渲染数学公式（dsh 用 micromark 数学扩展原生支持） | deepseek-harness 对比 | P3 | 低 | chat-markdown-rendering |
 | G-06 | **前端框架化评估（架构方向）** | 当前静态 HTML + 节流渲染可承载 G-01 工具卡片与简单工作流面板。**触发信号**：①需 AST 级增量渲染（流式中选中/复制文本、交互式代码块）——react-markdown/remark 的优势，Vue v-html 与 innerHTML 无异；②UI 复杂度超出静态页面可维护性（多组件状态/路由）；③G-01/G-02/G-03 同时上线。**原则**：最小改动，每次用当前架构渐进承载，信号出现再单独立 change 评估并连同构建链/部署一起规划 | 2026-08-31 调研 | P3 | 高 | G-01, G-02, G-03 |
 | G-07 | **`/xxx` 直出轮的委派折叠区（delegate start/end 缺失）** | `/xxx` 命中 fork 技能走直出轮时，直出节点（`src/agents/graph/skill_direct.py`）只投递 `delegate action=delta`，从不投 `start`/`end`（`start`/`end` 仅由 `src/agents/skills/delegate_task.py` 投递），导致前端拿不到 open section、把整包 delta 丢弃（console 报 `delegate delta without open section`），直出轮没有委派折叠区。**建议**：直出节点补投 `start`/`end`（与 `delegate_task` 同构），或前端容忍无 `start` 的 delta。**注**：存量缺陷，非 turn-provenance-observability change 引入，实机验证时发现 | turn-provenance-observability 实机验证 | P2 | 低 | 无 |
+| G-08 | **【已修】知识库页「详情」弹窗 71 天不可用** | `deploy/nginx/html/index.html` 的 `showEvalModal` 按**扁平**键读 `eval_detail`（`data.table_score` / `data.granularity_cv.toFixed(2)`），而后端返回的是**嵌套**结构（`structure_integrity.table.score` 等）⇒ `granularity_cv` 是对象，`.toFixed` 抛 `TypeError`，弹窗在渲染前即中断（`e503375` 2026-07-12 引入 → 2026-09-22 前端冒烟才发现）。同源错误还波及二级弹窗 `showEvalBroken` 三个分支，以及一级弹窗断裂链接的键名（传 `sec.key='structure'`、查询表的键却是 `'table'`）。**根因不是"没读文档"**：写前端当日（2026-07-12）`docs/agents/api_contract.md` **尚不存在**（2026-08-25 才创建），字段级契约当时为零。**已修**：契约补全（`api_contract.md` §2.2.1 加完整形状 + 逐键类型表 + 历史踩坑警示）、两级弹窗改按嵌套取值、`fmt`/`meterCls` 加类型守卫（漂移只降级成 `—`、不再让组件不渲染）；规则同步补进 `CLAUDE.md` 验证项 2、`code-map.md` 落点速查、`defensive-patterns.md`「接口契约」 | 2026-09-22 前端冒烟（langfuse-v2 合并后） | P2 | 低 | 无 |
+| G-09 | **前端契约消费无自动化护栏** | G-08 那类"后端形状变了、前端按旧形状读"的缺陷，现有四层闸门**一层都抓不到**：契约测试只测后端、doc 闸门只查文档、RAGAS 测质量、pyright 不跨语言。唯一能覆盖的是 `e2e-playwright-regression`，而它**0/30 尚未实施**。**建议**：该 change 落地时把「知识库页详情弹窗可打开且渲染出评分」列为首批用例之一（它正是"端到端最终形态"类断言） | 2026-09-22 修复 G-08 时确认 | P2 | 低 | e2e-playwright-regression |
 
 ## 标签说明
 
