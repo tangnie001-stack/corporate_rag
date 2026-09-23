@@ -2,8 +2,8 @@
 
 - **Status**：Accepted
 - **Date**：2026-09-23
-- **Deciders**：用户（决策：选方案 D——SQL 直删）；Claude（调研、实测与评审）
-- **关系**：为 ADR-0012 的「30 天保留期」提供**可工作的删除机制**，不取代 0012（0012 定「记原文 + 留 30 天」，本 ADR 定「用什么手段把它删掉」）；并兑现 ADR-0011 复查条件③（「接线 tracing 的那次变更必须一并落地 trace 保留/清理机制」）。
+- **Deciders**：用户（决策）；Claude（调研、实测与评审）
+- **关系**：为 ADR-0012 的「30 天保留期」提供**可工作的删除机制**，不取代 0012 —— 0012 定「记原文 + 留 30 天」并落了清理 CLI 的入口与护栏，本 ADR 提供其真正可工作的删除后端。
 
 ## 背景与问题
 
@@ -33,7 +33,7 @@ ADR-0012 决定 trace 记录 prompt / 回答原文并保留 30 天，但保留�
 - `comments` 用多态 `object_type` / `object_id`，**无** `trace_id`；`events` 是 v2 遗留摄取表，**无** trace_id 且当前 0 行。
 - **没有任何外键指向 `traces`** → 级联删除必须由我们自己保证。
 - 当前行数：`traces=8 / observations=0 / scores=0 / trace_sessions=5 / trace_media=0 / projects=1`；minio 里只有本项目的 `documents` 桶，**没有 langfuse 的媒体桶**。
-- app 容器 env 已有 `LANGFUSE_POSTGRES_PASS`；langfuse 库是同一 PG 实例上的独立 database（user `langfuse`），保留期常量与清理 CLI 入口见 `src/config/const.py:316-324` 与 `src/cli/purge_langfuse_traces.py`。
+- app 容器 env 已有 `LANGFUSE_POSTGRES_PASS`；langfuse 库是同一 PG 实例上的独立 database（user `langfuse`），保留期常量与清理 CLI 入口见 `src/config/const.py:319-324` 与 `src/cli/purge_langfuse_traces.py`。
 
 要回答的问题：**在「不升级 v3、也不购买企业授权」的前提下，用哪条路径执行保留期删除。**
 
@@ -64,14 +64,14 @@ ADR-0012 决定 trace 记录 prompt / 回答原文并保留 30 天，但保留�
 - **不选 A**：v3+ 的删除 API 是「新的」，用它就得先升级；而升级正是 ADR-0011 明确否掉的路（重新引入 ClickHouse / worker，推翻已决结论）。自研 SQL 删除比「升一个大版本 + 引入多套有状态服务」小得多。
 - **不选 B**：Data Retention 在 self-hosted 属企业版功能，是闭源门禁。为一条按时间批量删除去买授权，等于用整体授权面换一个窄功能。
 - **不选 C**：ADR-0012 之所以敢「记原文」，正是以 30 天保留期对冲留存面；放弃保留期会让 0012 的取舍前提不成立（原文无界留存）。这不是「省了实现」，而是把风险挪进未决状态。
-- **选 D 的正面依据**：prompt / 回答原文就在 `traces.input` / `output`（jsonb），**在同一 PG 实例内的独立 database**，app 侧已有凭据；官方社区对 v2 self-hosted 保留期给出的建议正是「清 PostgreSQL / 自写脚本」。此路径**不新增任何服务或组件**，且删除是**同步即时**的（与官方 API 的「异步、通常 15 分钟内、无删除确认」不同，这是我们的实现差异）。
+- **选 D 的正面依据**：prompt / 回答原文就在 `traces.input` / `output`（jsonb），**在同一 PG 实例内的独立 database**，app 侧已有凭据；官方社区对 v2 self-hosted 保留期给出的建议正是「清 PostgreSQL / 自写脚本」。此路径**不新增任何服务或组件**，且删除是**同步即时**的（与官方 API 的「异步、通常 15 分钟内、无删除确认」不同，这是我们的实现差异；该口径出自 Langfuse 官方 Data Deletion 文档：「Usually, trace data is deleted from our system within 15 minutes of the delete call. There is no deletion confirmation or notification」，https://langfuse.com/docs/administration/data-deletion ）。
 
 ## 后果
 
 **正面**：
 
 - **不新增任何服务 / 组件**：对比升 v3 要加 ClickHouse / worker / Redis / S3，本方案只在既有 PG 上执行删除。
-- **删除同步即时、便于验证**：不像官方 API 那样异步且「通常 15 分钟内」，执行完即可核对行数。
+- **删除同步即时、便于验证**：不像官方 API 那样异步且「通常 15 分钟内」（Langfuse 官方 Data Deletion 文档：「within 15 minutes of the delete call」，https://langfuse.com/docs/administration/data-deletion ），执行完即可核对行数。
 - 复用既有 CLI 与全部护栏，误删防线（保留期下界 / 单次上限 / 双重确认 / 审计输出）保持不变。
 
 **负面 / 接受的代价**：
