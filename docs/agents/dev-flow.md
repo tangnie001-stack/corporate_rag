@@ -108,6 +108,23 @@
 
 **含义**：走 **openspec 线**时两道闸门**必须显式触发**（skill 不会替你跑）；走 SDD 时 code review 与收尾会被自动带到，但验证纪律仍须自己守。**换执行器换的是主 skill，不换闸门** —— 「两道闸门必走」是 ⑥ 的阶段级约束。
 
+## 派 subagent 的上下文预算与「卡死」诊断
+
+**规则一（预算）**：给 subagent 的输入，**大 diff 包与「你自己去读 plan / design / specs / 账本」二选一**，不要同时给
+—— 两者叠加会让它把改动在原文件里再重读一遍。单个输入超过 ~100 KB 就按文件拆成多次派。
+
+**规则二（路由）**：输入越大越不要用最慢的模型档；若非用不可，就更要压小输入。
+
+**规则三（诊断，别猜"是不是慢"）**：subagent 长时间没输出时，读它自己的转录
+`<session>/subagents/<agent-id>.jsonl` 的**最后一条记录及其 `timestamp`**。若最后一条是错误、或时间戳停在很久以前，
+就是**已经死了** —— kill 重派。框架的 `running` 状态与不断增长的时长**不代表它在工作**。
+
+**实测代价（2026-09-23）**：一份 368 KB 的全域评审包 + 「也去读 plan/ADR/specs/账本」+ 最慢档路由 →
+该 subagent 在 **4 分 47 秒**内做了 43 次工具调用（32 次 `Read`，灌入 665 KB），上下文涨到 **~757 KB（≈19.4 万 token）**，
+随后上游返回**空流**而死：`Empty stream: upstream gateway sent only placeholder chunks without any model output`；
+框架仍报 `running`，**88 分钟零写入**才被发现，白等 1 小时 32 分。
+对照：同一评审改为**两个共 130 KB 的文件** + 默认档 + 明确「keep it bounded，别爬仓库」→ **约 2 分钟**完成。
+
 ## 两条硬规则
 
 1. **审提案与审 diff 是两件事**：④ 用 `architecture-review`（写文件**之前**），⑥ 用 `requesting-code-review`（改完**之后**）。二者不可互替。
