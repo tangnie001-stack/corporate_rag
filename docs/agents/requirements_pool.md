@@ -57,6 +57,7 @@
 | D-05 | 日志结构化 | 统一日志格式，支持 request_id 串联 | P1 | 低 | 无 |
 | D-06 | DDD 领域驱动重写业务层 | 按限界上下文拆分模块（知识管理/对话/检索），引入聚合根和领域事件 | P3 | 高 | D-03 |
 | D-07 | **dev 库迁移无人应用、也无版本守卫** | `alembic heads` = `0002`，而 dev 库长期停在 `0001`（`0002_kb_domain.py` 2026-09-21 就已写好、从未 apply）。容器**不跑**迁移（`/app` 下没有 `alembic/`，迁移是宿主侧手工操作），也没有任何启动期检查 ⇒ 2026-09-22 并行会话重建 app 容器后，新代码 `SELECT knowledge_base.domain` 而列不存在，`/api/kbs/list` 直接 500、知识库页整页不可用（旧容器已跑 41 小时、进程内仍是旧代码，故此前一直"看起来正常"）。**已处置**：宿主侧 `alembic upgrade head` → `0002`。**建议**：加一条启动/部署期 `alembic current == heads` 的守卫（或容器 entrypoint 自动 upgrade），让"代码前进了、库没迁移"当场暴露，而不是等下一次重建容器 | 2026-09-22 恢复「详情」缺陷验证时发现 | P1 | 低 | 无 |
+| D-08 | **文档锚点闸门自身的两处边界缺陷**（本次有意保留、待修） | ① **`UnicodeDecodeError` 不捕获 → 可挡死全员提交**：`src/cli/check_docs.py` 的代码快照只 `except OSError`，而 `UnicodeDecodeError` 是 `ValueError` 子类。该钩子 `always_run`、每次提交全量跑 ⇒ `src/` 下出现**任一**非 UTF-8 的 `.py` 就让**每次**提交崩掉。**注意触发面**：改前"命中即短路"（可能根本读不到坏文件），改成单次快照后**必读全树** ⇒ 触发面被**扩大**（存在坏文件时每次符号查询都抛）。修法约 1 行（`except (OSError, UnicodeDecodeError): continue`）；本次不改是因为它会破坏 change `check-docs-symbol-lookup-perf` 的"改前/改后 0 差异"等价性证明。② **`#` 截断 → 只产生 warn 噪声**：`line.split("#", 1)[0]` 把**字符串字面量里的 `#`** 也当注释起点、该行后半被丢弃 ⇒ 若某符号只出现在其后，会被误报为"未检索到"（失败方向单一，只能 `True → False`，不影响退出码）。缺陷类别已登记 `docs/agents/defensive-patterns.md`「开发期闸门（pre-commit）」 | 2026-09-23 check_docs 提速时发现（⑥ 代码评审指出 `(b)` 的触发面被扩大，原"保留现状"表述不准确） | P2 | 低 | 无 |
 
 ## E. 文档处理增强
 

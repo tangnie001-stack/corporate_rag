@@ -267,11 +267,15 @@
    git worktree add -b <新分支> /mnt/d/code/demo/AIAgent/corporate_rag-<名字> dev-wsl
    ```
    目录由 git 创建，**不能预先存在**。
-2. 若要在该 worktree 里跑 compose / pytest，把 gitignore 的运行时文件带过去（至少 `.env`，否则 compose 的 `${POSTGRES_PASSWORD:?}` 直接报错）：
+2. **必须**把 gitignore 的运行时文件带过去 —— **两个都要**，缺任一则该 worktree 跑不起来：
    ```bash
-   ln -s /mnt/d/code/demo/AIAgent/corporate_rag/.env \
-         /mnt/d/code/demo/AIAgent/corporate_rag-<名字>/.env
+   W=/mnt/d/code/demo/AIAgent/corporate_rag-<名字>
+   ln -s /mnt/d/code/demo/AIAgent/corporate_rag/.env  "$W/.env"
+   ln -s /mnt/d/code/demo/AIAgent/corporate_rag/.venv "$W/.venv"
    ```
+   - `.env`：不带则 compose 的 `${POSTGRES_PASSWORD:?}` 直接报错。
+   - **`.venv`：不带则该 worktree 里 `git commit` 全部失败** —— pre-commit 的本地钩子 entry 是 `.venv/bin/python -m src.cli.check_docs`（相对路径、按 worktree 解析），没有 `.venv` 就找不到解释器。**此前本节漏了这一步**（2026-09-23 建隔离 worktree 时踩到，事后补记）。
+   - ⚠️ **该 worktree 内禁用 `git add -A` / `git add .`**：`.venv` 是 symlink，而 `.gitignore` 里的 `.venv/`（带尾斜杠）只匹配**目录** ⇒ symlink 会以未跟踪文件 `?? .venv` 冒出来，被一把带进提交。一律用显式路径 `git add <文件...>`。同理见下方「注意事项」的 `/data/` 那条。
 3. 在新目录里正常编辑、提交。
 
 **验证**：`git worktree list` 列出两个工作区；新目录内 `git branch --show-current` 是新分支。

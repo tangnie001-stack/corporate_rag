@@ -5,6 +5,10 @@
 把"文档过时"变成可自动发现的信号（配合 pre-commit always_run hook 在提交前拦截）。
 """
 
+from pathlib import Path
+
+import pytest
+
 from src.cli import check_docs
 from src.cli.check_docs import (
     _check_path_anchors,
@@ -124,3 +128,100 @@ def test_skill_body_tool_names_exist_in_code():
             assert tool_name in known, (
                 f"skill {rec.name} 正文引用工具 {tool_name} 但代码未注册（已改名/删除？）"
             )
+
+
+# ── 符号检索的代码快照（change check-docs-symbol-lookup-perf）──
+
+
+@pytest.fixture(autouse=True)
+def _clear_src_blob():
+    """每个用例前后清空代码快照。
+
+    快照是**模块级、进程级**的：pytest 会话内模块只 import 一次，不隔离会让
+    「替换 _SRC_DIR」的用例污染同会话的其他用例。
+    """
+    check_docs._reset_cache()
+    yield
+    check_docs._reset_cache()
+
+
+def _make_src(tmp_path, monkeypatch, files: dict[str, str]) -> Path:
+    """造一个临时 src/ 目录并把它设为检索根，返回该目录。"""
+    src = tmp_path / "src"
+    src.mkdir()
+    for name, content in files.items():
+        (src / name).write_text(content, encoding="utf-8")
+    monkeypatch.setattr(check_docs, "_SRC_DIR", src)
+    check_docs._reset_cache()
+    return src
+
+
+def test_symbol_only_in_comment_not_found(tmp_path, monkeypatch):
+    """只出现在行内注释里的标识符 → 判为"未检索到"（注释不计入）。"""
+    _make_src(
+        tmp_path,
+        monkeypatch,
+        {"mod.py": "value = 1  # ghost_symbol 只在注释里\n"},
+    )
+    assert check_docs._symbol_exists_in_code("ghost_symbol") is False
+    # 同文件的真实标识符仍命中 —— 确认不是整体失配
+    assert check_docs._symbol_exists_in_code("value") is True
+
+
+def test_symbol_spanning_line_boundary_not_found(tmp_path, monkeypatch):
+    """跨行不产生假匹配：符号被行边界打断 → 判为"未检索到"。"""
+    _make_src(tmp_path, monkeypatch, {"mod.py": "foo\nbar\n"})
+    assert check_docs._symbol_exists_in_code("foobar") is False
+
+
+def test_symbol_lookup_reads_codebase_once(tmp_path, monkeypatch):
+    """读取次数不随调用次数增长 —— 规格「读取次数不随符号数增长」的确定性守卫。
+
+    计数方式：替换 `pathlib.Path.read_text`；**不使用耗时断言**（避免把机器性能
+    引入测试导致 flaky）。
+    """
+    src = _make_src(
+        tmp_path,
+        monkeypatch,
+        {f"m{i}.py": f"alpha_{i} = {i}\n" for i in range(3)},
+    )
+
+    reads = {"n": 0}
+    real_read_text = Path.read_text
+
+    def counting_read_text(self, *args, **kwargs):
+        if str(self).startswith(str(src)):
+            reads["n"] += 1
+        return real_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", counting_read_text)
+
+    check_docs._symbol_exists_in_code("alpha_0")  # 触发建快照
+    after_first = reads["n"]
+    # 首断言只锚定"建快照时 3 个文件各读一次"；**回退探测靠末断言** ——
+    # 旧实现若在顺序靠前的文件命中，首查也可能恰好是 3 次（首断言会误过）。
+    assert after_first == 3
+
+    for _ in range(50):
+        check_docs._symbol_exists_in_code("alpha_1")
+        check_docs._symbol_exists_in_code("no_such_symbol_xyz")
+
+    assert reads["n"] == after_first  # 后续查询不再读盘
+
+
+def test_blob_rebuilds_when_src_root_changes(tmp_path, monkeypatch):
+    """根变化时快照自行重建（**不**依赖显式失效函数）—— 根校验分支的护栏。"""
+    first = tmp_path / "a" / "src"
+    first.mkdir(parents=True)
+    (first / "m.py").write_text("alpha_only = 1\n", encoding="utf-8")
+    monkeypatch.setattr(check_docs, "_SRC_DIR", first)
+    check_docs._reset_cache()
+    assert check_docs._symbol_exists_in_code("alpha_only") is True
+
+    second = tmp_path / "b" / "src"
+    second.mkdir(parents=True)
+    (second / "m.py").write_text("beta_only = 1\n", encoding="utf-8")
+    monkeypatch.setattr(check_docs, "_SRC_DIR", second)
+    # 故意不调 _reset_cache()：快照必须因根变化而重建
+    assert check_docs._symbol_exists_in_code("beta_only") is True
+    assert check_docs._symbol_exists_in_code("alpha_only") is False
