@@ -1,7 +1,7 @@
 {
   "version": "1.0.0",
-  "gitCommitHash": "e67cafa65817bbae8fd9b46f564e4109f57773ba",
-  "generatedAt": "2026-09-23T09:27:01.780Z",
+  "gitCommitHash": "62dfa809efff37568d3593260cd2e32a95b9de8b",
+  "generatedAt": "2026-09-23T13:25:25.889Z",
   "files": {
     ".agents/skills/frontend-design/LICENSE.txt": {
       "filePath": ".agents/skills/frontend-design/LICENSE.txt",
@@ -255,7 +255,7 @@
     },
     ".env.example": {
       "filePath": ".env.example",
-      "contentHash": "038884189ac0e3b670a48cac0541e852694c857265b32a9d2974656b779c946f",
+      "contentHash": "2a61a690642b643f94c4162f9ae24e009a687b644a5b30644cffee9530e769ef",
       "functions": [],
       "classes": [],
       "imports": [],
@@ -265,12 +265,12 @@
     },
     ".env.template": {
       "filePath": ".env.template",
-      "contentHash": "d57877bbd4f270fc71850cd0a924ade61728c1e7038e654916b6a32a5d6fbfbe",
+      "contentHash": "2b3cb9c7cae4dfc3005f36060a845c1ed4b046876ccf50a91e51960207fbf1b0",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 123,
+      "totalLines": 125,
       "hasStructuralAnalysis": false
     },
     ".pre-commit-config.yaml": {
@@ -305,7 +305,7 @@
     },
     "CLAUDE.md": {
       "filePath": "CLAUDE.md",
-      "contentHash": "48786314d6f4e5495a860931a98aa1116cff9920962ba8130e3e9e9e91119650",
+      "contentHash": "138a385217637fc0997d00ba9f3393cb27380f768a9dcd7e88f5152bb2ff92e8",
       "functions": [],
       "classes": [],
       "imports": [],
@@ -1351,7 +1351,7 @@
     },
     "src/agents/graph/agent_node.py": {
       "filePath": "src/agents/graph/agent_node.py",
-      "contentHash": "269f19c3f639b93e911492f2bb525f3cb9bf2bb4f94e43482778388bca21a7ad",
+      "contentHash": "2e949b4e7fdb105eaa19b8f8b8b74f38b0c7814093e6086c9f767228fb8d0903",
       "functions": [
         {
           "name": "_truncate_history",
@@ -1385,7 +1385,7 @@
           ],
           "returnType": "Callable",
           "exported": true,
-          "lineCount": 137
+          "lineCount": 170
         },
         {
           "name": "make_agent_tools_node",
@@ -1402,15 +1402,6 @@
           "returnType": "Callable",
           "exported": true,
           "lineCount": 28
-        },
-        {
-          "name": "_extract_text",
-          "params": [
-            "message"
-          ],
-          "returnType": "str",
-          "exported": true,
-          "lineCount": 22
         },
         {
           "name": "route_agent",
@@ -1437,6 +1428,13 @@
           ]
         },
         {
+          "source": "datetime",
+          "specifiers": [
+            "UTC",
+            "datetime"
+          ]
+        },
+        {
           "source": "langchain_core.messages",
           "specifiers": [
             "AIMessage",
@@ -1446,9 +1444,29 @@
           ]
         },
         {
+          "source": "langfuse.decorators",
+          "specifiers": [
+            "langfuse_context",
+            "observe"
+          ]
+        },
+        {
+          "source": "langfuse.model",
+          "specifiers": [
+            "ModelUsage"
+          ]
+        },
+        {
           "source": "langgraph.prebuilt",
           "specifiers": [
             "ToolNode"
+          ]
+        },
+        {
+          "source": "src.agents.graph.message_payload",
+          "specifiers": [
+            "_extract_text",
+            "_messages_payload"
           ]
         },
         {
@@ -1503,15 +1521,15 @@
           ]
         },
         {
-          "source": "src.rag.prompt",
+          "source": "src.infra.llm.token_usage",
           "specifiers": [
-            "build_prompt"
+            "estimate_usage"
           ]
         },
         {
-          "source": "src.rag.stream",
+          "source": "src.rag.prompt",
           "specifiers": [
-            "estimate_usage"
+            "build_prompt"
           ]
         }
       ],
@@ -1521,10 +1539,9 @@
         "make_agent_model_node",
         "make_agent_tools_node",
         "make_agent_finalize_node",
-        "_extract_text",
         "route_agent"
       ],
-      "totalLines": 375,
+      "totalLines": 388,
       "hasStructuralAnalysis": true
     },
     "src/agents/graph/nodes.py": {
@@ -3020,7 +3037,7 @@
     },
     "src/agents/skills/fork_stream.py": {
       "filePath": "src/agents/skills/fork_stream.py",
-      "contentHash": "68a5295b817c329051f02a8e01829eac0dbe64dc280dca66772f64fa7012b730",
+      "contentHash": "eff0edb562ba020845d600a470c96bdfdec50fee1d039cfdf78f732efffff6b9",
       "functions": [
         {
           "name": "_resolve_stream_ctx",
@@ -3188,7 +3205,7 @@
           ]
         },
         {
-          "source": "src.rag.stream",
+          "source": "src.infra.llm.token_usage",
           "specifiers": [
             "estimate_usage"
           ]
@@ -4439,7 +4456,7 @@
     },
     "src/api/chat.py": {
       "filePath": "src/api/chat.py",
-      "contentHash": "e011e9106a32c9c15e6b1bb2cb9a24d5514777141aae37339fa184a57e0f91f2",
+      "contentHash": "69ba315cd8c02566bb911a0a4a09ec86f1395e0f01bfcb6f03d7ec18d3d6c3e0",
       "functions": [
         {
           "name": "_run_with_finalize",
@@ -4473,7 +4490,7 @@
           ],
           "returnType": "AsyncGenerator[str, None]",
           "exported": true,
-          "lineCount": 102
+          "lineCount": 107
         },
         {
           "name": "_acquire_session_lock",
@@ -4615,7 +4632,7 @@
         "_release_session_lock",
         "chat_stream"
       ],
-      "totalLines": 381,
+      "totalLines": 386,
       "hasStructuralAnalysis": true
     },
     "src/api/clarify.py": {
@@ -6953,7 +6970,7 @@
     },
     "src/cli/README.md": {
       "filePath": "src/cli/README.md",
-      "contentHash": "a7ac915fdc8b14d3431a204cd8d48ec9aeee0ab0fe9219fd535427456fb11655",
+      "contentHash": "84e213e7b8a00a694c09171908c498d39da4d2d8cc269371b1524244e97fac86",
       "functions": [],
       "classes": [],
       "imports": [],
@@ -8000,7 +8017,7 @@
     },
     "src/cli/eval_ragas.py": {
       "filePath": "src/cli/eval_ragas.py",
-      "contentHash": "18f6a26cbabede57c2c996ba6f204539cc7a01734db7bc9fe1c71fc9d6b7ddf4",
+      "contentHash": "524dbbe6303ccdddeb15a3c258c77a80c702a30f19197c895aba00c82d99989b",
       "functions": [
         {
           "name": "parse_args",
@@ -8008,6 +8025,19 @@
           "returnType": "argparse.Namespace",
           "exported": true,
           "lineCount": 57
+        },
+        {
+          "name": "_answer_one_question",
+          "params": [
+            "graph",
+            "kb_id",
+            "session_id",
+            "query",
+            "trace_id"
+          ],
+          "returnType": "tuple[str, list[str], list[dict]]",
+          "exported": true,
+          "lineCount": 48
         },
         {
           "name": "generate_answers_and_contexts",
@@ -8019,7 +8049,7 @@
           ],
           "returnType": "tuple[list[str], list[list[str]], list[str], list[list[dict]]]",
           "exported": true,
-          "lineCount": 88
+          "lineCount": 67
         },
         {
           "name": "run_evaluation",
@@ -8075,7 +8105,7 @@
           "params": [],
           "returnType": "None",
           "exported": true,
-          "lineCount": 144
+          "lineCount": 155
         },
         {
           "name": "_print_metric_averages",
@@ -8153,6 +8183,13 @@
           ]
         },
         {
+          "source": "langfuse.decorators",
+          "specifiers": [
+            "langfuse_context",
+            "observe"
+          ]
+        },
+        {
           "source": "src.config",
           "specifiers": [
             "settings"
@@ -8181,10 +8218,18 @@
           "specifiers": [
             "current_trace_id"
           ]
+        },
+        {
+          "source": "src.infra.llm.tracing",
+          "specifiers": [
+            "configure_tracing",
+            "flush_tracing"
+          ]
         }
       ],
       "exports": [
         "parse_args",
+        "_answer_one_question",
         "generate_answers_and_contexts",
         "run_evaluation",
         "save_results_csv",
@@ -8195,7 +8240,7 @@
         "_save_eval_report",
         "_list_knowledge_bases"
       ],
-      "totalLines": 720,
+      "totalLines": 764,
       "hasStructuralAnalysis": true
     },
     "src/cli/eval_ragas_generate.py": {
@@ -8636,7 +8681,7 @@
     },
     "src/config/const.py": {
       "filePath": "src/config/const.py",
-      "contentHash": "ea91d09f1727a1dd1984c8b2b3ab1af84a21c15d24ca4f7c02181062e1f23654",
+      "contentHash": "083be30cf7bd49b793c151c0b3e652dbaf14556a436c312b0f3e0df1fa2f600f",
       "functions": [
         {
           "name": "_extract_domain",
@@ -8774,7 +8819,7 @@
         "_extract_domain",
         "resolve_source_tier"
       ],
-      "totalLines": 408,
+      "totalLines": 419,
       "hasStructuralAnalysis": true
     },
     "src/config/prompts/__init__.py": {
@@ -9136,7 +9181,7 @@
     },
     "src/config/settings.py": {
       "filePath": "src/config/settings.py",
-      "contentHash": "aa25bacfa5f6b60449cadd2f15c24062397525913492390cde12eda539687c64",
+      "contentHash": "6c176a4a0a5471ce6ec36dd48cf4fa7f298ded73f33d7a028c174db6aad0104d",
       "functions": [
         {
           "name": "build_postgres_dsn",
@@ -9144,6 +9189,13 @@
           "returnType": "str",
           "exported": true,
           "lineCount": 18
+        },
+        {
+          "name": "build_langfuse_postgres_dsn",
+          "params": [],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 23
         }
       ],
       "classes": [],
@@ -9168,9 +9220,10 @@
         }
       ],
       "exports": [
-        "build_postgres_dsn"
+        "build_postgres_dsn",
+        "build_langfuse_postgres_dsn"
       ],
-      "totalLines": 313,
+      "totalLines": 347,
       "hasStructuralAnalysis": true
     },
     "src/core/__init__.py": {
@@ -9185,7 +9238,7 @@
     },
     "src/core/log_event_specs.py": {
       "filePath": "src/core/log_event_specs.py",
-      "contentHash": "cb37735dfb5d3c055dda763abe05035ea63ef0217ee1e3f4eee89e00aa74ae74",
+      "contentHash": "9e7535ad92d1eb12eb5e3ca060ca614206b671c7337e4e9d153285c67b95b71d",
       "functions": [],
       "classes": [
         {
@@ -9212,12 +9265,12 @@
       "exports": [
         "EventSpec"
       ],
-      "totalLines": 384,
+      "totalLines": 381,
       "hasStructuralAnalysis": true
     },
     "src/core/log_events.py": {
       "filePath": "src/core/log_events.py",
-      "contentHash": "b3794445f1c950f2a69b9a05da6161b3db81ff13399a0d4939ed61ed4db46e2e",
+      "contentHash": "e81d86b70c3968e73e455892cbb819205712383996d102dae19de39a4006fdb9",
       "functions": [
         {
           "name": "_validate_registry",
@@ -9243,7 +9296,7 @@
           "methods": [],
           "properties": [],
           "exported": true,
-          "lineCount": 160
+          "lineCount": 157
         },
         {
           "name": "ReplayEvent",
@@ -9289,12 +9342,12 @@
         "ReplayEvent",
         "_validate_registry"
       ],
-      "totalLines": 246,
+      "totalLines": 243,
       "hasStructuralAnalysis": true
     },
     "src/core/logging.py": {
       "filePath": "src/core/logging.py",
-      "contentHash": "747dd35a67470fe1fec016570c1cbaaba290599e908236502fd336fbee2e9bcd",
+      "contentHash": "bcba5f364de943d120d94db598ae5c7b80e9881400d9e97a96054b3d64822e10",
       "functions": [
         {
           "name": "log_sql_result",
@@ -11091,117 +11144,6 @@
       "totalLines": 12,
       "hasStructuralAnalysis": true
     },
-    "src/infra/llm/langfuse_tracing.py": {
-      "filePath": "src/infra/llm/langfuse_tracing.py",
-      "contentHash": "50cd6e7dfa0bb1a2d567e41c68a434f67729c07a33fc9772da0214aa067b537e",
-      "functions": [
-        {
-          "name": "traced",
-          "params": [
-            "name"
-          ],
-          "exported": true,
-          "lineCount": 48
-        }
-      ],
-      "classes": [
-        {
-          "name": "TraceInput",
-          "methods": [],
-          "properties": [
-            "kb_id",
-            "session_id",
-            "query"
-          ],
-          "exported": true,
-          "lineCount": 9
-        },
-        {
-          "name": "LangfuseTracer",
-          "methods": [
-            "__init__",
-            "start_trace",
-            "end_trace",
-            "start_generation",
-            "end_generation"
-          ],
-          "properties": [],
-          "exported": true,
-          "lineCount": 163
-        }
-      ],
-      "imports": [
-        {
-          "source": "functools",
-          "specifiers": [
-            "functools"
-          ]
-        },
-        {
-          "source": "inspect",
-          "specifiers": [
-            "inspect"
-          ]
-        },
-        {
-          "source": "dataclasses",
-          "specifiers": [
-            "asdict",
-            "dataclass"
-          ]
-        },
-        {
-          "source": "typing",
-          "specifiers": [
-            "cast"
-          ]
-        },
-        {
-          "source": "langfuse",
-          "specifiers": [
-            "Langfuse"
-          ]
-        },
-        {
-          "source": "langfuse.model",
-          "specifiers": [
-            "ModelUsage"
-          ]
-        },
-        {
-          "source": "src.core",
-          "specifiers": [
-            "core_logging"
-          ]
-        },
-        {
-          "source": "src.core.log_events",
-          "specifiers": [
-            "Event"
-          ]
-        },
-        {
-          "source": "src.infra.llm.token_usage",
-          "specifiers": [
-            "TokenUsage"
-          ]
-        },
-        {
-          "source": "src.infra.llm.trace_context",
-          "specifiers": [
-            "current_trace_id",
-            "current_tracer"
-          ]
-        }
-      ],
-      "exports": [
-        "TraceInput",
-        "traced",
-        "LangfuseTracer"
-      ],
-      "totalLines": 247,
-      "hasStructuralAnalysis": true
-    },
     "src/infra/llm/llm_content_logging.py": {
       "filePath": "src/infra/llm/llm_content_logging.py",
       "contentHash": "08b8ab697715464890bd6da371c6c81d9ff63ff76a50f08a19bc01b437305931",
@@ -11525,8 +11467,19 @@
     },
     "src/infra/llm/token_usage.py": {
       "filePath": "src/infra/llm/token_usage.py",
-      "contentHash": "8a34e56fbc481cee65e428f27398d9545145d3a39c39915cb8937bea035cc813",
-      "functions": [],
+      "contentHash": "1fe85ca5b98524eb18eb7d133e7bae4cffcda7714f925c76388b303bbab06461",
+      "functions": [
+        {
+          "name": "estimate_usage",
+          "params": [
+            "messages",
+            "output"
+          ],
+          "returnType": "TokenUsage",
+          "exported": true,
+          "lineCount": 12
+        }
+      ],
       "classes": [
         {
           "name": "TokenUsage",
@@ -11549,14 +11502,15 @@
         }
       ],
       "exports": [
-        "TokenUsage"
+        "TokenUsage",
+        "estimate_usage"
       ],
-      "totalLines": 13,
+      "totalLines": 27,
       "hasStructuralAnalysis": true
     },
     "src/infra/llm/trace_context.py": {
       "filePath": "src/infra/llm/trace_context.py",
-      "contentHash": "39a4a7a8e06bcb335140da2cfb62f54351cae1c0036a02c4cdc0396697c898cb",
+      "contentHash": "0df3766021df75052aa3722dca0096ae1c2b1d4d046a576a43c7f8f882137d59",
       "functions": [],
       "classes": [],
       "imports": [
@@ -11565,16 +11519,10 @@
           "specifiers": [
             "ContextVar"
           ]
-        },
-        {
-          "source": "typing",
-          "specifiers": [
-            "TYPE_CHECKING"
-          ]
         }
       ],
       "exports": [],
-      "totalLines": 20,
+      "totalLines": 13,
       "hasStructuralAnalysis": true
     },
     "src/infra/redis_client.py": {
@@ -12142,7 +12090,7 @@
     },
     "src/main.py": {
       "filePath": "src/main.py",
-      "contentHash": "ae236d2b90293b0de6135e5756f77f394013aba684ef599b792c14aeaf2da231",
+      "contentHash": "d05af5c1b1498db5e842b4227bf07fbf820d6bd1c5c02242ccf1ca6d071394ab",
       "functions": [
         {
           "name": "lifespan",
@@ -12150,7 +12098,7 @@
             "app"
           ],
           "exported": true,
-          "lineCount": 17
+          "lineCount": 25
         },
         {
           "name": "_clear_stale_chat_locks",
@@ -12297,6 +12245,13 @@
           ]
         },
         {
+          "source": "src.infra.llm.tracing",
+          "specifiers": [
+            "configure_tracing",
+            "flush_tracing"
+          ]
+        },
+        {
           "source": "src.middleware.auth",
           "specifiers": [
             "auth_middleware"
@@ -12329,7 +12284,7 @@
         "validation_exception_handler",
         "unknown_exception_handler"
       ],
-      "totalLines": 194,
+      "totalLines": 203,
       "hasStructuralAnalysis": true
     },
     "src/middleware/__init__.py": {
@@ -12462,7 +12417,7 @@
     },
     "src/middleware/trace_id.py": {
       "filePath": "src/middleware/trace_id.py",
-      "contentHash": "b7ae41dad4055aca85d84e5c6aca8668e0ab2b3e2c637a80a0cc86df3ce2d0e3",
+      "contentHash": "6c6a120f051530506eb286f5655d70eda87bbb4fb7a03104e46cfbeb722facf4",
       "functions": [
         {
           "name": "trace_id_middleware",
@@ -12472,17 +12427,11 @@
           ],
           "returnType": "Response",
           "exported": true,
-          "lineCount": 20
+          "lineCount": 29
         }
       ],
       "classes": [],
       "imports": [
-        {
-          "source": "uuid",
-          "specifiers": [
-            "uuid"
-          ]
-        },
         {
           "source": "collections.abc",
           "specifiers": [
@@ -12502,12 +12451,19 @@
           "specifiers": [
             "current_trace_id"
           ]
+        },
+        {
+          "source": "src.infra.llm.tracing",
+          "specifiers": [
+            "is_valid_trace_id",
+            "new_trace_id"
+          ]
         }
       ],
       "exports": [
         "trace_id_middleware"
       ],
-      "totalLines": 35,
+      "totalLines": 45,
       "hasStructuralAnalysis": true
     },
     "src/models.py": {
@@ -13067,7 +13023,7 @@
     },
     "src/rag/__init__.py": {
       "filePath": "src/rag/__init__.py",
-      "contentHash": "f05b3d667c3d034e800c2a45a4c78e6b2cc6ce8703fb9581bf8658441221ba87",
+      "contentHash": "c7df73fc470ab287b236a49a31a9e8e1b6d5f43eda7038ba7ab9a6edc44394f0",
       "functions": [],
       "classes": [],
       "imports": [
@@ -13670,86 +13626,6 @@
       "totalLines": 257,
       "hasStructuralAnalysis": true
     },
-    "src/rag/stream.py": {
-      "filePath": "src/rag/stream.py",
-      "contentHash": "d80f9489556af9ec334f67bbf55c598a268a5e8072e64aa1652aa9572daaaf31",
-      "functions": [
-        {
-          "name": "estimate_usage",
-          "params": [
-            "messages",
-            "output"
-          ],
-          "returnType": "TokenUsage",
-          "exported": true,
-          "lineCount": 12
-        },
-        {
-          "name": "stream_answer",
-          "params": [
-            "messages",
-            "llm",
-            "trace_id"
-          ],
-          "returnType": "Generator[str, None, None]",
-          "exported": true,
-          "lineCount": 116
-        }
-      ],
-      "classes": [],
-      "imports": [
-        {
-          "source": "time",
-          "specifiers": [
-            "time"
-          ]
-        },
-        {
-          "source": "collections.abc",
-          "specifiers": [
-            "Generator"
-          ]
-        },
-        {
-          "source": "loguru",
-          "specifiers": [
-            "logger"
-          ]
-        },
-        {
-          "source": "pydantic",
-          "specifiers": [
-            "SecretStr"
-          ]
-        },
-        {
-          "source": "src.config",
-          "specifiers": [
-            "RETRY_BACKOFF_FACTOR",
-            "RETRY_INITIAL_INTERVAL",
-            "RETRY_MAX_ATTEMPTS"
-          ]
-        },
-        {
-          "source": "src.infra.llm.token_usage",
-          "specifiers": [
-            "TokenUsage"
-          ]
-        },
-        {
-          "source": "src.infra.llm.trace_context",
-          "specifiers": [
-            "current_tracer"
-          ]
-        }
-      ],
-      "exports": [
-        "estimate_usage",
-        "stream_answer"
-      ],
-      "totalLines": 144,
-      "hasStructuralAnalysis": true
-    },
     "src/rag/temporal.py": {
       "filePath": "src/rag/temporal.py",
       "contentHash": "bb9735e09f36c45aa526b82ee27b084a074007f2b0870b9871d9923b1c446556",
@@ -13865,7 +13741,7 @@
     },
     "src/services/agent_service.py": {
       "filePath": "src/services/agent_service.py",
-      "contentHash": "6ed83c4664c57c23c206313042e75463adcca0749f97eaa0290265f9f415958e",
+      "contentHash": "3abaaf085bbec905b576b9d0d0816bbedfe5cb1f5fdd2a818434de8a975cc0ef",
       "functions": [
         {
           "name": "_extract_model_name",
@@ -13976,7 +13852,7 @@
           ],
           "returnType": "str",
           "exported": true,
-          "lineCount": 180
+          "lineCount": 190
         }
       ],
       "classes": [
@@ -14033,7 +13909,7 @@
             "_tool_names"
           ],
           "exported": true,
-          "lineCount": 420
+          "lineCount": 419
         }
       ],
       "imports": [
@@ -14092,6 +13968,13 @@
           "source": "langchain_core.runnables.schema",
           "specifiers": [
             "StreamEvent"
+          ]
+        },
+        {
+          "source": "langfuse.decorators",
+          "specifiers": [
+            "langfuse_context",
+            "observe"
           ]
         },
         {
@@ -14200,12 +14083,6 @@
           ]
         },
         {
-          "source": "src.infra.llm.langfuse_tracing",
-          "specifiers": [
-            "LangfuseTracer"
-          ]
-        },
-        {
           "source": "src.infra.llm.prompt_manager",
           "specifiers": [
             "PromptManager"
@@ -14257,7 +14134,7 @@
         "_run_generation",
         "AgentService"
       ],
-      "totalLines": 1152,
+      "totalLines": 1162,
       "hasStructuralAnalysis": true
     },
     "src/services/app_service.py": {
@@ -22174,7 +22051,7 @@
     },
     "tests/cli/test_adr_consistency.py": {
       "filePath": "tests/cli/test_adr_consistency.py",
-      "contentHash": "a938428f414102a9a80f6c7555dc6d8504e79654c17ec9d60cb7607fca914afb",
+      "contentHash": "bcc21709501e5450b911a424143318d1f1e2e98c428361be315813ab03fabe31",
       "functions": [
         {
           "name": "_write_adr",
@@ -22289,7 +22166,7 @@
           "name": "test_real_index_parses",
           "params": [],
           "exported": true,
-          "lineCount": 7
+          "lineCount": 6
         }
       ],
       "classes": [],
@@ -22323,7 +22200,7 @@
         "test_full_supersede_symmetric_pair_passes",
         "test_real_index_parses"
       ],
-      "totalLines": 259,
+      "totalLines": 258,
       "hasStructuralAnalysis": true
     },
     "tests/cli/test_doc_consistency.py": {
@@ -23788,19 +23665,19 @@
     },
     "tests/config/test_settings.py": {
       "filePath": "tests/config/test_settings.py",
-      "contentHash": "d0a6c560241fb31c15506335a210c0cbf1f5e4397cd9ae60fe96e3e57fd0c0fe",
+      "contentHash": "10c4dbbd053dc1638d46d071d16d97ddcb1e0fa6f599558cc3e2122a79d7d7a3",
       "functions": [
         {
           "name": "test_langfuse_secret_key_defaults_to_empty",
           "params": [],
           "exported": true,
-          "lineCount": 11
+          "lineCount": 9
         },
         {
           "name": "test_langfuse_public_key_defaults_to_empty",
           "params": [],
           "exported": true,
-          "lineCount": 11
+          "lineCount": 9
         },
         {
           "name": "test_langfuse_host_default",
@@ -23849,6 +23726,18 @@
           "params": [],
           "exported": true,
           "lineCount": 8
+        },
+        {
+          "name": "test_langfuse_defaults_do_not_point_to_nonexistent_host",
+          "params": [],
+          "exported": true,
+          "lineCount": 16
+        },
+        {
+          "name": "test_langfuse_key_defaults_are_empty",
+          "params": [],
+          "exported": true,
+          "lineCount": 16
         }
       ],
       "classes": [],
@@ -23894,9 +23783,11 @@
         "test_entity_text_prefix_len_default",
         "test_margin_constants_split",
         "test_pdf_heading_subprocess_constants",
-        "test_non_kb_temperature_default"
+        "test_non_kb_temperature_default",
+        "test_langfuse_defaults_do_not_point_to_nonexistent_host",
+        "test_langfuse_key_defaults_are_empty"
       ],
-      "totalLines": 115,
+      "totalLines": 147,
       "hasStructuralAnalysis": true
     },
     "tests/config/test_source_tier.py": {
@@ -24008,8 +23899,25 @@
     },
     "tests/conftest.py": {
       "filePath": "tests/conftest.py",
-      "contentHash": "77cb393814e1e6a486280839a84d7f3c91147d980b129fad99fe7a28d9420e7c",
+      "contentHash": "93f7afbe3ba21888742ce106fc0a6df1cd73257b4015f133d594efc09f54af96",
       "functions": [
+        {
+          "name": "_is_resolvable",
+          "params": [
+            "host",
+            "port"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 15
+        },
+        {
+          "name": "pytest_configure",
+          "params": [],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 29
+        },
         {
           "name": "service",
           "params": [],
@@ -24057,10 +23965,30 @@
           "returnType": "str",
           "exported": true,
           "lineCount": 7
+        },
+        {
+          "name": "_disable_langfuse_tracing",
+          "params": [],
+          "returnType": "Generator[None, None, None]",
+          "exported": true,
+          "lineCount": 15
+        },
+        {
+          "name": "_rearm_langfuse_kill_switch",
+          "params": [],
+          "returnType": "Generator[None, None, None]",
+          "exported": true,
+          "lineCount": 30
         }
       ],
       "classes": [],
       "imports": [
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
         {
           "source": "asyncio",
           "specifiers": [
@@ -24068,9 +23996,9 @@
           ]
         },
         {
-          "source": "os",
+          "source": "socket",
           "specifiers": [
-            "os"
+            "socket"
           ]
         },
         {
@@ -24111,14 +24039,18 @@
         }
       ],
       "exports": [
+        "_is_resolvable",
+        "pytest_configure",
         "service",
         "vector_store",
         "test_kb_name",
         "_cleanup_kb",
         "get_test_doc_path",
-        "corrupted_file_path"
+        "corrupted_file_path",
+        "_disable_langfuse_tracing",
+        "_rearm_langfuse_kill_switch"
       ],
-      "totalLines": 112,
+      "totalLines": 223,
       "hasStructuralAnalysis": true
     },
     "tests/core/test_log_events.py": {
@@ -26373,124 +26305,6 @@
         "test_chunk_result_has_no_bm25_named_field"
       ],
       "totalLines": 27,
-      "hasStructuralAnalysis": true
-    },
-    "tests/infra/llm/test_langfuse.py": {
-      "filePath": "tests/infra/llm/test_langfuse.py",
-      "contentHash": "41dc48c11e349aeae9793ecd56e54a38ccfeb8f0b2882cb2a3e5b4d8e933ef4c",
-      "functions": [
-        {
-          "name": "test_init_without_keys",
-          "params": [],
-          "exported": true,
-          "lineCount": 11
-        },
-        {
-          "name": "test_init_without_public_key",
-          "params": [],
-          "exported": true,
-          "lineCount": 10
-        },
-        {
-          "name": "test_init_success",
-          "params": [],
-          "exported": true,
-          "lineCount": 22
-        },
-        {
-          "name": "test_init_exception",
-          "params": [],
-          "exported": true,
-          "lineCount": 14
-        },
-        {
-          "name": "test_start_trace_returns_none_when_not_initialized",
-          "params": [],
-          "exported": true,
-          "lineCount": 8
-        },
-        {
-          "name": "test_start_trace_with_trace_input",
-          "params": [],
-          "exported": true,
-          "lineCount": 32
-        },
-        {
-          "name": "test_end_trace_does_nothing_when_not_initialized",
-          "params": [],
-          "exported": true,
-          "lineCount": 7
-        },
-        {
-          "name": "test_start_generation_returns_none_when_not_initialized",
-          "params": [],
-          "exported": true,
-          "lineCount": 8
-        },
-        {
-          "name": "test_end_generation_does_nothing_when_not_initialized",
-          "params": [],
-          "exported": true,
-          "lineCount": 7
-        },
-        {
-          "name": "test_end_trace_does_nothing_when_trace_id_empty",
-          "params": [],
-          "exported": true,
-          "lineCount": 9
-        },
-        {
-          "name": "test_methods_succeed_when_initialized",
-          "params": [
-            "method",
-            "kwargs"
-          ],
-          "exported": true,
-          "lineCount": 25
-        }
-      ],
-      "classes": [],
-      "imports": [
-        {
-          "source": "unittest.mock",
-          "specifiers": [
-            "MagicMock",
-            "patch"
-          ]
-        },
-        {
-          "source": "pytest",
-          "specifiers": [
-            "pytest"
-          ]
-        },
-        {
-          "source": "langfuse",
-          "specifiers": [
-            "Langfuse"
-          ]
-        },
-        {
-          "source": "src.config",
-          "specifiers": [
-            "LANGFUSE_ENABLE"
-          ]
-        }
-      ],
-      "exports": [
-        "test_init_without_keys",
-        "test_init_without_public_key",
-        "test_init_success",
-        "test_init_exception",
-        "test_start_trace_returns_none_when_not_initialized",
-        "test_start_trace_with_trace_input",
-        "test_end_trace_does_nothing_when_not_initialized",
-        "test_start_generation_returns_none_when_not_initialized",
-        "test_end_generation_does_nothing_when_not_initialized",
-        "test_end_trace_does_nothing_when_trace_id_empty",
-        "test_methods_succeed_when_initialized"
-      ],
-      "totalLines": 207,
       "hasStructuralAnalysis": true
     },
     "tests/infra/llm/test_prompt_manager_fallback.py": {
@@ -31343,6 +31157,1114 @@
         "test_sse_roundtrip"
       ],
       "totalLines": 105,
+      "hasStructuralAnalysis": true
+    },
+    "src/agents/graph/message_payload.py": {
+      "filePath": "src/agents/graph/message_payload.py",
+      "contentHash": "e3f24f240dad6d8b0e768b247d65ed9ddb93dc3c789a0f8e117d43afd5bbe814",
+      "functions": [
+        {
+          "name": "_extract_text",
+          "params": [
+            "message"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 22
+        },
+        {
+          "name": "_messages_payload",
+          "params": [
+            "messages"
+          ],
+          "returnType": "list[dict[str, str]]",
+          "exported": true,
+          "lineCount": 13
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "langchain_core.messages",
+          "specifiers": [
+            "BaseMessage"
+          ]
+        }
+      ],
+      "exports": [
+        "_extract_text",
+        "_messages_payload"
+      ],
+      "totalLines": 47,
+      "hasStructuralAnalysis": true
+    },
+    "src/cli/purge_langfuse_traces.py": {
+      "filePath": "src/cli/purge_langfuse_traces.py",
+      "contentHash": "3431cd2f94618a12c71322455a3f7ef5a913585bf5d93b48c2919b9c3bb68d74",
+      "functions": [
+        {
+          "name": "_target_label",
+          "params": [],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "_check_preflight_guardrails",
+          "params": [
+            "retention_days",
+            "dry_run",
+            "confirmed",
+            "allowed"
+          ],
+          "returnType": "int | None",
+          "exported": true,
+          "lineCount": 40
+        },
+        {
+          "name": "_print_hit_summary",
+          "params": [
+            "traces",
+            "retention_days"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "_print_trace_ids",
+          "params": [
+            "header",
+            "traces"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "_print_cascade_audit",
+          "params": [
+            "counts"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "run",
+          "params": [
+            "backend",
+            "retention_days",
+            "dry_run",
+            "confirmed",
+            "allowed"
+          ],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 76
+        },
+        {
+          "name": "_run_cli",
+          "params": [
+            "args"
+          ],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 34
+        },
+        {
+          "name": "main",
+          "params": [],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 10
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "argparse",
+          "specifiers": [
+            "argparse"
+          ]
+        },
+        {
+          "source": "asyncio",
+          "specifiers": [
+            "asyncio"
+          ]
+        },
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "sys",
+          "specifiers": [
+            "sys"
+          ]
+        },
+        {
+          "source": "datetime",
+          "specifiers": [
+            "UTC",
+            "datetime",
+            "timedelta"
+          ]
+        },
+        {
+          "source": "sqlalchemy.exc",
+          "specifiers": [
+            "SQLAlchemyError"
+          ]
+        },
+        {
+          "source": "src.config",
+          "specifiers": [
+            "LANGFUSE_PG_DATABASE",
+            "LANGFUSE_PG_USER",
+            "POSTGRES_HOST",
+            "POSTGRES_PORT"
+          ]
+        },
+        {
+          "source": "src.config.const",
+          "specifiers": [
+            "ALLOW_ENV_VAR"
+          ]
+        },
+        {
+          "source": "src.config.const",
+          "specifiers": [
+            "DEFAULT_RETENTION_DAYS"
+          ]
+        },
+        {
+          "source": "src.config.const",
+          "specifiers": [
+            "MAX_DELETE_PER_RUN"
+          ]
+        },
+        {
+          "source": "src.config.const",
+          "specifiers": [
+            "MIN_RETENTION_DAYS"
+          ]
+        },
+        {
+          "source": "src.infra.llm.langfuse_purge",
+          "specifiers": [
+            "CascadeCounts",
+            "ExpiredTrace",
+            "LangfuseProjectScopeError",
+            "LangfuseSqlPurgeBackend",
+            "PurgeBackend"
+          ]
+        }
+      ],
+      "exports": [
+        "_target_label",
+        "_check_preflight_guardrails",
+        "_print_hit_summary",
+        "_print_trace_ids",
+        "_print_cascade_audit",
+        "run",
+        "_run_cli",
+        "main"
+      ],
+      "totalLines": 265,
+      "hasStructuralAnalysis": true
+    },
+    "src/infra/llm/langfuse_purge.py": {
+      "filePath": "src/infra/llm/langfuse_purge.py",
+      "contentHash": "2e8ab3df8d367cca96febb61ce68ef6730caf4e796350e5784c260670d3dca00",
+      "functions": [],
+      "classes": [
+        {
+          "name": "ExpiredTrace",
+          "methods": [],
+          "properties": [
+            "id",
+            "session_id"
+          ],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "CascadeCounts",
+          "methods": [],
+          "properties": [
+            "observations",
+            "scores",
+            "trace_media",
+            "observation_media",
+            "traces",
+            "sessions"
+          ],
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "LangfuseProjectScopeError",
+          "methods": [
+            "__init__"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "PurgeBackend",
+          "methods": [
+            "list_expired",
+            "delete"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 25
+        },
+        {
+          "name": "LangfuseSqlPurgeBackend",
+          "methods": [
+            "__init__",
+            "_resolve_project_id",
+            "list_expired",
+            "delete",
+            "aclose"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 110
+        }
+      ],
+      "imports": [
+        {
+          "source": "dataclasses",
+          "specifiers": [
+            "dataclass"
+          ]
+        },
+        {
+          "source": "datetime",
+          "specifiers": [
+            "datetime"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Protocol"
+          ]
+        },
+        {
+          "source": "sqlalchemy",
+          "specifiers": [
+            "text"
+          ]
+        },
+        {
+          "source": "sqlalchemy.ext.asyncio",
+          "specifiers": [
+            "AsyncConnection",
+            "AsyncEngine",
+            "create_async_engine"
+          ]
+        },
+        {
+          "source": "src.config",
+          "specifiers": [
+            "build_langfuse_postgres_dsn"
+          ]
+        }
+      ],
+      "exports": [
+        "ExpiredTrace",
+        "CascadeCounts",
+        "LangfuseProjectScopeError",
+        "PurgeBackend",
+        "LangfuseSqlPurgeBackend"
+      ],
+      "totalLines": 235,
+      "hasStructuralAnalysis": true
+    },
+    "src/infra/llm/tracing.py": {
+      "filePath": "src/infra/llm/tracing.py",
+      "contentHash": "16cc29b4a5f21253fd21dcccf023a40558d897b7d0b120c5d07bff3423f016f3",
+      "functions": [
+        {
+          "name": "is_valid_trace_id",
+          "params": [
+            "value"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "new_trace_id",
+          "params": [],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "configure_tracing",
+          "params": [],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "flush_tracing",
+          "params": [],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 3
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "re",
+          "specifiers": [
+            "re"
+          ]
+        },
+        {
+          "source": "uuid",
+          "specifiers": [
+            "uuid"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Final"
+          ]
+        },
+        {
+          "source": "langfuse.decorators",
+          "specifiers": [
+            "langfuse_context"
+          ]
+        },
+        {
+          "source": "src.config",
+          "specifiers": [
+            "settings"
+          ]
+        }
+      ],
+      "exports": [
+        "is_valid_trace_id",
+        "new_trace_id",
+        "configure_tracing",
+        "flush_tracing"
+      ],
+      "totalLines": 60,
+      "hasStructuralAnalysis": true
+    },
+    "tests/agents/graph/test_agent_node_tracing.py": {
+      "filePath": "tests/agents/graph/test_agent_node_tracing.py",
+      "contentHash": "0764e2d2271132d217e73c98200ac651c1becfcf39974dad27a3748572a73c07",
+      "functions": [
+        {
+          "name": "_msg_payload_has_no_internal_objects",
+          "params": [
+            "payload"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "test_messages_payload_shape",
+          "params": [],
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "test_observe_decorator_disables_input_capture",
+          "params": [],
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "test_empty_text_output_does_not_fall_back_to_state_dict",
+          "params": [
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 50
+        }
+      ],
+      "classes": [
+        {
+          "name": "_EmptyTextToolCallChunk",
+          "methods": [],
+          "properties": [
+            "response_metadata",
+            "tool_calls"
+          ],
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "_ToolCallOnlyLLM",
+          "methods": [
+            "bind_tools",
+            "astream"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 10
+        }
+      ],
+      "imports": [
+        {
+          "source": "typing",
+          "specifiers": [
+            "ClassVar"
+          ]
+        },
+        {
+          "source": "src.agents.graph",
+          "specifiers": [
+            "agent_node"
+          ]
+        },
+        {
+          "source": "src.agents.graph.message_payload",
+          "specifiers": [
+            "_messages_payload"
+          ]
+        }
+      ],
+      "exports": [
+        "_msg_payload_has_no_internal_objects",
+        "test_messages_payload_shape",
+        "test_observe_decorator_disables_input_capture",
+        "_EmptyTextToolCallChunk",
+        "_ToolCallOnlyLLM",
+        "test_empty_text_output_does_not_fall_back_to_state_dict"
+      ],
+      "totalLines": 115,
+      "hasStructuralAnalysis": true
+    },
+    "tests/cli/test_eval_ragas_tracing.py": {
+      "filePath": "tests/cli/test_eval_ragas_tracing.py",
+      "contentHash": "422d76ac651cb4b27128167f0d3c4e1a4254ffa069fe5ef5cce4567b2270b7ed",
+      "functions": [
+        {
+          "name": "test_single_question_helper_is_observed",
+          "params": [],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "test_cli_configures_and_flushes_tracing",
+          "params": [],
+          "exported": true,
+          "lineCount": 5
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "inspect",
+          "specifiers": [
+            "inspect"
+          ]
+        },
+        {
+          "source": "src.cli",
+          "specifiers": [
+            "eval_ragas"
+          ]
+        }
+      ],
+      "exports": [
+        "test_single_question_helper_is_observed",
+        "test_cli_configures_and_flushes_tracing"
+      ],
+      "totalLines": 20,
+      "hasStructuralAnalysis": true
+    },
+    "tests/cli/test_purge_langfuse_traces.py": {
+      "filePath": "tests/cli/test_purge_langfuse_traces.py",
+      "contentHash": "10e2a36a6c1f6d9300abd53a5d7b7ebc31ddb04d88fd754773028638e62789df",
+      "functions": [
+        {
+          "name": "test_retention_below_lower_bound_is_rejected",
+          "params": [],
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "test_unconfirmed_deletion_is_rejected",
+          "params": [],
+          "exported": true,
+          "lineCount": 15
+        },
+        {
+          "name": "test_environment_guard_blocks_real_deletion",
+          "params": [],
+          "exported": true,
+          "lineCount": 15
+        },
+        {
+          "name": "test_dry_run_lists_but_does_not_delete",
+          "params": [
+            "capsys"
+          ],
+          "exported": true,
+          "lineCount": 16
+        },
+        {
+          "name": "test_over_limit_aborts_without_deleting",
+          "params": [],
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "test_real_deletion_passes_cutoff_and_audits",
+          "params": [
+            "capsys"
+          ],
+          "exported": true,
+          "lineCount": 16
+        },
+        {
+          "name": "test_empty_result_is_safe",
+          "params": [],
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "test_cascade_delete_order_contract",
+          "params": [],
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "test_cutoff_is_naive_utc",
+          "params": [],
+          "exported": true,
+          "lineCount": 18
+        },
+        {
+          "name": "test_audit_reports_cascade_counts",
+          "params": [
+            "capsys"
+          ],
+          "exported": true,
+          "lineCount": 23
+        },
+        {
+          "name": "test_project_count_not_one_is_rejected",
+          "params": [
+            "capsys"
+          ],
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "test_db_error_exits_one_with_single_error_line",
+          "params": [
+            "capsys"
+          ],
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "test_delete_failure_exits_one_with_single_error_line",
+          "params": [
+            "capsys"
+          ],
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "test_delete_path_project_scope_refusal_exits_two",
+          "params": [
+            "capsys"
+          ],
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "test_delete_drops_none_session_before_binding",
+          "params": [],
+          "exported": true,
+          "lineCount": 19
+        }
+      ],
+      "classes": [
+        {
+          "name": "_FakeBackend",
+          "methods": [
+            "__init__",
+            "list_expired",
+            "delete"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 43
+        },
+        {
+          "name": "_FakeResult",
+          "methods": [
+            "__init__",
+            "scalar_one"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "_RecordingConnection",
+          "methods": [
+            "__init__",
+            "execute",
+            "sessions_params"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 24
+        },
+        {
+          "name": "_ConnectionContext",
+          "methods": [
+            "__init__",
+            "__aenter__",
+            "__aexit__"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "_RecordingEngine",
+          "methods": [
+            "__init__",
+            "begin"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 9
+        }
+      ],
+      "imports": [
+        {
+          "source": "asyncio",
+          "specifiers": [
+            "asyncio"
+          ]
+        },
+        {
+          "source": "datetime",
+          "specifiers": [
+            "UTC",
+            "datetime",
+            "timedelta"
+          ]
+        },
+        {
+          "source": "unittest.mock",
+          "specifiers": [
+            "patch"
+          ]
+        },
+        {
+          "source": "sqlalchemy.exc",
+          "specifiers": [
+            "SQLAlchemyError"
+          ]
+        },
+        {
+          "source": "src.cli",
+          "specifiers": [
+            "purge"
+          ]
+        },
+        {
+          "source": "src.infra.llm",
+          "specifiers": [
+            "langfuse_purge"
+          ]
+        },
+        {
+          "source": "src.infra.llm.langfuse_purge",
+          "specifiers": [
+            "CascadeCounts",
+            "ExpiredTrace",
+            "LangfuseProjectScopeError"
+          ]
+        }
+      ],
+      "exports": [
+        "_FakeBackend",
+        "test_retention_below_lower_bound_is_rejected",
+        "test_unconfirmed_deletion_is_rejected",
+        "test_environment_guard_blocks_real_deletion",
+        "test_dry_run_lists_but_does_not_delete",
+        "test_over_limit_aborts_without_deleting",
+        "test_real_deletion_passes_cutoff_and_audits",
+        "test_empty_result_is_safe",
+        "test_cascade_delete_order_contract",
+        "test_cutoff_is_naive_utc",
+        "test_audit_reports_cascade_counts",
+        "test_project_count_not_one_is_rejected",
+        "test_db_error_exits_one_with_single_error_line",
+        "test_delete_failure_exits_one_with_single_error_line",
+        "test_delete_path_project_scope_refusal_exits_two",
+        "_FakeResult",
+        "_RecordingConnection",
+        "_ConnectionContext",
+        "_RecordingEngine",
+        "test_delete_drops_none_session_before_binding"
+      ],
+      "totalLines": 369,
+      "hasStructuralAnalysis": true
+    },
+    "tests/config/test_langfuse_disabled.py": {
+      "filePath": "tests/config/test_langfuse_disabled.py",
+      "contentHash": "806789a0f5d18d337ace38e11dff2930c11e4e7dc2173161cd6c1f2e30ae3282",
+      "functions": [
+        {
+          "name": "test_langfuse_env_var_set_before_import",
+          "params": [],
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "test_langfuse_disabled_in_tests",
+          "params": [],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "test_langfuse_context_disabled_in_tests",
+          "params": [],
+          "exported": true,
+          "lineCount": 7
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "src.config",
+          "specifiers": [
+            "settings"
+          ]
+        }
+      ],
+      "exports": [
+        "test_langfuse_env_var_set_before_import",
+        "test_langfuse_disabled_in_tests",
+        "test_langfuse_context_disabled_in_tests"
+      ],
+      "totalLines": 39,
+      "hasStructuralAnalysis": true
+    },
+    "tests/infra/llm/test_token_usage.py": {
+      "filePath": "tests/infra/llm/test_token_usage.py",
+      "contentHash": "e6a4b587042c6958bc3f47ca7acaa3db94c38491914d32717604b5ff4b4df1dc",
+      "functions": [
+        {
+          "name": "test_estimate_usage_total_is_sum_of_parts",
+          "params": [],
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "test_estimate_usage_lives_with_token_usage",
+          "params": [],
+          "exported": true,
+          "lineCount": 6
+        }
+      ],
+      "classes": [],
+      "imports": [],
+      "exports": [
+        "test_estimate_usage_total_is_sum_of_parts",
+        "test_estimate_usage_lives_with_token_usage"
+      ],
+      "totalLines": 19,
+      "hasStructuralAnalysis": true
+    },
+    "tests/infra/llm/test_tracing.py": {
+      "filePath": "tests/infra/llm/test_tracing.py",
+      "contentHash": "049cf14e6e0f482ba763d1e116c0d56a7d6bfacf96a0e97fee6b6e0615f92d0d",
+      "functions": [
+        {
+          "name": "test_new_trace_id_shape",
+          "params": [],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "test_valid_trace_id_accepts_normal_values",
+          "params": [],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "test_valid_trace_id_rejects_illegal_values",
+          "params": [],
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "test_configure_tracing_follows_settings",
+          "params": [
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 18
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "uuid",
+          "specifiers": [
+            "uuid"
+          ]
+        },
+        {
+          "source": "src.infra.llm",
+          "specifiers": [
+            "tracing"
+          ]
+        }
+      ],
+      "exports": [
+        "test_new_trace_id_shape",
+        "test_valid_trace_id_accepts_normal_values",
+        "test_valid_trace_id_rejects_illegal_values",
+        "test_configure_tracing_follows_settings"
+      ],
+      "totalLines": 49,
+      "hasStructuralAnalysis": true
+    },
+    "tests/middleware/test_trace_id.py": {
+      "filePath": "tests/middleware/test_trace_id.py",
+      "contentHash": "12886f1e6e536ca165399eb0e1e16024cf392086b7ac12b60c00b9debd36ddce",
+      "functions": [
+        {
+          "name": "_app",
+          "params": [],
+          "returnType": "FastAPI",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "test_valid_inbound_id_is_kept",
+          "params": [],
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "test_illegal_inbound_id_is_replaced_and_aligned",
+          "params": [],
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "test_illegal_header_falls_back_to_valid_query_param",
+          "params": [],
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "test_missing_id_is_generated",
+          "params": [],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "test_illegal_id_does_not_fail_request",
+          "params": [],
+          "exported": true,
+          "lineCount": 5
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "fastapi",
+          "specifiers": [
+            "FastAPI"
+          ]
+        },
+        {
+          "source": "fastapi.testclient",
+          "specifiers": [
+            "TestClient"
+          ]
+        },
+        {
+          "source": "src.middleware.trace_id",
+          "specifiers": [
+            "trace_id_middleware"
+          ]
+        }
+      ],
+      "exports": [
+        "_app",
+        "test_valid_inbound_id_is_kept",
+        "test_illegal_inbound_id_is_replaced_and_aligned",
+        "test_illegal_header_falls_back_to_valid_query_param",
+        "test_missing_id_is_generated",
+        "test_illegal_id_does_not_fail_request"
+      ],
+      "totalLines": 69,
+      "hasStructuralAnalysis": true
+    },
+    "tests/services/test_run_generation_tracing.py": {
+      "filePath": "tests/services/test_run_generation_tracing.py",
+      "contentHash": "c12ce1ca067ae703de4e47c7b64acf34a13a850adda4dc4fc15a62c776d3b662",
+      "functions": [
+        {
+          "name": "_fake_astream",
+          "params": [
+            "*args",
+            "**kwargs"
+          ],
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "test_run_generation_records_trace_fields",
+          "params": [
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 39
+        },
+        {
+          "name": "test_run_generation_is_observed_without_input_capture",
+          "params": [],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "test_answer_builder_passes_observation_id",
+          "params": [],
+          "exported": true,
+          "lineCount": 5
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "asyncio",
+          "specifiers": [
+            "asyncio"
+          ]
+        },
+        {
+          "source": "inspect",
+          "specifiers": [
+            "inspect"
+          ]
+        },
+        {
+          "source": "unittest.mock",
+          "specifiers": [
+            "Mock"
+          ]
+        },
+        {
+          "source": "pytest",
+          "specifiers": [
+            "pytest"
+          ]
+        },
+        {
+          "source": "src.chat.streaming",
+          "specifiers": [
+            "StreamingRunManager"
+          ]
+        },
+        {
+          "source": "src.infra.llm.request_context",
+          "specifiers": [
+            "RequestContext"
+          ]
+        },
+        {
+          "source": "src.services",
+          "specifiers": [
+            "agent_service"
+          ]
+        },
+        {
+          "source": "src.services.agent_service",
+          "specifiers": [
+            "_run_generation"
+          ]
+        }
+      ],
+      "exports": [
+        "_fake_astream",
+        "test_run_generation_records_trace_fields",
+        "test_run_generation_is_observed_without_input_capture",
+        "test_answer_builder_passes_observation_id"
+      ],
+      "totalLines": 80,
+      "hasStructuralAnalysis": true
+    },
+    "tests/test_tracing_order.py": {
+      "filePath": "tests/test_tracing_order.py",
+      "contentHash": "87b0ab2646e9c93e5e0a16d9b77695abe892d982f69c42877e2a0a36fc569fd1",
+      "functions": [
+        {
+          "name": "test_lifespan_configures_before_flushing",
+          "params": [
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 32
+        },
+        {
+          "name": "test_cli_main_configures_before_flushing",
+          "params": [
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 44
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "argparse",
+          "specifiers": [
+            "argparse"
+          ]
+        },
+        {
+          "source": "pytest",
+          "specifiers": [
+            "pytest"
+          ]
+        }
+      ],
+      "exports": [
+        "test_lifespan_configures_before_flushing",
+        "test_cli_main_configures_before_flushing"
+      ],
+      "totalLines": 99,
       "hasStructuralAnalysis": true
     }
   }
