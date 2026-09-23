@@ -329,8 +329,10 @@ AUTH_TOKEN_TTL: int = int(os.getenv("AUTH_TOKEN_TTL", "2592000"))
 
 # ====== Langfuse ======
 # 自托管后端见 docs/adr/0011-langfuse-v2-downgrade.md。
-# **内置默认值刻意留空**：K8s/CI/新 clone 若没有 .env，应表现为"明确不可用"，
-# 而不是拿一个不存在的服务名与另一对 key 去连（那会静默失败、只留日志）。
+# **内置默认值不掩盖缺配**：两个 key 默认为空串，缺 .env 时不会拿一对默认 key 去连；
+# HOST 默认指向 compose 服务名 langfuse-web:3000（容器内可达，宿主 / CI 不可解析）——
+# 于是无 .env 的 K8s/CI/新 clone 表现为「构造真实客户端并向该地址发起网络请求」，
+# 而非静默跳过。
 LANGFUSE_SECRET_KEY: str = os.getenv("LANGFUSE_SECRET_KEY", "")
 LANGFUSE_PUBLIC_KEY: str = os.getenv("LANGFUSE_PUBLIC_KEY", "")
 # 容器内地址为 compose 服务名 langfuse-web:3000；宿主机访问用 127.0.0.1:3000

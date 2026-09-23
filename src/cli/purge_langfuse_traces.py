@@ -219,15 +219,16 @@ async def _run_cli(args: argparse.Namespace) -> int:
         args: 已解析的命令行参数
 
     Returns:
-        run() 的退出码；后端构造失败时为 1
+        run() 的退出码；后端构造失败时为 1；释放连接池失败且原本成功时也置 1
     """
     try:
         backend = LangfuseSqlPurgeBackend()
     except RuntimeError as exc:
         print(f"[error] 无法构造 Langfuse 删除后端：{exc}", file=sys.stderr)
         return 1
+    code = 0
     try:
-        return await run(
+        code = await run(
             backend=backend,
             retention_days=args.retention_days,
             dry_run=args.dry_run,
@@ -235,7 +236,16 @@ async def _run_cli(args: argparse.Namespace) -> int:
             allowed=os.getenv(ALLOW_ENV_VAR) == "1",
         )
     finally:
-        await backend.aclose()
+        try:
+            await backend.aclose()
+        except (SQLAlchemyError, OSError) as exc:
+            # dispose() 的失败面与查询 / 删除同：SQLAlchemyError 与 OSError（关连接时
+            # 的网络错误）。收敛为一行 [error]，且只在原本成功时把 0 改 1，不覆盖
+            # run() 已有的非 0 退出码。
+            print(f"[error] 释放连接池失败：{exc}", file=sys.stderr)
+            if code == 0:
+                code = 1
+    return code
 
 
 def main() -> None:

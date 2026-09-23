@@ -166,10 +166,7 @@ def _rearm_langfuse_kill_switch() -> Generator[None, None, None]:
     settings.LANGFUSE_ENABLE = False
 
     client = langfuse_context.client_instance
-    if client is None:
-        # 客户端尚未构建：此处只构建一个 disabled 客户端，约 0.08 s
-        langfuse_context.configure(enabled=False)
-    elif client.enabled:
+    if client.enabled:
         # 客户端被重新打开（如 Task 2 故意开启）：付约 2.0 s 的 reset 代价按回去
         langfuse_context.configure(enabled=False)
     yield

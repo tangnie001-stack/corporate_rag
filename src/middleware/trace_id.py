@@ -1,6 +1,7 @@
 """TraceID 中间件 — 在请求入口生成/提取 trace_id，注入全链路。
 
-优先级: X-Trace-ID 请求头 → ?trace_id 查询参数 → uuid4 自动生成。
+优先级: X-Trace-ID 请求头 → ?trace_id 查询参数 → uuid4 自动生成（每个候选值都过
+白名单校验，非法即回落；全缺 / 全非法才服务端生成）。
 响应头 X-Trace-ID 统一回传，覆盖正常/异常/SSE 全部场景。
 """
 

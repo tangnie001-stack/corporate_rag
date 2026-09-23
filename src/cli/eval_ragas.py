@@ -136,7 +136,12 @@ async def _answer_one_question(
         }
     )
     answer = final_state.get("answer", "")
+    # 与生产 prompt（RAGContext.to_prompt_text）保持同一渲染格式，
+    # 让 RAGAS 的 NLI 看到与生成模型一致的上下文（含来源/页码锚点）
     contexts = [c.to_prompt_text() for c in final_state.get("tool_contexts", [])]
+    # 结构化检索明细（detail_json 下钻用：rerank 后来源+分数+类型）
+    # getattr 兜底：tool_contexts 来自图状态，约定为 RAGContext，防御性
+    # 容忍异常对象，保证明细字段不缺键
     details = [
         {
             "source": getattr(c, "source", ""),

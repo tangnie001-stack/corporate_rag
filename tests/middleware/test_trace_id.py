@@ -1,7 +1,7 @@
 """入站 trace id 白名单的行为契约（D3）。
 
 关键点：校验必须发生在 `current_trace_id.set()` **之前** —— 响应头用的是中间件
-内部的局部变量（`trace_id.py:33`），而 SSE done 事件重读 contextvar。若在下游
+内部的局部变量（`trace_id.py:43`），而 SSE done 事件重读 contextvar。若在下游
 重生成，两者会取到不同的值，四方对齐当场分叉。
 """
 

@@ -1,4 +1,4 @@
-"""RAG 问答流水线 — 检索、重排序、Prompt 构建、流式生成。"""
+"""RAG 问答流水线 — 检索、重排序、Prompt 构建。"""
 
 from src.rag.context import RAGContext
 
