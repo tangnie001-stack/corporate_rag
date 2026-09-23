@@ -16,7 +16,50 @@ import os
 # 此后再设等于无效。没有这一行，测试会构造真实 Langfuse 客户端并向外上报。
 os.environ["LANGFUSE_ENABLE"] = "false"
 
+
+def _is_resolvable(host: str, port: int) -> bool:
+    """host:port 能否被本进程解析（只做 DNS，不发起连接）。
+
+    Args:
+        host: 主机名
+        port: 端口
+
+    Returns:
+        True 表示可解析；False 表示解析不了。
+    """
+    try:
+        socket.getaddrinfo(host, port)
+    except OSError:
+        return False
+    return True
+
+
+def pytest_configure() -> None:
+    """宿主侧漏加 `POSTGRES_HOST=localhost` 前缀时，给一句可执行的报错。
+
+    为什么需要它：`.env` 里 `POSTGRES_HOST` 是 compose 服务名 `postgres`，宿主解析不了；
+    此时每个 DB 用例都会对着不可解析的主机名连接 —— 实测得到 65 个 `socket.gaierror`，
+    整套从 4m54s 慢到 19 分钟。与其让 65 个用例各失败一次，不如在这里提前拦下并给出要敲的命令。
+
+    容器内不受影响：容器里 `postgres` 可解析，本守卫直接放行。
+    """
+    from src.config.settings import POSTGRES_HOST, POSTGRES_PORT
+
+    if POSTGRES_HOST == "localhost":
+        return
+    if _is_resolvable(POSTGRES_HOST, POSTGRES_PORT):
+        return
+    pytest.exit(
+        f"POSTGRES_HOST={POSTGRES_HOST!r} 解析不了（.env 里是 compose 服务名），"
+        "宿主侧跑 pytest 请加前缀：\n"
+        "    POSTGRES_HOST=localhost pytest tests/\n"
+        "容器内跑不要加（容器用服务名）。约定见 docs/agents/cookbook.md",
+        returncode=1,
+    )
+
+
 import asyncio
+import socket
 import uuid
 from collections.abc import Generator
 
