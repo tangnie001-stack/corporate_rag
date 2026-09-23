@@ -62,7 +62,7 @@ Python 3.11+ / FastAPI / ChromaDB / LangChain / DashScope / MySQL 8.0 / Redis 7 
 ## 常用命令
 ```bash
 uvicorn src.main:app --reload          # 启动（热重载）
-pytest tests/ -v                       # 测试
+POSTGRES_HOST=localhost pytest tests/ -v   # 测试（宿主侧必加该前缀；容器内不加，用 .env 的服务名）
 ruff format . && ruff check . --fix    # 格式化 + lint 修复
 docker compose up -d --build           # 部署
 docker compose restart app             # 改 .py 后重启（override 挂载 src/，无需 --build；详见 cookbook.md「部署」）
@@ -83,7 +83,7 @@ docker compose build --no-cache app    # 改依赖后重建
 
 ## 验证
 改完代码后自检以下清单：
-1. **质量门禁**：`pytest tests/ -v` 全部通过、`ruff check .` 无错误、`pyright src/` 不引入新 error（存量多为第三方库误报，以不新增为准）、无遗留 `print()`/TODO/调试代码
+1. **质量门禁**：`POSTGRES_HOST=localhost pytest tests/ -v` 全部通过（宿主侧必须前置该前缀，容器内不加；见 docs/agents/cookbook.md）、`ruff check .` 无错误、`pyright src/` 不引入新 error（存量多为第三方库误报，以不新增为准）、无遗留 `print()`/TODO/调试代码
 2. **契约同步**：改了 API 响应结构 / 请求体 / 公共方法签名时，同步搜索并更新**两条消费链**——① `tests/` 断言（硬编码结构如 `["data"]["x"]` 常因响应包装等全局变更而失联）；② **前端 `deploy/nginx/html/` 的取值代码**（同一字段按错层级或错键名读会静默 `undefined` 或抛错，页面只表现为"点了没反应"）。字段形状以 `docs/agents/api_contract.md` 为准，改响应结构须同步该文档
 3. **结构检查**：新增/修改的代码位置正确吗？api/ 是否只做参数校验和路由转发？有无违反层间调用规则的 import（如 api/ import infra/）？
 4. **一事一档自检**：改文档后检查是否复制了别处内容？是则改成链接；新建归属文档是否已登记进「文档组织」表？
