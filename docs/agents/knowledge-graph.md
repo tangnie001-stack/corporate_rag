@@ -59,8 +59,11 @@ git diff --name-only -- . ; git diff --cached --name-only -- . ; git ls-files --
 ## 已知坑
 
 1. **收敛范围必须写进 `.ua/.understandignore`，不能只靠 CLI 参数**。`--exclude` 只对当次生效，增量更新只读该文件；否则文件集变化会让动作升级为 `FULL_UPDATE`（重建全图）。
-2. **增量重析会丢失该文件的语义边，且是静默的**。根因有两层：① `incremental-symbol-baseline.json` **只携带节点/符号、不携带边**，所以被重析的 agent 无从知道该文件原有那些边，只能靠源码重新推导；② 合并用新批次**整块替换**该文件的边，而校验**只验节点/符号、不验边**（实测丢了 4 条边仍报 `Symbol validation passed`）。
-   ⇒ **做法**：派 file-analyzer 做增量时，显式把该文件**现有的边逐条列出**（从 `knowledge-graph.json` 里 `grep` 该节点 id），并要求"按当前源码逐条重推、仍成立的保留"；合并后务必对比候选与已保存图谱的边集合，确认 `丢失=0`。
+2. **增量重析会丢失与重析文件相邻的边，且是静默的。两个方向都会丢**。根因有三层：① `incremental-symbol-baseline.json` **只携带节点/符号、不携带边**，所以被重析的 agent 无从知道该文件原有那些边，只能靠源码重新推导；② 合并用新批次**整块替换**；③ 替换的判据是「边的**任一端**命中重析文件」，因此**连来自未变更文件的入边也会一起丢**（实测：重析 `Dockerfile` 时，`document:README.md --documents-->`、`service:docker-compose.yml --depends_on-->`、`config:.dockerignore --configures-->` 三条入边静默消失，而校验仍报 `Symbol validation passed`——它**只验节点/符号，不验边**）。
+   ⇒ **做法（两步都要做）**：
+   - **出边**：派 file-analyzer 做增量时，显式把该文件节点**现有的边逐条列出**（从 `knowledge-graph.json` 里 `grep` 该节点 id），要求"按当前源码逐条重推、仍成立的保留"。
+   - **入边**：合并后**对比候选与已保存图谱的完整边集合**（不是只看本批次），把**只差在"来源是未变更文件"的入边**从已保存图谱原样补回 `assembled-graph.json` 再 finalize。这类边无需重析（其 owner 文件没变），重派 owner 批次反而更贵且可能丢掉它们的其他边。
+   - 收尾判据：`丢失=0 且 新增=0`。
 3. **`meta.gitCommitHash` 落后于 HEAD 有两种情形，只有第一种会真的卡住**（实测）：
    - **整份 diff 全是 `.ua/*` 生成物** ⇒ `SKIP`，reason「Only generated analysis artifacts changed」，**基线不推进** → `meta` 会一直落后，直到下一次含真实代码变更的提交才自愈。
    - 含**被忽略 / 不在分析清单内**的文件（如 `docs/*`、`.gitignore`）⇒ `SKIP`，reason「N changed file(s) are **outside the current analysis inventory**」，**基线照常推进**。

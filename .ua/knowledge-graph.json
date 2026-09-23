@@ -29,8 +29,8 @@
       "Docker Compose"
     ],
     "description": "金融文档智能问答助手（MVP）：基于 RAG 的财报问答系统，支持上传 PDF/DOCX/TXT 格式的财报文档，用户用自然语言提问后，由大语言模型基于检索到的文档片段生成带引用来源的回答。 注意：本项目源文件超过 100 个，建议将分析范围收窄到某个子目录以加快扫描速度。",
-    "analyzedAt": "2026-09-23T00:25:11.535Z",
-    "gitCommitHash": "91f4f16cc2bf387542fa198666e63c1a2f738dee"
+    "analyzedAt": "2026-09-23T02:00:05.023Z",
+    "gitCommitHash": "260f8c001ec9760f72a750c37e92805778587dbf"
   },
   "nodes": [
     {
@@ -24529,47 +24529,6 @@
       "languageNotes": "先写 `*.md` 再用 `!README.md` 取反是有意为之：pyproject.toml 声明了 readme，构建期需要 README，但其余文档不进镜像。"
     },
     {
-      "id": "service:Dockerfile",
-      "type": "service",
-      "name": "Dockerfile",
-      "filePath": "Dockerfile",
-      "summary": "两阶段镜像构建：builder 阶段经阿里云源安装 pyproject.toml 依赖（先用占位 README 保住 pip 层缓存），runtime 阶段基于 python:3.11-slim 整体拷贝已装的 site-packages 与 bin，再拷入 src/、scripts/、deploy/，声明 /data/logs 卷、EXPOSE 8000。",
-      "tags": [
-        "容器化",
-        "多阶段构建",
-        "部署",
-        "基础设施"
-      ],
-      "complexity": "moderate",
-      "languageNotes": "CMD 写的是 `uvicorn src.api.main:app`，但仓库中并不存在 src/api/main.py（实际入口是 src.main:app）；compose 的 command 覆盖了它，直接用镜像默认 CMD 启动会失败。"
-    },
-    {
-      "id": "service:Dockerfile:builder",
-      "type": "service",
-      "name": "builder",
-      "filePath": "Dockerfile",
-      "summary": "构建阶段（FROM python:3.11 AS builder）：只依赖 pyproject.toml 安装 `.[dev]`，并用 pip show 记录 site-packages 路径，供运行阶段整体拷贝以保留编译型原生扩展。",
-      "tags": [
-        "容器化",
-        "构建阶段",
-        "依赖安装"
-      ],
-      "complexity": "simple"
-    },
-    {
-      "id": "service:Dockerfile:python",
-      "type": "service",
-      "name": "python",
-      "filePath": "Dockerfile",
-      "summary": "运行阶段（源码中为未命名 FROM python:3.11-slim，脚本按基础镜像名标注）：仅从 builder 取 site-packages 与 /usr/local/bin，拷贝源码与 deploy/，设置 /data/logs 卷并对 8000 端口暴露。",
-      "tags": [
-        "容器化",
-        "运行阶段",
-        "部署"
-      ],
-      "complexity": "simple"
-    },
-    {
       "id": "service:docker-compose.yml",
       "type": "service",
       "name": "docker-compose.yml",
@@ -24674,100 +24633,6 @@
         "服务定义"
       ],
       "complexity": "simple"
-    },
-    {
-      "id": "service:docker-compose.prod.yml",
-      "type": "service",
-      "name": "docker-compose.prod.yml",
-      "filePath": "docker-compose.prod.yml",
-      "summary": "生产编排变体：与开发版共用 project name、容器名与卷名（因此必须与 dev 分机运行），去掉 mem_reservation、调大内存上限、restart 策略改 always、除 nginx 外不再暴露端口、nginx 增加 443 与 SSL 只读卷、app 以 4 worker 运行。",
-      "tags": [
-        "编排",
-        "基础设施",
-        "生产环境",
-        "部署"
-      ],
-      "complexity": "moderate",
-      "languageNotes": "注释明确 prod 与 dev 不能同机执行：两份 compose 的 project name/容器名/卷名完全相同，--force-recreate 会拆掉先起的一套。"
-    },
-    {
-      "id": "service:docker-compose.prod.yml:redis",
-      "type": "service",
-      "name": "redis",
-      "filePath": "docker-compose.prod.yml",
-      "summary": "生产 Redis：内存上限 2g、restart always，密码由可选改为强制必填（${REDIS_PASSWORD:?}），数据落同一具名卷 redis_data。",
-      "tags": [
-        "编排",
-        "缓存",
-        "生产环境"
-      ],
-      "complexity": "simple"
-    },
-    {
-      "id": "service:docker-compose.prod.yml:postgres",
-      "type": "service",
-      "name": "postgres",
-      "filePath": "docker-compose.prod.yml",
-      "summary": "生产 PostgreSQL（pgvector:pg15）：内存上限 4g、restart always，langfuse 与应用账号密码均强制必填，不再映射宿主端口，只经内部网络访问。",
-      "tags": [
-        "编排",
-        "数据库",
-        "生产环境"
-      ],
-      "complexity": "simple"
-    },
-    {
-      "id": "service:docker-compose.prod.yml:minio",
-      "type": "service",
-      "name": "minio",
-      "filePath": "docker-compose.prod.yml",
-      "summary": "生产 MinIO：内存上限 2g、restart always，凭据强制必填，S3 端口可按 MINIO_S3_PORT 对外暴露而控制台仅回环，数据落 minio_data 卷。",
-      "tags": [
-        "编排",
-        "对象存储",
-        "生产环境"
-      ],
-      "complexity": "simple"
-    },
-    {
-      "id": "service:docker-compose.prod.yml:langfuse-web",
-      "type": "service",
-      "name": "langfuse-web",
-      "filePath": "docker-compose.prod.yml",
-      "summary": "生产 Langfuse 2.95.11：内存上限 2g、restart always，仅回环 3000（当前需 SSH 隧道访问），NEXTAUTH/SALT/ENCRYPTION_KEY 等全部强制必填，同样显式 HOSTNAME=0.0.0.0。",
-      "tags": [
-        "编排",
-        "可观测性",
-        "生产环境"
-      ],
-      "complexity": "simple"
-    },
-    {
-      "id": "service:docker-compose.prod.yml:nginx",
-      "type": "service",
-      "name": "nginx",
-      "filePath": "docker-compose.prod.yml",
-      "summary": "生产 Nginx：内存上限 256m、restart always，同时暴露 80 与 443 并只读挂载 deploy/nginx/ssl，依赖 app，作为对外唯一入口。",
-      "tags": [
-        "编排",
-        "反向代理",
-        "生产环境"
-      ],
-      "complexity": "simple"
-    },
-    {
-      "id": "service:docker-compose.prod.yml:app",
-      "type": "service",
-      "name": "app",
-      "filePath": "docker-compose.prod.yml",
-      "summary": "生产应用服务：内存上限 4g、restart always，启动命令改为 `uvicorn --workers 4` 提升并发，除日志卷外直接挂载 skills/ 与 agents/ 运行时内容库。",
-      "tags": [
-        "编排",
-        "应用服务",
-        "生产环境"
-      ],
-      "complexity": "simple",
-      "languageNotes": "此处的 --workers 4 与 CLAUDE.md 记录的「生产单 worker，流式生成状态在进程内」规约不一致，属于待收敛的配置遗留。"
     },
     {
       "id": "service:docker-compose.override.yml",
@@ -29488,6 +29353,143 @@
       ],
       "complexity": "moderate",
       "languageNotes": "采用「常驻一句话规则 + 归属文档指针」两级组织，规则正文集中在 docs/agents/*，避免重复复制；本次变更在「文档组织」表中新增 docs/agents/knowledge-graph.md 一行（知识图谱查询配方 / 新鲜度判据 / 自动更新行为 / 已知坑），该文档路径被 .understandignore 排除，故不产生图内边。"
+    },
+    {
+      "id": "service:Dockerfile",
+      "type": "service",
+      "name": "Dockerfile",
+      "filePath": "Dockerfile",
+      "summary": "两阶段镜像构建：builder 阶段经阿里云源安装 pyproject.toml 依赖（先用占位 README 保住 pip 层缓存），runtime 阶段基于 python:3.11-slim 整体拷贝已装的 site-packages 与 bin，再拷入 src/、scripts/、deploy/，声明 /data/logs 卷、EXPOSE 8000，默认 CMD 以单 worker 启动 `uvicorn src.main:app` 并设 30 秒优雅退出。",
+      "tags": [
+        "容器化",
+        "多阶段构建",
+        "部署",
+        "基础设施"
+      ],
+      "complexity": "moderate",
+      "languageNotes": "CMD 直接指向真实入口 `src.main:app`（与 compose 的 command 及 src/main.py 的 `app = FastAPI(...)` 一致），因此镜像无需 compose 覆盖 command 即可启动。"
+    },
+    {
+      "id": "service:Dockerfile:builder",
+      "type": "service",
+      "name": "builder",
+      "filePath": "Dockerfile",
+      "summary": "构建阶段（FROM python:3.11 AS builder）：只依赖 pyproject.toml 安装 `.[dev]`，并用 pip show 记录 site-packages 路径，供运行阶段整体拷贝以保留编译型原生扩展。",
+      "tags": [
+        "容器化",
+        "构建阶段",
+        "依赖安装"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "service:Dockerfile:python",
+      "type": "service",
+      "name": "python",
+      "filePath": "Dockerfile",
+      "summary": "运行阶段（源码中为未命名 FROM python:3.11-slim，脚本按基础镜像名标注）：仅从 builder 取 site-packages 与 /usr/local/bin，拷贝源码与 deploy/，设置 /data/logs 卷、对 8000 端口暴露，并以 `uvicorn src.main:app --host 0.0.0.0 --port 8000 --timeout-graceful-shutdown 30` 作为默认启动命令。",
+      "tags": [
+        "容器化",
+        "运行阶段",
+        "部署"
+      ],
+      "complexity": "simple",
+      "languageNotes": "运行阶段不装编译工具链，仅复用 builder 的已装包，靠两阶段拆分压缩镜像体积。"
+    },
+    {
+      "id": "service:docker-compose.prod.yml",
+      "type": "service",
+      "name": "docker-compose.prod.yml",
+      "filePath": "docker-compose.prod.yml",
+      "summary": "生产编排变体：与开发版共用 project name、容器名与卷名（因此必须与 dev 分机运行），去掉 mem_reservation、调大内存上限、restart 策略改 always、除 nginx 与 MinIO 外不再暴露端口、nginx 增加 443 与 SSL 只读卷；app 以单 worker 运行以保持流式生成状态（任务注册表/事件缓冲）在进程内一致。",
+      "tags": [
+        "编排",
+        "基础设施",
+        "生产环境",
+        "部署"
+      ],
+      "complexity": "moderate",
+      "languageNotes": "注释明确 prod 与 dev 不能同机执行：两份 compose 的 project name/容器名/卷名完全相同，--force-recreate 会拆掉先起的一套。"
+    },
+    {
+      "id": "service:docker-compose.prod.yml:redis",
+      "type": "service",
+      "name": "redis",
+      "filePath": "docker-compose.prod.yml",
+      "summary": "生产 Redis：内存上限 2g、restart always，密码强制必填（${REDIS_PASSWORD:?}）并作为 redis-server --requirepass 传入，健康检查用带密码的 redis-cli ping，数据落同一具名卷 redis_data。",
+      "tags": [
+        "编排",
+        "缓存",
+        "生产环境"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "service:docker-compose.prod.yml:postgres",
+      "type": "service",
+      "name": "postgres",
+      "filePath": "docker-compose.prod.yml",
+      "summary": "生产 PostgreSQL（pgvector:pg15）：内存上限 4g、restart always，langfuse 库与应用账号密码均强制必填，挂载 deploy/postgres/init 做首次初始化，不再映射宿主端口，只经内部网络访问。",
+      "tags": [
+        "编排",
+        "数据库",
+        "生产环境"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "service:docker-compose.prod.yml:minio",
+      "type": "service",
+      "name": "minio",
+      "filePath": "docker-compose.prod.yml",
+      "summary": "生产 MinIO（chainguard 固定 digest 镜像）：内存上限 2g、restart always，凭据强制必填，S3 端口可按 MINIO_S3_PORT 对外暴露而控制台仅绑回环，数据落 minio_data 卷。",
+      "tags": [
+        "编排",
+        "对象存储",
+        "生产环境"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "service:docker-compose.prod.yml:langfuse-web",
+      "type": "service",
+      "name": "langfuse-web",
+      "filePath": "docker-compose.prod.yml",
+      "summary": "生产 Langfuse 2.95.11：内存上限 2g、restart always，等 postgres 健康后启动，仅绑回环 3000（当前需 SSH 隧道访问），NEXTAUTH/SALT/ENCRYPTION_KEY 等强制必填，并显式设 HOSTNAME=0.0.0.0 以便 app 经服务名访问。",
+      "tags": [
+        "编排",
+        "可观测性",
+        "生产环境"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "service:docker-compose.prod.yml:nginx",
+      "type": "service",
+      "name": "nginx",
+      "filePath": "docker-compose.prod.yml",
+      "summary": "生产 Nginx：内存上限 256m、restart always，由 deploy/nginx 构建，同时暴露 80 与 443 并只读挂载 deploy/nginx/ssl，依赖 app 启动，作为对外入口把 /api/ 与 /docs 反向代理到 app:8000。",
+      "tags": [
+        "编排",
+        "反向代理",
+        "生产环境"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "service:docker-compose.prod.yml:app",
+      "type": "service",
+      "name": "app",
+      "filePath": "docker-compose.prod.yml",
+      "summary": "生产应用服务：从仓库 Dockerfile 构建、内存上限 4g、restart always，以单 worker 启动 `uvicorn src.main:app --timeout-graceful-shutdown 30`（流式状态在进程内，多 worker 会让取消/订阅落到错误进程），等 redis 与 postgres 健康后启动；挂载 app_logs 日志卷与 skills/、agents/ 内容库，DB 连接预算约 20。",
+      "tags": [
+        "编排",
+        "生产环境",
+        "应用服务",
+        "部署"
+      ],
+      "complexity": "moderate",
+      "languageNotes": "单 worker 下数据库连接预算约 pool_size 10 + max_overflow 10 = 20，与「部署形态」规定一致。"
     }
   ],
   "edges": [
@@ -49799,20 +49801,6 @@
       "weight": 0.5
     },
     {
-      "source": "service:Dockerfile",
-      "target": "service:Dockerfile:builder",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "service:Dockerfile",
-      "target": "service:Dockerfile:python",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
       "source": "service:docker-compose.yml",
       "target": "service:docker-compose.yml:redis",
       "type": "contains",
@@ -49862,48 +49850,6 @@
       "weight": 1
     },
     {
-      "source": "service:docker-compose.prod.yml",
-      "target": "service:docker-compose.prod.yml:redis",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "service:docker-compose.prod.yml",
-      "target": "service:docker-compose.prod.yml:postgres",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "service:docker-compose.prod.yml",
-      "target": "service:docker-compose.prod.yml:minio",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "service:docker-compose.prod.yml",
-      "target": "service:docker-compose.prod.yml:langfuse-web",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "service:docker-compose.prod.yml",
-      "target": "service:docker-compose.prod.yml:nginx",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "service:docker-compose.prod.yml",
-      "target": "service:docker-compose.prod.yml:app",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
       "source": "service:docker-compose.override.yml",
       "target": "service:docker-compose.override.yml:app",
       "type": "contains",
@@ -49918,27 +49864,6 @@
       "weight": 1
     },
     {
-      "source": "config:.dockerignore",
-      "target": "service:Dockerfile",
-      "type": "configures",
-      "direction": "forward",
-      "weight": 0.6
-    },
-    {
-      "source": "service:docker-compose.yml",
-      "target": "service:Dockerfile",
-      "type": "depends_on",
-      "direction": "forward",
-      "weight": 0.6
-    },
-    {
-      "source": "service:docker-compose.prod.yml",
-      "target": "service:Dockerfile",
-      "type": "depends_on",
-      "direction": "forward",
-      "weight": 0.6
-    },
-    {
       "source": "service:docker-compose.override.yml",
       "target": "service:docker-compose.yml",
       "type": "depends_on",
@@ -49946,22 +49871,8 @@
       "weight": 0.6
     },
     {
-      "source": "service:docker-compose.prod.yml",
-      "target": "service:docker-compose.yml",
-      "type": "related",
-      "direction": "forward",
-      "weight": 0.5
-    },
-    {
       "source": "service:docker-compose.yml:nginx",
       "target": "service:docker-compose.yml:app",
-      "type": "routes",
-      "direction": "forward",
-      "weight": 0.6
-    },
-    {
-      "source": "service:docker-compose.prod.yml:nginx",
-      "target": "service:docker-compose.prod.yml:app",
       "type": "routes",
       "direction": "forward",
       "weight": 0.6
@@ -49988,42 +49899,7 @@
       "weight": 0.6
     },
     {
-      "source": "service:docker-compose.prod.yml:app",
-      "target": "service:docker-compose.prod.yml:redis",
-      "type": "depends_on",
-      "direction": "forward",
-      "weight": 0.6
-    },
-    {
-      "source": "service:docker-compose.prod.yml:app",
-      "target": "service:docker-compose.prod.yml:postgres",
-      "type": "depends_on",
-      "direction": "forward",
-      "weight": 0.6
-    },
-    {
-      "source": "service:docker-compose.prod.yml:langfuse-web",
-      "target": "service:docker-compose.prod.yml:postgres",
-      "type": "depends_on",
-      "direction": "forward",
-      "weight": 0.6
-    },
-    {
-      "source": "service:Dockerfile",
-      "target": "file:src/main.py",
-      "type": "deploys",
-      "direction": "forward",
-      "weight": 0.7
-    },
-    {
       "source": "service:docker-compose.yml:app",
-      "target": "file:src/main.py",
-      "type": "deploys",
-      "direction": "forward",
-      "weight": 0.7
-    },
-    {
-      "source": "service:docker-compose.prod.yml:app",
       "target": "file:src/main.py",
       "type": "deploys",
       "direction": "forward",
@@ -50319,13 +50195,6 @@
     {
       "source": "document:README.md",
       "target": "service:docker-compose.yml",
-      "type": "documents",
-      "direction": "forward",
-      "weight": 0.5
-    },
-    {
-      "source": "document:README.md",
-      "target": "service:Dockerfile",
       "type": "documents",
       "direction": "forward",
       "weight": 0.5
@@ -52499,6 +52368,139 @@
     {
       "source": "document:CLAUDE.md",
       "target": "service:docker-compose.yml",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "service:Dockerfile",
+      "target": "service:Dockerfile:builder",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "service:Dockerfile",
+      "target": "service:Dockerfile:python",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "service:docker-compose.prod.yml",
+      "target": "service:docker-compose.prod.yml:redis",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "service:docker-compose.prod.yml",
+      "target": "service:docker-compose.prod.yml:postgres",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "service:docker-compose.prod.yml",
+      "target": "service:docker-compose.prod.yml:minio",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "service:docker-compose.prod.yml",
+      "target": "service:docker-compose.prod.yml:langfuse-web",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "service:docker-compose.prod.yml",
+      "target": "service:docker-compose.prod.yml:nginx",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "service:docker-compose.prod.yml",
+      "target": "service:docker-compose.prod.yml:app",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "service:docker-compose.prod.yml",
+      "target": "service:Dockerfile",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "service:docker-compose.prod.yml",
+      "target": "service:docker-compose.yml",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "service:docker-compose.prod.yml:nginx",
+      "target": "service:docker-compose.prod.yml:app",
+      "type": "routes",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "service:docker-compose.prod.yml:app",
+      "target": "service:docker-compose.prod.yml:redis",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "service:docker-compose.prod.yml:app",
+      "target": "service:docker-compose.prod.yml:postgres",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "service:docker-compose.prod.yml:langfuse-web",
+      "target": "service:docker-compose.prod.yml:postgres",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "service:Dockerfile",
+      "target": "file:src/main.py",
+      "type": "deploys",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "service:docker-compose.prod.yml:app",
+      "target": "file:src/main.py",
+      "type": "deploys",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "config:.dockerignore",
+      "target": "service:Dockerfile",
+      "type": "configures",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "service:docker-compose.yml",
+      "target": "service:Dockerfile",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "document:README.md",
+      "target": "service:Dockerfile",
       "type": "documents",
       "direction": "forward",
       "weight": 0.5
