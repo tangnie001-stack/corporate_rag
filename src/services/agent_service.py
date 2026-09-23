@@ -45,7 +45,6 @@ from src.core.log_events import Event, Signal
 from src.infra.db.repos import KbRepo
 from src.infra.db.vector_store import VectorStore
 from src.infra.llm.chat_message import ChatMessage
-from src.infra.llm.langfuse_tracing import LangfuseTracer
 from src.infra.llm.prompt_manager import PromptManager
 from src.infra.llm.request_context import RequestContext
 from src.services.capability_service import CapabilityService
@@ -774,7 +773,6 @@ class AgentService:
         self._chat_manager = chat_manager
         self._prompt_manager = prompt_manager or PromptManager()
         self._kb_repo = kb_repo
-        self._tracer = LangfuseTracer()
 
         # skill 委派（agent-delegation-skills）：SKILLS_DIR 环境变量覆盖，缺省项目根 skills/
         skills_dir = settings.SKILLS_DIR

@@ -27,8 +27,8 @@ from src.core import logging as core_logging
 from src.core.log_events import Event
 from src.infra.llm.chat_message import ChatMessage
 from src.infra.llm.request_context import current_request_ctx
+from src.infra.llm.token_usage import estimate_usage
 from src.rag.prompt import build_prompt
-from src.rag.stream import estimate_usage
 
 
 def _truncate_history(

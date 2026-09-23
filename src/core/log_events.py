@@ -99,10 +99,7 @@ class Event(str, Enum):
     SEARCH_STATS = "search stats"
     SEARCH_RESULT = "search result"
 
-    # [llm] LLM 调用层事件（3.4 批迁移登记：langfuse / prompt / LLM 内容深日志）
-    TRACE_READY = "trace ready"
-    TRACE_INIT_FAILED = "trace init failed"
-    TRACE_SKIP = "trace skip"
+    # [llm] LLM 调用层事件（3.4 批迁移登记：prompt / LLM 内容深日志）
     PROMPT_FETCHED = "prompt fetched"
     PROMPT_FETCH_FAILED = "prompt fetch failed"
     PROMPT_FALLBACK = "prompt fallback"

@@ -18,7 +18,7 @@ from src.config.const import DelegateStopReason, SSEInteractionTexts
 from src.core import logging as core_logging
 from src.core.log_events import Event
 from src.infra.llm.request_context import RequestContext, current_request_ctx
-from src.rag.stream import estimate_usage
+from src.infra.llm.token_usage import estimate_usage
 
 # idle 到点哨兵：区别于 None（事件源正常收尾），供 consume_fork_events 分流
 _IDLE = object()

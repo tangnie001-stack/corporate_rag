@@ -183,10 +183,7 @@ EVENT_SPECS: dict[str, EventSpec] = {
     "search result": EventSpec(
         "search result", "db", "info", ("kb_id", "query_len", "result_count", "model")
     ),
-    # [llm] Langfuse 追踪 / prompt 拉取 / LLM 内容深日志（3.4 批）
-    "trace ready": EventSpec("trace ready", "llm", "info"),
-    "trace init failed": EventSpec("trace init failed", "llm", "warning", ("err",)),
-    "trace skip": EventSpec("trace skip", "llm", "warning", ("stage", "reason")),
+    # [llm] prompt 拉取 / LLM 内容深日志（3.4 批）
     "prompt fetched": EventSpec("prompt fetched", "llm", "info", ("name", "version")),
     "prompt fetch failed": EventSpec(
         "prompt fetch failed", "llm", "warning", ("name", "err")
