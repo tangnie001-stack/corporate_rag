@@ -106,3 +106,40 @@
 - Langfuse v2 客户端对 trace id **零校验**（`TraceBody.id` 无 pattern/max_length），且 ingestion 异常被 `client.py:1511-1512` **吞掉只记日志** → 非法 id 的后果是**静默丢 trace**
 - RAGAS 裁判打分在生成循环**返回之后**的 `run_evaluation`（`:243`），逐问生成是**全串行 for**（无 gather）
 - `settings.py` / `.env` / `.env.template` 的四个 `LANGFUSE_*` **三方全不一致**；内置 HOST 指向仓库内**不存在的服务名**
+
+## §8 DoD 逐条取证（收尾，2026-09-23）
+
+按 plan 的 Task 13 Step 2 要求，**逐条**列出证据来源。凡无实跑证据者**不勾**，并在「结论」列写明原因。
+
+### 实施计划的 DoD（11 条）
+
+| # | 条目 | 证据（实跑 / 命令输出 / pytest 用例） | 结论 |
+|---|---|---|---|
+| ① | 测试重定先完成；"pytest 全绿"须在全局关停 tracing 前提下取得 | **前置达成**：`tests/conftest.py` import 期关停 + session 级 fixture 兜底；`tests/config/test_langfuse_disabled.py` **3 passed**；`tests/test_tracing_order.py` 以列表相等断言 `configure → flush` 的调用序（覆盖 lifespan 与 CLI 两条路径）。**"全绿"未达成**：全量为存量环境类失败（`tests/infra/db/*` 的 `socket.gaierror`、`tests/parsers/*` 的 `FileNotFoundError`），与改动前基线**逐项一致**，非本变更引入；非 DB / 非 parser 子集全绿 | **部分**：前置条件 ✅；"全绿"受**存量环境失败**阻塞 |
+| ② | 关闭态：一轮对话行为与接线前逐项一致 | T7 Step 7 实跑（`.env` 为 `false` 时）：`X-Trace-ID: trace_e2e_off` → 响应头同 id；SSE `status → 590×token → model_info → agent_used → done`，`done` 带 `trace_id`；`select count(*) from traces where id='trace_e2e_off'` = **0** | ✅ |
+| ③ | 开启态：四方 id 对齐；主 agent generation 带 model / input / output / usage / 首 token 时间 | 收尾实跑 `trace_dod3`（`.env` = `true`）：① 响应头 `x-trace-id: trace_dod3`；② 应用日志 **10 行**同 id；③ SSE `done {"trace_id":"trace_dod3","cancelled":false,"seq":38}`；④ Langfuse `trace_dod3 \\| chat_turn`。generation：`agent_turn \\| GENERATION \\| model=qwen3.8-flash \\| completion_start_time=2026-09-23 06:37:37.857 \\| prompt_tokens=6037 completion_tokens=106 total_tokens=6143 \\| input=7414B output=180B` | ✅ |
+| ④ | 四条未验证断言 | **a. 取消后 trace 仍在** ✅ T4 Step 8：`trace_e2e_cancel` 流出 400 token 后取消，SSE `done {"cancelled":true,"seq":406}`，Langfuse 中该 trace 仍在。**b. id 字符集被服务端接受** ✅ 收尾直连 ingestion 实测：`_` / `-` / 119 字符 / **恰好 120 字符**全部落库（`status:201`）；且**点号、冒号也被服务端接受** → 白名单是**刻意的客户端收紧**，非服务端约束。**c. 辅助 LLM 与 fork 自动嵌套** ⚠️ **未按字面成立**：两者**未被 `@observe` 装饰**（全仓 `@observe` 仅三处：`agent_service.py:550` / `agent_node.py:165` / `eval_ragas.py:105`），故不产 observation、无"可嵌套"之物；已由 design **§4 未决项 #1 的 Non-Goal** 覆盖（首轮实跑证明单条 `agent_turn` 足以读懂一轮对话）。**机制侧**已证：`agent_turn` 虽在后台 asyncio task 内创建，仍带 `trace_id=trace_dod3` → 上下文跨 task 自动归属成立。**d. 级联与 UI** ✅ 级联见计划外①；UI 以公共 API 代验（见计划外①） | **a/b/d ✅；c 以 Non-Goal 收敛（未按字面成立）** |
+| ⑤ | 非法 `X-Trace-ID` 被拒且四方仍对齐 | 收尾实跑：入站 `trace.bad.with.dots` → **未回显**，重生成 `trace_8a474108-94f4-4a5d-aa75-bce6a7a4b798`；响应头 == SSE `done.trace_id`；Langfuse 该 id **1 行**；日志 **10 行**同 id（中间件白名单六种输入的探针另见 Task 12：合法值原样回传、点号/冒号/200 字符被拒、非法头不短路合法 `?trace_id`） | ✅ |
+| ⑥ | trace 输入里不含内部运行时对象（`ctx` / `manager` / `graph` / 事件队列） | `trace_dod3` 的 `input = {"kb_id":"", "query":"…", "deep_thinking":false}`、`metadata = {}`；对全部存活 trace 的 `input`/`metadata` 跑正则 `manager\\|asyncio\\|RequestContext\\|graph"` 扫描 → 全部 `false`；机制上三处装饰器均 `capture_input=False` | ✅ |
+| ⑦ | 清理 CLI 的 `--dry-run` / 下界拒绝 / 未确认不删 / 超上限中止 / 审计输出 / 保留期内零改动 / 重复执行安全 | 收尾真删 E2E（compose 网络内）：**`--dry-run`** 命中 6 条、列出 6 条、退出 0，之后 `traces` 仍 **10**；**下界拒绝** `--retention-days 0` → `[error] …低于下界 1 天` **exit 2**；**未武装不删** `--yes` 无 `LANGFUSE_PURGE_ALLOW` → **exit 2**、仍 10；**审计输出** `级联删除 observations=2 scores=0 trace_media=0 observation_media=0 traces=6 sessions=1`；**保留期内零改动** 4 条历史 trace 一条不少；**重复执行安全** 二次 armed 跑 `命中=0条` / `无超期 trace，退出` **exit 0**。**超上限中止**：仅**单测**覆盖（E2E 需 1001 条超期数据） | ✅（超上限一项为单测证据） |
+| ⑧ | CLI 的 trace 在 `--gate` / 异常退出路径下**也能落库**（D6 的 flush） | ⚠️ **未实跑**。原因（实测）：测试集生成路径被 `src/config/settings.py:159` 的**硬编码文档白名单**约束，其文档 `d5d72d1a-…`（`neusoft_2025_q1.pdf`）**已不在 dev 库中** → `python -m src.cli.eval_ragas --generate --size 1` 输出「⚠ doc_id=… 在知识库中无数据，已跳过 / ✗ 白名单中所有文档在分块存储中均无数据」并 **exit 1**；`data/ragas/` 下**无任何测试集**，故评测路径也无法启动。**仅有结构证据**：`flush_tracing()` 位于 CLI 的 `finally`；`tests/test_tracing_order.py` 断言 CLI 路径的 `configure → flush` 调用序 | ❌ **未实跑，不勾**（结构证据不足以替代"落库"） |
+| ⑨ | 已删符号全仓零引用（含 tests）；`token-usage-model` 主规格已由 delta 修正；质量门禁全绿 | `grep -rn "LangfuseTracer\\|@traced\\|current_tracer\\|stream_answer\\|TRACE_READY\\|TRACE_SKIP\\|TRACE_INIT_FAILED" src/ tests/ --include=*.py` → **零命中**；delta 在 `docs/openspec/changes/langfuse-trace-wiring/specs/token-usage-model/spec.md`；门禁：`ruff check .` **All checks passed**、`pyright src/` **0 error**、`check_docs` **0 error / 20 warn（全为存量 symbol 档）**、`check_adr` **13 条 0 error**；`pytest` 见 ① | ✅（`pytest` 一项见①） |
+| ⑩ | 文档不再出现"UI 里看不到数据是正常的"；`glossary.md` 术语统一为「trace 保留期」+ `trace_id` 条目补写；D16 新 ADR 与 D10 复评记录可被独立读到 | `grep -rn "UI 里看不到数据是正常的" docs/agents/` → **零命中**（已改为排查三步）；`glossary.md:207` 条目名为「trace 保留期」，`:13` 的 `trace_id` 行已补「同时是 Langfuse 的 trace id + 不可信入站输入」；ADR-0012（D16 的新决策）与 ADR-0011 复查条件②的复评结论（写在 0012 的 `关系` 字段）经 `docs/adr/README.md` 索引表可独立读到；另新增 ADR-0013（保留期删除后端） | ✅ |
+| ⑪ | 配置四面一致；内置 key 类默认为空串、HOST 不再指向不存在的服务名 | `LANGFUSE_ENABLE` 四面：`settings.py:339` 内置默认 `"true"`、`.env:53` `true`、`.env.template:89` `true`、`.env.example:27` `true`（四面一致；`.env` 由用户 2026-09-23 决定保留 `true`）；内置 `LANGFUSE_SECRET_KEY` / `LANGFUSE_PUBLIC_KEY` 默认为**空串**（`settings.py:301-302`）、`LANGFUSE_HOST` 已对齐 compose 服务名 `http://langfuse-web:3000`（`:303`） | ✅ |
+
+### 计划外部署动作的 DoD（5 条）
+
+| # | 条目 | 证据 | 结论 |
+|---|---|---|---|
+| ① | 删少量超期 trace 后 `observations` / `scores` / `dataset_run_items` **无孤儿**，UI 正常 | **级联**：真删后 `observations 2→0`；孤儿检查 `observations with dangling trace = 0`、`scores = 0`、`dataset_run_items` 本为 **0**（按 ADR-0013 决策，「不解决」清单明确**不删** `dataset_run_items`，沿用官方语义：数据集项不随源 trace 消失，仅源链接失效）。**UI**：以公共 API 代验 `GET /api/public/traces` → **200**，返回 6 行（4 条历史 + `trace_dod3` + 重生成 id），列表正确；**浏览器 UI 未人工打开** | ✅（UI 为 API 层代验） |
+| ② | 定时任务在 dev 与 prod 各自可运行 | 未做 | ❌ **未做**（plan 明确不在本计划内，属部署动作） |
+| ③ | 真删只影响早于保留期的 trace，保留期内零改动 | 真删后恰剩 4 条历史 trace（`traces 10→4`）；dry-run 与两次护栏拒绝后计数**均未变**；二次 armed 跑 `命中=0条` | ✅ |
+| ④ | prod 侧"后端不在跑"的故障隔离已验收 | 未做（dev 侧等价验证见实施计划 DoD ②） | ❌ **未做**（不在本计划内） |
+| ⑤ | `.env` 原值已记录、改动可精确回退 | 改前原值 `LANGFUSE_ENABLE=false` 已备份（`cp -L .env /tmp/env.before_task12`）并记入本 change 的执行账本。**按用户 2026-09-23 的指示保留 `true`** —— plan 的 Task 13 Step 3"恢复 `.env` 到记录的原始值"**被该指示取代**；原值已知，可精确回退 | ✅ |
+
+### 与 plan 的两处偏差（登记）
+
+| 项 | plan 原样 | 实际 | 依据 |
+|---|---|---|---|
+| Task 13 Step 1 的 `ruff format .`（全仓） | 要求全仓格式化 | **未按全仓执行**，改为对本次改动文件跑 `ruff format --check`（**6 files already formatted**）+ `ruff check .`（All checks passed） | 全仓 `ruff format .` 会把仓库根下 76 个 `docs/**/*.md`（内含 Python 代码块）一并改写 —— 属**既有漂移**、与本变更无关；`ruff format --check .` 本来就是红的 |
+| Task 13 Step 3 恢复 `.env` | 恢复到记录的原始值（`false`） | **保留 `true`** | 用户 2026-09-23 明确指示"保留 true"，且 DoD ⑪ 要求配置四面一致（原 `.env` 是四个面里唯一的 `false`） |
