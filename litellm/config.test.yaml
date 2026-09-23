@@ -12,7 +12,7 @@ model_list:
   - model_name: deepseek-v4-flash
     litellm_params:
       model: deepseek/deepseek-v4-flash
-      api_key: sk-bd05bb62e9254ce6b19f5a2879cffe6f
+      api_key: os.environ/DEEPSEEK_API_KEY
       api_base: https://api.deepseek.com
 
 litellm_settings:

@@ -25,6 +25,9 @@ repos:
       - id: check-merge-conflict
       - id: detect-private-key
       - id: check-added-large-files
+        # .ua/ 下是 understand-anything 生成的图谱（1.6MB）与指纹（760KB），
+        # 按官方建议入库共享；仓库其余文件仍受默认 500KB 阈值保护
+        exclude: ^\.ua/
 
   # 代码格式与 lint（与 claude.md 的 ruff format / ruff check 对齐）
   # rev 与 pyproject.toml 的 ruff==0.16.2 保持一致，避免两版本默认规则集差异导致误报

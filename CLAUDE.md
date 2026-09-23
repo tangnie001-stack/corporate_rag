@@ -27,12 +27,13 @@ Python 3.11+ / FastAPI / ChromaDB / LangChain / DashScope / MySQL 8.0 / Redis 7 
 | docs/agents/prompt-ownership.md | prompt 段归属规则唯一归属：五段归属表 / 段数最小性判据 / 逐条条件判据表 / base-vs-sources 判别例 / 领域 base 与预设的定位差异 | 改段模板、加条件规则、判定某条文案该住哪段前 |
 | docs/agents/api_contract.md | 接口契约：参数语义、返回值格式、历史踩坑 | 改 API / 公共方法签名前；前端页面对接接口时 |
 | docs/agents/code-map.md | 代码结构唯一归属：顶层目录 / 后端 `src/` 分层与模块职责 / 前端 `deploy/nginx/html` 页面与 SSE 消费 / 常见改动落点速查 | **改动代码前定位文件时必读** |
+| docs/agents/knowledge-graph.md | 知识图谱（`.ua/knowledge-graph.json`）的查询配方 / 新鲜度判据 / 自动更新行为 / 已知坑 | **查代码关系、调用方、改动影响面前**（用 `/understand-chat` 或按 id grep + 1-hop 取子图，**勿整包读图**）；图谱疑似过期或需刷新时 |
 | docs/agents/data-flow.md | 数据流链路 | 排查问题、理解系统流程 |
 | docs/agents/glossary.md | 领域词汇表：核心标识符 / 响应信封 / RAG 流水线 / RAGAS 指标等规范术语 | 术语含义不确定、写文档或命名时查阅 |
 | docs/agents/chunking-issues.md | 分块问题排查与修复记录 | 遇到分块问题优先查阅 |
 | docs/agents/defensive-patterns.md | 防御性模式：并发 / SSE / 精排 / 实体 / prompt / DB / 部署的防复发规则 | 写相关领域代码前 |
 | docs/agents/ui-design-flow.md | UI 设计流程与产物路径：全局基线 `docs/design/MASTER.md` / 页面规格 `docs/design/pages/<name>.md` / 效果预览 `docs/design/<name>-mockup.html` | **改 UI / 新增组件前必读**；产出按此流程落 `docs/design/`，改完用 playwright-cli 验证 |
-| docs/agents/dev-flow.md | 开发流程与 skill 选用：六环节（需求/bug → 完善 → 方案 → 验证 → 生成文件 → 执行）的主 skill、支撑项与必配闸门路由表；**worktree 开工前置**（新开 change 先问是否建隔离 worktree 的判据与代价） | **开工前**决定走哪套 skill 流程时；到评审、验证环节前查 |
+| docs/agents/dev-flow.md | 开发流程与 skill 选用：六环节（需求/bug → 完善 → 方案 → 验证 → 生成文件 → 执行）的主 skill、支撑项与必配闸门路由表；**worktree 开工前置**（新开 change 先问是否建隔离 worktree 的判据与代价）；**派 subagent 的上下文预算与「卡死」诊断**（大 diff 与"自己去读原文"二选一、怎么判断它是死了还是慢） | **开工前**决定走哪套 skill 流程时；到评审、验证环节前查；派 subagent 前查 |
 | docs/agents/cookbook.md | 操作记录协议：什么该记、怎么记；条目按协议追加 | 遇到可复用操作流程时按协议记录；需要操作步骤时查阅 |
 | docs/agents/requirements_pool.md | 需求池（意向清单，非已确认需求） | 规划/排期时参考；不作为功能实现依据 |
 | docs/agents/reference-projects.md | 参考资源：本地 github 镜像仓库（按域分组、评分排序、何时查阅）+ 附录「本地已安装技能」（`~/.agents/skills/`） | 写对应领域代码前、选型/排期时参考；找 agent/skill 范例时 |
@@ -95,6 +96,7 @@ docker compose build --no-cache app    # 改依赖后重建
 - 测试 mock 外部依赖，不发起真实网络调用
 - **部署形态**：生产环境单 worker，流式生成状态（任务注册表/事件缓冲）在进程内，不假设多 worker；详见 docs/agents/defensive-patterns.md
 - **新开 change 先问 worktree**：每新开一个 change（含接手在途 change）先确认是否建隔离 worktree，不得默认就地开工；判据与操作步骤见 docs/agents/dev-flow.md「变更开工前置」
+- **派 subagent 前先压小它的上下文**：大 diff 与「自己去读全部原文」二选一，>100 KB 的输入按文件拆派；它长时间没动静时，先看 `<session>/subagents/<agent-id>.jsonl` 最后一条记录的时间戳再决定是否 kill；判据与实测代价见 docs/agents/dev-flow.md「派 subagent 的上下文预算」
 - 需求池文档在 docs/agents/requirements_pool.md
 - **接口契约**：API 参数、返回值、历史踩坑记录详见 docs/agents/api_contract.md，修改公共方法签名**或响应结构**时，同步更新契约文档与受影响测试的断言
 - **代码风格**：不用三元表达式（`a if cond else b`），写完整的 if/else 结构，保持可读性

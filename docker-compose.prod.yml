@@ -138,8 +138,9 @@ services:
     mem_limit: 4g
     container_name: corporate-rag-app
     restart: always
-    # 生产用多 worker 提升并发
-    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 4
+    # 生产单 worker：流式生成状态（任务注册表/事件缓冲）在进程内，多 worker 会
+    # 让取消/订阅落到错误的进程；详见 CLAUDE.md「部署形态」与 docs/agents/defensive-patterns.md
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --timeout-graceful-shutdown 30
     env_file:
       - .env
     environment:

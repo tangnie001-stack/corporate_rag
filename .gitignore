@@ -14,13 +14,22 @@ venv/
 # IDE
 .idea/
 
-# CodeBuddy 本地个人配置（模型/密钥等，不入库）
+# 本地 AI 工具的个人配置（模型/密钥等，不入库）
 .codebuddy/models.json
+# .claude/mcp.json 可能含明文 API Key，且不是任何工具的读取路径（生效的是
+# <项目根>/.mcp.json 与 ~/.codebuddy/.mcp.json），一律不入库
+.claude/mcp.json
 
 # Generated indices (auto-regeneratable)
 .coverage
 .superpowers/
 .superprojects/
+
+# understand-anything：图谱与指纹入库共享，中间态/回收站不入库
+# （官方建议：提交 .ua/ 但排除 intermediate/ 与 diff-overlay.json）
+.ua/.trash-*/
+.ua/tmp/
+.ua/intermediate/
 
 # Docker volume data
 /data/
