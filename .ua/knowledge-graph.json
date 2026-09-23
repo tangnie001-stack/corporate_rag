@@ -29,8 +29,8 @@
       "Docker Compose"
     ],
     "description": "金融文档智能问答助手（MVP）：基于 RAG 的财报问答系统，支持上传 PDF/DOCX/TXT 格式的财报文档，用户用自然语言提问后，由大语言模型基于检索到的文档片段生成带引用来源的回答。 注意：本项目源文件超过 100 个，建议将分析范围收窄到某个子目录以加快扫描速度。",
-    "analyzedAt": "2026-09-23T07:02:15.537Z",
-    "gitCommitHash": "e30b59898c767acf460da68234edfbf27996cb41"
+    "analyzedAt": "2026-09-23T07:22:34.138Z",
+    "gitCommitHash": "70679a72426e5ef852753f0b0bcb7a620e677cf5"
   },
   "nodes": [
     {
@@ -27252,20 +27252,6 @@
       "complexity": "simple"
     },
     {
-      "id": "config:litellm/config.test.yaml",
-      "type": "config",
-      "name": "config.test.yaml",
-      "filePath": "litellm/config.test.yaml",
-      "summary": "litellm 测试配置：qwen3.7-max 故意使用无效 api_key 以触发 fallback 到 deepseek-v4-flash，并设置重试次数、请求超时、允许失败数与冷却时间。",
-      "tags": [
-        "configuration",
-        "llm-gateway",
-        "fallback",
-        "testing"
-      ],
-      "complexity": "simple"
-    },
-    {
       "id": "function:alembic/versions/0001_pg_baseline.py:upgrade",
       "type": "function",
       "name": "upgrade",
@@ -27629,22 +27615,6 @@
         "chat-controller"
       ],
       "complexity": "complex"
-    },
-    {
-      "id": "config:litellm/config.yaml",
-      "type": "config",
-      "name": "config.yaml",
-      "filePath": "litellm/config.yaml",
-      "summary": "LiteLLM Proxy 的模型路由配置：登记 DashScope 版 qwen3.7-max 与 DeepSeek fallback 两个模型，并设定重试、超时、熔断冷却策略。",
-      "tags": [
-        "配置",
-        "litellm",
-        "模型路由",
-        "fallback",
-        "容器化部署"
-      ],
-      "complexity": "simple",
-      "languageNotes": "fallbacks 使用 LiteLLM 的列表-字典混合写法 [{\"主模型\": [\"备模型\"]}]，另配 num_retries/request_timeout/allowed_fails/cooldown_time 控制失败转移。"
     },
     {
       "id": "document:skills/financial-statement-analyzer/LICENSE.txt",
@@ -29474,6 +29444,38 @@
       ],
       "complexity": "moderate",
       "languageNotes": "单 worker 下数据库连接预算约 pool_size 10 + max_overflow 10 = 20，与「部署形态」规定一致。"
+    },
+    {
+      "id": "config:litellm/config.test.yaml",
+      "type": "config",
+      "name": "config.test.yaml",
+      "filePath": "litellm/config.test.yaml",
+      "summary": "litellm Proxy 的测试配置，结构镜像 config.yaml：qwen3.7-max 故意保留无效 api_key（sk-invalid-for-test）以模拟故障、触发向 deepseek-v4-flash 的 fallback，deepseek-v4-flash 的凭据则从环境变量读取；并设置重试 3 次、请求超时 10s、允许失败 3 次、冷却 30s。",
+      "tags": [
+        "配置",
+        "litellm",
+        "fallback",
+        "测试",
+        "llm-gateway"
+      ],
+      "complexity": "simple",
+      "languageNotes": "与 config.yaml 的唯一差异是 qwen3.7-max 的 api_key：此文件用明文占位值 sk-invalid-for-test 以稳定复现 fallback 路径，而 DeepSeek 侧同样写成 os.environ/DEEPSEEK_API_KEY。"
+    },
+    {
+      "id": "config:litellm/config.yaml",
+      "type": "config",
+      "name": "config.yaml",
+      "filePath": "litellm/config.yaml",
+      "summary": "litellm Proxy 生产配置：登记 OpenAI 兼容的 DashScope 模型 qwen3.7-max 与原生 DeepSeek 模型 deepseek-v4-flash，把后者设为前者的 fallback，并设定重试次数、请求超时、允许失败数与熔断冷却时间；两个模型的 api_key 均以 os.environ/<VAR> 引用环境变量（DASHSCOPE_API_KEY / DEEPSEEK_API_KEY），满足 model-config 规格中“模型凭据只能来自环境变量”的要求。",
+      "tags": [
+        "配置",
+        "litellm",
+        "模型路由",
+        "fallback",
+        "容器化部署"
+      ],
+      "complexity": "simple",
+      "languageNotes": "litellm 原生写法：api_key 用 os.environ/VAR 语法引用环境变量；fallbacks 为列表-字典混合写法 [{\"主模型\": [\"备模型\"]}]，配合 num_retries/request_timeout/allowed_fails/cooldown_time 控制失败转移。compose 中 litellm-proxy 服务当前为 profiles: [\"disabled\"]（开发环境直连 DashScope），容器已注入 DASHSCOPE_API_KEY 与 DEEPSEEK_API_KEY。"
     }
   ],
   "edges": [
@@ -45165,20 +45167,6 @@
       "weight": 0.5
     },
     {
-      "source": "config:litellm/config.test.yaml",
-      "target": "file:src/config/settings.py",
-      "type": "configures",
-      "direction": "forward",
-      "weight": 0.6
-    },
-    {
-      "source": "config:litellm/config.test.yaml",
-      "target": "config:litellm/config.yaml",
-      "type": "related",
-      "direction": "forward",
-      "weight": 0.5
-    },
-    {
       "source": "file:deploy/nginx/nginx.conf",
       "target": "file:deploy/nginx/html/chat.html",
       "type": "routes",
@@ -45639,13 +45627,6 @@
       "type": "tested_by",
       "direction": "forward",
       "weight": 0.5
-    },
-    {
-      "source": "config:litellm/config.yaml",
-      "target": "file:src/models.py",
-      "type": "configures",
-      "direction": "forward",
-      "weight": 0.6
     },
     {
       "source": "document:src/api/README.md",
@@ -53344,6 +53325,27 @@
       "direction": "forward",
       "weight": 0.7,
       "recoveredFromImportMap": true
+    },
+    {
+      "source": "config:litellm/config.test.yaml",
+      "target": "file:src/config/settings.py",
+      "type": "configures",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "config:litellm/config.test.yaml",
+      "target": "config:litellm/config.yaml",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "config:litellm/config.yaml",
+      "target": "file:src/models.py",
+      "type": "configures",
+      "direction": "forward",
+      "weight": 0.6
     }
   ],
   "layers": [
