@@ -187,6 +187,41 @@ def build_postgres_dsn() -> str:
     )
 
 
+# --- Langfuse 观测库（同一 PG 实例上的独立 database）---
+# 用途：保留期清理 CLI 直连该库执行 SQL 删除（ADR-0013）；业务请求不走这里。
+LANGFUSE_PG_DATABASE: str = os.getenv("LANGFUSE_PG_DATABASE", "langfuse")
+LANGFUSE_PG_USER: str = os.getenv("LANGFUSE_PG_USER", "langfuse")
+# 密码默认复用编排层注入的 LANGFUSE_POSTGRES_PASS（app 容器已有该变量），再退空串
+LANGFUSE_PG_PASSWORD: str = os.getenv(
+    "LANGFUSE_PG_PASSWORD", os.getenv("LANGFUSE_POSTGRES_PASS", "")
+)
+
+
+def build_langfuse_postgres_dsn() -> str:
+    """拼装 Langfuse 观测库的 SQLAlchemy 异步 DSN。
+
+    仅用于保留期清理 CLI（ADR-0013）；宿主 / 容器均复用 POSTGRES_HOST 与
+    POSTGRES_PORT —— Langfuse 库与应用库是同一 PostgreSQL 实例。
+
+    Returns:
+        postgresql+asyncpg:// 形式的连接串，账号密码按 URL 规则转义。
+
+    Raises:
+        RuntimeError: 密码为空时抛出 —— 空密码只会得到一个连不上的 DSN，
+            失败会推迟到首次查询，不如在这里直接失败。
+    """
+    if not LANGFUSE_PG_PASSWORD:
+        raise RuntimeError(
+            "LANGFUSE_PG_PASSWORD 未配置，无法构造 Langfuse PostgreSQL DSN"
+        )
+    user = urllib.parse.quote(LANGFUSE_PG_USER, safe="")
+    password = urllib.parse.quote(LANGFUSE_PG_PASSWORD, safe="")
+    return (
+        f"postgresql+asyncpg://{user}:{password}"
+        f"@{POSTGRES_HOST}:{POSTGRES_PORT}/{LANGFUSE_PG_DATABASE}"
+    )
+
+
 # ====== Redis ======
 # 对话历史缓存，支持会话级上下文记忆；连接失败时自动降级为内存存储
 REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
