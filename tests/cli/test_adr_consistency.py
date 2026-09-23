@@ -250,9 +250,8 @@ def test_full_supersede_symmetric_pair_passes(tmp_path):
 
 
 def test_real_index_parses():
-    """真实 README 索引表可解析且覆盖 11 条 ADR。"""
+    """真实 README 索引表可解析且覆盖全部 ADR。"""
     order, statuses = ca._parse_index_statuses(_REAL_INDEX)
-    assert len(order) == 11
     assert order == sorted(order)
     assert set(order) == {a.number for a in ca._load_adrs(ca._ADR_DIR)}
     assert statuses["0003"] == "Accepted"

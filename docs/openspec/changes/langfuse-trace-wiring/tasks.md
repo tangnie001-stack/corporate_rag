@@ -37,7 +37,10 @@
 
 | 日期 | 落点 | 事实 | 处置 | 回改 design |
 |---|---|---|---|---|
-| — | — | — | — | — |
+| 2026-09-23 | `src/agents/graph/agent_node.py`（`@observe`） | design D8 写 `capture_output=True`；实现改为 **`False`** —— SDK 的 output 回落会在 `_extract_text` 返回空串时把**节点返回的 state dict** 序列化进 trace | 改为显式 `update_current_observation(output=...)` 写入原文（T5 fix round） | 否 |
+| 2026-09-23 | `src/cli/purge_langfuse_traces.py`、`src/infra/llm/langfuse_purge.py` | `DELETE /api/public/traces[/{id}]` 在 v2.95.11 上一律 **405**（该能力 **v3 才有**）；v2 里真正 enterprise-gated 的是 Data Retention | 立 ADR-0013，把保留期清理的**删除后端改为直连 Langfuse PG 的 SQL** | 否（索引指向 `docs/adr/0013-trace-retention-purge-via-langfuse-sql.md`） |
+| 2026-09-23 | `src/infra/llm/tracing.py`（`TRACE_ID_PATTERN`） | 入站 trace id 白名单的**最终字符集**（关闭 §4 第 7 条）：实测服务端实际接受范围**宽于**白名单（点号 / 冒号也落库、**恰好 120 字符**也落库） | 白名单维持 `^[A-Za-z0-9_-]{1,120}$` 不变 | 否 |
+| 2026-09-23 | `src/infra/llm/tracing.py`（SDK 重试） | 后端不可达实测（停 `langfuse-web` 3 秒）：SSE 正常走完、0 error 事件、对话零受损；SDK 用 `backoff.expo` 重试（`logger=None`）**吸收**故障并在恢复后补投成功（trace 确实落库） | 无需改动 | 否 |
 
 ## §4 未决项（承接 `design.md` 的 Open Questions）
 
@@ -49,7 +52,7 @@
 | 4 | ADR-0011 复查条件②的复评记录形式（写在 change design 内 vs 追加新 ADR）—— 注意与 D16 的新 ADR **是两件事**，不要合并 | 实施计划收尾前 |
 | 5 | `LANGFUSE_ENABLE` 是否拆成两个开关（prompt 远端 / trace 产出）—— 见 D13，当前不拆 | 日后把 prompt 名单加回 `PROMPT_NAMES` 时**必须**重评 |
 | 6 | `turn-provenance-observability/tasks.md` 4.1 的行号 `:158-167` 是错的（应为 `:173-200`） | 该 change 重启时顺手改正（属对方工件，本变更不擅自改） |
-| 7 | 入站 trace id 白名单的**最终字符集** —— 须与服务端实际接受的字符集对齐后再钉死（客户端层结论不足） | 接线实跑时（DoD 第④条的第 2 项一起做） |
+| 7 | ~~入站 trace id 白名单的**最终字符集** —— 须与服务端实际接受的字符集对齐后再钉死（客户端层结论不足）~~ → **已定：白名单维持 `^[A-Za-z0-9_-]{1,120}$`**（实测服务端接受范围宽于此，点号/冒号与恰好 120 字符均落库；见 §3） | 已收敛 |
 | 8 | 是否给 `src/cli/check_docs.py` 补 `docs/openspec/specs/` 的扫描范围 —— 主规格的失效引用目前**没有机械闸门** | **不在本变更内**，登记为遗留 |
 | 9 | 是否给 `LANGFUSE_*` 加"缺配置即拒绝启动"的 fail-fast —— D19 只把默认值改空串，没加校验（加了会改启动失败语义，属部署面） | **不在本变更内**，登记为遗留 |
 

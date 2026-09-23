@@ -53,7 +53,7 @@ core/              日志：logging / log_events / log_event_specs
 config/            settings(环境变量) / const(常量/文案/枚举) / response_codes
   └─ prompts/      prompt 模板包：__init__.py(7 条行为键常量 VERIFY_* / FORK_*) / loader.py(唯一读取点) / validation.py(启动期校验) / templates/*.yaml(20 条模板：段模板 + 独立任务模板)
                    —— 段模板(`kind: section`)与独立任务模板(`kind: task`)同处一包；改 prompt 文案改 YAML，改规则的挂载点改代码
-infra/             基础设施：db(engine/DSN + transaction 事务边界 + models + repos + vector_store + lexical_query) / llm(tracing 为 Langfuse 开关/flush/trace id 校验唯一入口) / search(tokenizer 为唯一 jieba 分词入口) / auth / redis_client
+infra/             基础设施：db(engine/DSN + transaction 事务边界 + models + repos + vector_store + lexical_query) / llm(tracing 为 Langfuse 开关/flush/trace id 校验唯一入口；langfuse_purge 为保留期删除的 SQL 后端) / search(tokenizer 为唯一 jieba 分词入口) / auth / redis_client
 middleware/        auth / trace_id / response_processor（统一响应包装）
 cli/               RAGAS 评估、检索对比、trace 回放、trace 清理等命令行工具
 models.py          LLM / Embedding / Rerank 工厂（get_llm / get_embedding / get_rerank）
