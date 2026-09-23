@@ -34,6 +34,8 @@ from src.config.const import PURGE_DEFAULT_RETENTION_DAYS as DEFAULT_RETENTION_D
 from src.config.const import PURGE_MAX_DELETE_PER_RUN as MAX_DELETE_PER_RUN
 from src.config.const import PURGE_MIN_RETENTION_DAYS as MIN_RETENTION_DAYS
 from src.infra.llm.langfuse_purge import (
+    CascadeCounts,
+    ExpiredTrace,
     LangfuseProjectScopeError,
     LangfuseSqlPurgeBackend,
     PurgeBackend,
@@ -49,6 +51,86 @@ def _target_label() -> str:
     return (
         f"{POSTGRES_HOST}:{POSTGRES_PORT}/{LANGFUSE_PG_DATABASE}"
         f" (user={LANGFUSE_PG_USER})"
+    )
+
+
+def _check_preflight_guardrails(
+    *,
+    retention_days: int,
+    dry_run: bool,
+    confirmed: bool,
+    allowed: bool,
+) -> int | None:
+    """检查删除前三项前置护栏，被拒绝时打印一行 `[error]` 并给出退出码。
+
+    顺序固定为：保留期下界 → 非 dry-run 需 `--yes` → 需 `LANGFUSE_PURGE_ALLOW=1`。
+
+    Args:
+        retention_days: 保留期天数
+        dry_run: True 时只列出不删除
+        confirmed: 是否已显式确认（`--yes`）
+        allowed: 环境是否已武装（`LANGFUSE_PURGE_ALLOW=1`）
+
+    Returns:
+        None = 全部通过；2 = 被护栏拒绝（已打印一行 `[error]`）
+    """
+    if retention_days < MIN_RETENTION_DAYS:
+        print(
+            f"[error] 保留期 {retention_days} 天低于下界 {MIN_RETENTION_DAYS} 天，拒绝执行",
+            file=sys.stderr,
+        )
+        return 2
+
+    if not dry_run and not confirmed:
+        print("[error] 非 dry-run 必须显式传 --yes", file=sys.stderr)
+        return 2
+
+    if not dry_run and not allowed:
+        print(
+            f"[error] 未武装环境（{ALLOW_ENV_VAR}=1），拒绝真删。"
+            f"当前目标库：{_target_label()}",
+            file=sys.stderr,
+        )
+        return 2
+
+    return None
+
+
+def _print_hit_summary(traces: list[ExpiredTrace], retention_days: int) -> None:
+    """打印目标库、保留期与命中条数（删除前的审计行）。
+
+    Args:
+        traces: 本次命中的超期 trace
+        retention_days: 保留期天数
+    """
+    print(
+        f"[info] 目标库={_target_label()} 保留期={retention_days}天 命中={len(traces)}条"
+    )
+
+
+def _print_trace_ids(header: str, traces: list[ExpiredTrace]) -> None:
+    """打印 header 行，随后逐行列出 trace id（审计明细）。
+
+    Args:
+        header: 明细前置说明行
+        traces: 要列出的 trace
+    """
+    print(header)
+    for trace in traces:
+        print(f"  - {trace.id}")
+
+
+def _print_cascade_audit(counts: CascadeCounts) -> None:
+    """打印逐表级联删除计数（审计口径）。
+
+    Args:
+        counts: 后端返回的逐表行数与空 session 清理数
+    """
+    print(
+        f"[info] 级联删除 observations={counts.observations} scores={counts.scores} "
+        f"trace_media={counts.trace_media} "
+        f"observation_media={counts.observation_media} "
+        f"traces={counts.traces} sessions={counts.sessions}"
     )
 
 
@@ -72,24 +154,14 @@ async def run(
     Returns:
         0 = 正常结束；2 = 被护栏拒绝；1 = 执行失败（DB 不可达 / SQL 报错）
     """
-    if retention_days < MIN_RETENTION_DAYS:
-        print(
-            f"[error] 保留期 {retention_days} 天低于下界 {MIN_RETENTION_DAYS} 天，拒绝执行",
-            file=sys.stderr,
-        )
-        return 2
-
-    if not dry_run and not confirmed:
-        print("[error] 非 dry-run 必须显式传 --yes", file=sys.stderr)
-        return 2
-
-    if not dry_run and not allowed:
-        print(
-            f"[error] 未武装环境（{ALLOW_ENV_VAR}=1），拒绝真删。"
-            f"当前目标库：{_target_label()}",
-            file=sys.stderr,
-        )
-        return 2
+    refusal = _check_preflight_guardrails(
+        retention_days=retention_days,
+        dry_run=dry_run,
+        confirmed=confirmed,
+        allowed=allowed,
+    )
+    if refusal is not None:
+        return refusal
 
     # cutoff 必须是 naive UTC：traces.timestamp 是 timestamp WITHOUT time zone，
     # 传 tz-aware 值会因比较语义不一致而删错范围。
@@ -100,13 +172,13 @@ async def run(
         print(f"[error] {exc}，拒绝执行", file=sys.stderr)
         return 2
     except (SQLAlchemyError, OSError) as exc:
-        # DB 侧失败统一收敛为一行 [error]，不向上裸抛 traceback
+        # 显式列出后端实际会抛的失败面：SQLAlchemyError（SQL/驱动错误）与 OSError
+        # （连接期 gaierror 等网络错误）。不裸 except Exception，避免把编程错误
+        # 误报成「查询失败」；统一收敛为一行 [error]，不向上裸抛 traceback。
         print(f"[error] 查询超期 trace 失败：{exc}", file=sys.stderr)
         return 1
 
-    print(
-        f"[info] 目标库={_target_label()} 保留期={retention_days}天 命中={len(traces)}条"
-    )
+    _print_hit_summary(traces, retention_days)
 
     if not traces:
         print("[info] 无超期 trace，退出")
@@ -121,27 +193,22 @@ async def run(
         return 2
 
     if dry_run:
-        print("[dry-run] 以下 trace 将被删除：")
-        for trace in traces:
-            print(f"  - {trace.id}")
+        _print_trace_ids("[dry-run] 以下 trace 将被删除：", traces)
         return 0
 
     try:
         counts = await backend.delete(traces)
+    except LangfuseProjectScopeError as exc:
+        # 项目作用域守卫在 delete 路径与 list 路径同样表现为拒绝（exit 2 的一行 [error]）
+        print(f"[error] {exc}，拒绝执行", file=sys.stderr)
+        return 2
     except (SQLAlchemyError, OSError) as exc:
-        # DB 侧失败统一收敛为一行 [error]，不向上裸抛 traceback
+        # 与 list_expired 同：显式列出后端实际会抛的失败面，收敛为一行 [error]。
         print(f"[error] 删除失败：{exc}", file=sys.stderr)
         return 1
 
-    print(
-        f"[info] 级联删除 observations={counts.observations} scores={counts.scores} "
-        f"trace_media={counts.trace_media} "
-        f"observation_media={counts.observation_media} "
-        f"traces={counts.traces} sessions={counts.sessions}"
-    )
-    print(f"[info] 已删除 {len(traces)} 条超期 trace：")
-    for trace in traces:
-        print(f"  - {trace.id}")
+    _print_cascade_audit(counts)
+    _print_trace_ids(f"[info] 已删除 {len(traces)} 条超期 trace：", traces)
     return 0
 
 

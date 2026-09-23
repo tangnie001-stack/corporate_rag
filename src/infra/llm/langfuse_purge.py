@@ -200,7 +200,14 @@ class LangfuseSqlPurgeBackend:
         sessions = [
             trace.session_id for trace in traces if trace.session_id is not None
         ]
-        counts: dict[str, int] = {}
+        counts = CascadeCounts(
+            observations=0,
+            scores=0,
+            trace_media=0,
+            observation_media=0,
+            traces=0,
+            sessions=0,
+        )
         async with self._engine.begin() as conn:
             pid = await self._resolve_project_id(conn)
             for table in CASCADE_DELETE_ORDER:
@@ -211,21 +218,14 @@ class LangfuseSqlPurgeBackend:
                     f" WHERE project_id = :pid AND {column} = ANY(:ids)"
                 )
                 result = await conn.execute(statement, {"pid": pid, "ids": ids})
-                counts[table] = result.rowcount
-            sessions_deleted = 0
+                # CASCADE_DELETE_ORDER 的表名与 CascadeCounts 字段名一一对应
+                setattr(counts, table, result.rowcount)
             if sessions:
                 result = await conn.execute(
                     _DELETE_EMPTY_SESSIONS_SQL, {"pid": pid, "sessions": sessions}
                 )
-                sessions_deleted = result.rowcount
-        return CascadeCounts(
-            observations=counts["observations"],
-            scores=counts["scores"],
-            trace_media=counts["trace_media"],
-            observation_media=counts["observation_media"],
-            traces=counts["traces"],
-            sessions=sessions_deleted,
-        )
+                counts.sessions = result.rowcount
+        return counts
 
     async def aclose(self) -> None:
         """释放连接池（进程退出前调用）。"""

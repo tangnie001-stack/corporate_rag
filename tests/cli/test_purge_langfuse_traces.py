@@ -2,6 +2,9 @@
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
+
+from sqlalchemy.exc import SQLAlchemyError
 
 from src.cli import purge_langfuse_traces as purge
 from src.infra.llm import langfuse_purge
@@ -149,7 +152,7 @@ def test_real_deletion_passes_cutoff_and_audits(capsys):
     cutoff = fake.list_calls[0][0]
     assert abs((cutoff - before.replace(tzinfo=None)).total_seconds()) < 120
     out = capsys.readouterr().out
-    assert "2" in out and "t1" in out
+    assert "命中=2" in out and "t1" in out
 
 
 def test_empty_result_is_safe():
@@ -221,14 +224,14 @@ def test_audit_reports_cascade_counts(capsys):
 
 
 def test_project_count_not_one_is_rejected(capsys):
-    """库内 project 数 ≠ 1 → 拒绝执行、非 0 退出，且不删。"""
+    """库内 project 数 ≠ 1 → 拒绝执行、exit 2，且不删。"""
     fake = _FakeBackend(["t1"], project_error=True)
     code = asyncio.run(
         purge.run(
             backend=fake, retention_days=30, dry_run=False, confirmed=True, allowed=True
         )
     )
-    assert code != 0
+    assert code == 2
     assert fake.deleted == []
     err = capsys.readouterr().err
     assert "[error]" in err
@@ -248,3 +251,118 @@ def test_db_error_exits_one_with_single_error_line(capsys):
     lines = err.strip().splitlines()
     assert len(lines) == 1
     assert lines[0].startswith("[error]")
+
+
+def test_delete_failure_exits_one_with_single_error_line(capsys):
+    """删除路径 DB 报错 → 退出码 1，stderr 恰好一行 [error]，不裸抛 traceback。"""
+    fake = _FakeBackend(["t1"], delete_error=SQLAlchemyError("delete boom"))
+    code = asyncio.run(
+        purge.run(
+            backend=fake, retention_days=30, dry_run=False, confirmed=True, allowed=True
+        )
+    )
+    assert code == 1
+    assert len(fake.deleted) == 1
+    err = capsys.readouterr().err
+    lines = err.strip().splitlines()
+    assert len(lines) == 1
+    assert lines[0].startswith("[error]")
+
+
+def test_delete_path_project_scope_refusal_exits_two(capsys):
+    """delete 路径的项目作用域拒绝与 list 路径一致：exit 2、恰好一行 [error]、不裸抛。"""
+    fake = _FakeBackend(["t1"], delete_error=LangfuseProjectScopeError(2))
+    code = asyncio.run(
+        purge.run(
+            backend=fake, retention_days=30, dry_run=False, confirmed=True, allowed=True
+        )
+    )
+    assert code == 2
+    assert len(fake.deleted) == 1
+    err = capsys.readouterr().err
+    lines = err.strip().splitlines()
+    assert len(lines) == 1
+    assert lines[0].startswith("[error]")
+
+
+class _FakeResult:
+    """`execute()` 的最小结果替身：同时提供 `rowcount` 与 `scalar_one`。"""
+
+    def __init__(self, *, rowcount: int = 1, scalar: object = 1) -> None:
+        self.rowcount = rowcount
+        self._scalar = scalar
+
+    def scalar_one(self) -> object:
+        """返回预设的标量（模拟 `SELECT count(*)` / `SELECT id`）。"""
+        return self._scalar
+
+
+class _RecordingConnection:
+    """记录 `execute()` 的 SQL 与绑定参数，并按语句返回替身结果。"""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def execute(
+        self, statement: object, params: dict[str, object] | None = None
+    ) -> _FakeResult:
+        """记录一次执行并返回结果；project 守卫语句返回单 project。"""
+        sql = str(statement)
+        recorded: dict[str, object] = {}
+        if params is not None:
+            recorded = params
+        self.calls.append((sql, recorded))
+        if "count(*)" in sql:
+            return _FakeResult(scalar=1)
+        if "SELECT id FROM projects" in sql:
+            return _FakeResult(scalar="proj-1")
+        return _FakeResult(rowcount=1)
+
+    def sessions_params(self) -> list[dict[str, object]]:
+        """返回所有绑定 `:sessions` 的调用参数。"""
+        return [params for sql, params in self.calls if ":sessions" in sql]
+
+
+class _ConnectionContext:
+    """`async with engine.begin()` 的异步上下文替身。"""
+
+    def __init__(self, conn: _RecordingConnection) -> None:
+        self._conn = conn
+
+    async def __aenter__(self) -> _RecordingConnection:
+        return self._conn
+
+    async def __aexit__(self, exc_type: object, exc: object, tb: object) -> bool:
+        return False
+
+
+class _RecordingEngine:
+    """`engine.begin()` 的替身：始终交出同一个记录型连接。"""
+
+    def __init__(self, conn: _RecordingConnection) -> None:
+        self._conn = conn
+
+    def begin(self) -> _ConnectionContext:
+        """返回异步上下文替身。"""
+        return _ConnectionContext(self._conn)
+
+
+def test_delete_drops_none_session_before_binding():
+    """`session_id=None` 的 trace 不得进入 `:sessions` 绑定参数。"""
+    conn = _RecordingConnection()
+    engine = _RecordingEngine(conn)
+    with patch.object(langfuse_purge, "create_async_engine", return_value=engine):
+        backend = langfuse_purge.LangfuseSqlPurgeBackend(
+            dsn="postgresql+asyncpg://u:p@localhost:5432/langfuse"
+        )
+    asyncio.run(
+        backend.delete(
+            [
+                ExpiredTrace(id="t1", session_id="s1"),
+                ExpiredTrace(id="t2", session_id=None),
+            ]
+        )
+    )
+    sessions_params = conn.sessions_params()
+    assert len(sessions_params) == 1
+    assert sessions_params[0]["sessions"] == ["s1"]
