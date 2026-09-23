@@ -42,7 +42,12 @@ def pytest_configure() -> None:
     整套从 4m54s 慢到 19 分钟。与其让 65 个用例各失败一次，不如在这里提前拦下并给出要敲的命令。
 
     容器内不受影响：容器里 `postgres` 可解析，本守卫直接放行。
+
+    只跑非 DB 用例时可用 `SKIP_PG_HOST_GUARD=1` 显式跳过本检查（不做隐式自动纠正）。
     """
+    if os.getenv("SKIP_PG_HOST_GUARD") == "1":
+        return
+
     from src.config.settings import POSTGRES_HOST, POSTGRES_PORT
 
     if POSTGRES_HOST == "localhost":
@@ -53,7 +58,9 @@ def pytest_configure() -> None:
         f"POSTGRES_HOST={POSTGRES_HOST!r} 解析不了（.env 里是 compose 服务名），"
         "宿主侧跑 pytest 请加前缀：\n"
         "    POSTGRES_HOST=localhost pytest tests/\n"
-        "容器内跑不要加（容器用服务名）。约定见 docs/agents/cookbook.md",
+        "容器内跑不要加（容器用服务名）。\n"
+        "本次只跑非 DB 用例、或容器/CI 自备连通性时，可设 SKIP_PG_HOST_GUARD=1 跳过本检查。\n"
+        "约定见 CLAUDE.md「验证」与 docs/agents/cookbook.md「宿主跑必须 POSTGRES_HOST=localhost」",
         returncode=1,
     )
 

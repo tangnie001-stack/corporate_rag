@@ -72,7 +72,7 @@
 1. 在 `src/chunking/` 新增策略实现
 2. 用 `validate_chunks` 校验输出合法
 3. 用 ChunkQualityScorer 评估质量
-**验证**：`pytest tests/chunking/ -v` 通过
+**验证**：`POSTGRES_HOST=localhost pytest tests/chunking/ -v` 通过（宿主侧须加前缀）
 **注意事项**：分块结果受 embedding 2048 token 限制（见 defensive-patterns.md）
 
 ## 部署
@@ -205,7 +205,7 @@
 |------|---------|------|
 | （暂无） | | |
 
-**验证**：加入规则表并重启后，用该域名来源重新提问，引用抽屉徽标显示预期档位；或 `pytest tests/ -k tier -v` 通过。
+**验证**：加入规则表并重启后，用该域名来源重新提问，引用抽屉徽标显示预期档位；或 `POSTGRES_HOST=localhost pytest tests/ -k tier -v` 通过。
 **注意事项**：SHALL NOT 使用 LLM 判定 tier 或自动升级档位（spec 硬约束）；SQL 阈值只是初筛，定档唯一权威是 `SOURCE_TIER_RULES`。
 
 ### RAGAS 检索质量评估基线分界（2026-09-10）
