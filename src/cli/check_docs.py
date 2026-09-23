@@ -319,12 +319,55 @@ def _check_symbol_anchors(
     return findings
 
 
+# ── 代码快照（进程级：单次读取代码库全文）──
+# 目的：符号检索不再逐符号重读整棵 src/。等价性依据与取舍见 change
+# `check-docs-symbol-lookup-perf` 的 design.md（D2 等价性 / D3 缓存寿命 / D6 保留的边界行为）。
+_SRC_BLOB: str | None = None
+_SRC_BLOB_ROOT: Path | None = None
+
+
+def _src_blob() -> str:
+    """返回本进程内 `src/` 全部 `.py` 剥注释后的文本快照（只读盘一次）。
+
+    拼法：每行经 `line.split("#", 1)[0]` 剥行内注释（与逐行扫描版逐字一致），
+    再用 `\\n` 连接。该快照上的一次正则扫描与逐行扫描等价：符号不含换行，匹配
+    不可能跨行；行首/行尾在此处是 `\\n`，而 `\\n` 不属于 `[A-Za-z0-9]`，故
+    `_symbol_exists_in_code` 两侧 lookaround 的判定不变。
+
+    异常语义与原先的逐文件读取一致：`OSError` 跳过该文件；`UnicodeDecodeError`
+    不捕获（有意保留现状，见 design.md D6）。
+
+    Returns:
+        快照字符串；根目录变化时重建。
+    """
+    global _SRC_BLOB, _SRC_BLOB_ROOT
+    if _SRC_BLOB is None or _SRC_BLOB_ROOT != _SRC_DIR:
+        parts: list[str] = []
+        for py in sorted(_SRC_DIR.rglob("*.py")):
+            try:
+                text = py.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            for line in text.splitlines():
+                parts.append(line.split("#", 1)[0])
+        _SRC_BLOB = "\n".join(parts)
+        _SRC_BLOB_ROOT = _SRC_DIR
+    return _SRC_BLOB
+
+
+def _reset_cache() -> None:
+    """清空本进程的代码快照（供测试隔离，或将来长驻进程显式失效）。"""
+    global _SRC_BLOB, _SRC_BLOB_ROOT
+    _SRC_BLOB = None
+    _SRC_BLOB_ROOT = None
+
+
 def _symbol_exists_in_code(symbol: str) -> bool:
     """在 src/ 下检索标识符是否以"代码标识符片段"形态出现（非注释/字符串）。
 
     Python 标识符可含下划线（如 set_entry_point 含 entry_point 片段），故不苛求
-    独立词边界，只要求前后不是字母数字（允许 _ 相连）。用极简文本扫描：命中的
-    行先去注释再查，为控制成本只扫 .py。
+    独立词边界，只要求前后不是字母数字（允许 _ 相连）。在 `_src_blob()` 的本进程
+    快照上做一次正则扫描，不逐符号重读代码库。
 
     Args:
         symbol: 标识符名
@@ -333,17 +376,7 @@ def _symbol_exists_in_code(symbol: str) -> bool:
         True 代码中存在该标识符
     """
     pattern = re.compile(rf"(?<![A-Za-z0-9]){re.escape(symbol)}(?![A-Za-z0-9])")
-    for py in _SRC_DIR.rglob("*.py"):
-        try:
-            text = py.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        for line in text.splitlines():
-            # 剥行内注释（# 前），粗略排除纯字符串行
-            stripped = line.split("#", 1)[0]
-            if pattern.search(stripped):
-                return True
-    return False
+    return pattern.search(_src_blob()) is not None
 
 
 def _collect_known_tool_names() -> set[str]:
