@@ -198,10 +198,30 @@ def test_symbol_lookup_reads_codebase_once(tmp_path, monkeypatch):
 
     check_docs._symbol_exists_in_code("alpha_0")  # 触发建快照
     after_first = reads["n"]
-    assert after_first == 3  # 3 个文件各读一次
+    # 首断言只锚定"建快照时 3 个文件各读一次"；**回退探测靠末断言** ——
+    # 旧实现若在顺序靠前的文件命中，首查也可能恰好是 3 次（首断言会误过）。
+    assert after_first == 3
 
     for _ in range(50):
         check_docs._symbol_exists_in_code("alpha_1")
         check_docs._symbol_exists_in_code("no_such_symbol_xyz")
 
     assert reads["n"] == after_first  # 后续查询不再读盘
+
+
+def test_blob_rebuilds_when_src_root_changes(tmp_path, monkeypatch):
+    """根变化时快照自行重建（**不**依赖显式失效函数）—— 根校验分支的护栏。"""
+    first = tmp_path / "a" / "src"
+    first.mkdir(parents=True)
+    (first / "m.py").write_text("alpha_only = 1\n", encoding="utf-8")
+    monkeypatch.setattr(check_docs, "_SRC_DIR", first)
+    check_docs._reset_cache()
+    assert check_docs._symbol_exists_in_code("alpha_only") is True
+
+    second = tmp_path / "b" / "src"
+    second.mkdir(parents=True)
+    (second / "m.py").write_text("beta_only = 1\n", encoding="utf-8")
+    monkeypatch.setattr(check_docs, "_SRC_DIR", second)
+    # 故意不调 _reset_cache()：快照必须因根变化而重建
+    assert check_docs._symbol_exists_in_code("beta_only") is True
+    assert check_docs._symbol_exists_in_code("alpha_only") is False

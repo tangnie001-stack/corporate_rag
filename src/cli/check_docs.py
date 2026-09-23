@@ -319,26 +319,29 @@ def _check_symbol_anchors(
     return findings
 
 
-# ── 代码快照（进程级：单次读取代码库全文）──
-# 目的：符号检索不再逐符号重读整棵 src/。等价性依据与取舍见 change
-# `check-docs-symbol-lookup-perf` 的 design.md（D2 等价性 / D3 缓存寿命 / D6 保留的边界行为）。
+# ── 代码快照（进程级）──
+# 快照 = `src/**/*.py` 各行剥行内注释后拼接；进程级、无 TTL、不落盘。
+# 等价性论证与边界取舍见 change `check-docs-symbol-lookup-perf` 的 design.md（D2 / D3 / D6）。
 _SRC_BLOB: str | None = None
 _SRC_BLOB_ROOT: Path | None = None
 
 
 def _src_blob() -> str:
-    """返回本进程内 `src/` 全部 `.py` 剥注释后的文本快照（只读盘一次）。
+    """返回 `src/` 下 `.py` 剥行内注释后的文本快照（进程级，首次调用时构建）。
 
-    拼法：每行经 `line.split("#", 1)[0]` 剥行内注释（与逐行扫描版逐字一致），
-    再用 `\\n` 连接。该快照上的一次正则扫描与逐行扫描等价：符号不含换行，匹配
-    不可能跨行；行首/行尾在此处是 `\\n`，而 `\\n` 不属于 `[A-Za-z0-9]`，故
-    `_symbol_exists_in_code` 两侧 lookaround 的判定不变。
+    内容：每行取行内注释前部分（`line.split("#", 1)[0]`），以换行符拼接；
+    `_SRC_DIR` 被替换时重建。
 
-    异常语义与原先的逐文件读取一致：`OSError` 跳过该文件；`UnicodeDecodeError`
-    不捕获（有意保留现状，见 design.md D6）。
+    非线程安全：调用方为单线程 CLI（pre-commit 钩子与测试），`_SRC_DIR` 在单次
+    运行内不被改写。
 
     Returns:
-        快照字符串；根目录变化时重建。
+        快照字符串。
+
+    Raises:
+        UnicodeDecodeError: 任一 `.py` 非 UTF-8 时透传（有意不捕获，见 design.md D6）。
+            因快照必读全树，其触发面比"命中即短路"的逐文件读取更广：存在坏文件时
+            **每次**符号查询都会抛出。
     """
     global _SRC_BLOB, _SRC_BLOB_ROOT
     if _SRC_BLOB is None or _SRC_BLOB_ROOT != _SRC_DIR:
@@ -356,18 +359,18 @@ def _src_blob() -> str:
 
 
 def _reset_cache() -> None:
-    """清空本进程的代码快照（供测试隔离，或将来长驻进程显式失效）。"""
+    """清空本进程的代码快照（测试隔离用；长驻进程亦可显式调用来失效）。"""
     global _SRC_BLOB, _SRC_BLOB_ROOT
     _SRC_BLOB = None
     _SRC_BLOB_ROOT = None
 
 
 def _symbol_exists_in_code(symbol: str) -> bool:
-    """在 src/ 下检索标识符是否以"代码标识符片段"形态出现（非注释/字符串）。
+    """在 `src/` 快照中检索标识符是否以"代码标识符片段"形态出现（非注释）。
 
     Python 标识符可含下划线（如 set_entry_point 含 entry_point 片段），故不苛求
-    独立词边界，只要求前后不是字母数字（允许 _ 相连）。在 `_src_blob()` 的本进程
-    快照上做一次正则扫描，不逐符号重读代码库。
+    独立词边界，只要求前后不是字母数字（允许 _ 相连）。判定在 `_src_blob()` 的
+    快照上以一次正则扫描完成。
 
     Args:
         symbol: 标识符名
