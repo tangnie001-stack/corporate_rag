@@ -1,7 +1,7 @@
 {
   "version": "1.0.0",
-  "gitCommitHash": "4d2943047b4397cc1578b49567ac113c93254743",
-  "generatedAt": "2026-09-23T02:04:48.125Z",
+  "gitCommitHash": "e30b59898c767acf460da68234edfbf27996cb41",
+  "generatedAt": "2026-09-23T07:02:15.934Z",
   "files": {
     ".agents/skills/frontend-design/LICENSE.txt": {
       "filePath": ".agents/skills/frontend-design/LICENSE.txt",
@@ -71,16 +71,6 @@
       "imports": [],
       "exports": [],
       "totalLines": 144,
-      "hasStructuralAnalysis": false
-    },
-    ".claude/mcp.json": {
-      "filePath": ".claude/mcp.json",
-      "contentHash": "2f88f3757eb7ba6eace108aa9edf62f26067bcc09c26d9e83ceb54b8005ae6e9",
-      "functions": [],
-      "classes": [],
-      "imports": [],
-      "exports": [],
-      "totalLines": 11,
       "hasStructuralAnalysis": false
     },
     ".claude/rules.md": {
