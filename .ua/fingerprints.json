@@ -1,7 +1,7 @@
 {
   "version": "1.0.0",
-  "gitCommitHash": "70679a72426e5ef852753f0b0bcb7a620e677cf5",
-  "generatedAt": "2026-09-23T07:22:34.696Z",
+  "gitCommitHash": "f8024331d961bf55620d4bb7d0ff00b9a60102a8",
+  "generatedAt": "2026-09-23T09:22:34.152Z",
   "files": {
     ".agents/skills/frontend-design/LICENSE.txt": {
       "filePath": ".agents/skills/frontend-design/LICENSE.txt",
@@ -305,12 +305,12 @@
     },
     "CLAUDE.md": {
       "filePath": "CLAUDE.md",
-      "contentHash": "9bd7e60e988d6cfc6f601ad7cf9bcb2e50978e8235f47bc6833a73c3f60defbc",
+      "contentHash": "48786314d6f4e5495a860931a98aa1116cff9920962ba8130e3e9e9e91119650",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 134,
+      "totalLines": 135,
       "hasStructuralAnalysis": false
     },
     "Dockerfile": {
@@ -7255,7 +7255,7 @@
     },
     "src/cli/check_docs.py": {
       "filePath": "src/cli/check_docs.py",
-      "contentHash": "5e98fd792f544e91dcda9b055d95cb1dd9c65065bdf6d559f151682d5183a7c0",
+      "contentHash": "3eabd87d0ce967c1ecd4247b3527c47a53a07215e4301a45f2939dadaa7683b8",
       "functions": [
         {
           "name": "_load_config",
@@ -7311,13 +7311,27 @@
           "lineCount": 39
         },
         {
+          "name": "_src_blob",
+          "params": [],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 30
+        },
+        {
+          "name": "_reset_cache",
+          "params": [],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 5
+        },
+        {
           "name": "_symbol_exists_in_code",
           "params": [
             "symbol"
           ],
           "returnType": "bool",
           "exported": true,
-          "lineCount": 25
+          "lineCount": 15
         },
         {
           "name": "_collect_known_tool_names",
@@ -7416,13 +7430,15 @@
         "_collect_code_routes",
         "_check_route_anchors",
         "_check_symbol_anchors",
+        "_src_blob",
+        "_reset_cache",
         "_symbol_exists_in_code",
         "_collect_known_tool_names",
         "_parse_skill_frontmatter_tools",
         "_check_skill_tool_anchors",
         "main"
       ],
-      "totalLines": 520,
+      "totalLines": 556,
       "hasStructuralAnalysis": true
     },
     "src/cli/check_retrieval.py": {
@@ -22312,7 +22328,7 @@
     },
     "tests/cli/test_doc_consistency.py": {
       "filePath": "tests/cli/test_doc_consistency.py",
-      "contentHash": "eb0350b34124d1b0c7c5f67047333021aeee8aaa20b7e993aeaf0c434d8fcfa5",
+      "contentHash": "115f493b167615b505c642eaacbde0decc064dac91fb57e6874223d75bd01d09",
       "functions": [
         {
           "name": "_scan_all_docs",
@@ -22359,10 +22375,75 @@
           "params": [],
           "exported": true,
           "lineCount": 23
+        },
+        {
+          "name": "_clear_src_blob",
+          "params": [],
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "_make_src",
+          "params": [
+            "tmp_path",
+            "monkeypatch",
+            "files"
+          ],
+          "returnType": "Path",
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "test_symbol_only_in_comment_not_found",
+          "params": [
+            "tmp_path",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "test_symbol_spanning_line_boundary_not_found",
+          "params": [
+            "tmp_path",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "test_symbol_lookup_reads_codebase_once",
+          "params": [
+            "tmp_path",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 33
+        },
+        {
+          "name": "test_blob_rebuilds_when_src_root_changes",
+          "params": [
+            "tmp_path",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 16
         }
       ],
       "classes": [],
       "imports": [
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        },
+        {
+          "source": "pytest",
+          "specifiers": [
+            "pytest"
+          ]
+        },
         {
           "source": "src.cli",
           "specifiers": [
@@ -22386,9 +22467,15 @@
         "test_load_config_defaults",
         "test_skill_tool_anchor_missing_tool",
         "test_skill_tool_anchor_exclude_suppresses",
-        "test_skill_body_tool_names_exist_in_code"
+        "test_skill_body_tool_names_exist_in_code",
+        "_clear_src_blob",
+        "_make_src",
+        "test_symbol_only_in_comment_not_found",
+        "test_symbol_spanning_line_boundary_not_found",
+        "test_symbol_lookup_reads_codebase_once",
+        "test_blob_rebuilds_when_src_root_changes"
       ],
-      "totalLines": 127,
+      "totalLines": 228,
       "hasStructuralAnalysis": true
     },
     "tests/cli/test_eval_ragas.py": {

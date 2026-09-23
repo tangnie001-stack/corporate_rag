@@ -29,8 +29,8 @@
       "Docker Compose"
     ],
     "description": "金融文档智能问答助手（MVP）：基于 RAG 的财报问答系统，支持上传 PDF/DOCX/TXT 格式的财报文档，用户用自然语言提问后，由大语言模型基于检索到的文档片段生成带引用来源的回答。 注意：本项目源文件超过 100 个，建议将分析范围收窄到某个子目录以加快扫描速度。",
-    "analyzedAt": "2026-09-23T07:22:34.138Z",
-    "gitCommitHash": "70679a72426e5ef852753f0b0bcb7a620e677cf5"
+    "analyzedAt": "2026-09-23T09:22:32.519Z",
+    "gitCommitHash": "f8024331d961bf55620d4bb7d0ff00b9a60102a8"
   },
   "nodes": [
     {
@@ -23453,223 +23453,6 @@
       "languageNotes": "纯 docstring 的包初始化文件，不导入子模块，避免 CLI 入口之间的循环依赖与启动开销。"
     },
     {
-      "id": "file:src/cli/check_docs.py",
-      "type": "file",
-      "name": "check_docs.py",
-      "filePath": "src/cli/check_docs.py",
-      "summary": "文档防腐检查 CLI —— 机械校验 docs/agents/*.md 中声明的代码锚点（src 路径、METHOD /api 路由、反引号符号、skill allowed-tools 工具名）是否仍与 src/ 现状一致，存在 error 档时退出码 1，供 pre-commit / CI 拦截文档腐化。",
-      "tags": [
-        "cli",
-        "documentation",
-        "validation",
-        "static-analysis",
-        "anti-rot",
-        "tested"
-      ],
-      "complexity": "complex",
-      "languageNotes": "用 ast 解析 FastAPI @router 装饰器 + 正则启发式扫描，不 import 项目代码，因此可在任何环境廉价运行；排除表从 pyproject.toml [tool.doc_anchors] 用文本正则 + ast.literal_eval 读取，避免依赖 tomllib 版本差异。"
-    },
-    {
-      "id": "function:src/cli/check_docs.py:_load_config",
-      "type": "function",
-      "name": "_load_config",
-      "filePath": "src/cli/check_docs.py",
-      "lineRange": [
-        112,
-        171
-      ],
-      "summary": "从 pyproject.toml 的 [tool.doc_anchors] 段读取五张排除表（docs / paths / routes / symbols / skill_tools）并与内置默认值并集合并；文件缺失、section 缺失或列表解析失败时静默回退默认值。",
-      "tags": [
-        "config",
-        "cli",
-        "parsing",
-        "defaults"
-      ],
-      "complexity": "moderate"
-    },
-    {
-      "id": "function:src/cli/check_docs.py:_check_path_anchors",
-      "type": "function",
-      "name": "_check_path_anchors",
-      "filePath": "src/cli/check_docs.py",
-      "lineRange": [
-        179,
-        211
-      ],
-      "summary": "校验 T1 路径锚点：逐行提取文档中的 src/** 引用并检查其在代码库是否存在，不存在产出 error 档；被 exclude_paths 前缀豁免的引用跳过。",
-      "tags": [
-        "validation",
-        "documentation",
-        "filesystem",
-        "cli"
-      ],
-      "complexity": "moderate"
-    },
-    {
-      "id": "function:src/cli/check_docs.py:_collect_code_routes",
-      "type": "function",
-      "name": "_collect_code_routes",
-      "filePath": "src/cli/check_docs.py",
-      "lineRange": [
-        214,
-        247
-      ],
-      "summary": "AST 扫描 src/api/*.py 中的 @router 装饰器调用，抽取字符串字面量路径并统一补上 /api 前缀，返回代码实际注册的路由集合。",
-      "tags": [
-        "static-analysis",
-        "ast",
-        "routing",
-        "cli"
-      ],
-      "complexity": "moderate",
-      "languageNotes": "只用 ast.walk + isinstance 判定装饰器形态，避免导入 FastAPI 应用本身导致副作用。"
-    },
-    {
-      "id": "function:src/cli/check_docs.py:_check_route_anchors",
-      "type": "function",
-      "name": "_check_route_anchors",
-      "filePath": "src/cli/check_docs.py",
-      "lineRange": [
-        250,
-        278
-      ],
-      "summary": "校验 T1 路由锚点：比对文档声明的 METHOD /api/... 与代码注册路由集合，文档有而代码无则产出 error 档（exclude_routes 豁免）。",
-      "tags": [
-        "validation",
-        "documentation",
-        "routing",
-        "cli"
-      ],
-      "complexity": "moderate"
-    },
-    {
-      "id": "function:src/cli/check_docs.py:_check_symbol_anchors",
-      "type": "function",
-      "name": "_check_symbol_anchors",
-      "filePath": "src/cli/check_docs.py",
-      "lineRange": [
-        281,
-        319
-      ],
-      "summary": "校验 T2 符号锚点：对文档反引号内的标识符（仅 CamelCase / UPPER_SNAKE / 带下划线 snake_case 形态）在 src/ 检索，未找到产出 warn 档供人工 triage。",
-      "tags": [
-        "validation",
-        "documentation",
-        "heuristic",
-        "cli"
-      ],
-      "complexity": "moderate",
-      "languageNotes": "启发式检查天然有误报，故定为 warn 档且不参与退出码，仅靠 --verbose 展示。"
-    },
-    {
-      "id": "function:src/cli/check_docs.py:_symbol_exists_in_code",
-      "type": "function",
-      "name": "_symbol_exists_in_code",
-      "filePath": "src/cli/check_docs.py",
-      "lineRange": [
-        322,
-        346
-      ],
-      "summary": "在 src/**/*.py 中检索标识符是否以代码片段形态出现（前后非字母数字，允许下划线相连），命中行先剥离行内注释再匹配，用于降低符号检查误报。",
-      "tags": [
-        "static-analysis",
-        "regex",
-        "search",
-        "cli"
-      ],
-      "complexity": "moderate"
-    },
-    {
-      "id": "function:src/cli/check_docs.py:_collect_known_tool_names",
-      "type": "function",
-      "name": "_collect_known_tool_names",
-      "filePath": "src/cli/check_docs.py",
-      "lineRange": [
-        349,
-        376
-      ],
-      "summary": "扫描 src/agents/tools 与 src/agents/skills，用正则提取 registry.register(\"name\") 与 @tool(\"name\") 字面量，得到代码中实际注册的工具名集合。",
-      "tags": [
-        "static-analysis",
-        "regex",
-        "tools",
-        "cli"
-      ],
-      "complexity": "moderate"
-    },
-    {
-      "id": "function:src/cli/check_docs.py:_parse_skill_frontmatter_tools",
-      "type": "function",
-      "name": "_parse_skill_frontmatter_tools",
-      "filePath": "src/cli/check_docs.py",
-      "lineRange": [
-        379,
-        411
-      ],
-      "summary": "解析 SKILL.md 的 YAML frontmatter，提取 allowed-tools 数组项并返回 (frontmatter 起始行号, 工具名) 列表；无 frontmatter 或未声明该键时返回空列表。",
-      "tags": [
-        "parsing",
-        "frontmatter",
-        "skills",
-        "cli"
-      ],
-      "complexity": "moderate"
-    },
-    {
-      "id": "function:src/cli/check_docs.py:_check_skill_tool_anchors",
-      "type": "function",
-      "name": "_check_skill_tool_anchors",
-      "filePath": "src/cli/check_docs.py",
-      "lineRange": [
-        414,
-        452
-      ],
-      "summary": "遍历 skills/ 下各 SKILL.md，校验其 allowed-tools 引用的工具名在代码中确实注册（design D18 防腐扩展），未注册且不在排除表则产出 error 档。",
-      "tags": [
-        "validation",
-        "skills",
-        "documentation",
-        "cli"
-      ],
-      "complexity": "moderate"
-    },
-    {
-      "id": "function:src/cli/check_docs.py:main",
-      "type": "function",
-      "name": "main",
-      "filePath": "src/cli/check_docs.py",
-      "lineRange": [
-        455,
-        515
-      ],
-      "summary": "CLI 入口：解析 --doc / --verbose / --list-routes，装配排除表后对目标文档执行路径、路由、符号三类锚点检查并追加 skill 工具名检查，汇总打印并存在 error 时以退出码 1 结束。",
-      "tags": [
-        "entry-point",
-        "cli",
-        "orchestration",
-        "validation"
-      ],
-      "complexity": "moderate"
-    },
-    {
-      "id": "class:src/cli/check_docs.py:DocFinding",
-      "type": "class",
-      "name": "DocFinding",
-      "filePath": "src/cli/check_docs.py",
-      "lineRange": [
-        92,
-        109
-      ],
-      "summary": "一次锚点校验结果的 dataclass，承载严重级别（error/warn）、锚点类别（path/route/symbol/skill_tool）、来源文档与行号、锚点原文及人类可读说明。",
-      "tags": [
-        "data-model",
-        "type-definition",
-        "validation",
-        "cli"
-      ],
-      "complexity": "simple"
-    },
-    {
       "id": "file:tests/cli/test_adr_consistency.py",
       "type": "file",
       "name": "test_adr_consistency.py",
@@ -23936,148 +23719,6 @@
         "regression"
       ],
       "complexity": "simple"
-    },
-    {
-      "id": "file:tests/cli/test_doc_consistency.py",
-      "type": "file",
-      "name": "test_doc_consistency.py",
-      "filePath": "tests/cli/test_doc_consistency.py",
-      "summary": "check_docs 文档防腐检查器的测试：断言 docs/agents/*.md 无失效的 src 路径与 /api 路由引用，并覆盖排除表加载默认值、skill allowed-tools 工具名缺失/被排除、以及 skill 正文工具名必须已在代码注册。",
-      "tags": [
-        "test",
-        "documentation",
-        "validation",
-        "cli",
-        "pytest"
-      ],
-      "complexity": "moderate",
-      "languageNotes": "把「文档过时」转成 pytest 可断言的失败信号，配合 pre-commit always_run hook 在提交前拦截。"
-    },
-    {
-      "id": "function:tests/cli/test_doc_consistency.py:_scan_all_docs",
-      "type": "function",
-      "name": "_scan_all_docs",
-      "filePath": "tests/cli/test_doc_consistency.py",
-      "lineRange": [
-        17,
-        27
-      ],
-      "summary": "测试辅助：加载排除表与代码路由集合后，对全部未排除的 docs/agents/*.md 跑路径与路由两类锚点检查，返回 error 档列表。",
-      "tags": [
-        "test",
-        "helper",
-        "validation",
-        "documentation"
-      ],
-      "complexity": "simple"
-    },
-    {
-      "id": "function:tests/cli/test_doc_consistency.py:test_no_dangling_code_paths_in_docs",
-      "type": "function",
-      "name": "test_no_dangling_code_paths_in_docs",
-      "filePath": "tests/cli/test_doc_consistency.py",
-      "lineRange": [
-        30,
-        38
-      ],
-      "summary": "断言 docs/agents/ 全量文档中引用的 src 路径均存在于代码库（path 类 error 为空），失败时打印腐化位置清单。",
-      "tags": [
-        "test",
-        "documentation",
-        "validation",
-        "regression"
-      ],
-      "complexity": "simple"
-    },
-    {
-      "id": "function:tests/cli/test_doc_consistency.py:test_doc_routes_registered_in_code",
-      "type": "function",
-      "name": "test_doc_routes_registered_in_code",
-      "filePath": "tests/cli/test_doc_consistency.py",
-      "lineRange": [
-        41,
-        49
-      ],
-      "summary": "断言文档声明的 /api 路由都能在 src/api/ 找到 @router 注册（route 类 error 为空），防止接口删除/改名后文档失联。",
-      "tags": [
-        "test",
-        "documentation",
-        "routing",
-        "regression"
-      ],
-      "complexity": "simple"
-    },
-    {
-      "id": "function:tests/cli/test_doc_consistency.py:test_load_config_defaults",
-      "type": "function",
-      "name": "test_load_config_defaults",
-      "filePath": "tests/cli/test_doc_consistency.py",
-      "lineRange": [
-        52,
-        57
-      ],
-      "summary": "断言排除表可加载且含核心排除项（requirements_pool.md 被排除）、未配置的 exclude_skill_tools 为空集、docs/agents 目录存在。",
-      "tags": [
-        "test",
-        "config",
-        "documentation",
-        "validation"
-      ],
-      "complexity": "simple"
-    },
-    {
-      "id": "function:tests/cli/test_doc_consistency.py:test_skill_tool_anchor_missing_tool",
-      "type": "function",
-      "name": "test_skill_tool_anchor_missing_tool",
-      "filePath": "tests/cli/test_doc_consistency.py",
-      "lineRange": [
-        60,
-        80
-      ],
-      "summary": "用临时 SKILL.md 令 allowed-tools 含 ghost_tool，断言仅缺失工具被报 error 而已知工具 retrieve_kb 不报。",
-      "tags": [
-        "test",
-        "skills",
-        "validation",
-        "frontmatter"
-      ],
-      "complexity": "moderate"
-    },
-    {
-      "id": "function:tests/cli/test_doc_consistency.py:test_skill_tool_anchor_exclude_suppresses",
-      "type": "function",
-      "name": "test_skill_tool_anchor_exclude_suppresses",
-      "filePath": "tests/cli/test_doc_consistency.py",
-      "lineRange": [
-        83,
-        101
-      ],
-      "summary": "断言 allowed-tools 引用的工具名出现在排除表时不再报 error，覆盖示例/伪代码场景。",
-      "tags": [
-        "test",
-        "skills",
-        "validation",
-        "config"
-      ],
-      "complexity": "moderate"
-    },
-    {
-      "id": "function:tests/cli/test_doc_consistency.py:test_skill_body_tool_names_exist_in_code",
-      "type": "function",
-      "name": "test_skill_body_tool_names_exist_in_code",
-      "filePath": "tests/cli/test_doc_consistency.py",
-      "lineRange": [
-        104,
-        126
-      ],
-      "summary": "叙述级防腐：用 SkillLoader 加载 skills/ 后检查各 skill 正文（inline_prompt + fork_body）提到的工具名均在代码已注册，skills 目录不存在时跳过。",
-      "tags": [
-        "test",
-        "skills",
-        "validation",
-        "documentation"
-      ],
-      "complexity": "moderate"
     },
     {
       "id": "file:tests/api/mock_data.py",
@@ -29294,21 +28935,6 @@
       "languageNotes": "本地 hook 复用项目 .venv 而非隔离环境（否则缺 langchain 等包会误报 missing import）；doc/ADR 检查用 always_run + pass_filenames:false 做全量扫描（腐化多发生在「改了代码但没改文档」这类与文件无关的改动上）。check-added-large-files 的 exclude 用 ^\\.ua/ 锚定仓库根，只豁免顶层 .ua/，嵌套同名目录仍受默认 500KB 保护；ruff hook 的 rev 与 pyproject.toml 的 ruff==0.16.2 锁同一版本，避免两版本默认规则集差异导致误报。"
     },
     {
-      "id": "document:CLAUDE.md",
-      "type": "document",
-      "name": "CLAUDE.md",
-      "filePath": "CLAUDE.md",
-      "summary": "项目级 AI 协作指令：界定 Claude 的资深 Python 后端/AI 架构师角色与五条工作原则，给出技术栈、「一事一档」文档归属表（新增指向 docs/agents/knowledge-graph.md 的知识图谱查询规则行）、代码目录结构与层间调用规则、常用命令、TraceID 与日志简则、验证清单、代码注释标准和参考项目。",
-      "tags": [
-        "documentation",
-        "项目指令",
-        "架构规约",
-        "entry-point"
-      ],
-      "complexity": "moderate",
-      "languageNotes": "采用「常驻一句话规则 + 归属文档指针」两级组织，规则正文集中在 docs/agents/*，避免重复复制；本次变更在「文档组织」表中新增 docs/agents/knowledge-graph.md 一行（知识图谱查询配方 / 新鲜度判据 / 自动更新行为 / 已知坑），该文档路径被 .understandignore 排除，故不产生图内边。"
-    },
-    {
       "id": "service:Dockerfile",
       "type": "service",
       "name": "Dockerfile",
@@ -29476,6 +29102,523 @@
       ],
       "complexity": "simple",
       "languageNotes": "litellm 原生写法：api_key 用 os.environ/VAR 语法引用环境变量；fallbacks 为列表-字典混合写法 [{\"主模型\": [\"备模型\"]}]，配合 num_retries/request_timeout/allowed_fails/cooldown_time 控制失败转移。compose 中 litellm-proxy 服务当前为 profiles: [\"disabled\"]（开发环境直连 DashScope），容器已注入 DASHSCOPE_API_KEY 与 DEEPSEEK_API_KEY。"
+    },
+    {
+      "id": "file:src/cli/check_docs.py",
+      "type": "file",
+      "name": "check_docs.py",
+      "filePath": "src/cli/check_docs.py",
+      "summary": "文档防腐检查 CLI —— 机械校验 docs/agents/*.md 中声明的代码锚点（src 路径、METHOD /api 路由、反引号符号、skill allowed-tools 工具名）是否仍与 src/ 现状一致，存在 error 档时退出码 1，供 pre-commit / CI 拦截文档腐化；本次符号检索由「逐符号重读全树」改为进程级单次代码快照。",
+      "tags": [
+        "cli",
+        "documentation",
+        "validation",
+        "static-analysis",
+        "anti-rot",
+        "tested"
+      ],
+      "complexity": "complex",
+      "languageNotes": "用 ast 解析 FastAPI @router 装饰器 + 正则启发式扫描，不 import 项目代码，因此可在任何环境廉价运行；排除表从 pyproject.toml [tool.doc_anchors] 用文本正则 + ast.literal_eval 读取，避免依赖 tomllib 版本差异；新增的进程级代码快照用模块级 global 缓存 + 根路径校验做 lazy 构建与失效。"
+    },
+    {
+      "id": "class:src/cli/check_docs.py:DocFinding",
+      "type": "class",
+      "name": "DocFinding",
+      "filePath": "src/cli/check_docs.py",
+      "lineRange": [
+        92,
+        109
+      ],
+      "summary": "一次锚点校验结果的 dataclass，承载严重级别（error/warn）、锚点类别（path/route/symbol/skill_tool）、来源文档与行号、锚点原文及人类可读说明。",
+      "tags": [
+        "data-model",
+        "type-definition",
+        "validation",
+        "cli"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/cli/check_docs.py:_load_config",
+      "type": "function",
+      "name": "_load_config",
+      "filePath": "src/cli/check_docs.py",
+      "lineRange": [
+        112,
+        171
+      ],
+      "summary": "从 pyproject.toml 的 [tool.doc_anchors] 段读取五张排除表（docs / paths / routes / symbols / skill_tools）并与内置默认值并集合并；文件缺失、section 缺失或列表解析失败时静默回退默认值。",
+      "tags": [
+        "config",
+        "cli",
+        "parsing",
+        "defaults"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/cli/check_docs.py:_check_path_anchors",
+      "type": "function",
+      "name": "_check_path_anchors",
+      "filePath": "src/cli/check_docs.py",
+      "lineRange": [
+        179,
+        211
+      ],
+      "summary": "校验 T1 路径锚点：逐行提取文档中的 src/** 引用并检查其在代码库是否存在，不存在产出 error 档；被 exclude_paths 前缀豁免的引用跳过。",
+      "tags": [
+        "validation",
+        "documentation",
+        "filesystem",
+        "cli"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/cli/check_docs.py:_collect_code_routes",
+      "type": "function",
+      "name": "_collect_code_routes",
+      "filePath": "src/cli/check_docs.py",
+      "lineRange": [
+        214,
+        247
+      ],
+      "summary": "AST 扫描 src/api/*.py 中的 @router 装饰器调用，抽取字符串字面量路径并统一补上 /api 前缀，返回代码实际注册的路由集合。",
+      "tags": [
+        "static-analysis",
+        "ast",
+        "routing",
+        "cli"
+      ],
+      "complexity": "moderate",
+      "languageNotes": "只用 ast.walk + isinstance 判定装饰器形态，避免导入 FastAPI 应用本身导致副作用。"
+    },
+    {
+      "id": "function:src/cli/check_docs.py:_check_route_anchors",
+      "type": "function",
+      "name": "_check_route_anchors",
+      "filePath": "src/cli/check_docs.py",
+      "lineRange": [
+        250,
+        278
+      ],
+      "summary": "校验 T1 路由锚点：比对文档声明的 METHOD /api/... 与代码注册路由集合，文档有而代码无则产出 error 档（exclude_routes 豁免）。",
+      "tags": [
+        "validation",
+        "documentation",
+        "routing",
+        "cli"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/cli/check_docs.py:_check_symbol_anchors",
+      "type": "function",
+      "name": "_check_symbol_anchors",
+      "filePath": "src/cli/check_docs.py",
+      "lineRange": [
+        281,
+        319
+      ],
+      "summary": "校验 T2 符号锚点：对文档反引号内的标识符（仅 CamelCase / UPPER_SNAKE / 带下划线 snake_case 形态）在 src/ 检索，未找到产出 warn 档供人工 triage。",
+      "tags": [
+        "validation",
+        "documentation",
+        "heuristic",
+        "cli"
+      ],
+      "complexity": "moderate",
+      "languageNotes": "启发式检查天然有误报，故定为 warn 档且不参与退出码，仅靠 --verbose 展示。"
+    },
+    {
+      "id": "function:src/cli/check_docs.py:_src_blob",
+      "type": "function",
+      "name": "_src_blob",
+      "filePath": "src/cli/check_docs.py",
+      "lineRange": [
+        329,
+        358
+      ],
+      "summary": "新增：返回 src/ 下 .py 剥行内注释后的文本快照（进程级、首次调用时 lazy 构建）——逐文件读文本、每行取 # 之前部分再以换行拼接；_SRC_DIR 被替换时自动重建。非线程安全，供单线程 CLI 独占使用。",
+      "tags": [
+        "static-analysis",
+        "snapshot",
+        "cache",
+        "performance"
+      ],
+      "complexity": "moderate",
+      "languageNotes": "有意透传 UnicodeDecodeError 不捕获（见 design D6）：快照必读全树，坏文件会令每次符号查询都抛错，触发面比逐文件读取更广。"
+    },
+    {
+      "id": "function:src/cli/check_docs.py:_reset_cache",
+      "type": "function",
+      "name": "_reset_cache",
+      "filePath": "src/cli/check_docs.py",
+      "lineRange": [
+        361,
+        365
+      ],
+      "summary": "新增：清空本进程的代码快照缓存（模块级 _SRC_BLOB / _SRC_BLOB_ROOT 置 None），供测试隔离与长驻进程显式失效使用。",
+      "tags": [
+        "utility",
+        "cache",
+        "test-support"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/cli/check_docs.py:_symbol_exists_in_code",
+      "type": "function",
+      "name": "_symbol_exists_in_code",
+      "filePath": "src/cli/check_docs.py",
+      "lineRange": [
+        368,
+        382
+      ],
+      "summary": "在 _src_blob() 的进程级快照上以一次正则扫描检索标识符是否以代码片段形态出现（前后非字母数字，允许下划线相连）；签名与判定语义不变，但由「逐符号重读 src/ 全部 .py」改为查快照加一次正则。",
+      "tags": [
+        "static-analysis",
+        "regex",
+        "search",
+        "performance"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/cli/check_docs.py:_collect_known_tool_names",
+      "type": "function",
+      "name": "_collect_known_tool_names",
+      "filePath": "src/cli/check_docs.py",
+      "lineRange": [
+        385,
+        412
+      ],
+      "summary": "扫描 src/agents/tools 与 src/agents/skills，用正则提取 registry.register(\"name\") 与 @tool(\"name\") 字面量，得到代码中实际注册的工具名集合。",
+      "tags": [
+        "static-analysis",
+        "regex",
+        "tools",
+        "cli"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/cli/check_docs.py:_parse_skill_frontmatter_tools",
+      "type": "function",
+      "name": "_parse_skill_frontmatter_tools",
+      "filePath": "src/cli/check_docs.py",
+      "lineRange": [
+        415,
+        447
+      ],
+      "summary": "解析 SKILL.md 的 YAML frontmatter，提取 allowed-tools 数组项并返回 (frontmatter 起始行号, 工具名) 列表；无 frontmatter 或未声明该键时返回空列表。",
+      "tags": [
+        "parsing",
+        "frontmatter",
+        "skills",
+        "cli"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/cli/check_docs.py:_check_skill_tool_anchors",
+      "type": "function",
+      "name": "_check_skill_tool_anchors",
+      "filePath": "src/cli/check_docs.py",
+      "lineRange": [
+        450,
+        488
+      ],
+      "summary": "遍历 skills/ 下各 SKILL.md，校验其 allowed-tools 引用的工具名在代码中确实注册（design D18 防腐扩展），未注册且不在排除表则产出 error 档。",
+      "tags": [
+        "validation",
+        "skills",
+        "documentation",
+        "cli"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/cli/check_docs.py:main",
+      "type": "function",
+      "name": "main",
+      "filePath": "src/cli/check_docs.py",
+      "lineRange": [
+        491,
+        551
+      ],
+      "summary": "CLI 入口：解析 --doc / --verbose / --list-routes，装配排除表后对目标文档执行路径、路由、符号三类锚点检查并追加 skill 工具名检查，汇总打印并存在 error 时以退出码 1 结束。",
+      "tags": [
+        "entry-point",
+        "cli",
+        "orchestration",
+        "validation"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:tests/cli/test_doc_consistency.py",
+      "type": "file",
+      "name": "test_doc_consistency.py",
+      "filePath": "tests/cli/test_doc_consistency.py",
+      "summary": "文档防腐检查（src/cli/check_docs.py）的回归测试：断言 docs/agents/*.md 引用的代码路径与 /api 路由均存在，并覆盖 skill allowed-tools 工具名校验；本次新增符号检索代码快照的隔离 fixture 与 4 个确定性守卫测试（注释剔除、跨行不误匹配、只读一次、根变化自动重建）。",
+      "tags": [
+        "test",
+        "documentation",
+        "anti-rot",
+        "validation",
+        "snapshot"
+      ],
+      "complexity": "moderate",
+      "languageNotes": "用 autouse fixture 前后调用 check_docs._reset_cache() 隔离模块级快照；计数读取次数时 monkeypatch pathlib.Path.read_text 而非用耗时断言，避免引入机器性能导致的 flaky。"
+    },
+    {
+      "id": "function:tests/cli/test_doc_consistency.py:_scan_all_docs",
+      "type": "function",
+      "name": "_scan_all_docs",
+      "filePath": "tests/cli/test_doc_consistency.py",
+      "lineRange": [
+        21,
+        31
+      ],
+      "summary": "测试辅助：加载排除表与代码路由集合后，对全部未排除的 docs/agents/*.md 跑路径与路由两类锚点检查，返回汇总的 error 档列表。",
+      "tags": [
+        "test-support",
+        "documentation",
+        "validation"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:tests/cli/test_doc_consistency.py:test_no_dangling_code_paths_in_docs",
+      "type": "function",
+      "name": "test_no_dangling_code_paths_in_docs",
+      "filePath": "tests/cli/test_doc_consistency.py",
+      "lineRange": [
+        34,
+        42
+      ],
+      "summary": "断言 docs/agents/*.md 引用的 src 路径全部存在（路径类 error 档为空），失败时打印腐化明细，把「文档过时」变成可自动发现的信号。",
+      "tags": [
+        "test",
+        "documentation",
+        "filesystem",
+        "regression"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:tests/cli/test_doc_consistency.py:test_doc_routes_registered_in_code",
+      "type": "function",
+      "name": "test_doc_routes_registered_in_code",
+      "filePath": "tests/cli/test_doc_consistency.py",
+      "lineRange": [
+        45,
+        53
+      ],
+      "summary": "断言文档声明的 /api 路由在 src/api/ 均有 @router 注册（路由类 error 档为空），接口删除/改名导致文档失联时测试失败。",
+      "tags": [
+        "test",
+        "documentation",
+        "routing",
+        "regression"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:tests/cli/test_doc_consistency.py:test_load_config_defaults",
+      "type": "function",
+      "name": "test_load_config_defaults",
+      "filePath": "tests/cli/test_doc_consistency.py",
+      "lineRange": [
+        56,
+        61
+      ],
+      "summary": "校验 pyproject 排除表可加载且含核心排除项（requirements_pool.md 被排除、未配置的 exclude_skill_tools 回退为空集），并确认 docs 目录存在。",
+      "tags": [
+        "test",
+        "config",
+        "defaults"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:tests/cli/test_doc_consistency.py:test_skill_tool_anchor_missing_tool",
+      "type": "function",
+      "name": "test_skill_tool_anchor_missing_tool",
+      "filePath": "tests/cli/test_doc_consistency.py",
+      "lineRange": [
+        64,
+        84
+      ],
+      "summary": "在临时 skills/ 下造一份 allowed-tools 引用不存在工具的 SKILL.md，断言校验产出 error 且已知工具名不误报。",
+      "tags": [
+        "test",
+        "skills",
+        "validation",
+        "frontmatter"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:tests/cli/test_doc_consistency.py:test_skill_tool_anchor_exclude_suppresses",
+      "type": "function",
+      "name": "test_skill_tool_anchor_exclude_suppresses",
+      "filePath": "tests/cli/test_doc_consistency.py",
+      "lineRange": [
+        87,
+        105
+      ],
+      "summary": "断言 allowed-tools 引用的工具名命中排除表时不报（示例/伪代码场景的豁免路径）。",
+      "tags": [
+        "test",
+        "skills",
+        "validation",
+        "exclusion"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:tests/cli/test_doc_consistency.py:test_skill_body_tool_names_exist_in_code",
+      "type": "function",
+      "name": "test_skill_body_tool_names_exist_in_code",
+      "filePath": "tests/cli/test_doc_consistency.py",
+      "lineRange": [
+        108,
+        130
+      ],
+      "summary": "Q3 叙述级防腐：加载 skills/ 下全部技能，用工具名词典比对正文（inline_prompt + fork_body），断言正文引用的工具名均在代码中注册；skills 目录不存在时跳过。",
+      "tags": [
+        "test",
+        "skills",
+        "validation",
+        "integration"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:tests/cli/test_doc_consistency.py:_clear_src_blob",
+      "type": "function",
+      "name": "_clear_src_blob",
+      "filePath": "tests/cli/test_doc_consistency.py",
+      "lineRange": [
+        137,
+        145
+      ],
+      "summary": "新增：autouse fixture，每个用例前后调用 check_docs._reset_cache() 清空模块级代码快照，避免替换 _SRC_DIR 的用例污染同会话其他用例。",
+      "tags": [
+        "test-support",
+        "fixture",
+        "isolation",
+        "snapshot"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:tests/cli/test_doc_consistency.py:_make_src",
+      "type": "function",
+      "name": "_make_src",
+      "filePath": "tests/cli/test_doc_consistency.py",
+      "lineRange": [
+        148,
+        156
+      ],
+      "summary": "新增：在 tmp_path 下造一个临时 src/ 目录写入给定文件，用 monkeypatch 将其设为 check_docs._SRC_DIR 并重置快照，返回该目录。",
+      "tags": [
+        "test-support",
+        "fixture",
+        "monkeypatch",
+        "snapshot"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:tests/cli/test_doc_consistency.py:test_symbol_only_in_comment_not_found",
+      "type": "function",
+      "name": "test_symbol_only_in_comment_not_found",
+      "filePath": "tests/cli/test_doc_consistency.py",
+      "lineRange": [
+        159,
+        168
+      ],
+      "summary": "新增：断言只出现在行内注释里的标识符判为「未检索到」，而同文件的真实标识符仍命中——确认剥注释逻辑生效且非整体失配。",
+      "tags": [
+        "test",
+        "snapshot",
+        "regex",
+        "deterministic"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:tests/cli/test_doc_consistency.py:test_symbol_spanning_line_boundary_not_found",
+      "type": "function",
+      "name": "test_symbol_spanning_line_boundary_not_found",
+      "filePath": "tests/cli/test_doc_consistency.py",
+      "lineRange": [
+        171,
+        174
+      ],
+      "summary": "新增：断言符号被行边界打断时不产生假匹配（foobar 不会命中跨行的 foo\\nbar），护栏快照的换行拼接语义。",
+      "tags": [
+        "test",
+        "snapshot",
+        "regex",
+        "deterministic"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:tests/cli/test_doc_consistency.py:test_symbol_lookup_reads_codebase_once",
+      "type": "function",
+      "name": "test_symbol_lookup_reads_codebase_once",
+      "filePath": "tests/cli/test_doc_consistency.py",
+      "lineRange": [
+        177,
+        209
+      ],
+      "summary": "新增：确定性守卫——monkeypatch pathlib.Path.read_text 计数，断言首次查询恰好读 3 个文件、后续 50 轮查询不再读盘（读取次数不随符号数增长），不使用耗时断言以避免 flaky。",
+      "tags": [
+        "test",
+        "performance",
+        "snapshot",
+        "monkeypatch"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:tests/cli/test_doc_consistency.py:test_blob_rebuilds_when_src_root_changes",
+      "type": "function",
+      "name": "test_blob_rebuilds_when_src_root_changes",
+      "filePath": "tests/cli/test_doc_consistency.py",
+      "lineRange": [
+        212,
+        227
+      ],
+      "summary": "新增：断言 _SRC_DIR 变化时快照自行重建（不依赖显式失效）——切换根后旧符号消失、新符号命中，护栏根路径校验分支。",
+      "tags": [
+        "test",
+        "snapshot",
+        "cache",
+        "deterministic"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "document:CLAUDE.md",
+      "type": "document",
+      "name": "CLAUDE.md",
+      "filePath": "CLAUDE.md",
+      "summary": "项目级 AI 协作指令：界定 Claude 的资深 Python 后端/AI 架构师角色与五条工作原则，给出技术栈、「一事一档」文档归属表、代码目录结构与层间调用规则、常用命令、TraceID 与日志简则、验证清单、规则与代码注释标准，以及参考项目清单。",
+      "tags": [
+        "documentation",
+        "项目指令",
+        "架构规约",
+        "entry-point",
+        "subagent"
+      ],
+      "complexity": "moderate",
+      "languageNotes": "采用「常驻一句话规则 + 归属文档指针」两级组织，常驻项只写一句话并链接到 docs/agents/* 承载细节，避免正文复制；「规则」章节含「派 subagent 前先压小它的上下文」一条（大 diff 与「自己去读全部原文」二选一、>100 KB 输入按文件拆派、卡死时先看 <session>/subagents/<agent-id>.jsonl 末条时间戳再决定是否 kill），细节归 docs/agents/dev-flow.md「派 subagent 的上下文预算」，该文档被 .understandignore 排除故不产生图内边。"
     }
   ],
   "edges": [
@@ -42892,97 +43035,6 @@
       "weight": 0.5
     },
     {
-      "source": "file:src/cli/check_docs.py",
-      "target": "class:src/cli/check_docs.py:DocFinding",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:src/cli/check_docs.py",
-      "target": "function:src/cli/check_docs.py:_load_config",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:src/cli/check_docs.py",
-      "target": "function:src/cli/check_docs.py:_check_path_anchors",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:src/cli/check_docs.py",
-      "target": "function:src/cli/check_docs.py:_collect_code_routes",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:src/cli/check_docs.py",
-      "target": "function:src/cli/check_docs.py:_check_route_anchors",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:src/cli/check_docs.py",
-      "target": "function:src/cli/check_docs.py:_check_symbol_anchors",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:src/cli/check_docs.py",
-      "target": "function:src/cli/check_docs.py:_symbol_exists_in_code",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:src/cli/check_docs.py",
-      "target": "function:src/cli/check_docs.py:_collect_known_tool_names",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:src/cli/check_docs.py",
-      "target": "function:src/cli/check_docs.py:_parse_skill_frontmatter_tools",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:src/cli/check_docs.py",
-      "target": "function:src/cli/check_docs.py:_check_skill_tool_anchors",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:src/cli/check_docs.py",
-      "target": "function:src/cli/check_docs.py:main",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:src/cli/check_docs.py",
-      "target": "function:src/cli/check_docs.py:main",
-      "type": "exports",
-      "direction": "forward",
-      "weight": 0.8
-    },
-    {
-      "source": "file:src/cli/check_docs.py",
-      "target": "class:src/cli/check_docs.py:DocFinding",
-      "type": "exports",
-      "direction": "forward",
-      "weight": 0.8
-    },
-    {
       "source": "file:tests/cli/test_adr_consistency.py",
       "target": "function:tests/cli/test_adr_consistency.py:_write_adr",
       "type": "contains",
@@ -43158,104 +43210,6 @@
       "weight": 0.8
     },
     {
-      "source": "file:tests/cli/test_doc_consistency.py",
-      "target": "function:tests/cli/test_doc_consistency.py:_scan_all_docs",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:tests/cli/test_doc_consistency.py",
-      "target": "function:tests/cli/test_doc_consistency.py:test_no_dangling_code_paths_in_docs",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:tests/cli/test_doc_consistency.py",
-      "target": "function:tests/cli/test_doc_consistency.py:test_doc_routes_registered_in_code",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:tests/cli/test_doc_consistency.py",
-      "target": "function:tests/cli/test_doc_consistency.py:test_load_config_defaults",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:tests/cli/test_doc_consistency.py",
-      "target": "function:tests/cli/test_doc_consistency.py:test_skill_tool_anchor_missing_tool",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:tests/cli/test_doc_consistency.py",
-      "target": "function:tests/cli/test_doc_consistency.py:test_skill_tool_anchor_exclude_suppresses",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:tests/cli/test_doc_consistency.py",
-      "target": "function:tests/cli/test_doc_consistency.py:test_skill_body_tool_names_exist_in_code",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:tests/cli/test_doc_consistency.py",
-      "target": "function:tests/cli/test_doc_consistency.py:test_no_dangling_code_paths_in_docs",
-      "type": "exports",
-      "direction": "forward",
-      "weight": 0.8
-    },
-    {
-      "source": "file:tests/cli/test_doc_consistency.py",
-      "target": "function:tests/cli/test_doc_consistency.py:test_doc_routes_registered_in_code",
-      "type": "exports",
-      "direction": "forward",
-      "weight": 0.8
-    },
-    {
-      "source": "file:tests/cli/test_doc_consistency.py",
-      "target": "function:tests/cli/test_doc_consistency.py:test_load_config_defaults",
-      "type": "exports",
-      "direction": "forward",
-      "weight": 0.8
-    },
-    {
-      "source": "file:tests/cli/test_doc_consistency.py",
-      "target": "function:tests/cli/test_doc_consistency.py:test_skill_tool_anchor_missing_tool",
-      "type": "exports",
-      "direction": "forward",
-      "weight": 0.8
-    },
-    {
-      "source": "file:tests/cli/test_doc_consistency.py",
-      "target": "function:tests/cli/test_doc_consistency.py:test_skill_tool_anchor_exclude_suppresses",
-      "type": "exports",
-      "direction": "forward",
-      "weight": 0.8
-    },
-    {
-      "source": "file:tests/cli/test_doc_consistency.py",
-      "target": "function:tests/cli/test_doc_consistency.py:test_skill_body_tool_names_exist_in_code",
-      "type": "exports",
-      "direction": "forward",
-      "weight": 0.8
-    },
-    {
-      "source": "file:tests/cli/test_doc_consistency.py",
-      "target": "file:src/agents/skills/loader.py",
-      "type": "depends_on",
-      "direction": "forward",
-      "weight": 0.6
-    },
-    {
       "source": "file:tests/cli/test_adr_consistency.py",
       "target": "file:src/cli/check_adr.py",
       "type": "depends_on",
@@ -43263,74 +43217,11 @@
       "weight": 0.6
     },
     {
-      "source": "file:src/cli/check_docs.py",
-      "target": "file:tests/cli/test_doc_consistency.py",
-      "type": "tested_by",
-      "direction": "forward",
-      "weight": 0.5
-    },
-    {
       "source": "file:src/cli/check_adr.py",
       "target": "file:tests/cli/test_adr_consistency.py",
       "type": "tested_by",
       "direction": "forward",
       "weight": 0.5
-    },
-    {
-      "source": "function:tests/cli/test_doc_consistency.py:_scan_all_docs",
-      "target": "function:src/cli/check_docs.py:_load_config",
-      "type": "calls",
-      "direction": "forward",
-      "weight": 0.8
-    },
-    {
-      "source": "function:tests/cli/test_doc_consistency.py:_scan_all_docs",
-      "target": "function:src/cli/check_docs.py:_collect_code_routes",
-      "type": "calls",
-      "direction": "forward",
-      "weight": 0.8
-    },
-    {
-      "source": "function:tests/cli/test_doc_consistency.py:_scan_all_docs",
-      "target": "function:src/cli/check_docs.py:_check_path_anchors",
-      "type": "calls",
-      "direction": "forward",
-      "weight": 0.8
-    },
-    {
-      "source": "function:tests/cli/test_doc_consistency.py:_scan_all_docs",
-      "target": "function:src/cli/check_docs.py:_check_route_anchors",
-      "type": "calls",
-      "direction": "forward",
-      "weight": 0.8
-    },
-    {
-      "source": "function:tests/cli/test_doc_consistency.py:test_load_config_defaults",
-      "target": "function:src/cli/check_docs.py:_load_config",
-      "type": "calls",
-      "direction": "forward",
-      "weight": 0.8
-    },
-    {
-      "source": "function:tests/cli/test_doc_consistency.py:test_skill_tool_anchor_missing_tool",
-      "target": "function:src/cli/check_docs.py:_check_skill_tool_anchors",
-      "type": "calls",
-      "direction": "forward",
-      "weight": 0.8
-    },
-    {
-      "source": "function:tests/cli/test_doc_consistency.py:test_skill_tool_anchor_exclude_suppresses",
-      "target": "function:src/cli/check_docs.py:_check_skill_tool_anchors",
-      "type": "calls",
-      "direction": "forward",
-      "weight": 0.8
-    },
-    {
-      "source": "function:tests/cli/test_doc_consistency.py:test_skill_body_tool_names_exist_in_code",
-      "target": "function:src/cli/check_docs.py:_collect_known_tool_names",
-      "type": "calls",
-      "direction": "forward",
-      "weight": 0.8
     },
     {
       "source": "function:tests/cli/test_adr_consistency.py:_run_all",
@@ -44091,13 +43982,6 @@
     {
       "source": "config:.env.template",
       "target": "service:docker-compose.yml",
-      "type": "configures",
-      "direction": "forward",
-      "weight": 0.6
-    },
-    {
-      "source": "config:pyproject.toml",
-      "target": "file:src/cli/check_docs.py",
       "type": "configures",
       "direction": "forward",
       "weight": 0.6
@@ -46221,13 +46105,6 @@
     },
     {
       "source": "config:.pre-commit-config.yaml",
-      "target": "file:src/cli/check_docs.py",
-      "type": "depends_on",
-      "direction": "forward",
-      "weight": 0.6
-    },
-    {
-      "source": "config:.pre-commit-config.yaml",
       "target": "file:src/cli/check_adr.py",
       "type": "depends_on",
       "direction": "forward",
@@ -46246,48 +46123,6 @@
       "type": "triggers",
       "direction": "forward",
       "weight": 0.6
-    },
-    {
-      "source": "document:AGENTS.md",
-      "target": "document:CLAUDE.md",
-      "type": "documents",
-      "direction": "forward",
-      "weight": 0.5
-    },
-    {
-      "source": "document:CLAUDE.md",
-      "target": "file:src/main.py",
-      "type": "documents",
-      "direction": "forward",
-      "weight": 0.5
-    },
-    {
-      "source": "document:CLAUDE.md",
-      "target": "file:src/models.py",
-      "type": "documents",
-      "direction": "forward",
-      "weight": 0.5
-    },
-    {
-      "source": "document:CLAUDE.md",
-      "target": "file:src/config/settings.py",
-      "type": "documents",
-      "direction": "forward",
-      "weight": 0.5
-    },
-    {
-      "source": "document:CLAUDE.md",
-      "target": "file:deploy/nginx/nginx.conf",
-      "type": "documents",
-      "direction": "forward",
-      "weight": 0.5
-    },
-    {
-      "source": "document:CLAUDE.md",
-      "target": "service:docker-compose.yml",
-      "type": "documents",
-      "direction": "forward",
-      "weight": 0.5
     },
     {
       "source": "service:Dockerfile",
@@ -51863,22 +51698,6 @@
       "recoveredFromImportMap": true
     },
     {
-      "source": "file:tests/cli/test_doc_consistency.py",
-      "target": "file:src/cli/__init__.py",
-      "type": "imports",
-      "direction": "forward",
-      "weight": 0.7,
-      "recoveredFromImportMap": true
-    },
-    {
-      "source": "file:tests/cli/test_doc_consistency.py",
-      "target": "file:src/cli/check_docs.py",
-      "type": "imports",
-      "direction": "forward",
-      "weight": 0.7,
-      "recoveredFromImportMap": true
-    },
-    {
       "source": "file:tests/cli/test_replay_trace.py",
       "target": "file:src/cli/replay_trace.py",
       "type": "imports",
@@ -53346,6 +53165,470 @@
       "type": "configures",
       "direction": "forward",
       "weight": 0.6
+    },
+    {
+      "source": "file:src/cli/check_docs.py",
+      "target": "class:src/cli/check_docs.py:DocFinding",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:src/cli/check_docs.py",
+      "target": "function:src/cli/check_docs.py:_load_config",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:src/cli/check_docs.py",
+      "target": "function:src/cli/check_docs.py:_check_path_anchors",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:src/cli/check_docs.py",
+      "target": "function:src/cli/check_docs.py:_collect_code_routes",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:src/cli/check_docs.py",
+      "target": "function:src/cli/check_docs.py:_check_route_anchors",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:src/cli/check_docs.py",
+      "target": "function:src/cli/check_docs.py:_check_symbol_anchors",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:src/cli/check_docs.py",
+      "target": "function:src/cli/check_docs.py:_symbol_exists_in_code",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:src/cli/check_docs.py",
+      "target": "function:src/cli/check_docs.py:_collect_known_tool_names",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:src/cli/check_docs.py",
+      "target": "function:src/cli/check_docs.py:_parse_skill_frontmatter_tools",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:src/cli/check_docs.py",
+      "target": "function:src/cli/check_docs.py:_check_skill_tool_anchors",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:src/cli/check_docs.py",
+      "target": "function:src/cli/check_docs.py:main",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:src/cli/check_docs.py",
+      "target": "function:src/cli/check_docs.py:_src_blob",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:src/cli/check_docs.py",
+      "target": "function:src/cli/check_docs.py:_reset_cache",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:src/cli/check_docs.py",
+      "target": "function:src/cli/check_docs.py:main",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:src/cli/check_docs.py",
+      "target": "class:src/cli/check_docs.py:DocFinding",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:src/cli/check_docs.py",
+      "target": "file:tests/cli/test_doc_consistency.py",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:tests/cli/test_doc_consistency.py",
+      "target": "function:tests/cli/test_doc_consistency.py:_scan_all_docs",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/cli/test_doc_consistency.py",
+      "target": "function:tests/cli/test_doc_consistency.py:test_no_dangling_code_paths_in_docs",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/cli/test_doc_consistency.py",
+      "target": "function:tests/cli/test_doc_consistency.py:test_doc_routes_registered_in_code",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/cli/test_doc_consistency.py",
+      "target": "function:tests/cli/test_doc_consistency.py:test_load_config_defaults",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/cli/test_doc_consistency.py",
+      "target": "function:tests/cli/test_doc_consistency.py:test_skill_tool_anchor_missing_tool",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/cli/test_doc_consistency.py",
+      "target": "function:tests/cli/test_doc_consistency.py:test_skill_tool_anchor_exclude_suppresses",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/cli/test_doc_consistency.py",
+      "target": "function:tests/cli/test_doc_consistency.py:test_skill_body_tool_names_exist_in_code",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/cli/test_doc_consistency.py",
+      "target": "function:tests/cli/test_doc_consistency.py:_clear_src_blob",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/cli/test_doc_consistency.py",
+      "target": "function:tests/cli/test_doc_consistency.py:_make_src",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/cli/test_doc_consistency.py",
+      "target": "function:tests/cli/test_doc_consistency.py:test_symbol_only_in_comment_not_found",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/cli/test_doc_consistency.py",
+      "target": "function:tests/cli/test_doc_consistency.py:test_symbol_spanning_line_boundary_not_found",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/cli/test_doc_consistency.py",
+      "target": "function:tests/cli/test_doc_consistency.py:test_symbol_lookup_reads_codebase_once",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/cli/test_doc_consistency.py",
+      "target": "function:tests/cli/test_doc_consistency.py:test_blob_rebuilds_when_src_root_changes",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/cli/test_doc_consistency.py",
+      "target": "function:tests/cli/test_doc_consistency.py:test_no_dangling_code_paths_in_docs",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:tests/cli/test_doc_consistency.py",
+      "target": "function:tests/cli/test_doc_consistency.py:test_doc_routes_registered_in_code",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:tests/cli/test_doc_consistency.py",
+      "target": "function:tests/cli/test_doc_consistency.py:test_load_config_defaults",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:tests/cli/test_doc_consistency.py",
+      "target": "function:tests/cli/test_doc_consistency.py:test_skill_tool_anchor_missing_tool",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:tests/cli/test_doc_consistency.py",
+      "target": "function:tests/cli/test_doc_consistency.py:test_skill_tool_anchor_exclude_suppresses",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:tests/cli/test_doc_consistency.py",
+      "target": "function:tests/cli/test_doc_consistency.py:test_skill_body_tool_names_exist_in_code",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:tests/cli/test_doc_consistency.py",
+      "target": "function:tests/cli/test_doc_consistency.py:test_symbol_only_in_comment_not_found",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:tests/cli/test_doc_consistency.py",
+      "target": "function:tests/cli/test_doc_consistency.py:test_symbol_spanning_line_boundary_not_found",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:tests/cli/test_doc_consistency.py",
+      "target": "function:tests/cli/test_doc_consistency.py:test_symbol_lookup_reads_codebase_once",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:tests/cli/test_doc_consistency.py",
+      "target": "function:tests/cli/test_doc_consistency.py:test_blob_rebuilds_when_src_root_changes",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:tests/cli/test_doc_consistency.py",
+      "target": "file:src/agents/skills/loader.py",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "function:tests/cli/test_doc_consistency.py:_scan_all_docs",
+      "target": "function:src/cli/check_docs.py:_load_config",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:tests/cli/test_doc_consistency.py:_scan_all_docs",
+      "target": "function:src/cli/check_docs.py:_collect_code_routes",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:tests/cli/test_doc_consistency.py:_scan_all_docs",
+      "target": "function:src/cli/check_docs.py:_check_path_anchors",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:tests/cli/test_doc_consistency.py:_scan_all_docs",
+      "target": "function:src/cli/check_docs.py:_check_route_anchors",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:tests/cli/test_doc_consistency.py:test_load_config_defaults",
+      "target": "function:src/cli/check_docs.py:_load_config",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:tests/cli/test_doc_consistency.py:test_skill_tool_anchor_missing_tool",
+      "target": "function:src/cli/check_docs.py:_check_skill_tool_anchors",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:tests/cli/test_doc_consistency.py:test_skill_tool_anchor_exclude_suppresses",
+      "target": "function:src/cli/check_docs.py:_check_skill_tool_anchors",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:tests/cli/test_doc_consistency.py:test_skill_body_tool_names_exist_in_code",
+      "target": "function:src/cli/check_docs.py:_collect_known_tool_names",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:src/cli/check_docs.py:_symbol_exists_in_code",
+      "target": "function:src/cli/check_docs.py:_src_blob",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:tests/cli/test_doc_consistency.py:_clear_src_blob",
+      "target": "function:src/cli/check_docs.py:_reset_cache",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:tests/cli/test_doc_consistency.py:_make_src",
+      "target": "function:src/cli/check_docs.py:_reset_cache",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:tests/cli/test_doc_consistency.py:test_symbol_only_in_comment_not_found",
+      "target": "function:src/cli/check_docs.py:_symbol_exists_in_code",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:tests/cli/test_doc_consistency.py:test_symbol_spanning_line_boundary_not_found",
+      "target": "function:src/cli/check_docs.py:_symbol_exists_in_code",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:tests/cli/test_doc_consistency.py:test_symbol_lookup_reads_codebase_once",
+      "target": "function:src/cli/check_docs.py:_symbol_exists_in_code",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:tests/cli/test_doc_consistency.py:test_blob_rebuilds_when_src_root_changes",
+      "target": "function:src/cli/check_docs.py:_symbol_exists_in_code",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:tests/cli/test_doc_consistency.py:test_blob_rebuilds_when_src_root_changes",
+      "target": "function:src/cli/check_docs.py:_reset_cache",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "document:CLAUDE.md",
+      "target": "file:src/main.py",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:CLAUDE.md",
+      "target": "file:src/models.py",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:CLAUDE.md",
+      "target": "file:src/config/settings.py",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:CLAUDE.md",
+      "target": "file:deploy/nginx/nginx.conf",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:CLAUDE.md",
+      "target": "service:docker-compose.yml",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "config:pyproject.toml",
+      "target": "file:src/cli/check_docs.py",
+      "type": "configures",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "config:.pre-commit-config.yaml",
+      "target": "file:src/cli/check_docs.py",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "document:AGENTS.md",
+      "target": "document:CLAUDE.md",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:tests/cli/test_doc_consistency.py",
+      "target": "file:src/cli/__init__.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7,
+      "recoveredFromImportMap": true
+    },
+    {
+      "source": "file:tests/cli/test_doc_consistency.py",
+      "target": "file:src/cli/check_docs.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7,
+      "recoveredFromImportMap": true
     }
   ],
   "layers": [
