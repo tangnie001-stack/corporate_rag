@@ -41,11 +41,11 @@ services/          业务编排：app_service → kb / document / chat(agent)
   agent_service.py 图生命周期 + 一次生成的主循环（_run_generation）
   capability_service.py  能力清单：/api/skills、/api/agents 由 registry 派生（fail-open）
 agents/            LangGraph agent 循环
-  ├─ graph/        workflow(建图) / state / agent_node / nodes / verify / skill_direct(命令行直出节点)
+  ├─ graph/        workflow(建图) / state / agent_node / message_payload(消息→trace 载荷纯函数) / nodes / verify / skill_direct(命令行直出节点)
   ├─ tools/        retrieve_kb、ask_user、search_web、task、registry( + readonly 声明表)
   ├─ skills/       主从委派运行时：loader/registry/executor/delegate_task/models/invocation/prefix(/xxx 解析与清洗纯函数) + fork 执行层 fork_stream/fork_tools/delegate_run
   └─ presets/      智能体预设：models / loader / registry
-rag/               检索与知识库路由：retrieval / fusion(RRF 纯函数) / context / prompt / stream / temporal
+rag/               检索与知识库路由：retrieval / fusion(RRF 纯函数) / context / prompt / temporal
 chat/              对话管理：manager(Redis) / persistence(PostgreSQL) / streaming / task_registry / process_log
 chunking/          分块：router(策略路由) / strategies(4 种) / validator / scorer
 parsers/           文档解析：pdf / docx / txt + base / router
@@ -53,9 +53,9 @@ core/              日志：logging / log_events / log_event_specs
 config/            settings(环境变量) / const(常量/文案/枚举) / response_codes
   └─ prompts/      prompt 模板包：__init__.py(7 条行为键常量 VERIFY_* / FORK_*) / loader.py(唯一读取点) / validation.py(启动期校验) / templates/*.yaml(20 条模板：段模板 + 独立任务模板)
                    —— 段模板(`kind: section`)与独立任务模板(`kind: task`)同处一包；改 prompt 文案改 YAML，改规则的挂载点改代码
-infra/             基础设施：db(engine/DSN + transaction 事务边界 + models + repos + vector_store + lexical_query) / llm / search(tokenizer 为唯一 jieba 分词入口) / auth / redis_client
+infra/             基础设施：db(engine/DSN + transaction 事务边界 + models + repos + vector_store + lexical_query) / llm(tracing 为 Langfuse 开关/flush/trace id 校验唯一入口) / search(tokenizer 为唯一 jieba 分词入口) / auth / redis_client
 middleware/        auth / trace_id / response_processor（统一响应包装）
-cli/               RAGAS 评估、检索对比、trace 回放等命令行工具
+cli/               RAGAS 评估、检索对比、trace 回放、trace 清理等命令行工具
 models.py          LLM / Embedding / Rerank 工厂（get_llm / get_embedding / get_rerank）
 utils/             sse 事件类型 / errors / desensitize / auth_crypto
 tools/             工具基类（base.py）

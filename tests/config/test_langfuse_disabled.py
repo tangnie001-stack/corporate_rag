@@ -1,9 +1,10 @@
 """断言测试进程内 tracing 被全局关停（D14）。
 
-为什么需要它：`settings.py` 的 `LANGFUSE_*` 内置默认值指向真实 host 与 key，
-一旦接线，任何走 `_run_generation` / `agent_model` 的用例都会构造真实客户端并
-上报 —— 违反「测试 mock 外部依赖，不发起真实网络调用」。本文件把"关停已生效"
-钉成可回归的契约。
+为什么需要它：`settings.py` 的 `LANGFUSE_ENABLE` 内置默认为 `true`（host / key 默认为
+空串）。缺了 conftest 顶部的 import 期关停，任何走 `_run_generation` / `agent_model`
+的用例都会按默认开关构造真实 Langfuse 客户端并上报 —— 开发机的 `.env` 指向真实
+host/key，CI / 新 clone 虽无 `.env` 但开关仍为 `true`，都会违反「测试 mock 外部依赖，
+不发起真实网络调用」。本文件把"关停已生效"钉成可回归的契约。
 """
 
 import os

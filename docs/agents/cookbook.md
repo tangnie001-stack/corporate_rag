@@ -312,7 +312,7 @@
 **注意事项**：
 - **只绑回环**：端口映射是 `127.0.0.1:3000->3000`，所以用非回环地址连不上是**预期**（`curl http://<LAN-IP>:3000/` → `000`）——这是 ADR-0011「暴露面收敛」的决定，不是故障。**不要**为了远程访问去改端口绑定；从 Windows 浏览器访问优先靠 WSL2 的 localhost 转发，不通则用 `ssh -L 3000:127.0.0.1:3000 <host>`。
 - 对照：前端 Nginx 绑的是 `0.0.0.0:80`（局域网可达），两者暴露面不同是有意为之。
-- **UI 里看不到数据是正常的**：应用默认不调用 Langfuse（`.env` 的 `LANGFUSE_ENABLE=false`，prompt 走本地兜底），且 tracing 尚未接线。要验证写入链路是否通，用 `LangfuseTracer` 裸发一条 trace，再查 `langfuse` 库的 `traces` 表。
+- **UI 里看不到数据怎么排查**：本机 `.env` 的 `LANGFUSE_ENABLE=false`（`settings.py` 内置默认才是 `true`，被 `.env` 覆盖为关），故**当前看不到数据属预期**。排查顺序：① 把 `.env` 的 `LANGFUSE_ENABLE` 置 `true` 并重创 `app`（环境变量变更须 `docker compose up -d --force-recreate app`，`restart` 不生效）；② 发一轮真实对话；③ 按响应头 `X-Trace-ID` 在 Langfuse 检索该 trace。
 - 账号由 `.env` 的 `LANGFUSE_INIT_USER_*` 在**首次启动时播种**，故无需手工注册。**`LANGFUSE_INIT_PROJECT_ID` 是播种开关**：缺它则 project 与 key 都不建，而且**不报错**（静默失效）。库重建后正是靠它 + `_PUBLIC_KEY`/`_SECRET_KEY` 保住原有那对 key，因此这三个键必须与 `.env` 的 `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY` 是**同一对**。
 - 库重建后若 UI 里 project 名称是播种值（`Corporate RAG`）而非你后来改的名字，说明重建生效了，属预期。
 

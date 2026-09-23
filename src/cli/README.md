@@ -132,7 +132,7 @@ CSV 每行结构（`question`、`ground_truth` 为原测试集内容，`trace_id
 index, question, ground_truth, trace_id, faithfulness, answer_relevancy, context_recall, context_precision
 ```
 
-MD 摘要表格同样带 `trace_id` 列。每个问题在评估时会生成独立的 `eval_<hex>` 格式 trace_id，并注入到该问题期间的所有日志行（loguru patcher 读取 `current_trace_id`），同时作为 Langfuse trace id —— 用 CSV 里的 trace_id 即可在日志 / Langfuse 中回溯这个问题的完整链路（分类 → 改写 → 检索 → 精排 → 生成），定位指标异常的根因。
+MD 摘要表格同样带 `trace_id` 列。每个问题在评估时会生成独立的 `eval_<hex>` 格式 trace_id，并注入到该问题期间的所有日志行（loguru patcher 读取 `current_trace_id`），同时作为 Langfuse trace id —— 用 CSV 里的 trace_id 即可在日志 / Langfuse 中回溯这个问题的完整链路（分类 → 改写 → 检索 → 精排 → 生成），定位指标异常的根因（前提：`.env` 的 `LANGFUSE_ENABLE=true` 且 Langfuse 后端可达 —— 关闭时该列无对应 trace）。
 
 MD 摘要末尾会给出整体平均值，例如：
 

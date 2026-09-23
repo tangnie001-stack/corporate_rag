@@ -10,7 +10,7 @@
 | `doc_id` | 文档唯一标识，UUID | ❌ 传数据库自增 ID（doc_id 是 UUID） |
 | `session_id` | 会话标识，用于关联对话历史 | ❌ 传空字符串 |
 | `chunk_id` | 分块 ID，`chunks` 表主键，格式 `"{doc_id}:{chunk_index}"` | ❌ 与 `doc_id` 混用（同一文档有多个 chunk） |
-| `trace_id` | 请求追踪 ID，格式 `trace_<uuid>` | — |
+| `trace_id` | 请求追踪 ID，格式 `trace_<uuid>`；**同时是 Langfuse 的 trace id**。由 `X-Trace-ID` 头或 `?trace_id` 决定，**属不可信入站输入**，须经白名单校验后才使用 | — |
 
 ## 响应与追踪
 
@@ -204,7 +204,9 @@
 |------|------|---------|
 | `可观测后端（observability backend）` | 本项目自托管的 Langfuse 后端及其部署形态。**现为 v2 线**（`langfuse/langfuse:2.95.11`）：只有 `langfuse-web` 一个容器 + 复用既有 PostgreSQL 的独立 database，**不含** ClickHouse / `langfuse-worker` / S3 事件存储。决策与代价见 `docs/adr/0011-langfuse-v2-downgrade.md`；部署契约见 change 的 `docs/openspec/changes/langfuse-v2-downgrade/specs/observability-backend/spec.md` | ❌ 以为还需要 ClickHouse 或 `langfuse-worker`；❌ 按 v3 的六组件形态排查问题 |
 | `凭据播种（credential seeding）` | 用 `LANGFUSE_INIT_ORG_*` / `LANGFUSE_INIT_PROJECT_*` / `LANGFUSE_INIT_USER_*` 在**空库首次启动**时创建组织、项目、API Key 与管理员。**`LANGFUSE_INIT_PROJECT_ID` 是开关** —— 官方 initialize 逻辑把 project 与 key 的创建整体嵌在 `if (env.LANGFUSE_INIT_PROJECT_ID)` 内，缺它时二者都不建**且不报错**。本项目用它与 `_PUBLIC_KEY` / `_SECRET_KEY` 播种**既有** key 对，使库重建后 `.env` 凭据仍有效 | ❌ 只配 `_PUBLIC_KEY` / `_SECRET_KEY` 而漏 `_PROJECT_ID`（静默不播种，凭据失效）；❌ 在 compose 里给这些值加双引号（官方 gotcha） |
-| `trace 保留窗口` | **另案，尚未落地**。Langfuse 的 Data Retention 在自托管下属企业版功能，OSS v2 无 retention/cleanup 开关。当前 tracing 未接线、后端不产 trace，故该问题暂为空；**一旦接线而清理未落地，trace 将无界增长**（ADR-0011 的显式残留） | ❌ 以为 v2 有内置 retention 配置可开 |
+| `trace 保留期` | Langfuse 的 Data Retention 在自托管下属企业版功能，OSS v2 无内置 retention/cleanup 开关，故清理由 `src/cli/purge_langfuse_traces.py` 自建：默认保留期 **30 天**（`--retention-days` 可覆写，下界 **1 天**），单次删除上限 **1000 条**（超限即中止、不删任何数据），非 dry-run 须显式 `--yes` 且环境变量 `LANGFUSE_PURGE_ALLOW=1` 武装；须在 compose 网络内执行（`LANGFUSE_HOST` 是容器服务名，宿主侧不可达） | ❌ 以为 v2 有内置 retention 配置可开；❌ 在宿主机上直跑该 CLI |
+
+**`LANGFUSE_ENABLE` 开关口径**：同一开关在代码里既接 tracing（`src/infra/llm/tracing.py`），也接 `PromptManager` 的远端 prompt 读取（`PromptManager.__init__` 读它）。按 `docs/adr/0010-delist-langfuse-prompts.md`，远端名单当前已出列为空，名单为空时不发起网络请求 —— 故**当前实际只影响 trace 产出**；待名单加回并固定 label/版本（终态，见 `docs/adr/0002-prompt-carrier-yaml-two-phase.md`）后，两者同受该开关治理。
 
 ## prompt 组装
 
