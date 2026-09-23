@@ -107,6 +107,7 @@ docs/adr/NNNN-<kebab-case-短标题>.md
 | [0009](0009-prompt-base-three-way-replacement.md) | `base` 段按三选一（替换）解析 | Accepted | 局部取代 0003 的决策 3 |
 | [0010](0010-delist-langfuse-prompts.md) | Langfuse 侧 3 个 prompt 出列，本地模板为唯一事实源 | Accepted | 不取代 0002；0002 内部的子决策 |
 | [0011](0011-langfuse-v2-downgrade.md) | 自托管 Langfuse 由 v3 降至 v2，去掉 ClickHouse 与 worker | Accepted | 局部推翻 0004 的一条附带陈述 |
+| [0012](0012-langfuse-trace-content-and-retention.md) | trace 记录请求/回答原文并保留 30 天 | Accepted | 承载 0011 复查条件②的复评（确认，不取代） |
 
 ## 模板
 
