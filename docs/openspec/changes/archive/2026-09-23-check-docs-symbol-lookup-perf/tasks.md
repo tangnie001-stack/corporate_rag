@@ -31,10 +31,10 @@
 ## 4. 收尾
 
 - [x] 4.1 端到端：一次真实 `git commit`，确认 pre-commit 的 `doc anti-rot (all docs)` 钩子耗时降到秒级
-- [ ] 4.2 归档：`openspec archive check-docs-symbol-lookup-perf` —— 把 `documentation-anti-rot` 的 delta 合并进主规格
-- [ ] 4.3 **登记本次有意保留的两处现状行为**（不修，仅登记；取舍理由见 `design.md` D6）
-  - [ ] 4.3.1 `#` 截断（字符串字面量里的 `#` 被当注释起点 → 只产生 `warn` 噪声）→ 登 `docs/agents/requirements_pool.md`
-  - [ ] 4.3.2 `UnicodeDecodeError` 不捕获（单个非 UTF-8 的 `.py` 可**挡死全员所有提交**）→ 登 `docs/agents/defensive-patterns.md`（缺陷类别）**并**登 `docs/agents/requirements_pool.md`（待修项，约 1 行 `except`）。**按扩大后的触发面登记**：快照必读全树 → 存在坏文件时**每次**符号查询都抛（改前"命中即短路"可能读不到该文件）
+- [x] 4.2 归档：`openspec archive check-docs-symbol-lookup-perf` —— 把 `documentation-anti-rot` 的 delta 合并进主规格
+- [x] 4.3 **登记本次有意保留的两处现状行为**（不修，仅登记；取舍理由见 `design.md` D6）
+  - [x] 4.3.1 `#` 截断（字符串字面量里的 `#` 被当注释起点 → 只产生 `warn` 噪声）→ 登 `docs/agents/requirements_pool.md`
+  - [x] 4.3.2 `UnicodeDecodeError` 不捕获（单个非 UTF-8 的 `.py` 可**挡死全员所有提交**）→ 登 `docs/agents/defensive-patterns.md`（缺陷类别）**并**登 `docs/agents/requirements_pool.md`（待修项，约 1 行 `except`）。**按扩大后的触发面登记**：快照必读全树 → 存在坏文件时**每次**符号查询都抛（改前"命中即短路"可能读不到该文件）
 - [ ] 4.4 cookbook 的 `.venv` 补充：作为**与本 change 无关的独立修复**，在本分支上单独一笔提交（message 标明独立）——「并行会话（worktree）」步骤补"必须同时 symlink `.venv`"（pre-commit 本地钩子 entry 是 `.venv/bin/python -m src.cli.check_docs`，只带 `.env` 不带 `.venv` 会让该 worktree 的每次提交都被 doc 闸门挡死）
 - [ ] 4.5 合并回 `dev-wsl`（**本地，不 push**）
 - [ ] 4.6 **合并后**在主工作区跑一次图谱增量更新，并核对 `src/cli/check_docs.py` 节点的**入边完整** —— 来自未变更的 `tests/cli/test_doc_consistency.py` 的 `calls` 边不得被丢（本分支内**有意不跑**图谱增量，故 worktree 的提交不含 `.ua/*`）；判据 `丢失=0 且 新增=0`（见 `docs/agents/knowledge-graph.md` 已知坑 #2）

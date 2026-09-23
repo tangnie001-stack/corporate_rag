@@ -1,6 +1,6 @@
 # 防御性模式
 
-> 真实发生/差点发生的缺陷类别，写成防复发规则。写并发、进程级注册表、SSE 流式、精排、实体、prompt、接口契约、数据库、部署相关代码前先读。
+> 真实发生/差点发生的缺陷类别，写成防复发规则。写并发、进程级注册表、SSE 流式、精排、实体、prompt、接口契约、数据库、部署、开发期闸门相关代码前先读。
 
 ## 并发
 
@@ -185,6 +185,16 @@
 **现象**：`docker-compose.override.yml` 曾把 6 条开发期挂载写成主工作区绝对路径（`/mnt/.../corporate_rag/{src,tests,skills,agents}` 与 `deploy/nginx/{nginx.conf,html}`）。危害两层，都是静默的：① 仓库 clone / 挪到别的路径后 bind 源不存在（Docker 可能报错，也可能静默建成**空目录**），容器看不到 `src/` 与 nginx 内容；② 在 `git worktree` 里跑 compose 时挂的仍是**主工作区**的文件 —— worktree 的改动静默失效，且看起来像生效了。
 
 **规则**：compose 的 bind mount 一律写**相对路径**（`./src:/app/src`）。相对 bind 按「compose 文件所在目录」解析，**与调用时的 cwd 无关**，因此主工作区与各 worktree 各自解析到自己。主 compose（`./data/ragas`、`./deploy/postgres/init`）原本就是此写法，override 曾偏离。
+
+## 开发期闸门（pre-commit）
+
+### 闸门的失败面要按"输入类"界定，不能只看当前仓库可不可达
+
+**现象**：`src/cli/check_docs.py` 的代码快照只 `except OSError`，**不捕获 `UnicodeDecodeError`**（它是 `ValueError` 子类）。而该钩子 `doc anti-rot (all docs)` 是 `always_run` 且无 `files` 过滤 —— **每次提交都全量跑**。因此只要 `src/` 下出现**一个**非 UTF-8 的 `.py`，闸门就会抛异常 ⇒ **全员的每一次提交都被拦死**。本仓当前无非 UTF-8 文件，故不可达 —— 但"不可达"靠的是输入集恰好干净，不是代码保证。
+
+**规则**：给"每次提交都跑"的闸门写文件读取时，异常覆盖面要按**输入类**界定，而不是按"当前仓库里有没有这种文件"。① 遍历全树时，单文件失败必须**跳过该文件**，不能崩掉整轮（`OSError` 之外还要想到 `UnicodeDecodeError` 这类解码失败）；② **不得把"捕获范围保留、但触发面被放大"的改动说成"行为不变"** —— 触发面本身就是行为的一部分（"命中即短路"可能永远读不到坏文件，"必读全树"则每次都会撞上）。
+
+**历史实例**：2026-09-23 change `check-docs-symbol-lookup-perf`。把"逐符号重读（命中即短路）"换成"单次快照（必读全树）"时，捕获范围逐字保留，但**触发面被扩大**（存在坏文件时每次查询都抛）。当时先在 `design.md` D6 写成"保留现状"，被代码评审指出不准确后才改准。待修项登记在 `requirements_pool.md` D-08。
 
 ## 如何更新
 
