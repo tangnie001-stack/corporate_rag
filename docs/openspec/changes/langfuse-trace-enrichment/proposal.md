@@ -13,7 +13,7 @@ Langfuse 接线（change `langfuse-trace-wiring`，2026-09-24 归档）已让每
 ## What Changes
 
 - **工具调用成为一等观测**：每条工具调用产出一条 Langfuse span，记录工具名、入参、返回值、起止时间、错误态；同一轮的多次调用归到该轮的 `tools` 父 span 之下（形成真正的树）。
-- **实现方式为「事件流驱动」，不侵入图与工具**：在 `_run_generation` 既有的 `graph.astream_events(...)` 循环里新增一个请求内私有的消费者 `_ToolTraceCollector`，按 `run_id` 配对 `on_tool_start` / `on_tool_end`；父 span 的开关以节点级 `on_chain_start/end`（`name == "tools"`）为锚点；事件筛选只用 `metadata.langgraph_node == "tools"`。
+- **实现方式为「事件流驱动」，不侵入图与工具**：在 `_run_generation` 既有的 `graph.astream_events(...)` 循环里新增一个请求内私有的消费者 `ToolTraceCollector`，按 `run_id` 配对 `on_tool_start` / `on_tool_end`；父 span 的开关以节点级 `on_chain_start/end`（`name == "tools"`）为锚点；事件筛选只用 `metadata.langgraph_node == "tools"`。
 - **generation 载荷补全**：工具轮的 `output` 不再为空（模型只发 `tool_calls` 时写入该结构，文本非空时仍写文本）；`input` 的消息 `role` 由 LangChain 类型名规范化成 OpenAI 形态（`ai`→`assistant`、`human`→`user`），并补上 assistant 的 `tool_calls` 与 tool 消息的 `name`。
 - **trace 富化**：写入 `user_id`（在请求内捕获后显式传入、空值转 `None`，不依赖 contextvar 继承）、低基数 `tags`（`chat` + `kb`|`no_kb`）、业务 `metadata`（生效智能体、本轮加载的技能、kb_id、kb_domain、deep_thinking、direct_skill 等）。全部**只读 `RequestContext`，不新增取数**。
 - **成本可见**：实际使用模型的输入/输出单价进 `src/config/settings.py`（env 驱动，**默认 0**；**单位是 USD / 单个 token**，$3 per 1M → 填 `0.000003`）；**0 视为「未配置」，CLI 跳过 seed**。模型名取 `settings.LLM_MODEL`（不硬编码），`match_pattern` 用 `"(?i)^" + re.escape(model_name) + "$"` 构造（锚定正则，防误配到形近模型），`unit=TOKENS`；**seed 前先用只读查询比对运行时 provider 名与配置名**，不等则拒绝 seed。落地为 repo 内幂等 CLI（`langfuse_context.client_instance.api.models` 的 `list` + `create`，dev / prod 各跑一次）。
@@ -34,11 +34,11 @@ Langfuse 接线（change `langfuse-trace-wiring`，2026-09-24 归档）已让每
 ## Impact
 
 - **代码**
-  - `src/services/agent_service.py` —— 事件循环内挂 `_ToolTraceCollector`；`update_current_trace` 扩参（`user_id` / `tags` / `metadata`）
+  - `src/services/agent_service.py` —— 事件循环内挂 `ToolTraceCollector`；`update_current_trace` 扩参（`user_id` / `tags` / `metadata`）
   - `src/api/chat.py` —— 捕获并显式传递 `user_id`（空值转 `None`）；订正第 42-43 行「任务与请求不共享 context」的误注释
   - `src/agents/graph/agent_node.py` —— 工具轮 generation 的 `output` 补 `tool_calls`
   - `src/agents/graph/message_payload.py` —— `role` 规范化 + 补 `tool_calls` / tool `name`
-  - `src/infra/llm/tool_trace.py`（新增）—— `_ToolTraceCollector`（跨事件记账 + 兜底关闭）
+  - `src/infra/llm/tool_trace.py`（新增）—— `ToolTraceCollector`（跨事件记账 + 兜底关闭）
   - `src/config/settings.py` —— 模型单价字段（env 驱动，默认 0；注释注明「USD / 单 token」）
   - `src/cli/seed_langfuse_models.py`（新增）—— 幂等 seed 模型定价（模型名取配置；seed 前比对运行时模型名）
 - **依赖**：Langfuse v2.95.11 + `langfuse==2.60.10`（命令式 span API 已实测可用）；**不新增第三方依赖**

@@ -81,7 +81,7 @@
 - ⚠️ **不得**写成「trace 的 `timestamp` 漂移已被根除」：`update_current_trace(...)`（既有路径，`_run_generation` 里**每轮调用一次**，唯一调用点 `agent_service.py:612`）**内部就是走 `client_instance.trace(id=…)`**，因此**每轮**都会刷新 trace 的 `timestamp`。那是**既有行为**，本变更不改变、也不声称修好。
 - **client 实例统一取 `langfuse_context.client_instance`** —— 它与 `configure_tracing()` / `flush_tracing()`（`src/infra/llm/tracing.py`）管的是**同一个单例**。**不得** `new Langfuse()`：那会绕过 `LANGFUSE_ENABLE` 开关、也不被关停时的 `flush` 覆盖，后果是「禁用态仍可能出网」+「关停丢 span」。
 
-### D4 `_ToolTraceCollector` 的形态
+### D4 `ToolTraceCollector` 的形态
 
 与 `_StreamCapture` 平级：**请求内私有**（每次请求 new 一个，绝不共享，避免并发串账）、**跨事件累积状态**、**自带行为**。
 

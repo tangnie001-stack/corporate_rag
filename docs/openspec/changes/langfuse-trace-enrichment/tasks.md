@@ -7,7 +7,7 @@
 
 ## 2. 工具观测（核心）
 
-- [ ] 2.1 新增 `src/infra/llm/tool_trace.py`：`_ToolTraceCollector`（`_enabled` 守卫、`{run_id: span}` 账本、当前 `tools` 父 span、`consume(item)` 三分支、`close()` 兜底）
+- [ ] 2.1 新增 `src/infra/llm/tool_trace.py`：`ToolTraceCollector`（`_enabled` 守卫、`{run_id: span}` 账本、当前 `tools` 父 span、`consume(item)` 三分支、`close()` 兜底）
 - [ ] 2.2 父 span 的开关接节点级 `on_chain_start/end`（`name == "tools"`）；工具 span 以 `parent_observation_id` 挂在其下
 - [ ] 2.3 过滤判据**只用 `metadata.langgraph_node == "tools"`**；**不得**用 `checkpoint_ns` 判空 —— 实测 `on_tool_*` 的 `checkpoint_ns` 是 `tools:<uuid>`（非空），误用会**丢掉全部工具事件**
 - [ ] 2.4 工具 span 一律用 `langfuse_context.client_instance.span(trace_id=…)` 创建（**不调用 `client.trace()`**；**不 new `Langfuse()`**，否则绕过开关与 flush）；`_on_end` 从 `ToolMessage` 显式取 `.content` / `.tool_call_id` / `.name` 后再写入
