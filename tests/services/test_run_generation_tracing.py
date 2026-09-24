@@ -147,3 +147,91 @@ async def test_run_generation_feeds_collector_and_closes(monkeypatch):
         "on_tool_end",
     ]
     assert closed == [True]
+
+
+@pytest.mark.asyncio
+async def test_run_generation_writes_user_tags_metadata(monkeypatch):
+    """trace 级写入 user_id / 低基数 tags / 业务 metadata；空 user_id 不得写成空串。"""
+    captured: dict = {}
+
+    class _SpyContext:
+        def update_current_trace(self, **kwargs):
+            captured.update(kwargs)
+
+        def update_current_observation(self, **kwargs):
+            pass
+
+    monkeypatch.setattr(agent_service, "langfuse_context", _SpyContext())
+
+    mgr = StreamingRunManager()
+    fake_graph = Mock()
+    fake_graph.astream_events = _fake_astream
+    ctx = RequestContext(session_id="s1", kb_id="kb1", kb_domain="finance")
+    ctx.agent = "financial-analyst"
+    ctx.agent_display_name = "财务专家"
+    ctx.loaded_skills = ["finance-qa"]
+    ctx.skill_action = "inline"
+    ctx.clarify_channel = asyncio.Queue()
+
+    await _run_generation(
+        "s1",
+        "kb1",
+        "q",
+        [],
+        False,
+        ctx,
+        mgr,
+        graph=fake_graph,
+        user_id="u-42",
+        langfuse_observation_id="trace_unit_enrich",  # type: ignore[reportCallIssue]
+    )
+
+    assert captured["user_id"] == "u-42"
+    assert captured["tags"] == ["chat", "kb"]
+    metadata = captured["metadata"]
+    assert metadata["agent"] == "financial-analyst"
+    assert metadata["agent_display_name"] == "财务专家"
+    assert metadata["kb_id"] == "kb1"
+    assert metadata["kb_domain"] == "finance"
+    assert metadata["skill_action"] == "inline"
+    assert metadata["loaded_skills"] == ["finance-qa"]
+    # 高基数取值不得进 tags
+    assert "kb1" not in captured["tags"]
+    assert "financial-analyst" not in captured["tags"]
+
+
+@pytest.mark.asyncio
+async def test_blank_user_id_is_not_written_as_empty_string(monkeypatch):
+    """未登录时 current_user_id 是空串；必须转 None，否则空串会被写进 trace。"""
+    captured: dict = {}
+
+    class _SpyContext:
+        def update_current_trace(self, **kwargs):
+            captured.update(kwargs)
+
+        def update_current_observation(self, **kwargs):
+            pass
+
+    monkeypatch.setattr(agent_service, "langfuse_context", _SpyContext())
+
+    mgr = StreamingRunManager()
+    fake_graph = Mock()
+    fake_graph.astream_events = _fake_astream
+    ctx = RequestContext(session_id="s1")
+    ctx.clarify_channel = asyncio.Queue()
+
+    await _run_generation(
+        "s1",
+        "",
+        "q",
+        [],
+        False,
+        ctx,
+        mgr,
+        graph=fake_graph,
+        user_id="",
+        langfuse_observation_id="trace_unit_nouser",  # type: ignore[reportCallIssue]
+    )
+
+    assert captured["user_id"] is None
+    assert captured["tags"] == ["chat", "no_kb"]
