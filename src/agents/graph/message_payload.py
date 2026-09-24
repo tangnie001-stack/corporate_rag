@@ -39,6 +39,54 @@ def _extract_text(message: BaseMessage | None) -> str:
     return str(content)
 
 
+def _tool_calls_payload(message: Any) -> list[dict[str, Any]]:
+    """把消息上的 tool_calls 投影成 trace 载荷形态。
+
+    Args:
+        message: 携带 `tool_calls` 的消息 / 流聚合块
+
+    Returns:
+        `[{"id", "name", "args"}]`；`tool_calls` 缺失或为空时返回空列表。
+        消息自带的 `type` 等额外键一律丢弃（LangChain 会注入 `type: "tool_call"`）。
+    """
+    payload: list[dict[str, Any]] = []
+    for call in message.tool_calls or []:
+        if not isinstance(call, dict):
+            continue
+        payload.append(
+            {
+                "id": call.get("id", ""),
+                "name": call.get("name", ""),
+                "args": call.get("args", {}),
+            }
+        )
+    return payload
+
+
+def _observation_output(message: Any) -> Any:
+    """算出一轮模型输出的 generation `output`（文本优先）。
+
+    参数按鸭子类型读取（`content` 走 `_extract_text`、`tool_calls` 走
+    `_tool_calls_payload`），**刻意不判 `isinstance(message, AIMessage)`**：调用点传入的是
+    `astream` 流聚合出来的块，测试里还会传入等价的替身对象；加类型门会让这类输入
+    的 `tool_calls` 被判空、工具轮输出回落成空串 —— 正是本函数要修的问题。
+
+    Args:
+        message: 流聚合后的消息对象（AIMessageChunk / AIMessage / 等价替身）
+
+    Returns:
+        文本非空时返回文本；文本为空但有 `tool_calls` 时返回
+        `{"tool_calls": [{"id", "name", "args"}]}`；两者皆空时返回空字符串
+    """
+    text = _extract_text(message)
+    if text:
+        return text
+    tool_calls = _tool_calls_payload(message)
+    if tool_calls:
+        return {"tool_calls": tool_calls}
+    return ""
+
+
 def _messages_payload(messages: list[BaseMessage]) -> list[dict[str, Any]]:
     """把消息列表转成 Langfuse 输入载荷。
 
@@ -57,15 +105,7 @@ def _messages_payload(messages: list[BaseMessage]) -> list[dict[str, Any]]:
             "content": _extract_text(message),
         }
         if isinstance(message, AIMessage) and message.tool_calls:
-            item["tool_calls"] = [
-                {
-                    "id": call.get("id", ""),
-                    "name": call.get("name", ""),
-                    "args": call.get("args", {}),
-                }
-                for call in message.tool_calls
-                if isinstance(call, dict)
-            ]
+            item["tool_calls"] = _tool_calls_payload(message)
         elif isinstance(message, ToolMessage) and message.name:
             item["name"] = message.name
         payload.append(item)

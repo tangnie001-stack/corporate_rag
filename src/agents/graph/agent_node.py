@@ -13,7 +13,11 @@ from langfuse.decorators import langfuse_context, observe
 from langfuse.model import ModelUsage
 from langgraph.prebuilt import ToolNode
 
-from src.agents.graph.message_payload import _extract_text, _messages_payload
+from src.agents.graph.message_payload import (
+    _extract_text,
+    _messages_payload,
+    _observation_output,
+)
 from src.agents.graph.state import AgentState
 from src.agents.skills.prefix import clean_prefix
 from src.config import settings
@@ -245,7 +249,7 @@ def make_agent_model_node(llm, tools, prompt_manager) -> Callable:
         langfuse_context.update_current_observation(
             model=model_name,
             input=_messages_payload(messages),
-            output=_extract_text(result),
+            output=_observation_output(result),
             # ModelUsage 是 TypedDict 且字段声明为 Optional（键仍算必填），
             # pyright 误判部分键构造非法；运行时 TypedDict 调用即普通 dict，SDK 接受
             usage=ModelUsage(  # type: ignore[reportCallIssue]

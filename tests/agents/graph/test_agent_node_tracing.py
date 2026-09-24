@@ -3,7 +3,7 @@
 from typing import ClassVar
 
 from src.agents.graph import agent_node
-from src.agents.graph.message_payload import _messages_payload
+from src.agents.graph.message_payload import _messages_payload, _observation_output
 
 
 def _msg_payload_keys_are_whitelisted(payload: list[dict]) -> bool:
@@ -50,6 +50,24 @@ def test_messages_payload_carries_tool_calls_and_tool_name():
     assert _msg_payload_keys_are_whitelisted(payload)
 
 
+def test_observation_output_prefers_text_over_tool_calls():
+    """文本非空时 output 取文本，即使同轮也带了 tool_calls。"""
+    from langchain_core.messages import AIMessage
+
+    message = AIMessage(
+        content="答案",
+        tool_calls=[{"name": "search", "args": {"q": "x"}, "id": "call_1"}],
+    )
+    assert _observation_output(message) == "答案"
+
+
+def test_observation_output_empty_when_no_text_and_no_tool_calls():
+    """文本与 tool_calls 皆空时 output 为空串。"""
+    from langchain_core.messages import AIMessage
+
+    assert _observation_output(AIMessage(content="")) == ""
+
+
 def test_observe_decorator_disables_input_capture():
     """agent_model 闭包必须以 capture_input=False 装饰。
 
@@ -87,11 +105,11 @@ class _ToolCallOnlyLLM:
 
 
 def test_empty_text_output_does_not_fall_back_to_state_dict(monkeypatch):
-    """模型只发 tool_calls、文本为空时，generation 的 output 不得落成节点返回的 state dict。
+    """模型只发 tool_calls、文本为空时，generation 的 output 写 tool_calls 结构，不落成 state dict。
 
-    显式写入的 output 在此轮为空串（falsy），会走 SDK 的自动捕获回落；本用例把回落
-    结果捕获下来，断言它不是 `{"messages": ...}`。若去掉 `capture_output=False`，
-    回落拿到的就是节点返回的 state dict，本用例即失败——以此锁住新旧行为的区分。
+    该轮显式 output 为非空的 `{"tool_calls": [...]}`，SDK 不再走自动捕获回落
+    （capture_output=False 只在显式 output 为空时才生效）；本用例断言显式写入的
+    output 抵达 observation，且不是节点返回的 `{"messages": ...}` state dict。
     """
     import asyncio
 
@@ -99,7 +117,7 @@ def test_empty_text_output_does_not_fall_back_to_state_dict(monkeypatch):
 
     from src.agents.graph.state import AgentState
 
-    # 替身 1：spy 显式写入（langfuse_context），确认显式 output 为空串而非 state dict
+    # 替身 1：spy 显式写入（langfuse_context），确认显式 output 是 tool_calls 结构而非 state dict
     explicit_updates: list[dict] = []
     real_update = agent_node.langfuse_context.update_current_observation
 
@@ -130,9 +148,13 @@ def test_empty_text_output_does_not_fall_back_to_state_dict(monkeypatch):
     asyncio.run(node(state))
 
     assert explicit_updates, "应发生一次 generation 字段回填"
-    assert explicit_updates[0]["output"] == ""
+    assert explicit_updates[0]["output"] == {
+        "tool_calls": [{"id": "call_1", "name": "search", "args": {"q": "x"}}]
+    }
 
     generation_outputs = [r["output"] for r in recorded if "model" in r]
     assert generation_outputs, "应有一条 generation 结束记录"
-    assert all(o is None for o in generation_outputs)
+    assert generation_outputs == [
+        {"tool_calls": [{"id": "call_1", "name": "search", "args": {"q": "x"}}]}
+    ]
     assert not any(isinstance(o, dict) and "messages" in o for o in generation_outputs)
