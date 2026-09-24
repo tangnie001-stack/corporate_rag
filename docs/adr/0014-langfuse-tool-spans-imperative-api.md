@@ -3,7 +3,7 @@
 - **Status**：Accepted
 - **Date**：2026-09-24
 - **Deciders**：用户（决策）；Claude（调研、实测与评审）
-- **关系**：为 ADR-0012 / ADR-0013 所依附的 `llm-tracing` 能力**扩展观测面**；与既有「纯装饰器」接入方式并存，不取代任何在先 ADR。
+- **关系**：为 ADR-0012 / ADR-0013 所依附的 `llm-tracing` 能力**扩展观测面**；与既有「纯装饰器」接入方式并存，不取代任何在先 ADR。本 ADR 新增的 tool span 与 trace 富化字段都是同一 trace 上的普通 observation，落在 ADR-0012 / ADR-0013 已定的保留策略（30 天保留期 + 直连 Postgres 清理）之内，本 ADR 不改变任何保留行为。
 
 ## 背景与问题
 

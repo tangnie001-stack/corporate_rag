@@ -171,6 +171,7 @@ async def test_run_generation_writes_user_tags_metadata(monkeypatch):
     ctx.agent_display_name = "财务专家"
     ctx.loaded_skills = ["finance-qa"]
     ctx.skill_action = "inline"
+    ctx.has_skills = True
     ctx.clarify_channel = asyncio.Queue()
 
     await _run_generation(
@@ -195,6 +196,7 @@ async def test_run_generation_writes_user_tags_metadata(monkeypatch):
     assert metadata["kb_domain"] == "finance"
     assert metadata["skill_action"] == "inline"
     assert metadata["loaded_skills"] == ["finance-qa"]
+    assert metadata["has_skills"] is True
     # 高基数取值不得进 tags
     assert "kb1" not in captured["tags"]
     assert "financial-analyst" not in captured["tags"]

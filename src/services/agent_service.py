@@ -624,6 +624,7 @@ async def _run_generation(
         "deep_thinking": deep_thinking,
         "skill_action": ctx.skill_action,
         "loaded_skills": list(ctx.loaded_skills),
+        "has_skills": ctx.has_skills,
     }
     if direct_skill:
         trace_metadata["direct_skill"] = direct_skill
