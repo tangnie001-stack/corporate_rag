@@ -1,7 +1,7 @@
 {
   "version": "1.0.0",
-  "gitCommitHash": "323e03383b156463708b0b5398c8f38e09c92969",
-  "generatedAt": "2026-09-24T07:03:27.297Z",
+  "gitCommitHash": "7f1df70a86a504655ea29a7a025796341f4a348e",
+  "generatedAt": "2026-09-24T08:23:50.111Z",
   "files": {
     ".agents/skills/frontend-design/LICENSE.txt": {
       "filePath": ".agents/skills/frontend-design/LICENSE.txt",
@@ -325,12 +325,12 @@
     },
     "README.md": {
       "filePath": "README.md",
-      "contentHash": "3168cf81d590ecd6aab2521a529542f9f5d3779805357e78642880d7386bda21",
+      "contentHash": "597d320ec2b54ac38b38c951befb928b18f1a94d2cd8caeb69cbe639732b1498",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 346,
+      "totalLines": 345,
       "hasStructuralAnalysis": false
     },
     "agents/finance-expert.md": {
@@ -32266,6 +32266,26 @@
       ],
       "totalLines": 99,
       "hasStructuralAnalysis": true
+    },
+    "deploy/nginx/nginx.dev.conf.template": {
+      "filePath": "deploy/nginx/nginx.dev.conf.template",
+      "contentHash": "cf949a74b576679605eacc233a78cb4ff49a710c60dd18a06db5b817f54f2786",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 77,
+      "hasStructuralAnalysis": false
+    },
+    "scripts/dev-worktree.sh": {
+      "filePath": "scripts/dev-worktree.sh",
+      "contentHash": "8a5c65491c11bccf3861733366aa6fd9850a2ddf3e2f884f74c5923a68beb08e",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 196,
+      "hasStructuralAnalysis": false
     }
   }
 }

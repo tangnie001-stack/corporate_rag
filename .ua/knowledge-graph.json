@@ -14,6 +14,7 @@
       "markdown",
       "python",
       "shell",
+      "template",
       "toml",
       "txt",
       "unknown",
@@ -29,8 +30,8 @@
       "Docker Compose"
     ],
     "description": "金融文档智能问答助手（MVP）：基于 RAG 的财报问答系统，支持上传 PDF/DOCX/TXT 格式的财报文档，用户用自然语言提问后，由大语言模型基于检索到的文档片段生成带引用来源的回答。 注意：本项目源文件超过 100 个，建议将分析范围收窄到某个子目录以加快扫描速度。",
-    "analyzedAt": "2026-09-24T07:03:27.135Z",
-    "gitCommitHash": "323e03383b156463708b0b5398c8f38e09c92969"
+    "analyzedAt": "2026-09-24T08:23:49.475Z",
+    "gitCommitHash": "7f1df70a86a504655ea29a7a025796341f4a348e"
   },
   "nodes": [
     {
@@ -23107,21 +23108,6 @@
       "complexity": "simple"
     },
     {
-      "id": "document:README.md",
-      "type": "document",
-      "name": "README.md",
-      "filePath": "README.md",
-      "summary": "项目总览文档：介绍金融文档智能问答助手的系统架构、7 条数据流链路（上传入库/问答生成/知识库管理/会话/认证/RAGAS 评估/分块评估）、功能特性、快速启动与 Docker Compose 部署指南、Nginx 路由、项目结构、配置说明与已知限制。",
-      "tags": [
-        "documentation",
-        "entry-point",
-        "overview",
-        "部署"
-      ],
-      "complexity": "complex",
-      "languageNotes": "架构图与链路章节仍写 MySQL/ChromaDB，已落后于实际代码（PostgreSQL + pgvector）；末章「大模型写代码的坑」为经验清单，非代码引用。"
-    },
-    {
       "id": "config:alembic.ini",
       "type": "config",
       "name": "alembic.ini",
@@ -31028,6 +31014,89 @@
         "conditional-edge",
         "langgraph",
         "agent-loop"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "document:README.md",
+      "type": "document",
+      "name": "README.md",
+      "filePath": "README.md",
+      "summary": "项目总览文档：介绍金融财报问答助手（Corporate RAG）的系统架构、7 条业务链路（上传入库/问答生成/知识库管理/会话/认证/RAGAS 评估/分块评估）、功能特性与技术栈、快速启动与四类部署方式（Docker Compose 全量、本地开发 worktree 热重载、纯前端预览、单服务管理）、Nginx 路由、项目结构、.env 配置项、RAGAS 评估命令、已知限制，末章为「大模型写代码的坑」经验清单。",
+      "tags": [
+        "documentation",
+        "entry-point",
+        "overview",
+        "部署",
+        "系统架构"
+      ],
+      "complexity": "complex",
+      "languageNotes": "文档共 44 个标题层级，以 ASCII 架构图 + 链路流程图 + 命令代码块 + 配置表组织。存在若干与当前代码脱节处：① 开篇称「项目包含 4 条核心业务链路」但实际列出 7 条；② 架构图与技术栈表仍写 MySQL/ChromaDB，而「项目结构」已提 PostgreSQL（infra/db/repos）；③ 项目结构树中 src/api/main.py 与顶层平铺的 rag_chain.py/app_service.py 已不符合现分层（src/main.py + src/services/），且 cli/ 一行的树形缩进断裂；④ 「7 个服务容器」表述下表格仅列 5 行。"
+    },
+    {
+      "id": "file:deploy/nginx/nginx.dev.conf.template",
+      "type": "file",
+      "name": "nginx.dev.conf.template",
+      "filePath": "deploy/nginx/nginx.dev.conf.template",
+      "summary": "本地开发用的 nginx 反代配置模板：挂到 nginx 官方镜像的 /etc/nginx/templates/ 下，由 entrypoint 的 envsubst 渲染成 conf.d/default.conf，将 /api/、/docs、/openapi.json 反代到宿主机上本地 uvicorn 的 ${BACKEND_PORT}，并静态托管前端页面（不缓存 HTML、JS/CSS 走 version 参数）。相较生产 nginx.conf，唯一差异是 proxy_pass 目标由 compose 服务名 app:8000 改为 host.docker.internal:${BACKEND_PORT}，便于多个 worktree 各用一套端口互不冲突。",
+      "tags": [
+        "nginx",
+        "reverse-proxy",
+        "dev-environment",
+        "infrastructure",
+        "sse"
+      ],
+      "complexity": "moderate",
+      "languageNotes": "nginx 官方镜像的 envsubst 只替换容器 env 中实际存在的变量，因此 $http_upgrade / $host / $remote_addr 等 nginx 内置变量不会被改写；文件注释同时记录了用 NGINX_ENVSUBST_FILTER='^BACKEND_PORT$' 进一步限定替换范围的做法。SSE 依赖 proxy_buffering off + 300s 长读超时，与本项目流式生成的运行形态对应。"
+    },
+    {
+      "id": "file:scripts/dev-worktree.sh",
+      "type": "file",
+      "name": "dev-worktree.sh",
+      "filePath": "scripts/dev-worktree.sh",
+      "summary": "在任意 git worktree 内本地拉起「宿主 uvicorn 后端 + 一次性 nginx 反代容器」的开发环境脚本，按 --slot 分配端口（后端 8000+N、前端 8079+N）以支持多 worktree 并存，提供 up/down/status 子命令并将状态与日志落在 .dev-ports、.dev-uvicorn.pid、logs/dev-uvicorn.log。",
+      "tags": [
+        "dev-environment",
+        "worktree",
+        "port-management",
+        "shell-script",
+        "local-dev"
+      ],
+      "complexity": "moderate",
+      "languageNotes": "set -euo pipefail 严格模式；函数级 shell 无 tree-sitter 结构解析，函数清单由脚本按顶层 NAME() 形式提取；主流程用 case 分派子命令，并用 ss 解析监听端口而非依赖 pidfile。"
+    },
+    {
+      "id": "function:scripts/dev-worktree.sh:usage",
+      "type": "function",
+      "name": "usage",
+      "filePath": "scripts/dev-worktree.sh",
+      "lineRange": [
+        24,
+        42
+      ],
+      "summary": "通过 heredoc 输出脚本用法、可用选项（slot/端口/force）与产物文件位置，供 -h、--help 及参数错误时调用。",
+      "tags": [
+        "cli-help",
+        "documentation",
+        "shell-script"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:scripts/dev-worktree.sh:kill_port",
+      "type": "function",
+      "name": "kill_port",
+      "filePath": "scripts/dev-worktree.sh",
+      "lineRange": [
+        50,
+        61
+      ],
+      "summary": "按端口定位监听进程并结束：先对 ss 解析出的 pid 发 SIGTERM 并最多轮询 15 秒，仍未释放则发 SIGKILL，用于兜底清理 --reload 的 uvicorn 子进程与停不掉的残留进程。",
+      "tags": [
+        "process-management",
+        "port",
+        "cleanup",
+        "robustness"
       ],
       "complexity": "simple"
     }
@@ -44220,20 +44289,6 @@
       "weight": 0.6
     },
     {
-      "source": "document:README.md",
-      "target": "file:deploy/nginx/nginx.conf",
-      "type": "documents",
-      "direction": "forward",
-      "weight": 0.5
-    },
-    {
-      "source": "document:README.md",
-      "target": "service:docker-compose.yml",
-      "type": "documents",
-      "direction": "forward",
-      "weight": 0.5
-    },
-    {
       "source": "file:deploy/nginx/html/chat-harness-mockup.html",
       "target": "function:deploy/nginx/html/chat-harness-mockup.html:renderCiteDrawer",
       "type": "contains",
@@ -46398,13 +46453,6 @@
       "type": "depends_on",
       "direction": "forward",
       "weight": 0.6
-    },
-    {
-      "source": "document:README.md",
-      "target": "service:Dockerfile",
-      "type": "documents",
-      "direction": "forward",
-      "weight": 0.5
     },
     {
       "source": "config:litellm/config.test.yaml",
@@ -49495,6 +49543,111 @@
       "type": "calls",
       "direction": "forward",
       "weight": 0.8
+    },
+    {
+      "source": "document:README.md",
+      "target": "file:deploy/nginx/nginx.conf",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:README.md",
+      "target": "service:docker-compose.yml",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:README.md",
+      "target": "service:Dockerfile",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:README.md",
+      "target": "config:.env.template",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:README.md",
+      "target": "file:src/main.py",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:README.md",
+      "target": "file:src/config/settings.py",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:README.md",
+      "target": "file:src/chunking/scorer.py",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:README.md",
+      "target": "file:src/cli/check_retrieval.py",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:README.md",
+      "target": "document:CLAUDE.md",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:deploy/nginx/nginx.dev.conf.template",
+      "target": "file:deploy/nginx/nginx.conf",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:deploy/nginx/nginx.dev.conf.template",
+      "target": "file:scripts/dev-worktree.sh",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:scripts/dev-worktree.sh",
+      "target": "function:scripts/dev-worktree.sh:usage",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:scripts/dev-worktree.sh",
+      "target": "function:scripts/dev-worktree.sh:kill_port",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:scripts/dev-worktree.sh",
+      "target": "file:src/main.py",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "file:scripts/dev-worktree.sh",
+      "target": "file:deploy/nginx/nginx.dev.conf.template",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
     },
     {
       "source": "file:alembic/env.py",
@@ -56803,7 +56956,8 @@
         "file:src/cli/check_docs.py",
         "file:src/cli/eval_ragas.py",
         "file:src/cli/purge_langfuse_traces.py",
-        "document:src/cli/README.md"
+        "document:src/cli/README.md",
+        "file:scripts/dev-worktree.sh"
       ]
     },
     {
@@ -56846,7 +57000,8 @@
         "service:docker-compose.prod.yml:minio",
         "service:docker-compose.prod.yml:langfuse-web",
         "service:docker-compose.prod.yml:nginx",
-        "service:docker-compose.prod.yml:app"
+        "service:docker-compose.prod.yml:app",
+        "file:deploy/nginx/nginx.dev.conf.template"
       ]
     },
     {
