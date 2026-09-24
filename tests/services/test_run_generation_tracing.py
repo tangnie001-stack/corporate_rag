@@ -77,3 +77,73 @@ def test_answer_builder_passes_observation_id():
     from src.api import chat
 
     assert "langfuse_observation_id=" in inspect.getsource(chat._stream_rag_response)
+
+
+async def _fake_astream_with_tool(*args, **kwargs):
+    """最小事件源：一条 tools 父 span 事件 + 一次工具开始/结束。"""
+    yield {
+        "event": "on_chain_start",
+        "name": "tools",
+        "run_id": "rc",
+        "metadata": {"langgraph_node": "tools"},
+        "data": {},
+    }
+    yield {
+        "event": "on_tool_start",
+        "name": "retrieve_kb",
+        "run_id": "r1",
+        "metadata": {"langgraph_node": "tools"},
+        "data": {"input": {"query": "q"}},
+    }
+    yield {
+        "event": "on_tool_end",
+        "name": "retrieve_kb",
+        "run_id": "r1",
+        "metadata": {"langgraph_node": "tools"},
+        "data": {"output": "ok"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_run_generation_feeds_collector_and_closes(monkeypatch):
+    """循环里每一项都要喂给采集器；收尾必须 close（取消/异常也走这里）。"""
+    seen: list[dict] = []
+    closed: list[bool] = []
+
+    class _SpyCollector:
+        def __init__(self, *, enabled, trace_id, client=None):
+            self.enabled = enabled
+            self.trace_id = trace_id
+
+        def consume(self, item):
+            seen.append(item)
+
+        def close(self):
+            closed.append(True)
+
+    monkeypatch.setattr(agent_service, "ToolTraceCollector", _SpyCollector)
+
+    mgr = StreamingRunManager()
+    fake_graph = Mock()
+    fake_graph.astream_events = _fake_astream_with_tool
+    ctx = RequestContext(session_id="s1")
+    ctx.clarify_channel = asyncio.Queue()
+
+    await _run_generation(
+        "s1",
+        "kb1",
+        "q",
+        [],
+        False,
+        ctx,
+        mgr,
+        graph=fake_graph,
+        langfuse_observation_id="trace_unit_tools",  # type: ignore[reportCallIssue]
+    )
+
+    assert [i["event"] for i in seen] == [
+        "on_chain_start",
+        "on_tool_start",
+        "on_tool_end",
+    ]
+    assert closed == [True]
