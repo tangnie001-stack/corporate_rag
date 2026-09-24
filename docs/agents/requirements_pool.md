@@ -125,6 +125,14 @@
 | G-08 | **【已修】知识库页「详情」弹窗 71 天不可用** | `deploy/nginx/html/index.html` 的 `showEvalModal` 按**扁平**键读 `eval_detail`（`data.table_score` / `data.granularity_cv.toFixed(2)`），而后端返回的是**嵌套**结构（`structure_integrity.table.score` 等）⇒ `granularity_cv` 是对象，`.toFixed` 抛 `TypeError`，弹窗在渲染前即中断（`e503375` 2026-07-12 引入 → 2026-09-22 前端冒烟才发现）。同源错误还波及二级弹窗 `showEvalBroken` 三个分支，以及一级弹窗断裂链接的键名（传 `sec.key='structure'`、查询表的键却是 `'table'`）。**根因不是"没读文档"**：写前端当日（2026-07-12）`docs/agents/api_contract.md` **尚不存在**（2026-08-25 才创建），字段级契约当时为零。**已修**：契约补全（`api_contract.md` §2.2.1 加完整形状 + 逐键类型表 + 历史踩坑警示）、两级弹窗改按嵌套取值、`fmt`/`meterCls` 加类型守卫（漂移只降级成 `—`、不再让组件不渲染）；规则同步补进 `CLAUDE.md` 验证项 2、`code-map.md` 落点速查、`defensive-patterns.md`「接口契约」 | 2026-09-22 前端冒烟（langfuse-v2 合并后） | P2 | 低 | 无 |
 | G-09 | **前端契约消费无自动化护栏** | G-08 那类"后端形状变了、前端按旧形状读"的缺陷，现有四层闸门**一层都抓不到**：契约测试只测后端、doc 闸门只查文档、RAGAS 测质量、pyright 不跨语言。唯一能覆盖的是 `e2e-playwright-regression`，而它**0/30 尚未实施**。**建议**：该 change 落地时把「知识库页详情弹窗可打开且渲染出评分」列为首批用例之一（它正是"端到端最终形态"类断言） | 2026-09-22 修复 G-08 时确认 | P2 | 低 | e2e-playwright-regression |
 
+## H. 可观测性与运维
+
+| 需求 | 描述 | 来源对比 | 优先级 | 预估成本 | 依赖 |
+|------|------|---------|--------|---------|------|
+| H-01 | **Langfuse 接线归档遗留：CLI trace 落库未实跑** | `langfuse-trace-wiring` 的 DoD ⑧「CLI 的 trace 在 `--gate` / 异常退出路径下也能落库」**未实跑**，归档时仅有结构证据（`flush_tracing()` 位于 CLI 的 `finally`；`tests/test_tracing_order.py` 断言 CLI 路径的 `configure → flush` 调用序）。⚠ **根因是独立的、且影响面更大的一条**：`src/config/settings.py:159` 的**硬编码文档白名单**指向 `neusoft_2025_q1.pdf`（`d5d72d1a-…`），该文档已不在 dev 库，`data/ragas/` 下也没有任何测试集 ⇒ `python -m src.cli.eval_ragas --generate --size 1` 直接 exit 1。**不修这条，dev 侧整个 RAGAS 评测链路都启动不了**，可独立修、优先级高于本条的 trace 验证 | langfuse-trace-wiring 归档遗留（2026-09-24） | P2 | 低 | 无 |
+| H-02 | **Langfuse purge 定时接入（dev + prod）** | 删除后端已实现（直连 Langfuse PG 跑 SQL，ADR-0013；`src/cli/purge_langfuse_traces.py` + `src/infra/llm/langfuse_purge.py`，真删已验），但**定时任务未接入** —— 宿主 cron / systemd timer / compose 定时服务三选一，且 **dev 与 prod 各自落地**。ADR-0011 复查条件③要求「清理与接线一并落地」，属接线变更的欠账 | langfuse-trace-wiring 计划外部署动作 ② | P1 | 低 | 无 |
+| H-03 | **prod 侧 Langfuse 落地** | 「改模板 ≠ 改到机器」：需在 prod 机上同步 `.env`（含 `COMPOSE_PROFILES=langfuse` 与三个 `LANGFUSE_INIT_PROJECT_*`；`INIT_*` 与 `LANGFUSE_*` 两对键须成对相等），确认 `langfuse-web` 在跑，随后验证 trace 可查 | langfuse-trace-wiring 计划外部署动作 ④ | P1 | 低 | 无 |
+
 ## 标签说明
 
 **优先级：**
