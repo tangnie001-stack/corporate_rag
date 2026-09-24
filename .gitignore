@@ -25,11 +25,11 @@ venv/
 .superpowers/
 .superprojects/
 
-# understand-anything：图谱/指纹为本地生成物，整目录不入库（2026-09-24 决定，
-# 偏离官方"提交 .ua/"的建议 —— 目的是让每次 commit 不再附带全图更新）
-# ⚠ .ua/.understandignore 是"装载性"配置：增量更新只读本文件而不读 CLI --exclude，
-#   缺了它首次自动更新会因文件集暴涨（419 → 1054）升级为 FULL_UPDATE 重建全图。
-.ua/
+# understand-anything：图谱与指纹入库共享，中间态/回收站不入库
+# （官方建议：提交 .ua/ 但排除 intermediate/ 与 diff-overlay.json）
+.ua/.trash-*/
+.ua/tmp/
+.ua/intermediate/
 
 # Docker volume data
 /data/
