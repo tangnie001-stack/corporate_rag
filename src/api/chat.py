@@ -207,14 +207,14 @@ async def _stream_rag_response(
     # 唤不醒澄清等待，会干等 ASK_USER_TIMEOUT 超时
     ctx.abort_signal = abort_signal
 
-    # user_id 与 trace_id 同做法：在请求内捕获后显式传入。**不要**依赖 contextvar
-    # 继承 —— create_task 虽会复制上下文，但原注释「任务与请求不共享 context」是错的，
-    # 一旦有人按它去「修正」或调整中间件顺序，user_id 会静默变空。
+    # trace_id 与 user_id 均在请求作用域内捕获后显式传入生成调用，不依赖后台任务
+    # 通过 contextvar 继承读取：任务的上下文是 create_task 创建时的拷贝，该时点之后写入
+    # 的值到不了任务内，依赖继承只会静默取空。
     user_id = current_user_id.get()
 
     async def answer_builder() -> str:
         # 根 observation 的 id 即 trace id；任务入口已 set 过 current_trace_id，
-        # 此处按调用时读取（任务与请求不共享 context，必须显式传）
+        # 此处按调用时读取并显式传入，不依赖任务上下文的那份拷贝。
         return await _run_generation(
             launch_ctx["session_id"],
             launch_ctx["kb_id"],
