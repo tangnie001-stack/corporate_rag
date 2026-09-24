@@ -20,7 +20,7 @@ from src.infra.db.engine import session_factory
 from src.infra.db.repos import KbRepo
 
 # 检索 top-K 搜索网格
-RETRIEVAL_VALUES = [5, 10, 15]
+RETRIEVAL_VALUES = [10, 30, 50]
 # 重排序 top-K 搜索网格
 RERANK_VALUES = [3, 5, 8]
 

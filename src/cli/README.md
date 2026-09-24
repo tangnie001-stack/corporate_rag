@@ -181,7 +181,7 @@ python -m src.cli.eval_ragas --kb-id <知识库UUID> --gate
 python -m src.cli.compare_retrieval --kb-name <知识库名称>
 ```
 
-遍历 `TOP_K_RETRIEVAL × TOP_K_RERANK` 的 3×3 网格（`[5, 10, 15] × [3, 5, 8]`），每组组合跑一次评估，打印各指标对比表，据此确定最优检索参数。运行前需先有测试集。
+遍历 `TOP_K_RETRIEVAL × TOP_K_RERANK` 的 3×3 网格（`[10, 30, 50] × [3, 5, 8]`），每组组合跑一次评估，打印各指标对比表，据此确定最优检索参数。运行前需先有测试集。
 
 ---
 
