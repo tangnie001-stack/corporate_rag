@@ -1,17 +1,28 @@
 """ToolTraceCollector：事件 → span 的配对、归组、错误与兜底（client 为替身）。"""
 
+from typing import Any
+
 from langchain_core.messages import ToolMessage
 
 from src.infra.llm.tool_trace import ToolTraceCollector
 
 
 class _FakeSpan:
-    """替身 span：记录 end() 收到的字段。"""
+    """替身 span：记录构造参数与 end() 收到的字段。"""
 
-    def __init__(self, span_id: str, name: str, parent_id: str | None):
+    def __init__(
+        self,
+        span_id: str,
+        name: str,
+        parent_id: str | None,
+        trace_id: str | None,
+        input: Any,
+    ):
         self.id = span_id
         self.name = name
         self.parent_observation_id = parent_id
+        self.trace_id = trace_id
+        self.input = input
         self.ended: dict | None = None
 
     def end(self, **kwargs):
@@ -29,6 +40,8 @@ class _FakeClient:
             f"s{len(self.spans)}",
             kwargs.get("name", ""),
             kwargs.get("parent_observation_id"),
+            kwargs.get("trace_id"),
+            kwargs.get("input"),
         )
         self.spans.append(span)
         return span
@@ -177,3 +190,48 @@ def test_blank_trace_id_disables_collector():
     collector.consume(_item("on_tool_start", name="a", run_id="r1", input={}))
 
     assert client.spans == []
+
+
+def test_chain_event_with_other_name_does_not_open_or_close_round():
+    """chain 事件按节点名判别：非 'tools' 名既不建父也不关父。"""
+    client = _FakeClient()
+    collector = ToolTraceCollector(enabled=True, trace_id="t1", client=client)
+
+    collector.consume(_item("on_chain_start", name="nested_chain"))
+    assert client.spans == []
+
+    collector.consume(_item("on_chain_start", name="tools"))
+    collector.consume(_item("on_chain_end", name="nested_chain"))
+    assert len(client.spans) == 1
+    round_span = client.spans[0]
+    assert round_span.ended is None
+
+    collector.consume(_item("on_tool_start", name="retrieve_kb", run_id="rA", input={}))
+    assert client.spans[-1].parent_observation_id == round_span.id
+
+
+def test_duplicate_tools_chain_start_opens_single_parent():
+    """同一轮内重复的 name=='tools' on_chain_start 只建一个父 span。"""
+    client = _FakeClient()
+    collector = ToolTraceCollector(enabled=True, trace_id="t1", client=client)
+
+    collector.consume(_item("on_chain_start", name="tools"))
+    collector.consume(_item("on_chain_start", name="tools"))
+
+    assert len(client.spans) == 1
+
+
+def test_spans_carry_trace_id_and_tool_input():
+    """span 一律带 trace_id；工具 span 记录事件的 input（观测面契约）。"""
+    client = _FakeClient()
+    collector = ToolTraceCollector(enabled=True, trace_id="t1", client=client)
+
+    collector.consume(_item("on_chain_start", name="tools"))
+    collector.consume(
+        _item("on_tool_start", name="retrieve_kb", run_id="rA", input={"query": "q"})
+    )
+
+    round_span, tool_span = client.spans
+    assert round_span.trace_id == "t1"
+    assert tool_span.trace_id == "t1"
+    assert tool_span.input == {"query": "q"}

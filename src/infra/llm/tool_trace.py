@@ -75,9 +75,11 @@ class ToolTraceCollector:
             return
         kind = item.get("event", "")
         if kind == _EV_CHAIN_START:
-            self._open_round()
+            if item.get("name") == _TOOLS_NODE:
+                self._open_round()
         elif kind == _EV_CHAIN_END:
-            self._close_round()
+            if item.get("name") == _TOOLS_NODE:
+                self._close_round()
         elif kind == _EV_TOOL_START:
             self._on_tool_start(item)
         elif kind == _EV_TOOL_END:
