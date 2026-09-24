@@ -424,10 +424,11 @@ Expected: FAIL —— 当前实现先截断后去重，`len(out)` 为 2 但 `c1`
         )
     before = len(contexts)
     contexts = _dedup_by_parent(contexts)
-    if before != len(contexts):
-        log_event(Event.DEDUP_DONE, dropped=before - len(contexts), kept=len(contexts))
+    log_event(Event.DEDUP_DONE, dropped=before - len(contexts), kept=len(contexts))
     return contexts[:TOP_K_RERANK]
 ```
+
+`dedup done` **无条件落盘**（含 `dropped=0`）：spec `observability-logging` 的「无丢弃时记零」要求 `dropped=0` 出现在行内，而非字段缺失。
 
 ⚠ `doc_count` 语义随之变为"进入精排的候选条数"（与变更前一致的口径：它是 rerank 的**输入**条数）。
 
@@ -564,13 +565,12 @@ Expected: FAIL —— `ImportError: cannot import name '_dedup_by_parent'`（若
 ```python
         before = len(contexts)
         contexts = retrieval._dedup_by_parent(contexts)
-        if before != len(contexts):
-            core_logging.log_event(
-                Event.DEDUP_DONE, dropped=before - len(contexts), kept=len(contexts)
-            )
+        core_logging.log_event(
+            Event.DEDUP_DONE, dropped=before - len(contexts), kept=len(contexts)
+        )
 ```
 
-（`dropped` 取"检索后条数 − kept"：该路径未发生精排，不存在"精排后条数"。）
+（`dropped` 取"检索后条数 − kept"：该路径未发生精排，不存在"精排后条数"。）同样**无条件落盘**，理由与 Task 2 Step 7 一致。
 
 - [ ] **Step 4: 跑测试确认通过**
 
