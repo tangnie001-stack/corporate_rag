@@ -174,6 +174,13 @@ def make_rag_tools(
                         },
                     )
                 )
+            # 降级路径未发生精排，不存在"精排后条数"：dropped 取"检索后条数 − 去重后条数"，
+            # 与 rerank_results 成功路径口径同构；无条件落盘（无丢弃时 dropped=0）
+            before = len(contexts)
+            contexts = retrieval._dedup_by_parent(contexts)
+            core_logging.log_event(
+                Event.DEDUP_DONE, dropped=before - len(contexts), kept=len(contexts)
+            )
         contexts = contexts[:top_k]
 
         if state is not None:
