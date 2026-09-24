@@ -2,13 +2,21 @@
 
 ### Requirement: 精排分数观测（rerank done 分数字段）
 
-`[retrieval] rerank done` 事件 SHALL 记录精排分数的分位信息：`score_top1` / `score_max` / `score_min` / `score_p50`。
+`[retrieval] rerank done` 事件 SHALL 记录精排分数的分位信息：`score_max` / `score_min` / `score_p50`，并 SHALL 记录分数来源标记 `scored`（取值 `rerank` | `fallback`）。
 
 不记录全量分数列表：该事件在每次 `retrieve_kb` 都会落盘，全量列表会显著放大日志体积，而分位信息已足以支撑阈值校准与"库内有无内容"的形态判别。
 
+不另记 `score_top1`：精排结果按分数降序，`score_top1` 恒等于 `score_max`，同一事实记两个名字只会让消费方无法判断该信哪个。
+
+**降级分数必须可辨**：精排调用失败时（`rerank failed`）系统回退为 `1 - distance` 造的分数，其量纲与语义不同于精排相关性分。这些样本 SHALL 以 `scored=fallback` 落盘，SHALL NOT 与 `scored=rerank` 的样本混入同一分布 —— 否则阈值校准与形态判别会被非精排分数污染。
+
 #### Scenario: 精排分数可见
 - **WHEN** 一次 `rerank` 执行完成
-- **THEN** 日志中的 `rerank done` 行 SHALL 出现 `score_top1` / `score_max` / `score_min` / `score_p50`
+- **THEN** 日志中的 `rerank done` 行 SHALL 出现 `score_max` / `score_min` / `score_p50` 与 `scored`
+
+#### Scenario: 降级分数被标记
+- **WHEN** 精排调用失败、结果回退为 `1 - distance`
+- **THEN** 该 `rerank done` 行的 `scored` SHALL 为 `fallback`；消费这些分位数的判据 SHALL 只取 `scored=rerank` 的样本
 
 #### Scenario: 空输入时不产生误导分数
 - **WHEN** 精排输入为空（`rerank skip reason=empty_input`）

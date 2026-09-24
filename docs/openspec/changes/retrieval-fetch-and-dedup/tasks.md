@@ -1,11 +1,11 @@
 ## 1. 观测补全（先行，不改行为）
 
-- [ ] 1.1 `src/rag/retrieval.py:191-196` `rerank done` 增 `score_top1` / `score_max` / `score_min` / `score_p50`（由 `reranked` 的 `relevance_score` 计算；当前该事件只记 `doc_count` + `query_len`）
+- [ ] 1.1 `src/rag/retrieval.py:191-196` `rerank done` 增 `score_max` / `score_min` / `score_p50`（由 `reranked` 的 `relevance_score` 计算；当前该事件只记 `doc_count` + `query_len`）与分数来源标记 `scored`：真实精排落 `scored=rerank`，`except` 降级分支（回退 `1 - distance`）落 `scored=fallback`。**不记 `score_top1`**（降序下恒等于 `score_max`）
 - [ ] 1.2 新增 `[retrieval] dedup done` 事件，记录 `dropped` / `kept`。**约束：不改 `retrieval.search` 的返回契约、不把统计挂到 `retrieve done`**（理由见 design D4）
 - [ ] 1.3 `src/core/log_events.py` / `log_event_specs.py` 登记：`rerank done` 的新字段 + `dedup done` 这个新事件
 - [ ] 1.4 `docs/agents/logging-rules.md` 按开放登记制登记上述字段与事件（值类型、含义、级别）
-- [ ] 1.5 单测：`tests/core/` 断言 `rerank done` / `dedup done` 的字段齐全；空输入（`rerank skip`）时不产生 `rerank done`；`retrieval.search` 的返回类型不变
-- [ ] 1.6 实跑一轮真实请求，确认字段可读（`rerank done` 分数字段 + `dedup done`）
+- [ ] 1.5 单测：`tests/core/` 断言 `rerank done` / `dedup done` 的字段齐全；**降级路径（rerank 抛异常）落 `scored=fallback`、正常路径落 `scored=rerank`**；空输入（`rerank skip`）时不产生 `rerank done`；`retrieval.search` 的返回类型不变
+- [ ] 1.6 实跑一轮真实请求，确认字段可读（`rerank done` 的 `score_*` + `scored` + `dedup done`）
 
 > `hybrid done` 的分路计数（`dense_count` / `sparse_count`）**不在本变更范围** —— 在效 spec「稀疏支路贡献可见」已要求、代码已实现（`src/rag/retrieval.py`），本变更不重复要求、不改字段名。
 
@@ -44,7 +44,7 @@
 
 本组**独立于 §1/§2/§3/§6**：它只读观测数据、不改检索行为，可在前述各节落地后单独进行（也可按需拆分为独立变更）。先前写的"前置：等 change `bm25-index-durability` 落地"已删除 —— 该 change 不存在，且词法路现由 PostgreSQL 全文检索承担（`sparse_count` 非零，见 `hybrid done`），无静默失效前提。
 
-- [ ] 5.1 采样脚本：跨 2 个 KB（`b9e74e82`、`ea84fb72`）× ≥ 10 个 query，记录 `score_top1` / 分布形状 / 库内实际是否有对应内容
+- [ ] 5.1 采样脚本：跨 2 个 KB（`b9e74e82`、`ea84fb72`）× ≥ 10 个 query，记录 `score_max` / 分布形状 / 库内实际是否有对应内容。**只统计 `scored=rerank` 的样本**（`scored=fallback` 的 `1 - distance` 分不参与形态判定与阈值校准）
 - [ ] 5.2 `ea84fb72`（121 chunk / 3 文档 / 单文档 85 chunk）必须纳入 —— 它是"单文档占满窗口"风险的最强样本
 - [ ] 5.3 输出结论文档**落到 `docs/agents/` 下一个登记过的归属文档**（不用 `docs/tmp/` —— 该结论会被后续变更长期引用）：双形态假说是否稳定、top1 的分界区间落在哪、是否需要第二个特征（断层幅度）
 - [ ] 5.4 明确写清**本变更不接控制流**：拦截层与动作留待后续变更决策

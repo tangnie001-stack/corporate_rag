@@ -100,8 +100,12 @@ dense + 词法 → rrf_fusion
 
 | 事件 | 新增字段 | 它能回答什么问题 |
 |---|---|---|
-| `rerank done` | `score_top1` / `score_max` / `score_min` / `score_p50` | 阈值能否校准、库内有无内容 |
+| `rerank done` | `score_max` / `score_min` / `score_p50` + `scored`（`rerank` \| `fallback`） | 阈值能否校准、库内有无内容；降级分可剔除 |
 | **`dedup done`（新事件）** | `dropped` / `kept` | 天花板是否仍在生效（精排后 − 去重后） |
+
+**为什么去掉 `score_top1`**：`reranked` 按分数降序排列，`score_top1` 恒等于 `score_max`；同一事实记两个名字，消费方无法判断该信哪个。
+
+**为什么加 `scored`**：`rerank failed` 降级路径用 `1 - distance` 造分（`rerank_results` 的 `except` 分支），与精排相关性分**量纲不同**。不标记来源就会把两类样本混进同一组分位数，直接污染 D5 的形态判据与任何阈值校准 —— 这是"分数可见"变成"分数误导"的典型。
 
 `hybrid done` 的分路计数不在本表：它已由在效 spec「稀疏支路贡献可见」要求、代码已落盘（`dense_count` / `sparse_count`），本变更加它会造成同一条事实两个 owner。
 
@@ -111,11 +115,11 @@ dense + 词法 → rrf_fusion
 
 ### D5：判据结论的产出方式（不接控制流）
 
-用两形态假说采样验证：`rerank top1` 的绝对值 + 分布形状。
+用两形态假说采样验证：`score_max` 的绝对值 + 分布形状，**只取 `scored=rerank` 的样本**（降级路径的 `1 - distance` 分不参与，见 D4）。
 
 已有初步观测（1 个 KB / 4 个 query）：
 
-| 形态 | 触发 | top1 | 形状 |
+| 形态 | 触发 | `score_max` | 形状 |
 |---|---|---|---|
 | 双峰 | 库内**有**该内容 | 0.8337（次高 0.7245，随后骤降至 0.18） | 断层明显 |
 | 平滑 | 库内**没有**该内容 | 0.1998 ~ 0.2898 | 平滑无拐点 |

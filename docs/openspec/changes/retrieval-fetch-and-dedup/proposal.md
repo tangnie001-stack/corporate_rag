@@ -17,7 +17,7 @@
 - **BREAKING** 检索去重两处改动：① 去重单位从**文档**（`doc_id`）改为**内容**（父块），每父块保留 1 条；② 去重位置从 rerank **之前**移到 **之后**，每父块保留**精排分最高**的一条（代表权由相关性而非融合名次决定）。无 `parent_content` 的 chunk 按自身保留。
 - 候选池 `TOP_K_RETRIEVAL` 默认值改为 **30**（已先行落地：`src/config/settings.py:243`、`.env`、`README.md:283`）。
 - 补全取数观测：
-  - `[retrieval] rerank done` 增 `score_top1` / `score_max` / `score_min` / `score_p50`
+  - `[retrieval] rerank done` 增 `score_max` / `score_min` / `score_p50` 与分数来源标记 `scored`（`rerank` | `fallback`；降级路径的 `1 - distance` 分数须可剔除）
   - 新增 `[retrieval] dedup done` 事件，记录 `dropped` / `kept`（**不改 `retrieval.search` 的返回契约**）
   - `[retrieval] retrieve replay` **移除** `dedup_max_per_doc` 字段（随 `RETRIEVAL_MAX_PER_DOC` 一并退出）
 - 采样并产出"库内有无该内容"的**判据结论**（依据 `rerank` 分数的双形态：库内有 → 双峰断层；库内无 → 平滑无拐点）。本变更只产出结论，**不接控制流**。
@@ -33,7 +33,7 @@
 
 - `retrieval-quality`: 候选池默认值与取值区间、`Cross-document aggregation` 与 `检索去重策略参数化` 两条互斥要求的消解、评测矩阵区间更新、废弃的"语义选库"要求移除。
 - `retrieval-judgment`: `检索结果去重` 要求由"按 doc_id 去重、每文档保留最先出现的结果，位置在 rerank 前"改为"按内容（父块）去重，位置在 **rerank 之后**、每父块保留**精排分最高**的一条"。
-- `observability-logging`: `rerank done` 增分数字段、新增 `dedup done` 事件；`retrieve replay` 与「离线重放 CLI」两条要求移除 `dedup_max_per_doc`。
+- `observability-logging`: `rerank done` 增分位数字段与来源标记 `scored`、新增 `dedup done` 事件；`retrieve replay` 与「离线重放 CLI」两条要求移除 `dedup_max_per_doc`。
 
 ## Impact
 
