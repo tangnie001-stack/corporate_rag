@@ -118,6 +118,12 @@
 - 与 `turn-provenance-observability`（0/36）：数据同源、函数重叠，**串行，不并行**；本变更在它之前。trace metadata 只读 `ctx`，将来它把 `_resolve_session_agent` 改成结构化返回时同步供 metadata 使用即可，不需要在 trace 侧再取一遍。
 - 工具事实不做「一套事实三 sink」的重构：**工具日志留在工具内部**（`retrieval_signal(empty_result/reretrieve)`、`retrieve_done(result_count)` 依赖工具内部状态，事件流拿不到）。本变更只新增 Langfuse 这个 sink。
 
+### D10 三条开工前待定项（定稿）
+
+- **父 span 的 `name` 用 `tools`，不带轮次**：与 LangGraph 节点名一致，便于在 Langfuse 里按 `name` 聚合；轮次已由时间顺序与子 span 的父子关系体现，自造 `tools[step=N]` 只会引入一个无从对齐的命名空间。
+- **seed CLI 的幂等判据按 `model_name` 已存在即跳过**：只比 `model_name`（Langfuse 侧同名即视为同一定义），不比 `match_pattern` —— 判据简单可预期，避免「改了 pattern 就多出一份定义」这类隐蔽行为。
+- **本期不把「工具返回条数」等摘要写进 span**：那需要从 output 文本反向解析，属 D8 的输出摘要 hook；本期 span 的 `output` 直接记录工具返回值原文。
+
 ## Risks / Trade-offs
 
 - **命令式与装饰器混用**（flush / 禁用态 / 异常路径口径不一）→ 采集器自带 `_enabled` 守卫；`close()` 在 `finally`；禁用态整条路径短路。落地时用 `LANGFUSE_ENABLE=false` 回归一轮，确认零产出且对话行为不变。
@@ -138,6 +144,4 @@
 
 ## Open Questions
 
-- 父 span 的 `name` 取值：沿用节点名 `tools`，还是带轮次（`tools[step=N]`）？倾向前者（与 LangGraph 节点名一致，便于按 name 聚合）。
-- seed CLI 的幂等判据：按 `model_name` 已存在即跳过，还是比对 `match_pattern`？倾向前者（简单、可预期）。
-- 是否需要把「工具返回条数」等摘要写进 span（需从 output 文本解析，属 D8 的输出摘要 hook）——本期不做。
+（无 —— 开工前待定的三条已定稿，见 D10。）
