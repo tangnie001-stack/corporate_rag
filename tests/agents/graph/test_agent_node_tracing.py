@@ -68,16 +68,19 @@ def test_observation_output_empty_when_no_text_and_no_tool_calls():
     assert _observation_output(AIMessage(content="")) == ""
 
 
-def test_observe_decorator_disables_input_capture():
-    """agent_model 闭包必须以 capture_input=False 装饰。
+def test_observe_decorator_disables_capture():
+    """agent_model 闭包必须以 capture_input=False 与 capture_output=False 装饰。
 
     用源码检查而非运行检查：闭包在工厂内定义、无独立引用可拿，
     而这条约束一旦丢失是**静默**的（内部对象被序列化进 trace）。
+    capture_output=False 在「一轮既无文本也无 tool_calls」时生效：此时显式 output
+    为空串，SDK 会走自动捕获回落，把节点返回的 state dict 写进 trace。
     """
     import inspect
 
     src = inspect.getsource(agent_node.make_agent_model_node)
     assert "capture_input=False" in src
+    assert "capture_output=False" in src
     assert 'as_type="generation"' in src
 
 

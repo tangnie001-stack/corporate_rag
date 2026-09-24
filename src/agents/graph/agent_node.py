@@ -163,9 +163,9 @@ def make_agent_model_node(llm, tools, prompt_manager) -> Callable:
     tool_names = frozenset(str(t.name) for t in tools)
     model = llm.bind_tools(tools)
 
-    # capture_output=False：模型只发 tool_calls、文本为空时，显式写入的 output 为空串
-    # （falsy），会走 SDK 的自动捕获回落；关掉自动捕获后回落得到 None，避免把节点返回的
-    # state dict（messages/_agent_iterations/...）写进 trace。显式非空 output 仍优先。
+    # 关闭输出自动捕获（capture_output）：仅当一轮既无文本也无 tool_calls 时，显式写入的
+    # output 才是空串（falsy），此时会走 SDK 的自动捕获回落，把节点返回的 state dict
+    # （messages/_agent_iterations/...）写进 trace；关掉后即避免该回落。显式非空 output 仍优先。
     @observe(
         name="agent_turn",
         as_type="generation",
