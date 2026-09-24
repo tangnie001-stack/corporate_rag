@@ -17,7 +17,7 @@ def test_parse_log_line_extracts_replay_fields():
     assert fields["query_len"] == 10
     assert fields["kb_id"] == "k1"
     assert fields["iteration"] == 2
-    assert fields["dedup_max_per_doc"] == 1
+    assert fields["kb_id"] == "k1"
 
 
 def test_parse_log_line_segment_agnostic():
@@ -78,18 +78,15 @@ def test_print_snippets_drift_markers(capsys, monkeypatch):
         "rerank": True,
     }
     # 阶段一：当前配置与行"当时值"不同 → 每个差异参数各出一行 drift
-    monkeypatch.setattr(settings, "RETRIEVAL_MAX_PER_DOC", 2)
     monkeypatch.setattr(settings, "HYBRID_SEARCH_ENABLED", False)
     monkeypatch.setattr("src.cli.replay_trace.TOP_K_RERANK", 3)
     _print_snippets(fields, [])
     out = capsys.readouterr().out
-    assert "drift: row dedup=1 → 本次 dedup=2" in out
     assert "drift: row top_k=8 → 本次 top_k=3" in out
     assert "drift: row hybrid=True → 本次 hybrid=False" in out
     # rerank 行值（True）与本次一致，不产生 drift 行
     assert "row rerank" not in out
     # 阶段二：当前配置与行值一致 → 无任何 drift 行
-    monkeypatch.setattr(settings, "RETRIEVAL_MAX_PER_DOC", 1)
     monkeypatch.setattr(settings, "HYBRID_SEARCH_ENABLED", True)
     monkeypatch.setattr("src.cli.replay_trace.TOP_K_RERANK", 8)
     _print_snippets(fields, [])

@@ -72,7 +72,6 @@ EVENT_SPECS: dict[str, EventSpec] = {
             "kb_id",
             "iteration",
             "top_k",
-            "dedup_max_per_doc",
             "hybrid",
             "rerank",
         ),

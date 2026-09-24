@@ -4,7 +4,7 @@
 
 读取全部 app_*.log（按天轮转，trace 可跨天），段位无关解析：按 trace_id 子串
 过滤行、取首个 " - " 之后为 message（兼容 _LOG_FORMAT 加 session 段前后）。
-输出语义：对当前 KB、当前配置重放（非历史快照）；事件行的 top_k/dedup/hybrid/rerank
+输出语义：对当前 KB、当前配置重放（非历史快照）；事件行的 top_k/hybrid/rerank
 为"当时值"，与本次实际执行参数并排对照并标注差异（drift 检测）。
 """
 
@@ -72,26 +72,20 @@ def parse_trace_logs(log_dir: str, trace_id: str) -> list[dict]:
 def _print_snippets(fields: dict, contexts: list[RAGContext]) -> None:
     """打印一次重放的命中片段与 drift 对照。
 
-    drift：事件行记录的"当时参数"（dedup_max_per_doc/top_k/hybrid/rerank）
+    drift：事件行记录的"当时参数"（top_k/hybrid/rerank）
     与本次实际执行（当前 settings 值）不同时标注差异——检索栈内部读模块
     常量，无法用事件参数覆盖（Q4/Q3），因此 replay 只做对照诊断，不做参数实验。
     """
     print(f"  [iteration={fields.get('iteration')}] query={fields['query']!r}")
     # 事件记录"当时值" vs 本次实际执行（检索栈内部读 settings 常量，无法在此覆盖）
-    row_dedup = fields.get("dedup_max_per_doc")
     row_top_k = fields.get("top_k")
     row_hybrid = fields.get("hybrid")
     row_rerank = fields.get("rerank")
-    print(
-        f"  params: dedup={row_dedup} top_k={row_top_k} "
-        f"hybrid={row_hybrid} rerank={row_rerank}"
-    )
-    current_dedup = settings.RETRIEVAL_MAX_PER_DOC
+    print(f"  params: top_k={row_top_k} hybrid={row_hybrid} rerank={row_rerank}")
     current_top_k = TOP_K_RERANK
     current_hybrid = settings.HYBRID_SEARCH_ENABLED
     current_rerank = True
     for key, row_value, current_value in (
-        ("dedup", row_dedup, current_dedup),
         ("top_k", row_top_k, current_top_k),
         ("hybrid", row_hybrid, current_hybrid),
         ("rerank", row_rerank, current_rerank),

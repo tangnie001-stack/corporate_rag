@@ -191,7 +191,6 @@ def make_rag_tools(
                 kb_id=kb_id,
                 iteration=iteration,
                 top_k=top_k,
-                dedup_max_per_doc=settings.RETRIEVAL_MAX_PER_DOC,
                 hybrid=settings.HYBRID_SEARCH_ENABLED,
                 rerank=True,
             )

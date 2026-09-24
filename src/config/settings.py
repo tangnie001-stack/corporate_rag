@@ -243,8 +243,6 @@ CHUNK_OVERLAP: int = int(os.getenv("CHUNK_OVERLAP", "64"))
 TOP_K_RETRIEVAL: int = int(os.getenv("TOP_K_RETRIEVAL", "30"))
 # 重排序后保留的 top-N 数量（最终送入 LLM 的上下文数量）
 TOP_K_RERANK: int = int(os.getenv("TOP_K_RERANK", "5"))
-# 检索结果按 doc_id 去重的每文档保留条数（1 = 现状；>1 供多样性 A/B 实验）
-RETRIEVAL_MAX_PER_DOC: int = int(os.getenv("RETRIEVAL_MAX_PER_DOC", "1"))
 # 扫描件检测阈值：单页可提取文字少于 200 字符视为"扫描页"
 MIN_TEXT_CHARS: int = int(os.getenv("MIN_TEXT_CHARS", "200"))
 # 页眉页脚边距过滤（fitz 通道按 y 坐标剔除重复页眉/页脚）

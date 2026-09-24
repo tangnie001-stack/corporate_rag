@@ -205,7 +205,6 @@ class ReplayEvent:
     kb_id: 知识库 ID（空 = 未绑定）
     iteration: agent 迭代序号
     top_k: 工具层返回上限（精排后截断）
-    dedup_max_per_doc: 同文档去重上限（settings.RETRIEVAL_MAX_PER_DOC）
     hybrid: 是否启用混合检索
     rerank: 是否执行精排
     """
@@ -215,7 +214,6 @@ class ReplayEvent:
     kb_id: str
     iteration: int
     top_k: int
-    dedup_max_per_doc: int | None
     hybrid: bool
     rerank: bool
 

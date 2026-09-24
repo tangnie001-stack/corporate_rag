@@ -1,8 +1,11 @@
 """事件定义层单测 — 注册表一致性 + import 校验。"""
 
+import dataclasses
+
 import pytest
 
 import src.core.log_events as le
+from src.config import settings
 
 
 def test_core_events_registered():
@@ -25,6 +28,17 @@ def test_signal_enum_covers_all():
     }
 
 
+def test_settings_removed_retrieval_max_per_doc():
+    # Task 3 钉桩：RETRIEVAL_MAX_PER_DOC 已删除，settings 上不应再有该属性
+    assert not hasattr(settings, "RETRIEVAL_MAX_PER_DOC")
+
+
+def test_replay_event_removed_dedup_max_per_doc_field():
+    # Task 3 钉桩：ReplayEvent 字段集不再包含 dedup_max_per_doc
+    field_names = {f.name for f in dataclasses.fields(le.ReplayEvent)}
+    assert "dedup_max_per_doc" not in field_names
+
+
 def test_replay_event_fields():
     r = le.ReplayEvent(
         query="腾讯2024年报",
@@ -32,7 +46,6 @@ def test_replay_event_fields():
         kb_id="k1",
         iteration=2,
         top_k=8,
-        dedup_max_per_doc=1,
         hybrid=True,
         rerank=True,
     )
