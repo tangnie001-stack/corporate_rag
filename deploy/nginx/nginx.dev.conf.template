@@ -1,0 +1,76 @@
+# nginx.dev.conf.template — 本地开发用的反代配置模板（非生产）
+#
+# 用途：在任意 worktree 里本地跑后端（uvicorn）+ 前端（静态 + /api 反代），
+#       让两个 worktree 各用一套端口、互不冲突（见 scripts/dev-worktree.sh）。
+#
+# 与 deploy/nginx/nginx.conf 的唯一差异：proxy_pass 的目标由 compose 服务名
+# `app:8000` 改为 `${BACKEND_PORT}`（宿主上的本地 uvicorn 端口），并通过
+# host.docker.internal 访问宿主机。其余行为（SSE 关 buffering、长超时、
+# 静态缓存策略、/docs 与 /openapi.json 透传）与生产 conf 保持一致。
+#
+# 渲染方式：挂到 nginx 官方镜像的 /etc/nginx/templates/ 下，由
+# docker-entrypoint.d/20-envsubst-on-templates.sh 用 envsubst 生成
+# /etc/nginx/conf.d/default.conf。该脚本只替换「容器 env 里存在的」变量，
+# 因此本文件里的 $http_upgrade / $host / $remote_addr 等 nginx 变量不受影响。
+# 为稳妥起见，启动时另传 NGINX_ENVSUBST_FILTER='^BACKEND_PORT$' 限定替换范围。
+#
+# 容器内固定监听 80；「前端端口」由 docker run -p <宿主端口>:80 决定，无需改本文件。
+
+server {
+    listen 80;
+    server_name localhost;
+
+    # Gzip
+    gzip on;
+    gzip_types text/css application/javascript text/html application/json;
+    gzip_min_length 256;
+
+    # Frontend static files — HTML 不缓存，JS/CSS 通过 version 参数更新
+    location = /Knowledgebase {
+        root /usr/share/nginx/html;
+        try_files /index.html =404;
+        add_header Cache-Control "no-cache, must-revalidate";
+    }
+
+    location / {
+        root /usr/share/nginx/html;
+        index chat.html;
+        try_files $uri $uri/ $uri.html /chat.html;
+        add_header Cache-Control "no-cache, must-revalidate";
+    }
+
+    # API reverse proxy → 宿主本地 uvicorn
+    location /api/ {
+        proxy_pass http://host.docker.internal:${BACKEND_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+
+        # Retry on reload/transient failures
+        proxy_next_upstream error timeout http_502;
+        proxy_next_upstream_tries 3;
+
+        # SSE requires buffering to be off
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 300s;
+    }
+
+    # OpenAPI docs — pass through
+    location /docs {
+        proxy_pass http://host.docker.internal:${BACKEND_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+    }
+
+    location /openapi.json {
+        proxy_pass http://host.docker.internal:${BACKEND_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+    }
+}

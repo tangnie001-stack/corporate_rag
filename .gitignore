@@ -38,6 +38,10 @@ venv/
 logs/
 *.log
 
+# 本地开发（scripts/dev-worktree.sh）：端口记录与本地后端 pid
+.dev-ports
+.dev-uvicorn.pid
+
 # OS
 .DS_Store
 Thumbs.db
