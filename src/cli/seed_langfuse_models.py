@@ -35,7 +35,8 @@ from src.config import (
     MODEL_OUTPUT_PRICE_PER_TOKEN,
 )
 
-#: Langfuse 模型定义的计价单位（配合 input_price/output_price 即 USD / 单 token）
+#: Langfuse 模型定义的计价单位（配合 input_price/output_price 即「按单 token 计价」；
+#: 这两个价格字段本身不含币种，本仓部署填的是人民币数值，口径见 `settings.py` 的定价注释）
 UNIT_TOKENS = "TOKENS"
 
 #: `models.list` 的翻页大小
@@ -49,8 +50,8 @@ def build_model_request(
 
     Args:
         model_name: 模型名（取自 `settings.LLM_MODEL`）
-        input_price: 输入单价（USD / 单 token）
-        output_price: 输出单价（USD / 单 token）
+        input_price: 输入单价（按单 token；币种口径见 `src/config/settings.py` 的定价注释）
+        output_price: 输出单价（按单 token；币种口径见 `src/config/settings.py` 的定价注释）
 
     Returns:
         含 `model_name` / `match_pattern` / `unit` / `input_price` / `output_price`
@@ -94,8 +95,8 @@ async def seed(
     Args:
         client: Langfuse 客户端（生产传 `langfuse_context.client_instance`）
         model_name: 模型名
-        input_price: 输入单价（USD / 单 token）
-        output_price: 输出单价（USD / 单 token）
+        input_price: 输入单价（按单 token；币种口径见 `src/config/settings.py` 的定价注释）
+        output_price: 输出单价（按单 token；币种口径见 `src/config/settings.py` 的定价注释）
 
     Returns:
         "skipped"（单价未配置完整）/ "exists"（同名已存在）/ "created"（本次创建）
@@ -120,7 +121,7 @@ async def seed(
         f"[created] {model_name} "
         f"pattern={request['match_pattern']} "
         f"unit={request['unit']} "
-        f"in={input_price} out={output_price} (USD/token)"
+        f"in={input_price} out={output_price} (per token)"
     )
     return "created"
 
