@@ -109,6 +109,7 @@ docs/adr/NNNN-<kebab-case-短标题>.md
 | [0011](0011-langfuse-v2-downgrade.md) | 自托管 Langfuse 由 v3 降至 v2，去掉 ClickHouse 与 worker | Accepted | 局部推翻 0004 的一条附带陈述 |
 | [0012](0012-langfuse-trace-content-and-retention.md) | trace 记录请求/回答原文并保留 30 天 | Accepted | 承载 0011 复查条件②的复评（确认，不取代） |
 | [0013](0013-trace-retention-purge-via-langfuse-sql.md) | trace 保留期清理的后端定为直连 Langfuse PG 的 SQL | Accepted | 为 0012 的 30 天保留期提供可工作的删除机制（不取代） |
+| [0014](0014-langfuse-tool-spans-imperative-api.md) | 工具 span 用命令式 Langfuse client 创建（client 实例取 decorators 单例） | Accepted | 为 `llm-tracing` 扩展观测面；与「纯装饰器」并存，不取代任何在先 ADR |
 
 ## 模板
 

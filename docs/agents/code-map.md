@@ -210,6 +210,8 @@ Nginx 容器把本目录挂到 `/usr/share/nginx/html` 直接托管，**无 npm 
 | **定位文件前：查代码关系**（谁调用它 / 它依赖谁 / 改动波及面） | 先查 `.ua/knowledge-graph.json`（**勿整包读**，1.6 MB）：用 `/understand-chat <问题>`，或按 id grep 节点再取 1-hop 邻域。查询配方、新鲜度判据（hash 不等 ≠ 过期）、自动更新与已知坑见 `docs/agents/knowledge-graph.md` |
 | 加/改一个 HTTP 接口 | `src/api/<模块>.py`（路由）+ `src/api/model/request.py`/`response.py`（契约）+ 对应 `services/` 编排；同步 `docs/agents/api_contract.md` + 测试断言 + **前端消费方 `deploy/nginx/html/`** |
 | 改一次生成的编排 / 事件转换 | `src/services/agent_service.py`（`_run_generation` / `_convert_event`） |
+| 改工具观测（工具 span 的字段 / 归组 / 过滤） | `src/infra/llm/tool_trace.py`（`ToolTraceCollector`）；消费点在 `src/services/agent_service.py::_run_generation` 的事件循环。口径见 ADR-0014 |
+| 改模型定价 / 让 Langfuse 出成本 | `src/config/settings.py`（`MODEL_*_PRICE_PER_TOKEN`，USD/单 token）+ `src/cli/seed_langfuse_models.py`；操作步骤见 `cookbook.md` |
 | 改 agent 循环 / 提示词 | 文案改 `src/config/prompts/templates/*.yaml`（经 `loader.py` 唯一读取）；规则挂载点改 `src/agents/graph/agent_node.py`、`nodes.py`、`src/rag/prompt.py` |
 | 加/改工具 | `src/agents/tools/`（实现 + 在 `rag_tools.py` 注册）；工具描述文案入 `src/config/` |
 | 加/改 skill 机制 | `src/agents/skills/`（loader/registry/executor/delegate_task）；内容放 `skills/<name>/SKILL.md` |
