@@ -1,12 +1,13 @@
 ## 1. 观测补全（先行，不改行为）
 
-- [ ] 1.1 `src/rag/retrieval.py:89-94` `hybrid done` 增 `dense_count` / `bm25_count`（`len(d)` / `len(b)`，两路各自原始条数）
-- [ ] 1.2 `src/rag/retrieval.py:191-196` `rerank done` 增 `score_top1` / `score_max` / `score_min` / `score_p50`（由 `reranked` 的 `relevance_score` 计算；当前该事件只记 `doc_count` + `query_len`）
-- [ ] 1.3 新增 `[retrieval] dedup done` 事件，记录 `dropped` / `kept`。**约束：不改 `retrieval.search` 的返回契约、不把统计挂到 `retrieve done`**（理由见 design D4）
-- [ ] 1.4 `src/core/log_events.py` / `log_event_specs.py` 登记：`hybrid done` / `rerank done` 的新字段 + `dedup done` 这个新事件
-- [ ] 1.5 `docs/agents/logging-rules.md` 按开放登记制登记上述字段与事件（值类型、含义、级别）
-- [ ] 1.6 单测：`tests/core/` 断言 `hybrid done` / `rerank done` / `dedup done` 的字段齐全；空输入（`rerank skip`）时不产生 `rerank done`；`retrieval.search` 的返回类型不变
-- [ ] 1.7 实跑一轮真实请求，确认字段可读（含 `bm25_count=0` 的失效样本）
+- [ ] 1.1 `src/rag/retrieval.py:191-196` `rerank done` 增 `score_top1` / `score_max` / `score_min` / `score_p50`（由 `reranked` 的 `relevance_score` 计算；当前该事件只记 `doc_count` + `query_len`）
+- [ ] 1.2 新增 `[retrieval] dedup done` 事件，记录 `dropped` / `kept`。**约束：不改 `retrieval.search` 的返回契约、不把统计挂到 `retrieve done`**（理由见 design D4）
+- [ ] 1.3 `src/core/log_events.py` / `log_event_specs.py` 登记：`rerank done` 的新字段 + `dedup done` 这个新事件
+- [ ] 1.4 `docs/agents/logging-rules.md` 按开放登记制登记上述字段与事件（值类型、含义、级别）
+- [ ] 1.5 单测：`tests/core/` 断言 `rerank done` / `dedup done` 的字段齐全；空输入（`rerank skip`）时不产生 `rerank done`；`retrieval.search` 的返回类型不变
+- [ ] 1.6 实跑一轮真实请求，确认字段可读（`rerank done` 分数字段 + `dedup done`）
+
+> `hybrid done` 的分路计数（`dense_count` / `sparse_count`）**不在本变更范围** —— 在效 spec「稀疏支路贡献可见」已要求、代码已实现（`src/rag/retrieval.py`），本变更不重复要求、不改字段名。
 
 ## 2. 候选池默认值
 
@@ -14,15 +15,23 @@
 - [ ] 2.2 `.env` / `README.md:283` 同步为 30（**已先行落地，本任务仅勾选确认**）
 - [ ] 2.3 确认 `src/infra/db/vector_store/search.py:76` 的 `similarity_search_all(k=TOP_K_RETRIEVAL)` 属生产不可达路径，无需额外处理（在 design 里记为已知事实）
 
-## 3. 去重单位切换（核心）
+## 3. 去重单位与位置切换（核心）
 
-- [ ] 3.1 先写会失败的测试：`tests/rag/test_retrieval.py` 新增"同文档多父块全部保留"与"同父块多 chunk 只留一条"两组断言（现有断言写的是 doc_id 语义，属契约变更，需一并改写）
-- [ ] 3.2 `src/rag/retrieval.py:33-62` `_dedup_by_doc_id` 的去重键由 `metadata["doc_id"]` 改为父块标识；每父块保留 1 条
-- [ ] 3.3 父块标识取法：键为 **`(doc_id, hash(parent_content))`**；`parent_content` 缺失时按该 chunk 自身保留（不去重）。⚠ 必须把 `doc_id` 纳入键（跨文档样板文本会误折叠）；不要用 `heading_path`（实测 `(doc_id, heading_path)` 在 11/51 组里对应多个父块）；不要用全文做 dict key
-- [ ] 3.4 函数改名 `_dedup_by_parent` 并更新 docstring（当前名 `_dedup_by_doc_id` 与新区义不符）；同步更新 `retrieval.py:95` / `:116` 两处调用点
-- [ ] 3.5 **删除 `RETRIEVAL_MAX_PER_DOC`**（`src/config/settings.py:183`）—— 不留失效旋钮；同步移除 `[retrieval] retrieve replay` 事件的 `dedup_max_per_doc` 字段（该字段会输出一个已无意义的值，污染重放对照）
+- [ ] 3.1 先写会失败的测试（`tests/rag/test_retrieval.py` / `test_retrieval_dedup.py`）三组断言：① 同一文档多个不同父块全部保留；② 同一父块多个 chunk 只留一条；③ **保留的是精排分最高的那条**（构造同父块两条、分数一高一低，断言留下高分那条）。现有断言写的是 doc_id 语义与"rerank 前"，属契约变更，需一并改写
+- [ ] 3.2 `src/rag/retrieval.py`：`search` **不再去重**（去掉 `:95` hybrid / `:116` 非 hybrid 两处 `_dedup_by_doc_id` 调用）；去重**移到精排之后**、`rerank_results` 内对全部候选打分之后执行
+- [ ] 3.3 去重键：**`(doc_id, hash(parent_content))`**；每键保留 `relevance_score` **最高**的一条；`parent_content` 缺失时按该 chunk 自身保留（不参与折叠）。⚠ 必须把 `doc_id` 纳入键（跨文档样板文本会误折叠）；不要用 `heading_path`（实测 `(doc_id, heading_path)` 在 11/51 组里对应多个父块）；不要用全文做 dict key
+- [ ] 3.4 截断顺序改为 **先打分 → 再去重 → 再 `[:TOP_K_RERANK]`**（当前 `retrieval.py:164` 在没有去重的前提下直接 `reranked[:TOP_K_RERANK]`，须把截断移到去重之后）。函数改名 `_dedup_by_parent` 并更新 docstring（当前名 `_dedup_by_doc_id` 与新区义不符）
+- [ ] 3.5 **删除 `RETRIEVAL_MAX_PER_DOC`**（`src/config/settings.py`）—— 不留失效旋钮。连带清理（漏一处即 AttributeError 或契约漂移，完整清单）：
+  - `[retrieval] retrieve replay` 事件的 `dedup_max_per_doc` 字段（写方 `src/agents/tools/rag_tools.py`；容器 `src/core/log_events.py` 的 `ReplayEvent.dedup_max_per_doc`；字段登记 `src/core/log_event_specs.py`）
+  - `src/cli/replay_trace.py`：`settings.RETRIEVAL_MAX_PER_DOC` 读取、drift 对照的 `dedup` 轴、params 打印
+  - 测试：`tests/cli/test_replay_trace.py`、`tests/core/test_log_events.py`
+  - delta spec：本变更已在 `specs/observability-logging/spec.md` 的 MODIFIED 中把该字段从「检索重放上下文日志」与「离线重放 CLI」两条要求移除
 - [ ] 3.6 全量跑 `pytest tests/ -v` + `ruff check .` + `pyright src/`，确认无回归
-- [ ] 3.7 用 `b9e74e82`（2 文档 / 51 chunk / 14 父块）实跑，确认 `retrieve done` 的 `result_count` 不再恒为 2，且 `dedup done` 的 `dropped` 反映真实丢弃量
+- [ ] 3.7 实跑（KB 均已存在，核实于 2026-09-24）：
+  - **`4a1dcb8b`（1 文档 / 38 chunk / 9 父块 —— 即 trace_19e8e472 的 KB）**：期望 `retrieve done result_count` 从 **1 升到 5**（= `TOP_K_RERANK`，精排窗口被填满）
+  - `b9e74e82`（2 文档 / 51 chunk / 12 父块）：期望不再恒为 2
+  - `ea84fb72`（3 文档 / 121 chunk / 30 父块）：单文档 85 chunk 的"占满窗口"最强样本（见 5.2）
+  - 三例均核对 `dedup done` 的 `dropped` / `kept` 反映真实折叠量
 
 ## 4. 失效资产处置
 
@@ -32,7 +41,8 @@
 
 ## 5. 分数形态采样与判据结论
 
-- [ ] 5.0 **前置：等 change `bm25-index-durability` 落地。** 该变更修掉 BM25 索引静默失效（索引缺失 → 混合检索退化为纯 dense），并落"索引缺失可见"事件。**不修就采样，会把"混合已退化为纯 dense"的噪声当成信号**。若该变更被推迟，至少固定并记录 BM25 状态，并在结论文档里显式标注该前提
+本组**独立于 §1/§2/§3/§6**：它只读观测数据、不改检索行为，可在前述各节落地后单独进行（也可按需拆分为独立变更）。先前写的"前置：等 change `bm25-index-durability` 落地"已删除 —— 该 change 不存在，且词法路现由 PostgreSQL 全文检索承担（`sparse_count` 非零，见 `hybrid done`），无静默失效前提。
+
 - [ ] 5.1 采样脚本：跨 2 个 KB（`b9e74e82`、`ea84fb72`）× ≥ 10 个 query，记录 `score_top1` / 分布形状 / 库内实际是否有对应内容
 - [ ] 5.2 `ea84fb72`（121 chunk / 3 文档 / 单文档 85 chunk）必须纳入 —— 它是"单文档占满窗口"风险的最强样本
 - [ ] 5.3 输出结论文档**落到 `docs/agents/` 下一个登记过的归属文档**（不用 `docs/tmp/` —— 该结论会被后续变更长期引用）：双形态假说是否稳定、top1 的分界区间落在哪、是否需要第二个特征（断层幅度）
@@ -42,7 +52,7 @@
 ## 6. spec 存量 drift 修正与归档
 
 - [ ] 6.1 `docs/openspec/specs/retrieval-quality/spec.md:7` 默认值 10/5 → 30/5（与代码对齐）
-- [ ] 6.2 同文件 `:33-34` 评测矩阵 `TOP_K_RETRIEVAL: 5, 10, 15` → `10, 30, 50`
+- [ ] 6.2 同文件 `:33-34` 评测矩阵 `TOP_K_RETRIEVAL: 5, 10, 15` → `10, 30, 50`；**同步改实现与说明**，否则 spec 又与它描述的 CLI 不符（同一类 drift）：`src/cli/compare_retrieval.py`（`RETRIEVAL_VALUES = [5, 10, 15]`）与 `src/cli/README.md`（网格描述 `[5, 10, 15] × [3, 5, 8]`）
 - [ ] 6.3 同文件 `:66-68` 移除"语义选库检索"scenario（`_semantic_select_kb` 已废弃，`rag_tools.py:134` 注释在案）
 - [ ] 6.4 归档前校验：`openspec validate retrieval-fetch-and-dedup` 通过
 - [ ] 6.5 归档本变更，delta 合并进在效 spec
@@ -51,3 +61,14 @@
 
 - [ ] 7.1 `docs/adr/0001-retrieval-fetch-and-dedup-scope.md` 的 Status 由 `Accepted` 复核为已落地（若有偏差需补记）
 - [ ] 7.2 提交信息里写明：本次推翻了 `retrieval-quality`「检索去重策略参数化」与 `retrieval-judgment`「检索结果去重」两条要求的口径
+
+## 8. 完成定义（DoD）
+
+以下为**可证伪**的验收判据；全部满足方视为达成目标。此前 tasks 只有动作、无判据（评审 F3）。
+
+- [ ] 8.1 **单文档库不再被压成 1 条**：重放 trace `trace_19e8e472` 的 4 个 query（KB `4a1dcb8b`），iteration-1 的 `retrieve done result_count` ≥ 3（期望 5 = `TOP_K_RERANK`），且不再出现 `rerank done doc_count=1`
+- [ ] 8.2 **循环不再触顶**：同 session 重问"能帮忙查一下腾讯2024年第四季度业绩情况吗"，答案在 `iteration < 5` 产出，日志**不出现** `[agent] iteration limit`
+- [ ] 8.3 **多文档库不再被文档数压顶**：`b9e74e82`（2 文档 / 12 父块）上 `retrieve done result_count` 不再恒为 2
+- [ ] 8.4 **天花板可见**：`dedup done` 的 `kept` 与 `retrieve done` 的 `result_count` 自洽（`dropped = 精排后条数 − kept`）；`dedup_max_per_doc` 字段不再出现在任何 `retrieve replay` 行
+- [ ] 8.5 **契约不破**：`pytest tests/ -v` 全绿；`retrieval.search` 返回类型仍为 `list`；`replay_trace` 在**含 `dedup_max_per_doc` 的历史日志行**上仍能解析、不抛错（该字段只被忽略，不被读取）
+- [ ] 8.6 **边界声明**：循环端的提前止损（`retrieval_exhausted`）**不在本变更 DoD 内**。若 8.2 未达成，须先判定是"材料仍不足"还是"循环信号缺失"；后者归后续变更（`docs/superpowers/specs/2026-09-16-retrieval-exhaustion-early-stop-design.md`）

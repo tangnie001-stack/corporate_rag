@@ -1,12 +1,22 @@
 ## Context
 
-`src/rag/retrieval.py` 的取数链路当前是：
+`src/rag/retrieval.py` 的取数链路**现状**是（去重在精排之前）：
 
 ```
-dense(TOP_K_RETRIEVAL) + bm25(TOP_K_RETRIEVAL)
+dense(TOP_K_RETRIEVAL) + 词法(TOP_K_RETRIEVAL，PG 全文检索)
   → rrf_fusion            （retrieval.py:87-88）
   → _dedup_by_doc_id      （retrieval.py:95 hybrid / :116 非 hybrid）★ 在 rerank 之前
   → rerank_results        （retrieval.py:120-197，取前 TOP_K_RERANK）
+  → rag_tools.py:180 contexts[:top_k]
+```
+
+**改后**（去重移到精排之后，按父块折叠、保留最高分 —— 见 D2）：
+
+```
+dense + 词法 → rrf_fusion
+  → rerank_results        （对全部融合候选打分，不再先截断）
+  → _dedup_by_parent      （按 (doc_id, 父块内容哈希) 折叠，每父块保留精排分最高的一条）
+  → 截断 TOP_K_RERANK
   → rag_tools.py:180 contexts[:top_k]
 ```
 
@@ -15,7 +25,7 @@ dense(TOP_K_RETRIEVAL) + bm25(TOP_K_RETRIEVAL)
 - **天花板是乘性的**：`文档数 × RETRIEVAL_MAX_PER_DOC`。实测当前 KB（2 篇文档）恒为 2；`ea84fb72`（3 篇）恒为 3。
 - **去重位置在 rerank 之前**：`rerank done doc_count=<去重后条数>`（`retrieval.py:194` 记的是 rerank 的**输入**），所以精排无法在"同一文档的多个候选"之间做选择。
 - **父块正文会被重复渲染**：`retrieval.py:168-172` 用 `parent_content` 覆盖 chunk 正文，`context.py:60` 渲染的正是它。实测一父块约 1998 字符、被 3.25~3.9 个 chunk 共享 —— 只要同一父块的多个 chunk 同时进入结果，就会输出逐字相同的正文。现状 `每文档 1 条` 恰好掩盖了这一点。
-- **观测缺口**：`hybrid done` 只记融合后条数（`retrieval.py:89-94`）；`rerank done` 只记输入条数与 query 长度（`:191-196`）；`retrieve done` 只记最终条数（`rag_tools.py:217-223`）。分数、分路贡献、去重丢弃量全部不可见。
+- **观测缺口**：`rerank done` 只记输入条数与 query 长度（`retrieval.py:191-196`）；`retrieve done` 只记最终条数（`rag_tools.py:217-223`）。**精排分数分布**与**去重丢弃量**不可见。（分路贡献 `dense_count` / `sparse_count` 已由在效 spec「稀疏支路贡献可见」要求并在 `hybrid done` 落盘，不属缺口。）
 - **多库路径已死**：`retrieval.search` 的唯一生产调用方是 `rag_tools.py:136` 且 `kb_id` 恒非空（`:135` 守卫）→ `retrieval.py:98-105` 的 `not kb_id` 分支生产不可达。
 - **规模前提**（2026-09-18 确认）：正式测试几十文档 / 生产几百 / 长期千；实测每文档 25~40 chunk（单个年报可达 85 chunk）。三种规模下 `文档数 × N` 均非绑定约束，`TOP_K_RETRIEVAL` 才是。
 
@@ -35,7 +45,6 @@ dense(TOP_K_RETRIEVAL) + bm25(TOP_K_RETRIEVAL)
 
 - 不实现止损判据接控制流（拦截层与动作尚未决定）。
 - 不引入绝对分数阈值（既有决策，见 `retrieval-judgment` spec）。
-- 不处理 BM25 静默失效与索引持久化（第 3 层，独立缺陷）。
 - 不引入 MMR（排序见 ADR-0001 复查触发条件）。
 - 不改 `TOP_K_RERANK`（保持 5）。
 - 不改 `parent_content` 覆盖 chunk 正文这一行为本身。
@@ -64,9 +73,15 @@ dense(TOP_K_RETRIEVAL) + bm25(TOP_K_RETRIEVAL)
 
 **N 不引入**：任何固定 N 都是同一错误的缩放 —— N ≤ 2 仍构成天花板；N ≥ 5 时配额失效（`文档数 × 5 ≥ TOP_K_RERANK` 恒成立）。引入一个永不生效的旋钮不如删掉。
 
-### D2：去重仍在 rerank 之前，但不再按文档切
+### D2：去重移到 rerank 之后，每父块保留精排分最高的一条
 
-保留"去重后精排"的顺序（与既有 spec 一致，且能减少精排输入量）。区别在于：内容级去重只折叠**重复内容**，不折叠"同一文档的不同内容"—— 因此精排仍能看到目标文档的多个不同章节。真正的"谁最相关"由精排决定。
+**改后顺序**：融合 → 精排（对全部候选打分）→ 内容级去重（按 `(doc_id, 父块内容哈希)` 折叠，保留精排分最高的一条）→ 截断 `TOP_K_RERANK`。
+
+**为什么移到精排之后**：现状去重在精排之前，等于在精排看到候选之前就替它选好了"哪条 chunk 代表这个父块"。代表权不该由 RRF 名次（融合顺序）决定，应由精排相关性决定 —— 父块正文才是最终渲染给模型的内容，代表它的应当是相关性最高的那条。这与 ADR-0001 对"配额在 rerank 之前替精排做选择"的批评是同一件事，只是对象从文档换成了父块。
+
+**代价**：精排输入从"去重后条数"变为"全部融合候选"（实测 30~35 条）。耗时不是约束 —— ADR 实测 50 条输入 468~735 ms，`RERANK_TIMEOUT=5` 有 7 倍余量。
+
+**残留误差（明确接受）**：精排对 `r.content`（子 chunk 正文）打分，而渲染的是 `parent_content`（父块正文），两者不完全一致。本决策只保证"同一父块只用一条、且是精排分最高的那条"，**不改变"用什么文本喂精排"这一既有行为**（ADR-0001 明确不评判 `retrieval.py:168-172` 的父块正文替换）。
 
 ### D3：`TOP_K_RETRIEVAL` 取 30
 
@@ -83,11 +98,12 @@ dense(TOP_K_RETRIEVAL) + bm25(TOP_K_RETRIEVAL)
 
 | 事件 | 新增字段 | 它能回答什么问题 |
 |---|---|---|
-| `hybrid done` | `dense_count` / `bm25_count` | BM25 支路是否还活着、贡献多少（第 3 层的前置观测） |
 | `rerank done` | `score_top1` / `score_max` / `score_min` / `score_p50` | 阈值能否校准、库内有无内容 |
-| **`dedup done`（新事件）** | `dropped` / `kept` | 天花板是否仍在生效（融合后 − 去重后） |
+| **`dedup done`（新事件）** | `dropped` / `kept` | 天花板是否仍在生效（精排后 − 去重后） |
 
-**为什么去重自己落一条事件，而不是挂在 `retrieve done` 上**：去重发生在 `retrieval.search` 内部，而 `search` 只返回 `list[ChunkResult]`。要把统计挂到 `retrieve done`（`rag_tools.py:217-223`），只能改 `search` 的返回契约 —— 那会破坏 `tests/rag/test_retrieval.py` 的返回值断言，并把"编排关注点"塞进检索层。去重自落事件零契约影响，也天然符合 `logging-rules.md` 的开放登记制。
+`hybrid done` 的分路计数不在本表：它已由在效 spec「稀疏支路贡献可见」要求、代码已落盘（`dense_count` / `sparse_count`），本变更加它会造成同一条事实两个 owner。
+
+**为什么去重自己落一条事件，而不是挂在 `retrieve done` 上**：D2 改后去重发生在精排之后、`rerank_results` 内部，而 `rerank_results` 只返回 `list[RAGContext]`。要把统计挂到 `retrieve done`（`rag_tools.py:217-223`），只能改返回值契约 —— 那会破坏 `tests/rag/test_retrieval.py` 的返回值断言，并把"编排关注点"塞进检索层。去重自落事件零契约影响，也天然符合 `logging-rules.md` 的开放登记制。
 
 **不放分数全量列表**：`rerank done` 是每次 `retrieve_kb` 都落的信息级事件，全量分数会显著放大日志体积；分位数足以支撑阈值校准与双形态判别。
 
@@ -110,7 +126,7 @@ dense(TOP_K_RETRIEVAL) + bm25(TOP_K_RETRIEVAL)
 - **[`parent_content` 缺失的 chunk 不受约束]** → 33/51 有父块。缺失时退化为按自身保留，等价于不去重；结果是这部分 chunk 仍可能重复进入结果。**接受的代价**：宁可放过，不可错杀（错杀会丢召回）。
 - **[日志体积增大]** → 只加分位数，不加全量列表（D4）；新字段走 `logging-rules.md` 开放登记制。
 - **[`compare_dedup.py` 已作废]** → 其网格 `{1,2,3}` 与 `RETRIEVAL_MAX_PER_DOC` 一并退出（口径改成父块级后无可调参数，无 A/B 可言）。**不可只留 TODO** —— 它评的链路已改口径，跑出来是另一件事，留着会误导后续实验。作废需在 glossary 注明。
-- **[精排成本上升]** → 候选池 8→30 使精排输入增大约 3.75 倍（按输入文档数计费）。30 是为成本取的折中；若召回受损需回调（见 D3）。
+- **[精排成本上升]** → 两重放大：候选池 8→30（约 3.75 倍）+ 去重后移到精排之后（精排输入从"去重后条数"变为"全部融合候选"）。30 是为成本取的折中；耗时不是约束（50 条输入仍 < 1s，`RERANK_TIMEOUT=5`），但**费用按输入条数计**，需在采样时记录成本（tasks 5.5）；若召回受损需回调（见 D3）。
 - **[`retrieval-quality` spec 的 drift 修正属于"顺手改"]** → 三处 drift（默认值 10/5、评测矩阵 5/10/15、语义选库）都不是本变更引入的，但都在同一份 spec 里且与本变更同域。**若不修，spec 会继续与代码不符**；修则扩大 diff。选择修，并在 tasks 里单列，便于 reviewer 分辨。
 
 ## Migration Plan
@@ -118,12 +134,14 @@ dense(TOP_K_RETRIEVAL) + bm25(TOP_K_RETRIEVAL)
 **与 change `prompt-layering-and-domain-binding` 的顺序**：**本变更先落地**；对端的 **P0（YAML 载体搬运，零行为差异、零文件交集）可并行开工**。对端的 P1/P2 必须排在本变更之后 —— 它要重采两次基线（prompt 快照 + RAGAS eval），而基线所测的 context 内容正是本变更在改的东西，先采会直接作废。
 
 1. **观测先行**：先落 D4（不改行为），跑一轮真实请求确认字段可读。
-2. **去重单位切换**：改 `retrieval.py`，同步改 `tests/rag/test_retrieval.py` 的去重断言（现有断言写的是 doc_id 语义，属契约变更）。
+2. **去重单位与位置切换**：改 `retrieval.py`（`search` 不再去重；去重移到 `rerank_results` 内、打分之后、截断之前），同步改 `tests/rag/test_retrieval.py` / `test_retrieval_dedup.py` 的去重断言（现有断言写的是 doc_id 语义与"rerank 前"，属契约变更）。
 3. **文档同步**：`glossary.md` 词条、`logging-rules.md` 登记、`compare_dedup.py` 处置。
 4. **采样**：用 2 个 KB（`b9e74e82` / `ea84fb72`）× 多 query 采分数分布，产出结论。
 5. **spec 归档**：`retrieval-quality` / `retrieval-judgment` / `observability-logging` 的 delta 合并进在效 spec。
 
-**回滚**：观测字段与去重单位各自独立 —— 观测字段为纯增量（回滚即删字段）；去重单位切换为单函数改动（回滚即恢复按 `doc_id` 去重）。`TOP_K_RETRIEVAL` 为单配置项。三者无耦合，可分别回滚。
+**回滚**：观测字段与去重单位各自独立 —— 观测字段为纯增量（回滚即删字段）；`TOP_K_RETRIEVAL` 为单配置项。**去重单位切换的回滚不再是一行**：删除 `RETRIEVAL_MAX_PER_DOC` 与 replay 的 `dedup_max_per_doc` 字段后，恢复"按 `doc_id` 去重"需同时恢复配置项、replay 写方与 `ReplayEvent`/`replay_trace.py`——回滚面 = 本变更 3.5 的清单。若需保留一行回滚能力，可选把配置项标记 `deprecated` 保留一个版本。
+
+**关于 `RETRIEVAL_MAX_PER_DOC` 的存在性**：删除它不涉及部署风险 —— 容器与 `.env` 均未设置该键（只有 `TOP_K_RETRIEVAL` / `TOP_K_RERANK`），删后无读取方残留（清单见 tasks 3.5）。
 
 ## Open Questions
 
