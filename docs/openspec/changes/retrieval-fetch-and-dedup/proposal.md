@@ -15,7 +15,7 @@
 ## What Changes
 
 - **BREAKING** 检索去重两处改动：① 去重单位从**文档**（`doc_id`）改为**内容**（父块），每父块保留 1 条；② 去重位置从 rerank **之前**移到 **之后**，每父块保留**精排分最高**的一条（代表权由相关性而非融合名次决定）。无 `parent_content` 的 chunk 按自身保留。
-- 候选池 `TOP_K_RETRIEVAL` 默认值改为 **30**（已先行落地：`src/config/settings.py:179`、`.env`、`README.md:283`）。
+- 候选池 `TOP_K_RETRIEVAL` 默认值改为 **30**（已先行落地：`src/config/settings.py:243`、`.env`、`README.md:283`）。
 - 补全取数观测：
   - `[retrieval] rerank done` 增 `score_top1` / `score_max` / `score_min` / `score_p50`
   - 新增 `[retrieval] dedup done` 事件，记录 `dropped` / `kept`（**不改 `retrieval.search` 的返回契约**）
@@ -48,7 +48,7 @@
 
 **测试**
 
-- `tests/rag/test_retrieval.py` / `tests/rag/test_retrieval_dedup.py`（去重口径）、`tests/config/`、`tests/core/test_log_events.py`（日志字段）、`tests/cli/test_replay_trace.py`（replay 字段）
+- `tests/rag/test_retrieval.py` / `tests/rag/test_retrieval_dedup.py`（去重口径）、`tests/core/test_log_events.py`（日志字段）、`tests/cli/test_replay_trace.py`（replay 字段）
 
 **文档**
 

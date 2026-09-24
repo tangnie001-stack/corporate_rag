@@ -5,7 +5,7 @@
 ```
 dense(TOP_K_RETRIEVAL) + 词法(TOP_K_RETRIEVAL，PG 全文检索)
   → rrf_fusion            （retrieval.py:87-88）
-  → _dedup_by_doc_id      （retrieval.py:95 hybrid / :116 非 hybrid）★ 在 rerank 之前
+  → _dedup_by_doc_id      （retrieval.py:102 hybrid / :116 非 hybrid）★ 在 rerank 之前
   → rerank_results        （retrieval.py:120-197，取前 TOP_K_RERANK）
   → rag_tools.py:180 contexts[:top_k]
 ```
@@ -83,6 +83,8 @@ dense + 词法 → rrf_fusion
 
 **残留误差（明确接受）**：精排对 `r.content`（子 chunk 正文）打分，而渲染的是 `parent_content`（父块正文），两者不完全一致。本决策只保证"同一父块只用一条、且是精排分最高的那条"，**不改变"用什么文本喂精排"这一既有行为**（ADR-0001 明确不评判 `retrieval.py:168-172` 的父块正文替换）。
 
+**降级路径同样必须去重**：`rag_tools.py` 的 `except TimeoutError` 分支（约 `:144-176`）在精排超时时**不进入** `rerank_results`，而是用检索原始顺序手工构造 `RAGContext`。改后 `search` 不再去重 → 这条路径会把"同一父块被重复渲染"重新引入（正是 D1 要消除的现象）。因此去重 SHALL 抽成可在两条路径上复用的步骤，降级路径同样调用它并落 `dedup done`；否则本变更净引入一条新的重复渲染回归。
+
 ### D3：`TOP_K_RETRIEVAL` 取 30
 
 **候选**：30 / 50 / 150。
@@ -90,7 +92,7 @@ dense + 词法 → rrf_fusion
 - WeKnora `DefaultRetrievalTopK = 50`；业界推荐 30~100；本仓库 `requirements_pool.md` F-05 曾提 50~150。
 - 实测候选池 50：精排耗时 468~735 ms，`RERANK_TIMEOUT=5` 有 7 倍余量 → 耗时不是约束。
 - 取 30 的依据是**精排成本**（按输入文档数计费，降约 40%）；**召回损失未测**。
-- 已先行落地于 `src/config/settings.py:179` / `.env` / `README.md`。
+- 已先行落地于 `src/config/settings.py:243` / `.env` / `README.md`。
 
 **取舍已记录在 ADR-0001 的「接受的代价」与复查触发条件**（top1 落在 0.2~0.5 灰区的 query 占比升高 → 先试 50）。
 

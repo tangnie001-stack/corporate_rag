@@ -11,14 +11,14 @@
 
 ## 2. 候选池默认值
 
-- [ ] 2.1 `src/config/settings.py:179` 默认值 50 → 30（**已先行落地，本任务仅勾选确认**）
+- [ ] 2.1 `src/config/settings.py:243` 默认值 50 → 30（**已先行落地，本任务仅勾选确认**）
 - [ ] 2.2 `.env` / `README.md:283` 同步为 30（**已先行落地，本任务仅勾选确认**）
 - [ ] 2.3 确认 `src/infra/db/vector_store/search.py:76` 的 `similarity_search_all(k=TOP_K_RETRIEVAL)` 属生产不可达路径，无需额外处理（在 design 里记为已知事实）
 
 ## 3. 去重单位与位置切换（核心）
 
 - [ ] 3.1 先写会失败的测试（`tests/rag/test_retrieval.py` / `test_retrieval_dedup.py`）三组断言：① 同一文档多个不同父块全部保留；② 同一父块多个 chunk 只留一条；③ **保留的是精排分最高的那条**（构造同父块两条、分数一高一低，断言留下高分那条）。现有断言写的是 doc_id 语义与"rerank 前"，属契约变更，需一并改写
-- [ ] 3.2 `src/rag/retrieval.py`：`search` **不再去重**（去掉 `:95` hybrid / `:116` 非 hybrid 两处 `_dedup_by_doc_id` 调用）；去重**移到精排之后**、`rerank_results` 内对全部候选打分之后执行
+- [ ] 3.2 `src/rag/retrieval.py`：`search` **不再去重**（去掉 `:102` hybrid / `:116` 非 hybrid 两处 `_dedup_by_doc_id` 调用）；去重**移到精排之后**、`rerank_results` 内对全部候选打分之后执行
 - [ ] 3.3 去重键：**`(doc_id, hash(parent_content))`**；每键保留 `relevance_score` **最高**的一条；`parent_content` 缺失时按该 chunk 自身保留（不参与折叠）。⚠ 必须把 `doc_id` 纳入键（跨文档样板文本会误折叠）；不要用 `heading_path`（实测 `(doc_id, heading_path)` 在 11/51 组里对应多个父块）；不要用全文做 dict key
 - [ ] 3.4 截断顺序改为 **先打分 → 再去重 → 再 `[:TOP_K_RERANK]`**（当前 `retrieval.py:164` 在没有去重的前提下直接 `reranked[:TOP_K_RERANK]`，须把截断移到去重之后）。函数改名 `_dedup_by_parent` 并更新 docstring（当前名 `_dedup_by_doc_id` 与新区义不符）
 - [ ] 3.5 **删除 `RETRIEVAL_MAX_PER_DOC`**（`src/config/settings.py`）—— 不留失效旋钮。连带清理（漏一处即 AttributeError 或契约漂移，完整清单）：
@@ -32,6 +32,7 @@
   - `b9e74e82`（2 文档 / 51 chunk / 12 父块）：期望不再恒为 2
   - `ea84fb72`（3 文档 / 121 chunk / 30 父块）：单文档 85 chunk 的"占满窗口"最强样本（见 5.2）
   - 三例均核对 `dedup done` 的 `dropped` / `kept` 反映真实折叠量
+- [ ] 3.8 **降级路径同样去重**：`src/agents/tools/rag_tools.py` 的 `except TimeoutError` 分支（约 `:144-176`）绕过 `rerank_results`、按检索原始顺序手工构造 `RAGContext`。改后 `search` 不再去重，该路径会重新引入"同一父块被重复渲染"——须让去重步骤在**两条路径**上复用（降级路径同样调用 `_dedup_by_parent` 并落 `dedup done`）
 
 ## 4. 失效资产处置
 
@@ -69,6 +70,6 @@
 - [ ] 8.1 **单文档库不再被压成 1 条**：重放 trace `trace_19e8e472` 的 4 个 query（KB `4a1dcb8b`），iteration-1 的 `retrieve done result_count` ≥ 3（期望 5 = `TOP_K_RERANK`），且不再出现 `rerank done doc_count=1`
 - [ ] 8.2 **循环不再触顶**：同 session 重问"能帮忙查一下腾讯2024年第四季度业绩情况吗"，答案在 `iteration < 5` 产出，日志**不出现** `[agent] iteration limit`
 - [ ] 8.3 **多文档库不再被文档数压顶**：`b9e74e82`（2 文档 / 12 父块）上 `retrieve done result_count` 不再恒为 2
-- [ ] 8.4 **天花板可见**：`dedup done` 的 `kept` 与 `retrieve done` 的 `result_count` 自洽（`dropped = 精排后条数 − kept`）；`dedup_max_per_doc` 字段不再出现在任何 `retrieve replay` 行
+- [ ] 8.4 **天花板可见且口径唯一**：`dedup done` 的 `kept` = **去重后条数（截断前）**，`dropped` = `精排后条数 − kept`；最终 `retrieve done` 的 `result_count` = `min(kept, top_k)`，故恒有 **`result_count ≤ kept`**（截断在去重之后，二者**不要求相等**）；`dedup_max_per_doc` 字段不再出现在任何 `retrieve replay` 行
 - [ ] 8.5 **契约不破**：`pytest tests/ -v` 全绿；`retrieval.search` 返回类型仍为 `list`；`replay_trace` 在**含 `dedup_max_per_doc` 的历史日志行**上仍能解析、不抛错（该字段只被忽略，不被读取）
 - [ ] 8.6 **边界声明**：循环端的提前止损（`retrieval_exhausted`）**不在本变更 DoD 内**。若 8.2 未达成，须先判定是"材料仍不足"还是"循环信号缺失"；后者归后续变更（`docs/superpowers/specs/2026-09-16-retrieval-exhaustion-early-stop-design.md`）
