@@ -147,15 +147,28 @@ def test_langfuse_key_defaults_are_empty():
 
 
 def test_model_price_defaults_to_zero_meaning_unconfigured():
-    """单价默认必须是 0.0 —— 0 是「未配置」的哨兵值（seed CLI 据此跳过）。"""
-    from src.config import MODEL_INPUT_PRICE_PER_TOKEN, MODEL_OUTPUT_PRICE_PER_TOKEN
+    """单价默认必须是 0.0 —— 0 是「未配置」的哨兵值（seed CLI 据此跳过）。
 
-    assert MODEL_INPUT_PRICE_PER_TOKEN == 0.0
-    assert MODEL_OUTPUT_PRICE_PER_TOKEN == 0.0
+    同上的 `.env` reload 陷阱：必须把 `dotenv.load_dotenv` 打成 no-op 并清掉
+    两个键，否则 reload 会从软链 .env 灌回真实单价 —— 那是在测 .env，
+    不是在测内置默认值。
+    """
+    import src.config.settings as _s
+
+    with patch("dotenv.load_dotenv"), patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("MODEL_INPUT_PRICE_PER_TOKEN", None)
+        os.environ.pop("MODEL_OUTPUT_PRICE_PER_TOKEN", None)
+        reloaded = reload(_s)
+        assert reloaded.MODEL_INPUT_PRICE_PER_TOKEN == 0.0
+        assert reloaded.MODEL_OUTPUT_PRICE_PER_TOKEN == 0.0
 
 
 def test_model_price_is_env_driven(monkeypatch):
-    """单价可由环境变量覆盖，且为浮点。"""
+    """单价可由环境变量覆盖，且为浮点。
+
+    两次 reload 都必须在隔离块内：否则退出时 `.env` 会把真实单价写回，
+    污染同会话其他用例。
+    """
     import importlib
 
     monkeypatch.setenv("MODEL_INPUT_PRICE_PER_TOKEN", "0.000003")
@@ -163,10 +176,11 @@ def test_model_price_is_env_driven(monkeypatch):
 
     from src.config import settings as settings_module
 
-    reloaded = importlib.reload(settings_module)
-    assert reloaded.MODEL_INPUT_PRICE_PER_TOKEN == 0.000003
-    assert reloaded.MODEL_OUTPUT_PRICE_PER_TOKEN == 0.000006
+    with patch("dotenv.load_dotenv"), patch.dict(os.environ, {}, clear=False):
+        reloaded = importlib.reload(settings_module)
+        assert reloaded.MODEL_INPUT_PRICE_PER_TOKEN == 0.000003
+        assert reloaded.MODEL_OUTPUT_PRICE_PER_TOKEN == 0.000006
 
-    monkeypatch.delenv("MODEL_INPUT_PRICE_PER_TOKEN")
-    monkeypatch.delenv("MODEL_OUTPUT_PRICE_PER_TOKEN")
-    importlib.reload(settings_module)
+        monkeypatch.delenv("MODEL_INPUT_PRICE_PER_TOKEN")
+        monkeypatch.delenv("MODEL_OUTPUT_PRICE_PER_TOKEN")
+        importlib.reload(settings_module)
