@@ -30,8 +30,8 @@
       "Docker Compose"
     ],
     "description": "金融文档智能问答助手（MVP）：基于 RAG 的财报问答系统，支持上传 PDF/DOCX/TXT 格式的财报文档，用户用自然语言提问后，由大语言模型基于检索到的文档片段生成带引用来源的回答。 注意：本项目源文件超过 100 个，建议将分析范围收窄到某个子目录以加快扫描速度。",
-    "analyzedAt": "2026-09-24T16:54:03.124Z",
-    "gitCommitHash": "49e339f1147121685d2f2618548edde7027a615b"
+    "analyzedAt": "2026-09-24T17:06:45.779Z",
+    "gitCommitHash": "8556eb25b3700d1d0bd20adf1875f80a27d108d6"
   },
   "nodes": [
     {
