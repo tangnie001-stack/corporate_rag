@@ -474,3 +474,44 @@ def test_rerank_dedups_before_truncating(monkeypatch):
     assert len(out) == 2
     assert out[0].chunk_id == "c1"  # 同父块里 .score 最高者
     assert "c4" in [c.chunk_id for c in out]  # 另一父块未被重复项挤掉
+
+
+def test_rerank_dedup_logs_dropped_kept(monkeypatch):
+    """内容级去重折叠时 dedup done 事件记录 dropped/kept。"""
+    parent = "同一段父块正文"
+    results = [
+        _cr("a1", cid="c1", doc_id="d1", parent=parent),
+        _cr("a2", cid="c2", doc_id="d1", parent=parent),
+        _cr("a3", cid="c3", doc_id="d1", parent=parent),
+        _cr("b1", cid="c4", doc_id="d2", parent="另一段父块"),
+    ]
+    logged: list[dict] = []
+    monkeypatch.setattr(
+        retrieval,
+        "log_event",
+        lambda event, **fields: logged.append({"event": event, **fields}),
+    )
+    rerank_results("q", results, _mock_reranker([0.9, 0.89, 0.88, 0.87]))
+    dedup = [e for e in logged if e["event"] == retrieval.Event.DEDUP_DONE]
+    assert len(dedup) == 1
+    assert dedup[0]["dropped"] == 2
+    assert dedup[0]["kept"] == 2
+
+
+def test_rerank_dedup_logs_zero_drop(monkeypatch):
+    """无折叠时 dedup done 事件记录 dropped=0（spec 无丢弃时记零）。"""
+    results = [
+        _cr("a1", cid="c1", doc_id="d1", parent="父块A"),
+        _cr("a2", cid="c2", doc_id="d2", parent="父块B"),
+    ]
+    logged: list[dict] = []
+    monkeypatch.setattr(
+        retrieval,
+        "log_event",
+        lambda event, **fields: logged.append({"event": event, **fields}),
+    )
+    rerank_results("q", results, _mock_reranker([0.9, 0.8]))
+    dedup = [e for e in logged if e["event"] == retrieval.Event.DEDUP_DONE]
+    assert len(dedup) == 1
+    assert dedup[0]["dropped"] == 0
+    assert dedup[0]["kept"] == 2

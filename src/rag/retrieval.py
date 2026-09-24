@@ -227,8 +227,7 @@ def rerank_results(
         )
     before = len(contexts)
     contexts = _dedup_by_parent(contexts)
-    if before != len(contexts):
-        log_event(Event.DEDUP_DONE, dropped=before - len(contexts), kept=len(contexts))
+    log_event(Event.DEDUP_DONE, dropped=before - len(contexts), kept=len(contexts))
     return contexts[:TOP_K_RERANK]
 
 
