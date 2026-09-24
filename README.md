@@ -174,7 +174,7 @@ scripts/dev-worktree.sh down            # 停止
 - 前端 → `http://localhost:8080`（`/api/` 经反代打到本地 8001）
 - 接口 → `http://localhost:8001/docs`
 - 依赖服务（`postgres` / `redis` / `minio` / `langfuse-web`）仍用容器那套，无需另起；脚本已内置宿主侧必需的 `POSTGRES_HOST=localhost`。
-- 首次冷启动在 `/mnt/d`（9p）上约需 1 分钟，脚本会等到健康检查通过再返回。
+- 首次冷启动在 ext4（`/root/code/corporate_rag`）上只需数秒；若仓库落在 `/mnt/d`（9p）上则约需 1 分钟。脚本会等到健康检查通过再返回。
 - 反代配置模板：`deploy/nginx/nginx.dev.conf.template`（与生产 `nginx.conf` 只差 `proxy_pass` 目标）。
 
 > ⚠️ **前端不要只用一个静态服务器**（如 `python3 -m http.server 8080`）：前端全部用相对路径 `fetch('/api/...')`，

@@ -264,14 +264,14 @@
 **步骤**：
 1. 建 worktree —— **必须配新分支**（`dev-wsl` 已被主工作区签出，git 拒绝同一分支签出两处）：
    ```bash
-   git worktree add -b feat/<change 名> /mnt/d/code/demo/AIAgent/corporate_rag-<名字> dev-wsl
+   git worktree add -b feat/<change 名> /root/code/corporate_rag-<名字> dev-wsl
    ```
    目录由 git 创建，**不能预先存在**。分支名用 **`feat/<change 名>`** —— 与历史特性分支 `feat/langfuse-v2`、`feat/intent-routing-upgrade` 一致（`dev-wsl` / `dev-adv-rag` / `dev-wsl-chroma` 是长期环境分支，不属这一类）。
 2. **必须**把 gitignore 的运行时文件带过去 —— **两个都要**，缺任一则该 worktree 跑不起来：
    ```bash
-   W=/mnt/d/code/demo/AIAgent/corporate_rag-<名字>
-   ln -s /mnt/d/code/demo/AIAgent/corporate_rag/.env  "$W/.env"
-   ln -s /mnt/d/code/demo/AIAgent/corporate_rag/.venv "$W/.venv"
+   W=/root/code/corporate_rag-<名字>
+   ln -s /root/code/corporate_rag/.env  "$W/.env"
+   ln -s /root/code/corporate_rag/.venv "$W/.venv"
    ```
    - `.env`：不带则 compose 的 `${POSTGRES_PASSWORD:?}` 直接报错。
    - **`.venv`：不带则该 worktree 里 `git commit` 全部失败** —— pre-commit 的本地钩子 entry 是 `.venv/bin/python -m src.cli.check_docs`（相对路径、按 worktree 解析），没有 `.venv` 就找不到解释器；也跑不了 `pytest` / `ruff` / `pyright`（等于只能在里面空编辑）。**此前本节漏了这一步**（2026-09-23 建隔离 worktree 时踩到，事后补记）。
@@ -324,8 +324,8 @@ scripts/dev-worktree.sh down
 
 **注意事项**：
 
-- **首次冷启动慢**：`/mnt/d`（9p）上 import 全量依赖约需 1 分钟；脚本等健康检查（上限 180s）才返回，未就绪时反代返回 502（看 `logs/dev-uvicorn.log`）。
-- **`down` 要真杀掉后端**：`--reload` 是 supervisor + 子进程，且 `/mnt/d` 上进程可能停在 `D` 状态、SIGTERM 打不进 → 脚本按「谁在监听该端口」兜底结束（`kill_port`）。手工排查同理：**别用 `pkill -f "<模式>"`**，模式串会命中执行它的 shell 自身。
+- **冷启动慢只发生在 9p 上**：仓库现在在 ext4（`/root/code/corporate_rag`），`import src.main` 实测约 3s。若把仓库或其 worktree 放回 `/mnt/d`（9p），同一份代码实测要 40s+（小文件读写比 ext4 慢约 80 倍，`pytest tests/rag` 从 5s 变 43s）。脚本等健康检查（上限 180s）才返回，未就绪时反代返回 502（看 `logs/dev-uvicorn.log`）。
+- **`down` 要真杀掉后端**：`--reload` 是 supervisor + 子进程；在 `/mnt/d`（9p）上进程还可能停在 `D` 状态、SIGTERM 打不进（ext4 上少见）→ 脚本按「谁在监听该端口」兜底结束（`kill_port`）。手工排查同理：**别用 `pkill -f "<模式>"`**，模式串会命中执行它的 shell 自身。
 - **前端不要只起静态服务器**（如 `python3 -m http.server`）：前端用相对路径 `fetch('/api/...')`，无反代时 `/api/*` 全部 404。纯样式预览另见 README「纯前端预览」。
 - **依赖服务仍是共享的那一套**（postgres / redis / minio / langfuse-web）：数据跨 worktree 共享，别做破坏性操作。
 - 该脚本与模板随分支走：**旧分支 / 未合并 `dev-wsl` 的 worktree 里不存在**，需先合并。

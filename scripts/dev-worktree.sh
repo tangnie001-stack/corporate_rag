@@ -46,7 +46,7 @@ port_in_use() {
 }
 
 # 按「谁在监听该端口」结束进程：--reload 的 uvicorn 有 supervisor+子进程，
-# 且 /mnt/d 上进程可能停在 D 状态（SIGTERM 打不进），单靠 pidfile 杀不干净。
+# 且 9p（/mnt/d）上进程可能停在 D 状态（SIGTERM 打不进），单靠 pidfile 杀不干净。
 kill_port() {
     local port="$1" i=0 pids
     while [ "$i" -lt 15 ]; do
@@ -127,7 +127,7 @@ case "$cmd" in
             "$IMAGE" >/dev/null
         echo "前端反代容器已启动：$CONTAINER"
 
-        # 首次冷启动在 /mnt/d（9p）上可能耗时约 1 分钟，故等待放宽到 180s
+        # 冷启动在 ext4 上只需数秒；9p（/mnt/d）上约需 1 分钟，故等待放宽到 180s
         healthy=0
         for _ in $(seq 1 180); do
             if curl -sf -o /dev/null "http://127.0.0.1:${backend_port}/api/health"; then
