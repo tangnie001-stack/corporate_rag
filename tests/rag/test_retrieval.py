@@ -447,3 +447,4 @@ def test_rerank_stats_marks_fallback_source():
     assert out["scored"] == "fallback"
     assert out["score_max"] == 1.0
     assert out["score_min"] == 0.0
+    assert out["score_p50"] == 0.5
