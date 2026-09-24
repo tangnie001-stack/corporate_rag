@@ -340,6 +340,18 @@ LANGFUSE_HOST: str = os.getenv("LANGFUSE_HOST", "http://langfuse-web:3000")
 # 全局开关：false 时完全不产出 trace（且不影响对话）
 LANGFUSE_ENABLE: bool = os.getenv("LANGFUSE_ENABLE", "true").lower() == "true"
 
+# ====== 模型定价（Langfuse 成本计算）======
+# 供 seed CLI 写入 Langfuse 的模型定义；**单位是 USD / 单个 token**（不是每 1M）。
+# 例：$3 per 1M tokens 要填 0.000003。
+# 0.0 是哨兵值，表示「未配置」：seed CLI 会跳过，不在 Langfuse 里留下会被误读成
+# 「免费」的零价模型定义。
+MODEL_INPUT_PRICE_PER_TOKEN: float = float(
+    os.getenv("MODEL_INPUT_PRICE_PER_TOKEN", "0")
+)
+MODEL_OUTPUT_PRICE_PER_TOKEN: float = float(
+    os.getenv("MODEL_OUTPUT_PRICE_PER_TOKEN", "0")
+)
+
 # ====== 分块质量评估 ======
 # 分块质量评估开关：true 时上传文件后自动跑 3 个质量指标
 # 默认关闭，不影响现有流程
