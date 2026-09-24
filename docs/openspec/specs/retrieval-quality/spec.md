@@ -4,13 +4,19 @@
 TBD - created by archiving change mvp-core-features. Update Purpose after archive.
 ## Requirements
 ### Requirement: Retrieval parameter configuration
-The system SHALL keep `TOP_K_RETRIEVAL` and `TOP_K_RERANK` configurable via environment variables in `src/config/settings.py`, defaulting to 10 and 5 respectively.
+The system SHALL keep `TOP_K_RETRIEVAL` and `TOP_K_RERANK` configurable via environment variables in `src/config/settings.py`, defaulting to 30 and 5 respectively.
 
 The system SHALL support overriding these values at evaluation time without modifying source code.
 
+`TOP_K_RETRIEVAL` SHALL bound each retrieval branch's fetch size (the dense path and the lexical path each fetch up to this many). It SHALL NOT be read as the exact size of the rerank input: on the hybrid path the rerank input is the RRF-fused result, whose size is bounded by `RRF_TOP_N`. The effective number of chunks entering the model SHALL be bounded by `TOP_K_RERANK` downstream.
+
 #### Scenario: Parameter override via environment
 - **WHEN** user sets `TOP_K_RETRIEVAL=15` and `TOP_K_RERANK=8` in `.env`
-- **THEN** the RAG pipeline SHALL use 15 initial retrieval results and keep 8 after reranking
+- **THEN** the RAG pipeline SHALL fetch up to 15 results **per retrieval branch** and keep 8 after reranking（15 为**各支路**各取 15；hybrid 路径送入精排的是 RRF 融合结果，其上界为 `RRF_TOP_N`，不等于 15）
+
+#### Scenario: 候选池不构成最终上下文条数
+- **WHEN** `TOP_K_RETRIEVAL` 配置大于 `TOP_K_RERANK`
+- **THEN** 进入模型的 chunk 条数 SHALL 不超过 `TOP_K_RERANK`；`TOP_K_RETRIEVAL` 只约束各支路取数，**不构成精排输入的上界**（hybrid 路径的精排输入上界为 `RRF_TOP_N`）
 
 ### Requirement: Short query handling
 The system SHALL handle short queries (under 5 Chinese characters) gracefully by:
@@ -24,13 +30,19 @@ The system SHALL handle short queries (under 5 Chinese characters) gracefully by
 ### Requirement: Cross-document aggregation
 When a query requires information spread across multiple chunks from different documents within the same KB, the RAG chain SHALL aggregate context from up to TOP_K_RERANK chunks regardless of which document they originate from.
 
+The selection of those chunks SHALL be decided by rerank relevance, not by a per-document quota: multiple chunks originating from the same document SHALL remain eligible when they are the most relevant candidates.
+
 #### Scenario: Cross-document query returns aggregated results
 - **WHEN** user asks a question whose answer spans multiple documents in the same KB
 - **THEN** the response SHALL include information from all relevant documents, with citations tracing back to each source document
 
+#### Scenario: 单文档多片段不被截断
+- **WHEN** 一个问题需要同一文档的多个不同片段（如跨章节的指标与说明）
+- **THEN** 该文档的多个片段 SHALL 能同时进入精排候选，且不因"每文档配额"被提前丢弃
+
 ### Requirement: Retrieval quality comparison
 The system SHALL provide a CLI command to compare retrieval quality across different parameter combinations:
-- TOP_K_RETRIEVAL: 5, 10, 15
+- TOP_K_RETRIEVAL: 10, 30, 50
 - TOP_K_RERANK: 3, 5, 8
 
 Results SHALL include average relevance score and recall@K metrics per combination.
@@ -55,6 +67,8 @@ Results SHALL include average relevance score and recall@K metrics per combinati
 
 删除 classify 节点与固定流水线后，系统 SHALL 将空检索的 abstention 触发全部改为"模型决策"：`retrieve_kb` 返回空结果（或证据不足）时作为普通工具结果回喂模型，模型 SHALL 基于证据情况自行选择——输出 abstention 文案、调用 `ask_user` 追问、调用 `escalate_to_human` 转人工、调用 `search_web` 联网补充、或基于已有证据作答。不再存在"确定性 abstention 分支"。
 
+`retrieve_kb` SHALL 只检索会话绑定的那一个知识库；不存在按 query 与 KB 元数据相似度自动选库的路径。
+
 #### Scenario: 空检索模型决策
 - **WHEN** retrieve_kb 返回空结果
 - **THEN** 模型收到空工具结果后自行决定 abstain / 追问 / 转人工 / 联网搜索，不由流水线硬编码判断
@@ -63,9 +77,9 @@ Results SHALL include average relevance score and recall@K metrics per combinati
 - **WHEN** retrieve_kb 结果为空或全部明显不相关
 - **THEN** 模型 SHALL 提炼核心实体换一种问法再次检索；仍无相关结果时 SHALL 调用 search_web 联网搜索补充，回答先说明"该问题不在当前知识库范围内"；web 搜索关闭或失败时走纯拒答
 
-#### Scenario: KB 未解析 → 语义选库检索
-- **WHEN** kb_router 未解析出知识库（如无 user_id）
-- **THEN** retrieve_kb 以语义匹配 query 与各 KB 的 name+description，选中相似度最高的 1 个知识库进行检索；匹配失败（无 KB 或相似度低于阈值）时返回空工具结果，模型按 abstain / ask_user / escalate / search_web 决策，不触发旧确定性 abstention 文案
+#### Scenario: 未绑定 KB 时不检索
+- **WHEN** 会话未绑定知识库（`kb_id` 为空）
+- **THEN** retrieve_kb SHALL 直接返回空结果，不触发跨库检索
 
 ### Requirement: Context rendering includes entity metadata
 
@@ -117,20 +131,6 @@ The system SHALL carry entity metadata from the `chunks` table through the reran
 
 - **WHEN** 答案正常带 [n] 引用
 - **THEN** 产生 `signal=cited` 对照基线信号，引用 kind 区分 kb/web
-
-### Requirement: 检索去重策略参数化
-
-系统 SHALL 将检索结果按 doc_id 去重的策略参数化（每文档保留条数可配置，`RETRIEVAL_MAX_PER_DOC`，默认 1 保持现状），支持多样性对照实验评估最优值。
-
-#### Scenario: 每文档保留多条的多样性对照
-
-- **WHEN** 配置 `RETRIEVAL_MAX_PER_DOC=2` 重新评估同一小测试集
-- **THEN** 检索结果保留每文档最多 2 条参与 rerank，与默认 1 条的结果可用 RAGAS 指标对照
-
-#### Scenario: 默认行为不回归
-
-- **WHEN** 未配置 `RETRIEVAL_MAX_PER_DOC`（保持默认 1）
-- **THEN** 检索去重行为与现状一致（每文档最先出现的结果保留）
 
 ### Requirement: 迁移等价性与词项命中探针
 

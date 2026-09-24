@@ -41,8 +41,42 @@ TBD - created by archiving change web-search-fallback. Update Purpose after arch
 
 ### Requirement: 检索结果去重
 
-检索结果 SHALL 按 doc_id 去重（保留每个文档最先出现的结果），去重位置在 RRF 融合后、rerank 前，保证候选多样性，避免重复文档占满检索窗口。
+检索结果 SHALL 做**内容级**去重：同一文档内同一父块下的多个 chunk 只保留**代表分最高**的一条。去重位置 SHALL 在 rerank **之后**、截断 `TOP_K_RERANK` 之前，输出按 `.score` 降序。
 
-#### Scenario: 重复文档去重
-- **WHEN** 同一文档存在多个副本（重复入库）
-- **THEN** 检索结果 SHALL 只保留该文档最先出现的结果，去重后再执行 rerank
+去重键 SHALL 同时包含文档标识与父块内容标识（`doc_id` + 父块内容的哈希）。系统 SHALL NOT 只按父块内容去重 —— 跨文档的样板文本可能逐字相同，只按内容去重会误折叠真实候选。去重单位 SHALL 是内容（父块），不是文档：同一文档的多个不同父块全部保留，系统 SHALL NOT 施加任何"每文档保留 N 条"的配额。
+
+代表分的取值 SHALL 按每条候选最终的 `.score` 取每父块最高者（输入 `list[RAGContext]`）。分数语义按来源分三态：精排成功为 `relevance_score`；`rerank_results` 内部异常（`RERANK_FAILED`）回退为 `1 - distance`；精排超时（`rag_tools.py` 的 `except TimeoutError`）回退为 `1 - distance`。三种情形下按最终 `score` 取最高 SHALL 一致正确。
+
+去重 SHALL 对**所有**检索返回路径生效，包括精排超时的降级路径（该路径不进入精排、按检索原始顺序返回，若不应用去重同一父块会被重复渲染）。
+
+`retrieval.search` SHALL NOT 在检索入口做去重。
+
+chunk 缺少父块内容时 SHALL 按自身保留（不去重）。
+
+#### Scenario: 同父块多 chunk 只留一条
+- **WHEN** 同一文档内出现同一父块下的多个 chunk
+- **THEN** 精排后只保留精排分最高的一条，其余不进入最终上下文
+
+#### Scenario: 保留的是最高分而非最先出现
+- **WHEN** 同一父块下有多个 chunk，且其中一条精排分高于其余
+- **THEN** SHALL 保留该最高分 chunk 作为该父块的代表，SHALL NOT 按融合顺序取最先出现的一条
+
+#### Scenario: 跨文档相同文本不被折叠
+- **WHEN** 两个不同文档各自有一个内容逐字相同的父块
+- **THEN** 它们 SHALL 被视为两个不同的父块、各自保留，不得只留其一
+
+#### Scenario: 同文档多父块全部保留
+- **WHEN** 同一文档的多个不同父块同时被召回
+- **THEN** 它们 SHALL 全部进入精排候选，不被每文档条数限制截断
+
+#### Scenario: 去重发生在精排之后
+- **WHEN** 一次检索完成精排
+- **THEN** 去重 SHALL 在精排分数产出之后、截断 `TOP_K_RERANK` 之前执行，使被折叠条目的取舍依据是精排分而非融合名次
+
+#### Scenario: 精排降级路径同样去重
+- **WHEN** 精排超时（`rerank timeout`）走降级路径、按检索原始顺序返回
+- **THEN** 该路径 SHALL 同样应用内容级去重，同一父块只保留**该父块内 `1 - distance` 最高**的一条，且 SHALL 产生 `dedup done` 事件（该路径无精排，`dropped` 取 **检索后条数 − 去重后条数**）
+
+#### Scenario: 无父块内容时不去重
+- **WHEN** 检索结果的 chunk 没有父块内容
+- **THEN** 该 chunk SHALL 按自身保留，不参与内容级去重
