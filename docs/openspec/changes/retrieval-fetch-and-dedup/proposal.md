@@ -6,6 +6,8 @@
 2. **候选池被配置缩到 8**（`settings.py` 代码默认 50，`.env` 覆盖为 8），库覆盖率仅 0.5%；千文档规模下为 0.013%。
 3. **取数过程不可观测**：`RERANK_DONE` 不记分数（无法校准任何阈值），`RETRIEVE_DONE` 不记去重丢弃量（天花板不可见）。（分路计数 `dense_count` / `sparse_count` 已在 `hybrid done` 落盘，见在效 spec「稀疏支路贡献可见」。）
 
+触发本变更的 trace 有两条，**同一根因、不同表现**：`c54ce259`（2026-09-16，2 文档库 → 天花板恒为 2）与 `trace_19e8e472`（2026-09-23，单文档库 `4a1dcb8b` → 天花板恒为 1，agent 连查 4 轮后第 5 轮触顶 `[agent] iteration limit`）。§8 的 DoD 8.1/8.2 以后者为验证对象。
+
 同域对照：WeKnora `DefaultRetrievalTopK = 50`、精排后 10；业界推荐候选池 30~100、精排后 5~10。**两家均无"每文档保留 N 条"这一类约束**，WeKnora 的有效去重是"每父块 1 条"。决策理由与代价见 `docs/adr/0001-retrieval-fetch-and-dedup-scope.md`。
 
 同时刻发现 `retrieval-quality` spec 存在 3 处存量 drift（默认值与代码不符、评测矩阵区间过期、语义选库已废弃），一并修正。其中第三处不是"与代码不符"这么轻 —— **它与另一份在效 spec 直接矛盾**：`kb-routing` spec 已明写"跨库'所有知识库'语义路由 SHALL 废弃…不再对用户查询做知识库语义匹配"，而 `retrieval-quality:66-68` 仍在要求"以语义匹配 query 与各 KB 的 name+description，选中相似度最高的 1 个知识库进行检索"。
@@ -15,7 +17,7 @@
 ## What Changes
 
 - **BREAKING** 检索去重两处改动：① 去重单位从**文档**（`doc_id`）改为**内容**（父块），每父块保留 1 条；② 去重位置从 rerank **之前**移到 **之后**，每父块保留**精排分最高**的一条（代表权由相关性而非融合名次决定）。无 `parent_content` 的 chunk 按自身保留。
-- 候选池 `TOP_K_RETRIEVAL` 默认值改为 **30**（已先行落地：`src/config/settings.py:243`、`.env`、`README.md:283`）。
+- 候选池 `TOP_K_RETRIEVAL` 默认值改为 **30**（已先行落地：`src/config/settings.py:243`、`.env`、`README.md:283`）。**注意**：它约束的是**各支路取数**，不是精排输入的上界（后者为 `RRF_TOP_N`）—— 见 design D3 的"口径更正"。
 - 补全取数观测：
   - `[retrieval] rerank done` 增 `score_max` / `score_min` / `score_p50` 与分数来源标记 `scored`（`rerank` | `fallback`；降级路径的 `1 - distance` 分数须可剔除）
   - 新增 `[retrieval] dedup done` 事件，记录 `dropped` / `kept`（**不改 `retrieval.search` 的返回契约**）

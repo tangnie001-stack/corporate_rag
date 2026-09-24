@@ -5,15 +5,15 @@ The system SHALL keep `TOP_K_RETRIEVAL` and `TOP_K_RERANK` configurable via envi
 
 The system SHALL support overriding these values at evaluation time without modifying source code.
 
-`TOP_K_RETRIEVAL` SHALL be treated as the candidate pool size fed into rerank, not as a final context size; the effective number of chunks entering the model SHALL be bounded by `TOP_K_RERANK` downstream.
+`TOP_K_RETRIEVAL` SHALL bound each retrieval branch's fetch size (the dense path and the lexical path each fetch up to this many). It SHALL NOT be read as the exact size of the rerank input: on the hybrid path the rerank input is the RRF-fused result, whose size is bounded by `RRF_TOP_N`. The effective number of chunks entering the model SHALL be bounded by `TOP_K_RERANK` downstream.
 
 #### Scenario: Parameter override via environment
 - **WHEN** user sets `TOP_K_RETRIEVAL=15` and `TOP_K_RERANK=8` in `.env`
 - **THEN** the RAG pipeline SHALL use 15 initial retrieval results and keep 8 after reranking
 
 #### Scenario: 候选池不构成最终上下文条数
-- **WHEN** 候选池配置大于 `TOP_K_RERANK`
-- **THEN** 进入模型的 chunk 条数 SHALL 不超过 `TOP_K_RERANK`，候选池大小只影响精排的输入
+- **WHEN** `TOP_K_RETRIEVAL` 配置大于 `TOP_K_RERANK`
+- **THEN** 进入模型的 chunk 条数 SHALL 不超过 `TOP_K_RERANK`；`TOP_K_RETRIEVAL` 只约束各支路取数，**不构成精排输入的上界**（hybrid 路径的精排输入上界为 `RRF_TOP_N`）
 
 ### Requirement: Cross-document aggregation
 When a query requires information spread across multiple chunks from different documents within the same KB, the RAG chain SHALL aggregate context from up to TOP_K_RERANK chunks regardless of which document they originate from.

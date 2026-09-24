@@ -10,6 +10,8 @@
 
 **降级分数必须可辨**：精排调用失败时（`rerank failed`）系统回退为 `1 - distance` 造的分数，其量纲与语义不同于精排相关性分。这些样本 SHALL 以 `scored=fallback` 落盘，SHALL NOT 与 `scored=rerank` 的样本混入同一分布 —— 否则阈值校准与形态判别会被非精排分数污染。
 
+精排**超时**路径（`rag_tools.py` 的 `except TimeoutError`）不在本要求范围内：它不落 `rerank done`，其 `1 - distance` 分数天然不进入该分布。
+
 #### Scenario: 精排分数可见
 - **WHEN** 一次 `rerank` 执行完成
 - **THEN** 日志中的 `rerank done` 行 SHALL 出现 `score_max` / `score_min` / `score_p50` 与 `scored`

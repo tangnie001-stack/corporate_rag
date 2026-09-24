@@ -7,7 +7,7 @@ dense(TOP_K_RETRIEVAL) + 词法(TOP_K_RETRIEVAL，PG 全文检索)
   → rrf_fusion            （retrieval.py:87-88）
   → _dedup_by_doc_id      （retrieval.py:102 hybrid / :116 非 hybrid）★ 在 rerank 之前
   → rerank_results        （retrieval.py:120-197，取前 TOP_K_RERANK）
-  → rag_tools.py:180 contexts[:top_k]
+  → rag_tools.py:177 contexts[:top_k]
 ```
 
 **改后**（去重移到精排之后，按父块折叠、保留最高分 —— 见 D2）：
@@ -17,7 +17,7 @@ dense + 词法 → rrf_fusion
   → rerank_results        （对全部融合候选打分，不再先截断）
   → _dedup_by_parent      （按 (doc_id, 父块内容哈希) 折叠，每父块保留精排分最高的一条）
   → 截断 TOP_K_RERANK
-  → rag_tools.py:180 contexts[:top_k]
+  → rag_tools.py:177 contexts[:top_k]
 ```
 
 约束与现状：
@@ -26,7 +26,7 @@ dense + 词法 → rrf_fusion
 - **去重位置在 rerank 之前**：`rerank done doc_count=<去重后条数>`（`retrieval.py:194` 记的是 rerank 的**输入**），所以精排无法在"同一文档的多个候选"之间做选择。
 - **父块正文会被重复渲染**：`retrieval.py:168-172` 用 `parent_content` 覆盖 chunk 正文，`context.py:60` 渲染的正是它。实测一父块约 1998 字符、被 3.25~3.9 个 chunk 共享 —— 只要同一父块的多个 chunk 同时进入结果，就会输出逐字相同的正文。现状 `每文档 1 条` 恰好掩盖了这一点。
 - **观测缺口**：`rerank done` 只记输入条数与 query 长度（`retrieval.py:191-196`）；`retrieve done` 只记最终条数（`rag_tools.py:217-223`）。**精排分数分布**与**去重丢弃量**不可见。（分路贡献 `dense_count` / `sparse_count` 已由在效 spec「稀疏支路贡献可见」要求并在 `hybrid done` 落盘，不属缺口。）
-- **多库路径已死**：`retrieval.search` 的唯一生产调用方是 `rag_tools.py:136` 且 `kb_id` 恒非空（`:135` 守卫）→ `retrieval.py:98-105` 的 `not kb_id` 分支生产不可达。
+- **多库路径已死**：`retrieval.search` 的唯一生产调用方是 `rag_tools.py:133`；`kb_id` 为空时 `rag_tools.py:132` 直接不调 `search` → `search` 从不在空 `kb_id` 下被调用（`search` 自身没有 `kb_id` 空分支）。
 - **规模前提**（2026-09-18 确认）：正式测试几十文档 / 生产几百 / 长期千；实测每文档 25~40 chunk（单个年报可达 85 chunk）。三种规模下 `文档数 × N` 均非绑定约束，`TOP_K_RETRIEVAL` 才是。
 
 决策记录见 `docs/adr/0001-retrieval-fetch-and-dedup-scope.md`。
@@ -85,13 +85,15 @@ dense + 词法 → rrf_fusion
 
 **降级路径同样必须去重**：`rag_tools.py` 的 `except TimeoutError` 分支（约 `:144-176`）在精排超时时**不进入** `rerank_results`，而是用检索原始顺序手工构造 `RAGContext`。改后 `search` 不再去重 → 这条路径会把"同一父块被重复渲染"重新引入（正是 D1 要消除的现象）。因此去重 SHALL 抽成可在两条路径上复用的步骤，降级路径同样调用它并落 `dedup done`；否则本变更净引入一条新的重复渲染回归。
 
+**代表分由调用方显式给出**：`_dedup_by_parent` 不内部自取分数，而是接受调用方给出的"代表分"——rerank 路径取 `relevance_score`（精排分最高者代表父块），精排超时降级路径取 `1 - distance`（与 `rag_tools.py` 降级分支现有的 `score=1-distance` 同源）。两条路径的分数语义不同，混用一种取值会让"保留最高分"在降级路径上退化成"保留 RRF 首条"。
+
 ### D3：`TOP_K_RETRIEVAL` 取 30
 
 **候选**：30 / 50 / 150。
 
 - WeKnora `DefaultRetrievalTopK = 50`；业界推荐 30~100；本仓库 `requirements_pool.md` F-05 曾提 50~150。
-- 实测候选池 50：精排耗时 468~735 ms，`RERANK_TIMEOUT=5` 有 7 倍余量 → 耗时不是约束。
-- 取 30 的依据是**精排成本**（按输入文档数计费，降约 40%）；**召回损失未测**。
+- 实测精排输入 50 条：耗时 468~735 ms，`RERANK_TIMEOUT=5` 有 7 倍余量 → 耗时不是约束。
+- **口径更正**：`TOP_K_RETRIEVAL` 约束**各支路取数**（dense 与词法各取至多 30 条），**不是**精排输入的上界 —— hybrid 路径喂精排的是 RRF 融合结果，其上界是 `RRF_TOP_N`（当前 50；本 trace 实测融合结果 30~35 条，未构成绑定约束）。因此本变更**不主张**"精排成本降约 40%"：该说法默认了精排输入随 `TOP_K_RETRIEVAL` 缩小，而实际上 `RRF_TOP_N` 未动。若确要压缩精排成本，应下调 `RRF_TOP_N`（见 Open Questions）。**召回损失未测**。
 - 已先行落地于 `src/config/settings.py:243` / `.env` / `README.md`。
 
 **取舍已记录在 ADR-0001 的「接受的代价」与复查触发条件**（top1 落在 0.2~0.5 灰区的 query 占比升高 → 先试 50）。
@@ -132,7 +134,7 @@ dense + 词法 → rrf_fusion
 - **[`parent_content` 缺失的 chunk 不受约束]** → 33/51 有父块。缺失时退化为按自身保留，等价于不去重；结果是这部分 chunk 仍可能重复进入结果。**接受的代价**：宁可放过，不可错杀（错杀会丢召回）。
 - **[日志体积增大]** → 只加分位数，不加全量列表（D4）；新字段走 `logging-rules.md` 开放登记制。
 - **[`compare_dedup.py` 已作废]** → 其网格 `{1,2,3}` 与 `RETRIEVAL_MAX_PER_DOC` 一并退出（口径改成父块级后无可调参数，无 A/B 可言）。**不可只留 TODO** —— 它评的链路已改口径，跑出来是另一件事，留着会误导后续实验。作废需在 glossary 注明。
-- **[精排成本上升]** → 两重放大：候选池 8→30（约 3.75 倍）+ 去重后移到精排之后（精排输入从"去重后条数"变为"全部融合候选"）。30 是为成本取的折中；耗时不是约束（50 条输入仍 < 1s，`RERANK_TIMEOUT=5`），但**费用按输入条数计**，需在采样时记录成本（tasks 5.5）；若召回受损需回调（见 D3）。
+- **[精排输入与成本]** → **确定**的放大只有一处：去重后移到精排之后，精排输入从"去重后条数"变为"全部融合候选"（上界 `RRF_TOP_N`，本 trace 实测 30~35 条）。`TOP_K_RETRIEVAL` 8→30 **不改变**该上界（融合结果被 `RRF_TOP_N` 截断），故**不主张**它带来成本变化（见 D3 的口径更正）。耗时不是约束（50 条输入 < 1s，`RERANK_TIMEOUT=5`）；**费用按输入条数计**，需在采样时记录（tasks 5.5）。
 - **[`retrieval-quality` spec 的 drift 修正属于"顺手改"]** → 三处 drift（默认值 10/5、评测矩阵 5/10/15、语义选库）都不是本变更引入的，但都在同一份 spec 里且与本变更同域。**若不修，spec 会继续与代码不符**；修则扩大 diff。选择修，并在 tasks 里单列，便于 reviewer 分辨。
 
 ## Migration Plan
@@ -155,3 +157,4 @@ dense + 词法 → rrf_fusion
 2. **候选池 30 的召回损失**：待 D4 数据积累后复核，必要时回调 50。
 3. **`ea84fb72`（121 chunk / 3 文档 / 单文档 85 chunk）未纳入先前的临时采样**：它是"单文档占满窗口"风险的最强样本，**必须**纳入正式采样（见 tasks 5.2）。
 4. **`compare_dedup.py` 的去留**：改造为内容级 A/B，还是标记作废并在 glossary 注明？
+5. **`RRF_TOP_N` 是否下调**：它才是精排输入的真实上界（当前 50）。若要压缩精排成本/上下文规模，应动它而非 `TOP_K_RETRIEVAL`。本变更不动，记为后续项（改动它会同时影响召回面，需单独评估）。
