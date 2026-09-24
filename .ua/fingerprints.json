@@ -1,7 +1,7 @@
 {
   "version": "1.0.0",
-  "gitCommitHash": "7f1df70a86a504655ea29a7a025796341f4a348e",
-  "generatedAt": "2026-09-24T08:23:50.111Z",
+  "gitCommitHash": "49e339f1147121685d2f2618548edde7027a615b",
+  "generatedAt": "2026-09-24T16:54:04.695Z",
   "files": {
     ".agents/skills/frontend-design/LICENSE.txt": {
       "filePath": ".agents/skills/frontend-design/LICENSE.txt",
@@ -3737,7 +3737,7 @@
     },
     "src/agents/tools/rag_tools.py": {
       "filePath": "src/agents/tools/rag_tools.py",
-      "contentHash": "29d8ef81efd7de06b865fe9473c6cc8b0d4e4e79d12887b915e744e87d9c343f",
+      "contentHash": "1e99d2dde1cc6b8b552421a2373a3bfb9308ebbe07a2a1e86391649b70b4ec44",
       "functions": [
         {
           "name": "make_rag_tools",
@@ -3749,7 +3749,7 @@
           ],
           "returnType": "list[BaseTool]",
           "exported": true,
-          "lineCount": 185
+          "lineCount": 191
         }
       ],
       "classes": [
@@ -3896,7 +3896,7 @@
         "RetrieveKBArgs",
         "make_rag_tools"
       ],
-      "totalLines": 247,
+      "totalLines": 253,
       "hasStructuralAnalysis": true
     },
     "src/agents/tools/readonly.py": {
@@ -6970,7 +6970,7 @@
     },
     "src/cli/README.md": {
       "filePath": "src/cli/README.md",
-      "contentHash": "84e213e7b8a00a694c09171908c498d39da4d2d8cc269371b1524244e97fac86",
+      "contentHash": "d35cbca53e63d9e39032414cb6a0a2a5dab914e9ba388b728f906609ff63f1b7",
       "functions": [],
       "classes": [],
       "imports": [],
@@ -7545,78 +7545,9 @@
       "totalLines": 106,
       "hasStructuralAnalysis": true
     },
-    "src/cli/compare_dedup.py": {
-      "filePath": "src/cli/compare_dedup.py",
-      "contentHash": "f0b883f16ef92b28e723f78f22d0d37b7802502aeca63ddbaf29cc78ae1bdd5e",
-      "functions": [
-        {
-          "name": "run_eval_with_dedup",
-          "params": [
-            "max_per_doc",
-            "kb_id"
-          ],
-          "returnType": "dict[str, float]",
-          "exported": true,
-          "lineCount": 43
-        },
-        {
-          "name": "main",
-          "params": [],
-          "returnType": "None",
-          "exported": true,
-          "lineCount": 29
-        }
-      ],
-      "classes": [],
-      "imports": [
-        {
-          "source": "argparse",
-          "specifiers": [
-            "argparse"
-          ]
-        },
-        {
-          "source": "asyncio",
-          "specifiers": [
-            "asyncio"
-          ]
-        },
-        {
-          "source": "os",
-          "specifiers": [
-            "os"
-          ]
-        },
-        {
-          "source": "subprocess",
-          "specifiers": [
-            "subprocess"
-          ]
-        },
-        {
-          "source": "sys",
-          "specifiers": [
-            "sys"
-          ]
-        },
-        {
-          "source": "src.cli.compare_retrieval",
-          "specifiers": [
-            "_resolve_kb_id",
-            "parse_metrics"
-          ]
-        }
-      ],
-      "exports": [
-        "run_eval_with_dedup",
-        "main"
-      ],
-      "totalLines": 105,
-      "hasStructuralAnalysis": true
-    },
     "src/cli/compare_retrieval.py": {
       "filePath": "src/cli/compare_retrieval.py",
-      "contentHash": "66f2760c5f350e3b041e9be092a080f2bd6b9ae766cb378f82ff7aa118beac80",
+      "contentHash": "9dbb8fc6cf302cb0bcac5cd6f9ee966ba39bedfb2e7f87ceaba09a9e71b587e9",
       "functions": [
         {
           "name": "_resolve_kb_id",
@@ -8017,7 +7948,7 @@
     },
     "src/cli/eval_ragas.py": {
       "filePath": "src/cli/eval_ragas.py",
-      "contentHash": "524dbbe6303ccdddeb15a3c258c77a80c702a30f19197c895aba00c82d99989b",
+      "contentHash": "738ebfeed92464b8b750f456f0a32e3ff68d1f006af1a9ae90311d88dd068ad0",
       "functions": [
         {
           "name": "parse_args",
@@ -8397,7 +8328,7 @@
     },
     "src/cli/replay_trace.py": {
       "filePath": "src/cli/replay_trace.py",
-      "contentHash": "afab69f9669ea712b57e16bce07c978338e3c73f19a9375fb44d1218a0a4d22f",
+      "contentHash": "ec756de21a032e8e133c4b7fc6265a7d33c63ca8be68afa594f9c020ea7a7433",
       "functions": [
         {
           "name": "parse_log_line",
@@ -8426,7 +8357,7 @@
           ],
           "returnType": "None",
           "exported": true,
-          "lineCount": 34
+          "lineCount": 28
         },
         {
           "name": "_replay_all",
@@ -8527,7 +8458,7 @@
         "_replay_all",
         "main"
       ],
-      "totalLines": 138,
+      "totalLines": 132,
       "hasStructuralAnalysis": true
     },
     "src/cli/symptom_metrics.py": {
@@ -9181,7 +9112,7 @@
     },
     "src/config/settings.py": {
       "filePath": "src/config/settings.py",
-      "contentHash": "6c176a4a0a5471ce6ec36dd48cf4fa7f298ded73f33d7a028c174db6aad0104d",
+      "contentHash": "769c7356190314a05096fabd94725e99adab0b500383014ece9d20a54a5bc338",
       "functions": [
         {
           "name": "build_postgres_dsn",
@@ -9223,7 +9154,7 @@
         "build_postgres_dsn",
         "build_langfuse_postgres_dsn"
       ],
-      "totalLines": 347,
+      "totalLines": 345,
       "hasStructuralAnalysis": true
     },
     "src/core/__init__.py": {
@@ -9238,7 +9169,7 @@
     },
     "src/core/log_event_specs.py": {
       "filePath": "src/core/log_event_specs.py",
-      "contentHash": "9e7535ad92d1eb12eb5e3ca060ca614206b671c7337e4e9d153285c67b95b71d",
+      "contentHash": "18a149b11c646a41d365ba856c36227661c535828f7528be8604fc218ceea232",
       "functions": [],
       "classes": [
         {
@@ -9265,12 +9196,12 @@
       "exports": [
         "EventSpec"
       ],
-      "totalLines": 381,
+      "totalLines": 384,
       "hasStructuralAnalysis": true
     },
     "src/core/log_events.py": {
       "filePath": "src/core/log_events.py",
-      "contentHash": "e81d86b70c3968e73e455892cbb819205712383996d102dae19de39a4006fdb9",
+      "contentHash": "3dc31ce4288ccc2f4cb1c57904c3da2e97603b7bac998c140733077a44e56d14",
       "functions": [
         {
           "name": "_validate_registry",
@@ -9296,7 +9227,7 @@
           "methods": [],
           "properties": [],
           "exported": true,
-          "lineCount": 157
+          "lineCount": 158
         },
         {
           "name": "ReplayEvent",
@@ -9307,12 +9238,11 @@
             "kb_id",
             "iteration",
             "top_k",
-            "dedup_max_per_doc",
             "hybrid",
             "rerank"
           ],
           "exported": true,
-          "lineCount": 21
+          "lineCount": 19
         }
       ],
       "imports": [
@@ -9342,7 +9272,7 @@
         "ReplayEvent",
         "_validate_registry"
       ],
-      "totalLines": 243,
+      "totalLines": 242,
       "hasStructuralAnalysis": true
     },
     "src/core/logging.py": {
@@ -13460,17 +13390,16 @@
     },
     "src/rag/retrieval.py": {
       "filePath": "src/rag/retrieval.py",
-      "contentHash": "e1ae84fcc2fb39e62b781276bc716db511511bb0e3c51299c0048e1c1e8327ac",
+      "contentHash": "91709287b107a6223bb5ed63ec1b3ecfc557d4c5c79b62d71c756398150e2dfd",
       "functions": [
         {
-          "name": "_dedup_by_doc_id",
+          "name": "_dedup_by_parent",
           "params": [
-            "results",
-            "max_per_doc"
+            "contexts"
           ],
-          "returnType": "list[ChunkResult]",
+          "returnType": "list[RAGContext]",
           "exported": true,
-          "lineCount": 30
+          "lineCount": 27
         },
         {
           "name": "search",
@@ -13481,7 +13410,17 @@
           ],
           "returnType": "list[ChunkResult]",
           "exported": true,
-          "lineCount": 51
+          "lineCount": 49
+        },
+        {
+          "name": "_rerank_stats",
+          "params": [
+            "reranked",
+            "used_fallback"
+          ],
+          "returnType": "dict",
+          "exported": true,
+          "lineCount": 31
         },
         {
           "name": "rerank_results",
@@ -13492,7 +13431,7 @@
           ],
           "returnType": "list[RAGContext]",
           "exported": true,
-          "lineCount": 78
+          "lineCount": 84
         },
         {
           "name": "expand_query",
@@ -13543,6 +13482,12 @@
           ]
         },
         {
+          "source": "hashlib",
+          "specifiers": [
+            "hashlib"
+          ]
+        },
+        {
           "source": "src.config",
           "specifiers": [
             "HYBRID_SEARCH_ENABLED",
@@ -13552,8 +13497,7 @@
             "RRF_K",
             "RRF_TOP_N",
             "TOP_K_RERANK",
-            "TOP_K_RETRIEVAL",
-            "settings"
+            "TOP_K_RETRIEVAL"
           ]
         },
         {
@@ -13615,15 +13559,16 @@
         }
       ],
       "exports": [
-        "_dedup_by_doc_id",
+        "_dedup_by_parent",
         "search",
+        "_rerank_stats",
         "rerank_results",
         "expand_query",
         "condense_query",
         "decompose_query",
         "rewrite_query"
       ],
-      "totalLines": 257,
+      "totalLines": 291,
       "hasStructuralAnalysis": true
     },
     "src/rag/temporal.py": {
@@ -22464,7 +22409,7 @@
     },
     "tests/cli/test_replay_trace.py": {
       "filePath": "tests/cli/test_replay_trace.py",
-      "contentHash": "90427b0caa8b6f19b30d8a139715abdb513d80c1863f24838356aa9b4553226c",
+      "contentHash": "a921522522f42e086a9d26e5cb74c0d9b9aeb3ad3be0234196e64eec5a89660f",
       "functions": [
         {
           "name": "test_parse_log_line_extracts_replay_fields",
@@ -22499,7 +22444,7 @@
             "monkeypatch"
           ],
           "exported": true,
-          "lineCount": 29
+          "lineCount": 26
         }
       ],
       "classes": [],
@@ -22526,7 +22471,7 @@
         "test_parse_trace_logs_filters_by_trace",
         "test_print_snippets_drift_markers"
       ],
-      "totalLines": 97,
+      "totalLines": 94,
       "hasStructuralAnalysis": true
     },
     "tests/cli/test_symptom_metrics.py": {
@@ -24055,7 +24000,7 @@
     },
     "tests/core/test_log_events.py": {
       "filePath": "tests/core/test_log_events.py",
-      "contentHash": "52f159ac285caa4b00623ba985f581582bc444c5de7020cceb4eb613749aa550",
+      "contentHash": "d34d24bbd9e49ad628120b9ac413446746a2530e6f50cf89cf6438ca381ff809",
       "functions": [
         {
           "name": "test_core_events_registered",
@@ -24070,10 +24015,22 @@
           "lineCount": 9
         },
         {
+          "name": "test_settings_removed_retrieval_max_per_doc",
+          "params": [],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "test_replay_event_removed_dedup_max_per_doc_field",
+          "params": [],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
           "name": "test_replay_event_fields",
           "params": [],
           "exported": true,
-          "lineCount": 12
+          "lineCount": 11
         },
         {
           "name": "test_registry_import_validation_detects_drift",
@@ -24097,6 +24054,12 @@
       "classes": [],
       "imports": [
         {
+          "source": "dataclasses",
+          "specifiers": [
+            "dataclasses"
+          ]
+        },
+        {
           "source": "pytest",
           "specifiers": [
             "pytest"
@@ -24107,17 +24070,25 @@
           "specifiers": [
             "le"
           ]
+        },
+        {
+          "source": "src.config",
+          "specifiers": [
+            "settings"
+          ]
         }
       ],
       "exports": [
         "test_core_events_registered",
         "test_signal_enum_covers_all",
+        "test_settings_removed_retrieval_max_per_doc",
+        "test_replay_event_removed_dedup_max_per_doc_field",
         "test_replay_event_fields",
         "test_registry_import_validation_detects_drift",
         "test_turn_provenance_events_registered",
         "test_model_turn_spec_includes_temperature_fields"
       ],
-      "totalLines": 72,
+      "totalLines": 85,
       "hasStructuralAnalysis": true
     },
     "tests/core/test_logging_helpers.py": {
@@ -28361,17 +28332,19 @@
     },
     "tests/rag/test_retrieval.py": {
       "filePath": "tests/rag/test_retrieval.py",
-      "contentHash": "540b5a0c34cd4c508167c59cc06d57859a755cac7ae227a4221c49423efed09b",
+      "contentHash": "6b214b2c3b7306accd8070777f7c5c9824234c2b53a285b1afb66659cea7339d",
       "functions": [
         {
           "name": "_cr",
           "params": [
             "content",
-            "cid"
+            "cid",
+            "doc_id",
+            "parent"
           ],
           "returnType": "ChunkResult",
           "exported": true,
-          "lineCount": 16
+          "lineCount": 26
         },
         {
           "name": "_mock_reranker",
@@ -28422,6 +28395,42 @@
           ],
           "exported": true,
           "lineCount": 17
+        },
+        {
+          "name": "test_rerank_stats_percentiles_and_source",
+          "params": [],
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "test_rerank_stats_marks_fallback_source",
+          "params": [],
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "test_rerank_dedups_before_truncating",
+          "params": [
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "test_rerank_dedup_logs_dropped_kept",
+          "params": [
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 20
+        },
+        {
+          "name": "test_rerank_dedup_logs_zero_drop",
+          "params": [
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 17
         }
       ],
       "classes": [
@@ -28442,7 +28451,7 @@
             "test_rerank_empty_results",
             "test_rerank_no_absolute_threshold",
             "test_rerank_top_n_capped",
-            "test_rerank_fallback_keeps_raw_order",
+            "test_rerank_fallback_orders_by_score_desc",
             "test_kb_construction_assigns_tier_zero"
           ],
           "properties": [],
@@ -28545,6 +28554,7 @@
         {
           "source": "src.rag.retrieval",
           "specifiers": [
+            "_rerank_stats",
             "rerank_results"
           ]
         }
@@ -28561,73 +28571,87 @@
         "test_to_prompt_text_web_ctx_with_tier_label",
         "test_hybrid_runs_both_paths_concurrently_on_same_store",
         "test_hybrid_logs_both_path_contributions",
-        "test_dense_only_when_hybrid_disabled"
+        "test_dense_only_when_hybrid_disabled",
+        "test_rerank_stats_percentiles_and_source",
+        "test_rerank_stats_marks_fallback_source",
+        "test_rerank_dedups_before_truncating",
+        "test_rerank_dedup_logs_dropped_kept",
+        "test_rerank_dedup_logs_zero_drop"
       ],
-      "totalLines": 424,
+      "totalLines": 518,
       "hasStructuralAnalysis": true
     },
     "tests/rag/test_retrieval_dedup.py": {
       "filePath": "tests/rag/test_retrieval_dedup.py",
-      "contentHash": "5c5342751d17d207bfbbe1be1e0eb9835b42df01638db1ffcaa4cf57d4c54521",
+      "contentHash": "c757acc67c01763c66ef4a313a9aba72d98828bf55370fd3d9e056498fb608ab",
       "functions": [
         {
-          "name": "_chunk",
+          "name": "_ctx",
           "params": [
             "cid",
-            "doc_id"
+            "doc_id",
+            "parent",
+            "score"
           ],
-          "returnType": "ChunkResult",
+          "returnType": "RAGContext",
           "exported": true,
-          "lineCount": 6
+          "lineCount": 10
         },
         {
-          "name": "test_dedup_keeps_first_per_doc",
+          "name": "test_same_parent_keeps_highest_score",
           "params": [],
           "exported": true,
           "lineCount": 10
         },
         {
-          "name": "test_dedup_keeps_items_without_doc_id",
+          "name": "test_different_parents_in_same_doc_all_kept",
           "params": [],
           "exported": true,
           "lineCount": 9
         },
         {
-          "name": "test_dedup_default_one_per_doc_keeps_existing_behavior",
+          "name": "test_cross_document_identical_parent_not_folded",
           "params": [],
           "exported": true,
-          "lineCount": 10
+          "lineCount": 6
         },
         {
-          "name": "test_dedup_max_per_doc_two",
+          "name": "test_chunk_without_parent_kept_as_is",
           "params": [],
           "exported": true,
-          "lineCount": 10
+          "lineCount": 8
+        },
+        {
+          "name": "test_kept_order_is_score_desc",
+          "params": [],
+          "exported": true,
+          "lineCount": 9
         }
       ],
       "classes": [],
       "imports": [
         {
-          "source": "src.infra.db.vector_store.types",
+          "source": "src.rag.context",
           "specifiers": [
-            "ChunkResult"
+            "RAGContext"
           ]
         },
         {
           "source": "src.rag.retrieval",
           "specifiers": [
-            "_dedup_by_doc_id"
+            "_dedup_by_parent"
           ]
         }
       ],
       "exports": [
-        "_chunk",
-        "test_dedup_keeps_first_per_doc",
-        "test_dedup_keeps_items_without_doc_id",
-        "test_dedup_default_one_per_doc_keeps_existing_behavior",
-        "test_dedup_max_per_doc_two"
+        "_ctx",
+        "test_same_parent_keeps_highest_score",
+        "test_different_parents_in_same_doc_all_kept",
+        "test_cross_document_identical_parent_not_folded",
+        "test_chunk_without_parent_kept_as_is",
+        "test_kept_order_is_score_desc"
       ],
-      "totalLines": 60,
+      "totalLines": 69,
       "hasStructuralAnalysis": true
     },
     "tests/rag/test_rewrite.py": {
@@ -32286,6 +32310,145 @@
       "exports": [],
       "totalLines": 196,
       "hasStructuralAnalysis": false
+    },
+    "scripts/verify_retrieval_dedup.py": {
+      "filePath": "scripts/verify_retrieval_dedup.py",
+      "contentHash": "1eceda68a8f0e914bd427a36eeb842546fd7b201732f1caa96cdd1488c711aa3",
+      "functions": [
+        {
+          "name": "main",
+          "params": [],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 22
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "asyncio",
+          "specifiers": [
+            "asyncio"
+          ]
+        },
+        {
+          "source": "sys",
+          "specifiers": [
+            "sys"
+          ]
+        },
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        },
+        {
+          "source": "src.config",
+          "specifiers": [
+            "TOP_K_RERANK"
+          ]
+        },
+        {
+          "source": "src.infra.db.engine",
+          "specifiers": [
+            "run_and_dispose"
+          ]
+        },
+        {
+          "source": "src.infra.db.vector_store",
+          "specifiers": [
+            "VectorStore"
+          ]
+        },
+        {
+          "source": "src.models",
+          "specifiers": [
+            "get_rerank"
+          ]
+        },
+        {
+          "source": "src.rag",
+          "specifiers": [
+            "retrieval"
+          ]
+        }
+      ],
+      "exports": [
+        "main"
+      ],
+      "totalLines": 53,
+      "hasStructuralAnalysis": true
+    },
+    "tests/agents/tools/test_rag_tools_timeout_dedup.py": {
+      "filePath": "tests/agents/tools/test_rag_tools_timeout_dedup.py",
+      "contentHash": "aa4b44ea3787e6034c0342dd5d9c2d74522c43613e808c9ce6c3063cb10eba9b",
+      "functions": [
+        {
+          "name": "test_timeout_fallback_contexts_are_deduped",
+          "params": [
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 77
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "typing",
+          "specifiers": [
+            "cast"
+          ]
+        },
+        {
+          "source": "pytest",
+          "specifiers": [
+            "pytest"
+          ]
+        },
+        {
+          "source": "src.agents.graph.state",
+          "specifiers": [
+            "AgentState"
+          ]
+        },
+        {
+          "source": "src.agents.tools",
+          "specifiers": [
+            "rag_tools_mod"
+          ]
+        },
+        {
+          "source": "src.core.log_events",
+          "specifiers": [
+            "Event"
+          ]
+        },
+        {
+          "source": "src.infra.db.vector_store",
+          "specifiers": [
+            "VectorStore"
+          ]
+        },
+        {
+          "source": "src.infra.db.vector_store.types",
+          "specifiers": [
+            "ChunkResult"
+          ]
+        },
+        {
+          "source": "src.rag",
+          "specifiers": [
+            "retrieval"
+          ]
+        }
+      ],
+      "exports": [
+        "test_timeout_fallback_contexts_are_deduped"
+      ],
+      "totalLines": 99,
+      "hasStructuralAnalysis": true
     }
   }
 }

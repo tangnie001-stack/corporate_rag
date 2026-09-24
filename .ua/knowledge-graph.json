@@ -30,8 +30,8 @@
       "Docker Compose"
     ],
     "description": "金融文档智能问答助手（MVP）：基于 RAG 的财报问答系统，支持上传 PDF/DOCX/TXT 格式的财报文档，用户用自然语言提问后，由大语言模型基于检索到的文档片段生成带引用来源的回答。 注意：本项目源文件超过 100 个，建议将分析范围收窄到某个子目录以加快扫描速度。",
-    "analyzedAt": "2026-09-24T08:23:49.475Z",
-    "gitCommitHash": "7f1df70a86a504655ea29a7a025796341f4a348e"
+    "analyzedAt": "2026-09-24T16:54:03.124Z",
+    "gitCommitHash": "49e339f1147121685d2f2618548edde7027a615b"
   },
   "nodes": [
     {
@@ -5634,20 +5634,6 @@
       "languageNotes": "ChunkData 是解析侧与写入侧共用的唯一载荷定义，chunk_id/tokens 的填充时机在字段注释中约定。"
     },
     {
-      "id": "file:src/cli/compare_dedup.py",
-      "type": "file",
-      "name": "compare_dedup.py",
-      "filePath": "src/cli/compare_dedup.py",
-      "summary": "RAGAS 对照实验脚本：遍历 RETRIEVAL_MAX_PER_DOC ∈ {1,2,3}，子进程覆盖环境变量跑 eval_ragas 并打印指标表格。",
-      "tags": [
-        "script",
-        "cli",
-        "evaluation",
-        "experiment"
-      ],
-      "complexity": "moderate"
-    },
-    {
       "id": "file:src/cli/compare_retrieval.py",
       "type": "file",
       "name": "compare_retrieval.py",
@@ -6262,40 +6248,6 @@
       "lineRange": [
         95,
         141
-      ]
-    },
-    {
-      "id": "function:src/cli/compare_dedup.py:run_eval_with_dedup",
-      "type": "function",
-      "name": "run_eval_with_dedup",
-      "filePath": "src/cli/compare_dedup.py",
-      "summary": "以子进程覆盖 RETRIEVAL_MAX_PER_DOC 跑 eval_ragas 并解析指标；超时/非零退出不阻断整轮实验。",
-      "tags": [
-        "evaluation",
-        "experiment",
-        "subprocess"
-      ],
-      "complexity": "moderate",
-      "lineRange": [
-        27,
-        69
-      ]
-    },
-    {
-      "id": "function:src/cli/compare_dedup.py:main",
-      "type": "function",
-      "name": "main",
-      "filePath": "src/cli/compare_dedup.py",
-      "summary": "dedup 对照实验入口：解析 kb-name，跑 N=1/2/3 并打印指标表格。",
-      "tags": [
-        "entry-point",
-        "cli",
-        "evaluation"
-      ],
-      "complexity": "simple",
-      "lineRange": [
-        72,
-        100
       ]
     },
     {
@@ -14415,21 +14367,6 @@
       "languageNotes": "纯数据模块不反向 import log_events，一致性由 log_events 在 import 期断言保证，避免环依赖。"
     },
     {
-      "id": "file:src/core/log_events.py",
-      "type": "file",
-      "name": "log_events.py",
-      "filePath": "src/core/log_events.py",
-      "summary": "统一事件定义层：Signal/Event 枚举、ReplayEvent 与 import 期一致性校验，是分层前缀与事件名的单一事实源。",
-      "tags": [
-        "logging",
-        "event-model",
-        "enum",
-        "validation",
-        "tested"
-      ],
-      "complexity": "complex"
-    },
-    {
       "id": "file:src/core/logging.py",
       "type": "file",
       "name": "logging.py",
@@ -14475,74 +14412,6 @@
         "registry"
       ],
       "complexity": "simple"
-    },
-    {
-      "id": "class:src/core/log_events.py:Signal",
-      "type": "class",
-      "name": "Signal",
-      "filePath": "src/core/log_events.py",
-      "lineRange": [
-        28,
-        36
-      ],
-      "summary": "检索行为信号枚举：reretrieve/to_web/abstain_after_retrieve/cited/empty_result/invalid_citation。",
-      "tags": [
-        "enum",
-        "logging",
-        "signal"
-      ],
-      "complexity": "simple"
-    },
-    {
-      "id": "class:src/core/log_events.py:Event",
-      "type": "class",
-      "name": "Event",
-      "filePath": "src/core/log_events.py",
-      "lineRange": [
-        39,
-        198
-      ],
-      "summary": "普通事件枚举（值即事件名），与 EVENT_SPECS 在 import 期做成员集与元数据强一致校验。",
-      "tags": [
-        "enum",
-        "logging",
-        "event-model"
-      ],
-      "complexity": "complex"
-    },
-    {
-      "id": "class:src/core/log_events.py:ReplayEvent",
-      "type": "class",
-      "name": "ReplayEvent",
-      "filePath": "src/core/log_events.py",
-      "lineRange": [
-        202,
-        222
-      ],
-      "summary": "检索重放上下文 dataclass：query/query_len/kb_id/iteration/top_k/去重上限/混合与精排开关。",
-      "tags": [
-        "data-model",
-        "logging",
-        "replay"
-      ],
-      "complexity": "simple"
-    },
-    {
-      "id": "function:src/core/log_events.py:_validate_registry",
-      "type": "function",
-      "name": "_validate_registry",
-      "filePath": "src/core/log_events.py",
-      "lineRange": [
-        225,
-        242
-      ],
-      "summary": "import 期校验：Event 成员集与 EVENT_SPECS 一致，且每个条目前缀在允许集内、级别合法。",
-      "tags": [
-        "validation",
-        "import-time",
-        "logging"
-      ],
-      "complexity": "moderate"
     },
     {
       "id": "class:src/core/logging.py:InterceptHandler",
@@ -15501,21 +15370,6 @@
       "complexity": "moderate"
     },
     {
-      "id": "file:src/rag/retrieval.py",
-      "type": "file",
-      "name": "retrieval.py",
-      "filePath": "src/rag/retrieval.py",
-      "summary": "检索与查询改写核心：并发执行 dense 与词法两路检索、RRF 融合、按文档去重、Reranker 精排并产出带来源档位的 RAGContext 列表。",
-      "tags": [
-        "retrieval",
-        "rag",
-        "rerank",
-        "query-rewrite",
-        "tested"
-      ],
-      "complexity": "complex"
-    },
-    {
       "id": "file:tests/agents/graph/test_verify_node.py",
       "type": "file",
       "name": "test_verify_node.py",
@@ -15608,122 +15462,6 @@
       "tags": [
         "algorithm",
         "fusion",
-        "retrieval"
-      ],
-      "complexity": "moderate"
-    },
-    {
-      "id": "function:src/rag/retrieval.py:_dedup_by_doc_id",
-      "type": "function",
-      "name": "_dedup_by_doc_id",
-      "filePath": "src/rag/retrieval.py",
-      "lineRange": [
-        35,
-        64
-      ],
-      "summary": "按 doc_id 限制每个文档保留的条数（默认 1），保持原有顺序，无 doc_id 的条目直通。",
-      "tags": [
-        "dedup",
-        "retrieval",
-        "utility"
-      ],
-      "complexity": "moderate"
-    },
-    {
-      "id": "function:src/rag/retrieval.py:search",
-      "type": "function",
-      "name": "search",
-      "filePath": "src/rag/retrieval.py",
-      "lineRange": [
-        67,
-        117
-      ],
-      "summary": "并发执行 dense 与词法检索，RRF 融合后按文档去重；未启用混合检索时退化为纯 dense 路径。",
-      "tags": [
-        "retrieval",
-        "hybrid-search",
-        "async"
-      ],
-      "complexity": "moderate"
-    },
-    {
-      "id": "function:src/rag/retrieval.py:rerank_results",
-      "type": "function",
-      "name": "rerank_results",
-      "filePath": "src/rag/retrieval.py",
-      "lineRange": [
-        120,
-        197
-      ],
-      "summary": "调用 Reranker 精排并按得分重排结果，构造带来源档位的 RAGContext 列表；精排失败时回退原始顺序。",
-      "tags": [
-        "rerank",
-        "retrieval",
-        "resilience"
-      ],
-      "complexity": "complex"
-    },
-    {
-      "id": "function:src/rag/retrieval.py:expand_query",
-      "type": "function",
-      "name": "expand_query",
-      "filePath": "src/rag/retrieval.py",
-      "lineRange": [
-        200,
-        207
-      ],
-      "summary": "把最近的历史问题拼进查询做扩展，供指代消解场景使用。",
-      "tags": [
-        "query-rewrite",
-        "utility"
-      ],
-      "complexity": "simple"
-    },
-    {
-      "id": "function:src/rag/retrieval.py:condense_query",
-      "type": "function",
-      "name": "condense_query",
-      "filePath": "src/rag/retrieval.py",
-      "lineRange": [
-        210,
-        216
-      ],
-      "summary": "去除查询中的冗余填充词做压缩，保留核心实体。",
-      "tags": [
-        "query-rewrite",
-        "utility"
-      ],
-      "complexity": "simple"
-    },
-    {
-      "id": "function:src/rag/retrieval.py:decompose_query",
-      "type": "function",
-      "name": "decompose_query",
-      "filePath": "src/rag/retrieval.py",
-      "lineRange": [
-        219,
-        228
-      ],
-      "summary": "把复合查询按分隔符拆解为子查询列表。",
-      "tags": [
-        "query-rewrite",
-        "utility"
-      ],
-      "complexity": "moderate"
-    },
-    {
-      "id": "function:src/rag/retrieval.py:rewrite_query",
-      "type": "function",
-      "name": "rewrite_query",
-      "filePath": "src/rag/retrieval.py",
-      "lineRange": [
-        231,
-        256
-      ],
-      "summary": "按意图路由选择扩展 / 压缩 / 拆分策略重写查询。",
-      "tags": [
-        "query-rewrite",
-        "routing",
         "retrieval"
       ],
       "complexity": "moderate"
@@ -17732,19 +17470,6 @@
       "complexity": "moderate"
     },
     {
-      "id": "file:tests/core/test_log_events.py",
-      "type": "file",
-      "name": "test_log_events.py",
-      "filePath": "tests/core/test_log_events.py",
-      "summary": "事件定义层测试：事件注册表与 EventSpec 一致性、Signal 枚举覆盖、ReplayEvent 字段约定与 turn 溯源事件登记。",
-      "tags": [
-        "单元测试",
-        "事件注册表",
-        "日志规范"
-      ],
-      "complexity": "moderate"
-    },
-    {
       "id": "function:tests/agents/graph/test_prefix_cleaning.py:_call_initial_messages",
       "type": "function",
       "name": "_call_initial_messages",
@@ -18032,40 +17757,6 @@
         "会话智能体"
       ],
       "complexity": "moderate"
-    },
-    {
-      "id": "function:tests/core/test_log_events.py:test_replay_event_fields",
-      "type": "function",
-      "name": "test_replay_event_fields",
-      "filePath": "tests/core/test_log_events.py",
-      "lineRange": [
-        28,
-        39
-      ],
-      "summary": "断言 ReplayEvent 的字段集合符合事件回放的数据约定。",
-      "tags": [
-        "单元测试",
-        "事件定义",
-        "回放"
-      ],
-      "complexity": "simple"
-    },
-    {
-      "id": "function:tests/core/test_log_events.py:test_turn_provenance_events_registered",
-      "type": "function",
-      "name": "test_turn_provenance_events_registered",
-      "filePath": "tests/core/test_log_events.py",
-      "lineRange": [
-        49,
-        63
-      ],
-      "summary": "断言 turn 溯源相关事件已登记进事件注册表，事件名与规范前缀一致。",
-      "tags": [
-        "单元测试",
-        "事件注册",
-        "turn 溯源"
-      ],
-      "complexity": "simple"
     },
     {
       "id": "file:tests/core/test_logging_helpers.py",
@@ -19034,35 +18725,6 @@
       "complexity": "moderate"
     },
     {
-      "id": "file:tests/rag/test_retrieval.py",
-      "type": "file",
-      "name": "test_retrieval.py",
-      "filePath": "tests/rag/test_retrieval.py",
-      "summary": "测试检索链路：search 返回结果、rerank 上下文/实体透传/空结果/无绝对阈值/top_n/回退/tier、查询改写（扩展/压缩/分解）、tier 标注、to_prompt_text 渲染、混合检索双路并发与日志。",
-      "tags": [
-        "test",
-        "pytest",
-        "rag",
-        "retrieval",
-        "hybrid"
-      ],
-      "complexity": "complex"
-    },
-    {
-      "id": "file:tests/rag/test_retrieval_dedup.py",
-      "type": "file",
-      "name": "test_retrieval_dedup.py",
-      "filePath": "tests/rag/test_retrieval_dedup.py",
-      "summary": "测试检索结果按 doc_id 去重：每文档保留首个、无 doc_id 项保留、默认每文档一条、max_per_doc=2 时保留两条。",
-      "tags": [
-        "test",
-        "pytest",
-        "rag",
-        "dedup"
-      ],
-      "complexity": "simple"
-    },
-    {
       "id": "file:tests/test_models.py",
       "type": "file",
       "name": "test_models.py",
@@ -19349,216 +19011,6 @@
         "fusion"
       ],
       "complexity": "moderate"
-    },
-    {
-      "id": "function:tests/rag/test_retrieval.py:_cr",
-      "type": "function",
-      "name": "_cr",
-      "filePath": "tests/rag/test_retrieval.py",
-      "lineRange": [
-        27,
-        42
-      ],
-      "summary": "测试辅助：构造带内容与 id 的 ChunkResult。",
-      "tags": [
-        "test-helper",
-        "data-model"
-      ],
-      "complexity": "simple"
-    },
-    {
-      "id": "function:tests/rag/test_retrieval.py:test_to_prompt_text_with_entities",
-      "type": "function",
-      "name": "test_to_prompt_text_with_entities",
-      "filePath": "tests/rag/test_retrieval.py",
-      "lineRange": [
-        188,
-        202
-      ],
-      "summary": "验证 to_prompt_text 在含实体时渲染实体信息。",
-      "tags": [
-        "test",
-        "prompt"
-      ],
-      "complexity": "simple"
-    },
-    {
-      "id": "function:tests/rag/test_retrieval.py:test_to_prompt_text_without_entities",
-      "type": "function",
-      "name": "test_to_prompt_text_without_entities",
-      "filePath": "tests/rag/test_retrieval.py",
-      "lineRange": [
-        205,
-        217
-      ],
-      "summary": "验证 to_prompt_text 在无实体时的渲染格式。",
-      "tags": [
-        "test",
-        "prompt"
-      ],
-      "complexity": "simple"
-    },
-    {
-      "id": "function:tests/rag/test_retrieval.py:test_to_prompt_text_web_ctx_with_tier_label",
-      "type": "function",
-      "name": "test_to_prompt_text_web_ctx_with_tier_label",
-      "filePath": "tests/rag/test_retrieval.py",
-      "lineRange": [
-        313,
-        332
-      ],
-      "summary": "验证网页上下文渲染时带 tier 标签。",
-      "tags": [
-        "test",
-        "prompt",
-        "tier"
-      ],
-      "complexity": "simple"
-    },
-    {
-      "id": "function:tests/rag/test_retrieval.py:test_hybrid_runs_both_paths_concurrently_on_same_store",
-      "type": "function",
-      "name": "test_hybrid_runs_both_paths_concurrently_on_same_store",
-      "filePath": "tests/rag/test_retrieval.py",
-      "lineRange": [
-        339,
-        377
-      ],
-      "summary": "验证混合检索在同一存储上并发执行稠密与词法两路。",
-      "tags": [
-        "test",
-        "hybrid"
-      ],
-      "complexity": "moderate"
-    },
-    {
-      "id": "function:tests/rag/test_retrieval.py:test_hybrid_logs_both_path_contributions",
-      "type": "function",
-      "name": "test_hybrid_logs_both_path_contributions",
-      "filePath": "tests/rag/test_retrieval.py",
-      "lineRange": [
-        381,
-        403
-      ],
-      "summary": "验证混合检索记录两路各自贡献的日志。",
-      "tags": [
-        "test",
-        "hybrid",
-        "logging"
-      ],
-      "complexity": "simple"
-    },
-    {
-      "id": "function:tests/rag/test_retrieval.py:test_dense_only_when_hybrid_disabled",
-      "type": "function",
-      "name": "test_dense_only_when_hybrid_disabled",
-      "filePath": "tests/rag/test_retrieval.py",
-      "lineRange": [
-        407,
-        423
-      ],
-      "summary": "验证关闭混合检索时仅走稠密路径。",
-      "tags": [
-        "test",
-        "hybrid"
-      ],
-      "complexity": "simple"
-    },
-    {
-      "id": "class:tests/rag/test_retrieval.py:TestRerank",
-      "type": "class",
-      "name": "TestRerank",
-      "filePath": "tests/rag/test_retrieval.py",
-      "lineRange": [
-        75,
-        184
-      ],
-      "summary": "精排用例集：上下文返回、实体透传、空结果、无绝对阈值、top_n 截断、回退保序与 tier 0 构造。",
-      "tags": [
-        "test",
-        "rerank"
-      ],
-      "complexity": "moderate"
-    },
-    {
-      "id": "class:tests/rag/test_retrieval.py:TestQueryRewrite",
-      "type": "class",
-      "name": "TestQueryRewrite",
-      "filePath": "tests/rag/test_retrieval.py",
-      "lineRange": [
-        221,
-        275
-      ],
-      "summary": "查询改写用例集：简单直通、短查询扩展、中等改写压缩、复杂分解以及历史/无历史场景。",
-      "tags": [
-        "test",
-        "query-rewrite"
-      ],
-      "complexity": "moderate"
-    },
-    {
-      "id": "class:tests/rag/test_retrieval.py:TestTierAnnotation",
-      "type": "class",
-      "name": "TestTierAnnotation",
-      "filePath": "tests/rag/test_retrieval.py",
-      "lineRange": [
-        281,
-        310
-      ],
-      "summary": "tier 标注用例集：KB 与网页 tier 标注、None 时保持旧格式、默认 tier。",
-      "tags": [
-        "test",
-        "tier"
-      ],
-      "complexity": "moderate"
-    },
-    {
-      "id": "function:tests/rag/test_retrieval_dedup.py:test_dedup_keeps_first_per_doc",
-      "type": "function",
-      "name": "test_dedup_keeps_first_per_doc",
-      "filePath": "tests/rag/test_retrieval_dedup.py",
-      "lineRange": [
-        15,
-        24
-      ],
-      "summary": "验证去重对每个 doc_id 保留首个结果。",
-      "tags": [
-        "test",
-        "dedup"
-      ],
-      "complexity": "simple"
-    },
-    {
-      "id": "function:tests/rag/test_retrieval_dedup.py:test_dedup_default_one_per_doc_keeps_existing_behavior",
-      "type": "function",
-      "name": "test_dedup_default_one_per_doc_keeps_existing_behavior",
-      "filePath": "tests/rag/test_retrieval_dedup.py",
-      "lineRange": [
-        38,
-        47
-      ],
-      "summary": "验证默认每文档一条时保持既有行为。",
-      "tags": [
-        "test",
-        "dedup"
-      ],
-      "complexity": "simple"
-    },
-    {
-      "id": "function:tests/rag/test_retrieval_dedup.py:test_dedup_max_per_doc_two",
-      "type": "function",
-      "name": "test_dedup_max_per_doc_two",
-      "filePath": "tests/rag/test_retrieval_dedup.py",
-      "lineRange": [
-        50,
-        59
-      ],
-      "summary": "验证 max_per_doc=2 时每文档保留两条。",
-      "tags": [
-        "test",
-        "dedup"
-      ],
-      "complexity": "simple"
     },
     {
       "id": "class:tests/test_models.py:TestWithRetry",
@@ -30776,22 +30228,6 @@
       "languageNotes": "采用「常驻一句话规则 + 归属文档指针」两级组织，常驻项只写一句话并链接 docs/agents/* 承载细节，避免正文复制；「规则」章节含「派 subagent 前先压小它的上下文」一条（大 diff 与「自己去读全部原文」二选一、>100 KB 输入按文件拆派、长时间无动静先看 <session>/subagents/<agent-id>.jsonl 末条时间戳再决定是否 kill）；`docs/` 目录被 .understandignore 排除，故对 docs/agents/* 归属文档不产生图内边。"
     },
     {
-      "id": "document:src/cli/README.md",
-      "type": "document",
-      "name": "README.md",
-      "filePath": "src/cli/README.md",
-      "summary": "src/cli 诊断与评估命令行工具目录的唯一使用手册：说明前提条件、四条命令（eval_ragas / eval_ragas_generate / compare_retrieval / check_retrieval），并详解 RAGAS「生成测试集 → 执行评估 → 质量门禁 → 参数选优」四步工作流、四项指标阈值与解读方法、产物目录布局。",
-      "tags": [
-        "文档",
-        "cli",
-        "ragas",
-        "评估流程",
-        "命令行参考"
-      ],
-      "complexity": "moderate",
-      "languageNotes": "文档共 24 个标题层级（H1/H2/H3），以命令示例代码块 + 参数表 + 指标阈值表组织，属于面向使用者的操作手册而非 API 参考。"
-    },
-    {
       "id": "file:tests/infra/llm/test_token_usage.py",
       "type": "file",
       "name": "test_token_usage.py",
@@ -31099,6 +30535,749 @@
         "robustness"
       ],
       "complexity": "simple"
+    },
+    {
+      "id": "file:tests/core/test_log_events.py",
+      "type": "file",
+      "name": "test_log_events.py",
+      "filePath": "tests/core/test_log_events.py",
+      "summary": "事件定义层单测：校验事件注册表与 EventSpec 的一致性、Signal 枚举覆盖、ReplayEvent 字段约定与 turn 溯源事件登记，并新增两处回归钉桩（settings 的 RETRIEVAL_MAX_PER_DOC 与 ReplayEvent 的 dedup_max_per_doc 字段均已删除）。",
+      "tags": [
+        "单元测试",
+        "事件注册表",
+        "日志规范",
+        "回归钉桩"
+      ],
+      "complexity": "moderate",
+      "languageNotes": "以断言注册表结构不变量（spec.name/prefix/level 一致性）为主，未走真实日志输出；删除类改动用「属性/字段不存在」的否定断言钉桩，防止旧配置回潮。"
+    },
+    {
+      "id": "function:tests/core/test_log_events.py:test_replay_event_fields",
+      "type": "function",
+      "name": "test_replay_event_fields",
+      "filePath": "tests/core/test_log_events.py",
+      "lineRange": [
+        42,
+        52
+      ],
+      "summary": "构造 ReplayEvent 实例并断言 query_len 与 hybrid 字段取值，锁定事件回放的数据字段约定。",
+      "tags": [
+        "单元测试",
+        "事件定义",
+        "回放"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:tests/core/test_log_events.py:test_turn_provenance_events_registered",
+      "type": "function",
+      "name": "test_turn_provenance_events_registered",
+      "filePath": "tests/core/test_log_events.py",
+      "lineRange": [
+        62,
+        76
+      ],
+      "summary": "断言 turn 来源与观测相关的 5 个事件已登记进事件注册表，且各自的前缀与日志级别符合日志规范（design D11）。",
+      "tags": [
+        "单元测试",
+        "事件注册",
+        "turn 溯源"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:src/core/log_events.py",
+      "type": "file",
+      "name": "log_events.py",
+      "filePath": "src/core/log_events.py",
+      "summary": "统一事件定义层：定义 Signal/Event 枚举、ReplayEvent 检索重放上下文与 import 期一致性校验，是分层前缀、信号类型与事件名的单一事实源。",
+      "tags": [
+        "logging",
+        "event-model",
+        "enum",
+        "validation",
+        "single-source-of-truth",
+        "tested"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:src/core/log_events.py:Signal",
+      "type": "class",
+      "name": "Signal",
+      "filePath": "src/core/log_events.py",
+      "lineRange": [
+        28,
+        36
+      ],
+      "summary": "检索行为信号枚举（reretrieve/to_web/abstain_after_retrieve/cited/empty_result/invalid_citation），作为 retrieval_signal 行的 signal= 值。",
+      "tags": [
+        "enum",
+        "logging",
+        "signal"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:src/core/log_events.py:Event",
+      "type": "class",
+      "name": "Event",
+      "filePath": "src/core/log_events.py",
+      "lineRange": [
+        39,
+        196
+      ],
+      "summary": "普通事件枚举，值即事件名（log_event 的事件 key），覆盖 retrieval/agent/verify/session/db/llm/cli/app/delegate 各层，与 EVENT_SPECS 在 import 期做成员集强一致校验。",
+      "tags": [
+        "enum",
+        "logging",
+        "event-model"
+      ],
+      "complexity": "complex",
+      "languageNotes": "继承 str 与 Enum 的混合枚举，使枚举成员可直接作为字符串值参与日志行拼接。"
+    },
+    {
+      "id": "class:src/core/log_events.py:ReplayEvent",
+      "type": "class",
+      "name": "ReplayEvent",
+      "filePath": "src/core/log_events.py",
+      "lineRange": [
+        200,
+        218
+      ],
+      "summary": "检索重放上下文 dataclass，字段含 query/query_len/kb_id/iteration/top_k/hybrid/rerank，作为 retrieve replay 事件行的字段容器。",
+      "tags": [
+        "data-model",
+        "logging",
+        "replay"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/core/log_events.py:_validate_registry",
+      "type": "function",
+      "name": "_validate_registry",
+      "filePath": "src/core/log_events.py",
+      "lineRange": [
+        221,
+        238
+      ],
+      "summary": "import 期一致性校验：校验 Event 成员集与 EVENT_SPECS 一致，且每个条目前缀在允许集内、级别合法。",
+      "tags": [
+        "validation",
+        "import-time",
+        "logging"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:scripts/verify_retrieval_dedup.py",
+      "type": "file",
+      "name": "verify_retrieval_dedup.py",
+      "filePath": "scripts/verify_retrieval_dedup.py",
+      "summary": "独立验证脚本：实跑验证父块级去重后，单文档库的检索结果不再被文档数压顶，逐用例断言 result_count 落在 (期望下限, TOP_K_RERANK] 区间。",
+      "tags": [
+        "验证脚本",
+        "retrieval",
+        "dedup",
+        "smoke-test"
+      ],
+      "complexity": "simple",
+      "languageNotes": "脚本通过 sys.path.insert 把仓库根显式插到搜索路径最前，保证以 `python scripts/verify_retrieval_dedup.py` 方式运行时也能 `import src`。"
+    },
+    {
+      "id": "function:scripts/verify_retrieval_dedup.py:main",
+      "type": "function",
+      "name": "main",
+      "filePath": "scripts/verify_retrieval_dedup.py",
+      "lineRange": [
+        27,
+        48
+      ],
+      "summary": "异步入口：收敛 loguru 日志到 INFO，逐用例调用 retrieval.search 与 rerank_results，断言结果条数既未超过 TOP_K_RERANK 也未回落到去重前的天花板。",
+      "tags": [
+        "入口点",
+        "retrieval",
+        "dedup",
+        "validation"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:src/rag/retrieval.py",
+      "type": "file",
+      "name": "retrieval.py",
+      "filePath": "src/rag/retrieval.py",
+      "summary": "检索与查询改写核心：并发执行 dense 与词法两路检索并 RRF 融合，Reranker 精排后做父块级内容去重，产出带来源档位的 RAGContext 列表，并附带查询改写策略。",
+      "tags": [
+        "retrieval",
+        "rag",
+        "rerank",
+        "query-rewrite",
+        "dedup",
+        "tested"
+      ],
+      "complexity": "complex",
+      "languageNotes": "去重键为 `(doc_id, md5(parent_content))`：必须带上 doc_id，否则跨文档逐字相同的样板文本会被错误折叠成同一条。"
+    },
+    {
+      "id": "function:src/rag/retrieval.py:_dedup_by_parent",
+      "type": "function",
+      "name": "_dedup_by_parent",
+      "filePath": "src/rag/retrieval.py",
+      "lineRange": [
+        35,
+        61
+      ],
+      "summary": "内容级去重：同一文档内同一父块仅保留 score 最高的一条，去重键为 (doc_id, md5(parent_content))，parent_content 为空的 chunk 按自身保留，返回按 score 降序列表。",
+      "tags": [
+        "dedup",
+        "retrieval",
+        "utility"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/rag/retrieval.py:search",
+      "type": "function",
+      "name": "search",
+      "filePath": "src/rag/retrieval.py",
+      "lineRange": [
+        64,
+        112
+      ],
+      "summary": "执行检索：dense 与词法两路同源并发取数，RRF 融合后返回按相关性降序的结果；未启用混合检索时退化为纯 dense 路径。",
+      "tags": [
+        "retrieval",
+        "hybrid-search",
+        "async"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/rag/retrieval.py:_rerank_stats",
+      "type": "function",
+      "name": "_rerank_stats",
+      "filePath": "src/rag/retrieval.py",
+      "lineRange": [
+        115,
+        145
+      ],
+      "summary": "汇总精排分数的分位信息（max/min/p50）与来源标记（rerank/fallback），供 rerank done 事件使用，只取分位数以避免放大日志体积。",
+      "tags": [
+        "rerank",
+        "statistics",
+        "logging",
+        "utility"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/rag/retrieval.py:rerank_results",
+      "type": "function",
+      "name": "rerank_results",
+      "filePath": "src/rag/retrieval.py",
+      "lineRange": [
+        148,
+        231
+      ],
+      "summary": "调用 Reranker 精排并构造带来源档位与实体的 RAGContext 列表，精排失败时降级为 1-distance 回退分；随后父块级去重并截断到 TOP_K_RERANK。",
+      "tags": [
+        "rerank",
+        "retrieval",
+        "resilience",
+        "dedup"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:src/rag/retrieval.py:expand_query",
+      "type": "function",
+      "name": "expand_query",
+      "filePath": "src/rag/retrieval.py",
+      "lineRange": [
+        234,
+        241
+      ],
+      "summary": "对模糊短查询扩展：取最近一条与当前不同的用户历史消息拼接到查询前，用于指代消解。",
+      "tags": [
+        "query-rewrite",
+        "utility"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/rag/retrieval.py:condense_query",
+      "type": "function",
+      "name": "condense_query",
+      "filePath": "src/rag/retrieval.py",
+      "lineRange": [
+        244,
+        250
+      ],
+      "summary": "去除查询中的口语化填充词（如「分析」「为什么」）做精简，保留核心实体，全删空时返回原查询。",
+      "tags": [
+        "query-rewrite",
+        "utility"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/rag/retrieval.py:decompose_query",
+      "type": "function",
+      "name": "decompose_query",
+      "filePath": "src/rag/retrieval.py",
+      "lineRange": [
+        253,
+        262
+      ],
+      "summary": "按对比类分隔词（「对比」「vs」「和」等）迭代拆解复合查询为子查询列表。",
+      "tags": [
+        "query-rewrite",
+        "utility"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/rag/retrieval.py:rewrite_query",
+      "type": "function",
+      "name": "rewrite_query",
+      "filePath": "src/rag/retrieval.py",
+      "lineRange": [
+        265,
+        290
+      ],
+      "summary": "根据三级意图路由（simple/medium/complex）选择对应改写策略：simple 原样返回，complex 拆解子查询，medium 按长度与关键词决定扩展或精简。",
+      "tags": [
+        "query-rewrite",
+        "routing",
+        "retrieval"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:tests/agents/tools/test_rag_tools_timeout_dedup.py",
+      "type": "file",
+      "name": "test_rag_tools_timeout_dedup.py",
+      "filePath": "tests/agents/tools/test_rag_tools_timeout_dedup.py",
+      "summary": "测试 retrieve_kb 精排超时降级路径的内容级去重：将 RERANK_TIMEOUT 置 0 强制进入 except TimeoutError 分支，锁定降级路径同样按父块去重并落 dedup done 事件。",
+      "tags": [
+        "test",
+        "pytest",
+        "rag",
+        "retrieval",
+        "dedup"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:tests/agents/tools/test_rag_tools_timeout_dedup.py:test_timeout_fallback_contexts_are_deduped",
+      "type": "function",
+      "name": "test_timeout_fallback_contexts_are_deduped",
+      "filePath": "tests/agents/tools/test_rag_tools_timeout_dedup.py",
+      "lineRange": [
+        22,
+        98
+      ],
+      "summary": "通过 monkeypatch search/rerank_results 与置 0 的 RERANK_TIMEOUT 强制降级，验证同父块 3 条结果折叠为 score 最高 1 条并落 dedup done（dropped=2/kept=1）。",
+      "tags": [
+        "test",
+        "dedup",
+        "timeout",
+        "fallback"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:tests/rag/test_retrieval.py",
+      "type": "file",
+      "name": "test_retrieval.py",
+      "filePath": "tests/rag/test_retrieval.py",
+      "summary": "检索模块（retrieval）单元测试：覆盖 search 向量检索、rerank_results 精排与去重、查询改写（扩展/压缩/分解）、to_prompt_text 实体与 tier 渲染、混合检索双路并发与日志。",
+      "tags": [
+        "test",
+        "pytest",
+        "rag",
+        "retrieval",
+        "hybrid"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:tests/rag/test_retrieval.py:_cr",
+      "type": "function",
+      "name": "_cr",
+      "filePath": "tests/rag/test_retrieval.py",
+      "lineRange": [
+        27,
+        52
+      ],
+      "summary": "测试辅助：构造 mock ChunkResult，doc_id/parent 为 None 时不写入 metadata，满足 rerank_results 读取所需字段。",
+      "tags": [
+        "test-helper",
+        "data-model"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:tests/rag/test_retrieval.py:test_to_prompt_text_with_entities",
+      "type": "function",
+      "name": "test_to_prompt_text_with_entities",
+      "filePath": "tests/rag/test_retrieval.py",
+      "lineRange": [
+        198,
+        212
+      ],
+      "summary": "验证 RAGContext 带实体时 to_prompt_text 按 ENTITY_RENDER_ORDER 渲染存在的实体。",
+      "tags": [
+        "test",
+        "prompt",
+        "entity"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:tests/rag/test_retrieval.py:test_to_prompt_text_without_entities",
+      "type": "function",
+      "name": "test_to_prompt_text_without_entities",
+      "filePath": "tests/rag/test_retrieval.py",
+      "lineRange": [
+        215,
+        227
+      ],
+      "summary": "验证无实体时 to_prompt_text 保持来源/页码/内容的既有格式。",
+      "tags": [
+        "test",
+        "prompt"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:tests/rag/test_retrieval.py:test_to_prompt_text_web_ctx_with_tier_label",
+      "type": "function",
+      "name": "test_to_prompt_text_web_ctx_with_tier_label",
+      "filePath": "tests/rag/test_retrieval.py",
+      "lineRange": [
+        323,
+        342
+      ],
+      "summary": "验证 web 上下文（tier 非 None）经 to_prompt_text 渲染时来源括注内追加档位标签，保证生产 prompt 与 RAGAS NLI 共用格式一致。",
+      "tags": [
+        "test",
+        "prompt",
+        "tier"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:tests/rag/test_retrieval.py:test_hybrid_runs_both_paths_concurrently_on_same_store",
+      "type": "function",
+      "name": "test_hybrid_runs_both_paths_concurrently_on_same_store",
+      "filePath": "tests/rag/test_retrieval.py",
+      "lineRange": [
+        349,
+        387
+      ],
+      "summary": "用 asyncio.Barrier(2) 验证混合检索两路在同源 VectorStore 上并发执行，串行实现会因屏障超时而失败。",
+      "tags": [
+        "test",
+        "hybrid",
+        "concurrency"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:tests/rag/test_retrieval.py:test_hybrid_logs_both_path_contributions",
+      "type": "function",
+      "name": "test_hybrid_logs_both_path_contributions",
+      "filePath": "tests/rag/test_retrieval.py",
+      "lineRange": [
+        391,
+        413
+      ],
+      "summary": "验证混合检索记录 dense/sparse 两路各自贡献的日志，任一路为 0 时可被直接看出。",
+      "tags": [
+        "test",
+        "hybrid",
+        "logging"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:tests/rag/test_retrieval.py:test_dense_only_when_hybrid_disabled",
+      "type": "function",
+      "name": "test_dense_only_when_hybrid_disabled",
+      "filePath": "tests/rag/test_retrieval.py",
+      "lineRange": [
+        417,
+        433
+      ],
+      "summary": "验证关闭混合检索时仅走 dense 路径，不调用词法检索。",
+      "tags": [
+        "test",
+        "hybrid"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:tests/rag/test_retrieval.py:test_rerank_stats_percentiles_and_source",
+      "type": "function",
+      "name": "test_rerank_stats_percentiles_and_source",
+      "filePath": "tests/rag/test_retrieval.py",
+      "lineRange": [
+        436,
+        447
+      ],
+      "summary": "验证 _rerank_stats 分位数取 max/min/p50，且未降级时来源标记为 rerank。",
+      "tags": [
+        "test",
+        "rerank",
+        "stats"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:tests/rag/test_retrieval.py:test_rerank_stats_marks_fallback_source",
+      "type": "function",
+      "name": "test_rerank_stats_marks_fallback_source",
+      "filePath": "tests/rag/test_retrieval.py",
+      "lineRange": [
+        450,
+        460
+      ],
+      "summary": "验证精排失败回退（1-distance）时 _rerank_stats 来源标记为 fallback。",
+      "tags": [
+        "test",
+        "rerank",
+        "fallback"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:tests/rag/test_retrieval.py:test_rerank_dedups_before_truncating",
+      "type": "function",
+      "name": "test_rerank_dedups_before_truncating",
+      "filePath": "tests/rag/test_retrieval.py",
+      "lineRange": [
+        463,
+        476
+      ],
+      "summary": "验证内容级去重发生在 TOP_K_RERANK 截断之前，3 条同父块只占 1 个名额。",
+      "tags": [
+        "test",
+        "rerank",
+        "dedup"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:tests/rag/test_retrieval.py:test_rerank_dedup_logs_dropped_kept",
+      "type": "function",
+      "name": "test_rerank_dedup_logs_dropped_kept",
+      "filePath": "tests/rag/test_retrieval.py",
+      "lineRange": [
+        479,
+        498
+      ],
+      "summary": "验证去重折叠时 dedup done 事件记录正确的 dropped/kept 计数。",
+      "tags": [
+        "test",
+        "rerank",
+        "dedup",
+        "logging"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:tests/rag/test_retrieval.py:test_rerank_dedup_logs_zero_drop",
+      "type": "function",
+      "name": "test_rerank_dedup_logs_zero_drop",
+      "filePath": "tests/rag/test_retrieval.py",
+      "lineRange": [
+        501,
+        517
+      ],
+      "summary": "验证无折叠时 dedup done 事件记录 dropped=0（spec 无丢弃时记零）。",
+      "tags": [
+        "test",
+        "rerank",
+        "dedup"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:tests/rag/test_retrieval.py:TestSearch",
+      "type": "class",
+      "name": "TestSearch",
+      "filePath": "tests/rag/test_retrieval.py",
+      "lineRange": [
+        66,
+        81
+      ],
+      "summary": "search() 检索用例集：验证调用 vector_store.dense_search 并返回结果。",
+      "tags": [
+        "test",
+        "retrieval"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:tests/rag/test_retrieval.py:TestRerank",
+      "type": "class",
+      "name": "TestRerank",
+      "filePath": "tests/rag/test_retrieval.py",
+      "lineRange": [
+        85,
+        194
+      ],
+      "summary": "rerank_results() 精排用例集：上下文返回、实体透传、空结果、无绝对阈值、top_n 截断、回退保序与 tier 0 构造。",
+      "tags": [
+        "test",
+        "rerank"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:tests/rag/test_retrieval.py:TestQueryRewrite",
+      "type": "class",
+      "name": "TestQueryRewrite",
+      "filePath": "tests/rag/test_retrieval.py",
+      "lineRange": [
+        231,
+        285
+      ],
+      "summary": "查询改写用例集：简单直通、短查询扩展、中等改写压缩、复杂分解以及历史/无历史场景。",
+      "tags": [
+        "test",
+        "query-rewrite"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:tests/rag/test_retrieval.py:TestTierAnnotation",
+      "type": "class",
+      "name": "TestTierAnnotation",
+      "filePath": "tests/rag/test_retrieval.py",
+      "lineRange": [
+        291,
+        320
+      ],
+      "summary": "to_prompt_text 档位标注用例集：KB 与 web tier 标注、None 时保持旧格式、默认 tier。",
+      "tags": [
+        "test",
+        "tier"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:tests/rag/test_retrieval_dedup.py",
+      "type": "file",
+      "name": "test_retrieval_dedup.py",
+      "filePath": "tests/rag/test_retrieval_dedup.py",
+      "summary": "检索结果内容级（父块）去重测试：验证 _dedup_by_parent 同父块只留最高分、跨文档不折叠、无父块保留、按分数降序输出。",
+      "tags": [
+        "test",
+        "pytest",
+        "rag",
+        "dedup"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:tests/rag/test_retrieval_dedup.py:test_same_parent_keeps_highest_score",
+      "type": "function",
+      "name": "test_same_parent_keeps_highest_score",
+      "filePath": "tests/rag/test_retrieval_dedup.py",
+      "lineRange": [
+        19,
+        28
+      ],
+      "summary": "验证同一父块的多个 chunk 只保留 .score 最高的一条（而非最先出现的）。",
+      "tags": [
+        "test",
+        "dedup"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:tests/rag/test_retrieval_dedup.py:test_different_parents_in_same_doc_all_kept",
+      "type": "function",
+      "name": "test_different_parents_in_same_doc_all_kept",
+      "filePath": "tests/rag/test_retrieval_dedup.py",
+      "lineRange": [
+        31,
+        39
+      ],
+      "summary": "验证同一文档的多个不同父块全部保留（取消每文档配额）。",
+      "tags": [
+        "test",
+        "dedup"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:tests/rag/test_retrieval_dedup.py:test_cross_document_identical_parent_not_folded",
+      "type": "function",
+      "name": "test_cross_document_identical_parent_not_folded",
+      "filePath": "tests/rag/test_retrieval_dedup.py",
+      "lineRange": [
+        42,
+        47
+      ],
+      "summary": "验证跨文档逐字相同的父块不折叠，去重键必须包含 doc_id。",
+      "tags": [
+        "test",
+        "dedup"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:tests/rag/test_retrieval_dedup.py:test_chunk_without_parent_kept_as_is",
+      "type": "function",
+      "name": "test_chunk_without_parent_kept_as_is",
+      "filePath": "tests/rag/test_retrieval_dedup.py",
+      "lineRange": [
+        50,
+        57
+      ],
+      "summary": "验证无 parent_content 的 chunk 按自身保留，不参与折叠。",
+      "tags": [
+        "test",
+        "dedup"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:tests/rag/test_retrieval_dedup.py:test_kept_order_is_score_desc",
+      "type": "function",
+      "name": "test_kept_order_is_score_desc",
+      "filePath": "tests/rag/test_retrieval_dedup.py",
+      "lineRange": [
+        60,
+        68
+      ],
+      "summary": "验证去重输出按 .score 降序，供后续按 TOP_K_RERANK 截断。",
+      "tags": [
+        "test",
+        "dedup"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "document:src/cli/README.md",
+      "type": "document",
+      "name": "README.md",
+      "filePath": "src/cli/README.md",
+      "summary": "src/cli 诊断与评估命令行工具目录的唯一使用手册：先给前提条件与四条命令速查，再详解 RAGAS「生成测试集 → 执行评估 → 质量门禁 → 参数选优」四步工作流，含各步运行命令、内部流程、产物目录、四项指标阈值与解读方法，末尾附参数一览与典型工作流。",
+      "tags": [
+        "documentation",
+        "cli",
+        "ragas",
+        "评估流程",
+        "命令行参考"
+      ],
+      "complexity": "moderate",
+      "languageNotes": "文档共 24 个标题（H1/H2/H3 三级），以命令示例代码块 + 参数表 + 指标阈值表组织，属面向使用者的操作手册；含 `src/cli/eval_ragas.py:157`、`src/rag/context.py` 等源码级锚点引用。"
     }
   ],
   "edges": [
@@ -34827,20 +35006,6 @@
       "weight": 1
     },
     {
-      "source": "file:src/cli/compare_dedup.py",
-      "target": "function:src/cli/compare_dedup.py:run_eval_with_dedup",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:src/cli/compare_dedup.py",
-      "target": "function:src/cli/compare_dedup.py:main",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
       "source": "file:src/cli/compare_retrieval.py",
       "target": "function:src/cli/compare_retrieval.py:_resolve_kb_id",
       "type": "contains",
@@ -35051,20 +35216,6 @@
       "weight": 0.8
     },
     {
-      "source": "file:src/cli/compare_dedup.py",
-      "target": "function:src/cli/compare_dedup.py:run_eval_with_dedup",
-      "type": "exports",
-      "direction": "forward",
-      "weight": 0.8
-    },
-    {
-      "source": "file:src/cli/compare_dedup.py",
-      "target": "function:src/cli/compare_dedup.py:main",
-      "type": "exports",
-      "direction": "forward",
-      "weight": 0.8
-    },
-    {
       "source": "file:src/cli/compare_retrieval.py",
       "target": "function:src/cli/compare_retrieval.py:run_eval",
       "type": "exports",
@@ -35145,20 +35296,6 @@
       "source": "file:src/infra/db/models/document.py",
       "target": "class:src/infra/db/models/document.py:DocModel",
       "type": "exports",
-      "direction": "forward",
-      "weight": 0.8
-    },
-    {
-      "source": "function:src/cli/compare_dedup.py:run_eval_with_dedup",
-      "target": "function:src/cli/compare_retrieval.py:parse_metrics",
-      "type": "calls",
-      "direction": "forward",
-      "weight": 0.8
-    },
-    {
-      "source": "function:src/cli/compare_dedup.py:main",
-      "target": "function:src/cli/compare_retrieval.py:_resolve_kb_id",
-      "type": "calls",
       "direction": "forward",
       "weight": 0.8
     },
@@ -39524,62 +39661,6 @@
       "weight": 0.8
     },
     {
-      "source": "file:src/core/log_events.py",
-      "target": "class:src/core/log_events.py:Signal",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:src/core/log_events.py",
-      "target": "class:src/core/log_events.py:Signal",
-      "type": "exports",
-      "direction": "forward",
-      "weight": 0.8
-    },
-    {
-      "source": "file:src/core/log_events.py",
-      "target": "class:src/core/log_events.py:Event",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:src/core/log_events.py",
-      "target": "class:src/core/log_events.py:Event",
-      "type": "exports",
-      "direction": "forward",
-      "weight": 0.8
-    },
-    {
-      "source": "file:src/core/log_events.py",
-      "target": "class:src/core/log_events.py:ReplayEvent",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:src/core/log_events.py",
-      "target": "class:src/core/log_events.py:ReplayEvent",
-      "type": "exports",
-      "direction": "forward",
-      "weight": 0.8
-    },
-    {
-      "source": "file:src/core/log_events.py",
-      "target": "function:src/core/log_events.py:_validate_registry",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:src/core/log_events.py",
-      "target": "function:src/core/log_events.py:_validate_registry",
-      "type": "exports",
-      "direction": "forward",
-      "weight": 0.8
-    },
-    {
       "source": "file:src/core/logging.py",
       "target": "class:src/core/logging.py:InterceptHandler",
       "type": "contains",
@@ -39881,13 +39962,6 @@
       "weight": 0.8
     },
     {
-      "source": "function:src/agents/tools/rag_tools.py:make_rag_tools",
-      "target": "function:src/rag/retrieval.py:search",
-      "type": "calls",
-      "direction": "forward",
-      "weight": 0.8
-    },
-    {
       "source": "function:src/agents/tools/web_tools.py:search_web",
       "target": "function:src/infra/search/tavily_client.py:tavily_search",
       "type": "calls",
@@ -39897,20 +39971,6 @@
     {
       "source": "function:src/agents/tools/web_tools.py:search_web",
       "target": "function:src/infra/search/tavily_client.py:tavily_extract",
-      "type": "calls",
-      "direction": "forward",
-      "weight": 0.8
-    },
-    {
-      "source": "function:src/cli/replay_trace.py:main",
-      "target": "function:src/rag/retrieval.py:search",
-      "type": "calls",
-      "direction": "forward",
-      "weight": 0.8
-    },
-    {
-      "source": "function:src/cli/replay_trace.py:main",
-      "target": "function:src/rag/retrieval.py:rerank_results",
       "type": "calls",
       "direction": "forward",
       "weight": 0.8
@@ -40266,97 +40326,6 @@
       "weight": 0.8
     },
     {
-      "source": "file:src/rag/retrieval.py",
-      "target": "function:src/rag/retrieval.py:_dedup_by_doc_id",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:src/rag/retrieval.py",
-      "target": "function:src/rag/retrieval.py:search",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:src/rag/retrieval.py",
-      "target": "function:src/rag/retrieval.py:search",
-      "type": "exports",
-      "direction": "forward",
-      "weight": 0.8
-    },
-    {
-      "source": "file:src/rag/retrieval.py",
-      "target": "function:src/rag/retrieval.py:rerank_results",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:src/rag/retrieval.py",
-      "target": "function:src/rag/retrieval.py:rerank_results",
-      "type": "exports",
-      "direction": "forward",
-      "weight": 0.8
-    },
-    {
-      "source": "file:src/rag/retrieval.py",
-      "target": "function:src/rag/retrieval.py:expand_query",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:src/rag/retrieval.py",
-      "target": "function:src/rag/retrieval.py:expand_query",
-      "type": "exports",
-      "direction": "forward",
-      "weight": 0.8
-    },
-    {
-      "source": "file:src/rag/retrieval.py",
-      "target": "function:src/rag/retrieval.py:condense_query",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:src/rag/retrieval.py",
-      "target": "function:src/rag/retrieval.py:condense_query",
-      "type": "exports",
-      "direction": "forward",
-      "weight": 0.8
-    },
-    {
-      "source": "file:src/rag/retrieval.py",
-      "target": "function:src/rag/retrieval.py:decompose_query",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:src/rag/retrieval.py",
-      "target": "function:src/rag/retrieval.py:decompose_query",
-      "type": "exports",
-      "direction": "forward",
-      "weight": 0.8
-    },
-    {
-      "source": "file:src/rag/retrieval.py",
-      "target": "function:src/rag/retrieval.py:rewrite_query",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:src/rag/retrieval.py",
-      "target": "function:src/rag/retrieval.py:rewrite_query",
-      "type": "exports",
-      "direction": "forward",
-      "weight": 0.8
-    },
-    {
       "source": "file:tests/agents/graph/test_verify_node.py",
       "target": "function:tests/agents/graph/test_verify_node.py:_make_ctx",
       "type": "contains",
@@ -40628,20 +40597,6 @@
       "type": "contains",
       "direction": "forward",
       "weight": 1
-    },
-    {
-      "source": "function:src/rag/retrieval.py:search",
-      "target": "function:src/rag/fusion.py:rrf_fusion",
-      "type": "calls",
-      "direction": "forward",
-      "weight": 0.8
-    },
-    {
-      "source": "function:src/rag/retrieval.py:rerank_results",
-      "target": "function:src/models.py:with_retry",
-      "type": "calls",
-      "direction": "forward",
-      "weight": 0.8
     },
     {
       "source": "file:src/rag/context.py",
@@ -41310,20 +41265,6 @@
       "weight": 1
     },
     {
-      "source": "file:tests/core/test_log_events.py",
-      "target": "function:tests/core/test_log_events.py:test_replay_event_fields",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:tests/core/test_log_events.py",
-      "target": "function:tests/core/test_log_events.py:test_turn_provenance_events_registered",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
       "source": "file:src/agents/graph/state.py",
       "target": "file:tests/agents/graph/test_state.py",
       "type": "tested_by",
@@ -41334,14 +41275,6 @@
     {
       "source": "file:src/agents/graph/verify/node.py",
       "target": "file:tests/agents/graph/test_verify_material_source.py",
-      "type": "tested_by",
-      "direction": "forward",
-      "weight": 0.5,
-      "description": "Direction corrected (was test → production)"
-    },
-    {
-      "source": "file:src/core/log_events.py",
-      "target": "file:tests/core/test_log_events.py",
       "type": "tested_by",
       "direction": "forward",
       "weight": 0.5,
@@ -41845,97 +41778,6 @@
       "weight": 1
     },
     {
-      "source": "file:tests/rag/test_retrieval.py",
-      "target": "function:tests/rag/test_retrieval.py:_cr",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:tests/rag/test_retrieval.py",
-      "target": "function:tests/rag/test_retrieval.py:test_to_prompt_text_with_entities",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:tests/rag/test_retrieval.py",
-      "target": "function:tests/rag/test_retrieval.py:test_to_prompt_text_without_entities",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:tests/rag/test_retrieval.py",
-      "target": "function:tests/rag/test_retrieval.py:test_to_prompt_text_web_ctx_with_tier_label",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:tests/rag/test_retrieval.py",
-      "target": "function:tests/rag/test_retrieval.py:test_hybrid_runs_both_paths_concurrently_on_same_store",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:tests/rag/test_retrieval.py",
-      "target": "function:tests/rag/test_retrieval.py:test_hybrid_logs_both_path_contributions",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:tests/rag/test_retrieval.py",
-      "target": "function:tests/rag/test_retrieval.py:test_dense_only_when_hybrid_disabled",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:tests/rag/test_retrieval.py",
-      "target": "class:tests/rag/test_retrieval.py:TestRerank",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:tests/rag/test_retrieval.py",
-      "target": "class:tests/rag/test_retrieval.py:TestQueryRewrite",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:tests/rag/test_retrieval.py",
-      "target": "class:tests/rag/test_retrieval.py:TestTierAnnotation",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:tests/rag/test_retrieval_dedup.py",
-      "target": "function:tests/rag/test_retrieval_dedup.py:test_dedup_keeps_first_per_doc",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:tests/rag/test_retrieval_dedup.py",
-      "target": "function:tests/rag/test_retrieval_dedup.py:test_dedup_default_one_per_doc_keeps_existing_behavior",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
-      "source": "file:tests/rag/test_retrieval_dedup.py",
-      "target": "function:tests/rag/test_retrieval_dedup.py:test_dedup_max_per_doc_two",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1
-    },
-    {
       "source": "file:tests/test_models.py",
       "target": "class:tests/test_models.py:TestWithRetry",
       "type": "contains",
@@ -41998,22 +41840,6 @@
     {
       "source": "file:src/infra/llm/reasoning_chat.py",
       "target": "file:tests/infra/test_reasoning_preserving.py",
-      "type": "tested_by",
-      "direction": "forward",
-      "weight": 0.5,
-      "description": "Direction corrected (was test → production)"
-    },
-    {
-      "source": "file:src/rag/retrieval.py",
-      "target": "file:tests/rag/test_retrieval.py",
-      "type": "tested_by",
-      "direction": "forward",
-      "weight": 0.5,
-      "description": "Direction corrected (was test → production)"
-    },
-    {
-      "source": "file:src/rag/retrieval.py",
-      "target": "file:tests/rag/test_retrieval_dedup.py",
       "type": "tested_by",
       "direction": "forward",
       "weight": 0.5,
@@ -49215,41 +49041,6 @@
       "weight": 0.5
     },
     {
-      "source": "document:src/cli/README.md",
-      "target": "file:src/cli/eval_ragas.py",
-      "type": "documents",
-      "direction": "forward",
-      "weight": 0.5
-    },
-    {
-      "source": "document:src/cli/README.md",
-      "target": "file:src/cli/eval_ragas_generate.py",
-      "type": "documents",
-      "direction": "forward",
-      "weight": 0.5
-    },
-    {
-      "source": "document:src/cli/README.md",
-      "target": "file:src/cli/compare_retrieval.py",
-      "type": "documents",
-      "direction": "forward",
-      "weight": 0.5
-    },
-    {
-      "source": "document:src/cli/README.md",
-      "target": "file:src/cli/check_retrieval.py",
-      "type": "documents",
-      "direction": "forward",
-      "weight": 0.5
-    },
-    {
-      "source": "document:src/cli/README.md",
-      "target": "file:src/rag/context.py",
-      "type": "documents",
-      "direction": "forward",
-      "weight": 0.5
-    },
-    {
       "source": "file:tests/infra/llm/test_token_usage.py",
       "target": "function:tests/infra/llm/test_token_usage.py:test_estimate_usage_total_is_sum_of_parts",
       "type": "contains",
@@ -49650,6 +49441,608 @@
       "weight": 0.6
     },
     {
+      "source": "file:tests/core/test_log_events.py",
+      "target": "function:tests/core/test_log_events.py:test_replay_event_fields",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/core/test_log_events.py",
+      "target": "function:tests/core/test_log_events.py:test_turn_provenance_events_registered",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/core/test_log_events.py",
+      "target": "function:tests/core/test_log_events.py:test_replay_event_fields",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:tests/core/test_log_events.py",
+      "target": "function:tests/core/test_log_events.py:test_turn_provenance_events_registered",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:tests/core/test_log_events.py:test_replay_event_fields",
+      "target": "class:src/core/log_events.py:ReplayEvent",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:tests/core/test_log_events.py:test_turn_provenance_events_registered",
+      "target": "class:src/core/log_events.py:Event",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:src/core/log_events.py",
+      "target": "file:tests/core/test_log_events.py",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:src/config/settings.py",
+      "target": "file:tests/core/test_log_events.py",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:src/core/log_events.py",
+      "target": "class:src/core/log_events.py:Signal",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:src/core/log_events.py",
+      "target": "class:src/core/log_events.py:Signal",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:src/core/log_events.py",
+      "target": "class:src/core/log_events.py:Event",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:src/core/log_events.py",
+      "target": "class:src/core/log_events.py:Event",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:src/core/log_events.py",
+      "target": "class:src/core/log_events.py:ReplayEvent",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:src/core/log_events.py",
+      "target": "class:src/core/log_events.py:ReplayEvent",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:src/core/log_events.py",
+      "target": "function:src/core/log_events.py:_validate_registry",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:src/core/log_events.py",
+      "target": "function:src/core/log_events.py:_validate_registry",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:scripts/verify_retrieval_dedup.py",
+      "target": "function:scripts/verify_retrieval_dedup.py:main",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:scripts/verify_retrieval_dedup.py",
+      "target": "function:scripts/verify_retrieval_dedup.py:main",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:src/rag/retrieval.py",
+      "target": "function:src/rag/retrieval.py:_dedup_by_parent",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:src/rag/retrieval.py",
+      "target": "function:src/rag/retrieval.py:search",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:src/rag/retrieval.py",
+      "target": "function:src/rag/retrieval.py:search",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:src/rag/retrieval.py",
+      "target": "function:src/rag/retrieval.py:_rerank_stats",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:src/rag/retrieval.py",
+      "target": "function:src/rag/retrieval.py:rerank_results",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:src/rag/retrieval.py",
+      "target": "function:src/rag/retrieval.py:rerank_results",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:src/rag/retrieval.py",
+      "target": "function:src/rag/retrieval.py:expand_query",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:src/rag/retrieval.py",
+      "target": "function:src/rag/retrieval.py:expand_query",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:src/rag/retrieval.py",
+      "target": "function:src/rag/retrieval.py:condense_query",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:src/rag/retrieval.py",
+      "target": "function:src/rag/retrieval.py:condense_query",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:src/rag/retrieval.py",
+      "target": "function:src/rag/retrieval.py:decompose_query",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:src/rag/retrieval.py",
+      "target": "function:src/rag/retrieval.py:decompose_query",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:src/rag/retrieval.py",
+      "target": "function:src/rag/retrieval.py:rewrite_query",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:src/rag/retrieval.py",
+      "target": "function:src/rag/retrieval.py:rewrite_query",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:scripts/verify_retrieval_dedup.py:main",
+      "target": "function:src/infra/db/engine.py:run_and_dispose",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:scripts/verify_retrieval_dedup.py:main",
+      "target": "function:src/models.py:get_rerank",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:scripts/verify_retrieval_dedup.py:main",
+      "target": "function:src/rag/retrieval.py:search",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:scripts/verify_retrieval_dedup.py:main",
+      "target": "function:src/rag/retrieval.py:rerank_results",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:src/rag/retrieval.py:search",
+      "target": "function:src/rag/fusion.py:rrf_fusion",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:src/rag/retrieval.py:search",
+      "target": "function:src/core/logging.py:log_event",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:src/rag/retrieval.py:rerank_results",
+      "target": "function:src/models.py:with_retry",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:src/rag/retrieval.py:rerank_results",
+      "target": "function:src/config/const.py:resolve_source_tier",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:src/rag/retrieval.py:rerank_results",
+      "target": "class:src/rag/context.py:RAGContext",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:src/rag/retrieval.py:rerank_results",
+      "target": "function:src/core/logging.py:log_event",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:tests/agents/tools/test_rag_tools_timeout_dedup.py",
+      "target": "function:tests/agents/tools/test_rag_tools_timeout_dedup.py:test_timeout_fallback_contexts_are_deduped",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/rag/test_retrieval.py",
+      "target": "function:tests/rag/test_retrieval.py:_cr",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/rag/test_retrieval.py",
+      "target": "function:tests/rag/test_retrieval.py:test_to_prompt_text_with_entities",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/rag/test_retrieval.py",
+      "target": "function:tests/rag/test_retrieval.py:test_to_prompt_text_without_entities",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/rag/test_retrieval.py",
+      "target": "function:tests/rag/test_retrieval.py:test_to_prompt_text_web_ctx_with_tier_label",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/rag/test_retrieval.py",
+      "target": "function:tests/rag/test_retrieval.py:test_hybrid_runs_both_paths_concurrently_on_same_store",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/rag/test_retrieval.py",
+      "target": "function:tests/rag/test_retrieval.py:test_hybrid_logs_both_path_contributions",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/rag/test_retrieval.py",
+      "target": "function:tests/rag/test_retrieval.py:test_dense_only_when_hybrid_disabled",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/rag/test_retrieval.py",
+      "target": "function:tests/rag/test_retrieval.py:test_rerank_stats_percentiles_and_source",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/rag/test_retrieval.py",
+      "target": "function:tests/rag/test_retrieval.py:test_rerank_stats_marks_fallback_source",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/rag/test_retrieval.py",
+      "target": "function:tests/rag/test_retrieval.py:test_rerank_dedups_before_truncating",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/rag/test_retrieval.py",
+      "target": "function:tests/rag/test_retrieval.py:test_rerank_dedup_logs_dropped_kept",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/rag/test_retrieval.py",
+      "target": "function:tests/rag/test_retrieval.py:test_rerank_dedup_logs_zero_drop",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/rag/test_retrieval.py",
+      "target": "class:tests/rag/test_retrieval.py:TestSearch",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/rag/test_retrieval.py",
+      "target": "class:tests/rag/test_retrieval.py:TestRerank",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/rag/test_retrieval.py",
+      "target": "class:tests/rag/test_retrieval.py:TestQueryRewrite",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/rag/test_retrieval.py",
+      "target": "class:tests/rag/test_retrieval.py:TestTierAnnotation",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/rag/test_retrieval_dedup.py",
+      "target": "function:tests/rag/test_retrieval_dedup.py:test_same_parent_keeps_highest_score",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/rag/test_retrieval_dedup.py",
+      "target": "function:tests/rag/test_retrieval_dedup.py:test_different_parents_in_same_doc_all_kept",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/rag/test_retrieval_dedup.py",
+      "target": "function:tests/rag/test_retrieval_dedup.py:test_cross_document_identical_parent_not_folded",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/rag/test_retrieval_dedup.py",
+      "target": "function:tests/rag/test_retrieval_dedup.py:test_chunk_without_parent_kept_as_is",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:tests/rag/test_retrieval_dedup.py",
+      "target": "function:tests/rag/test_retrieval_dedup.py:test_kept_order_is_score_desc",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:src/rag/retrieval.py",
+      "target": "file:tests/rag/test_retrieval.py",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:src/rag/context.py",
+      "target": "file:tests/rag/test_retrieval.py",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:src/rag/retrieval.py",
+      "target": "file:tests/rag/test_retrieval_dedup.py",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:src/rag/retrieval.py",
+      "target": "file:tests/agents/tools/test_rag_tools_timeout_dedup.py",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "function:tests/rag/test_retrieval.py:test_hybrid_runs_both_paths_concurrently_on_same_store",
+      "target": "function:src/rag/retrieval.py:search",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:tests/rag/test_retrieval.py:test_hybrid_logs_both_path_contributions",
+      "target": "function:src/rag/retrieval.py:search",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:tests/rag/test_retrieval.py:test_dense_only_when_hybrid_disabled",
+      "target": "function:src/rag/retrieval.py:search",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:tests/rag/test_retrieval.py:test_rerank_stats_percentiles_and_source",
+      "target": "function:src/rag/retrieval.py:_rerank_stats",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:tests/rag/test_retrieval.py:test_rerank_stats_marks_fallback_source",
+      "target": "function:src/rag/retrieval.py:_rerank_stats",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:tests/rag/test_retrieval.py:test_rerank_dedups_before_truncating",
+      "target": "function:src/rag/retrieval.py:rerank_results",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:tests/rag/test_retrieval.py:test_rerank_dedup_logs_dropped_kept",
+      "target": "function:src/rag/retrieval.py:rerank_results",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:tests/rag/test_retrieval.py:test_rerank_dedup_logs_zero_drop",
+      "target": "function:src/rag/retrieval.py:rerank_results",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:tests/rag/test_retrieval_dedup.py:test_same_parent_keeps_highest_score",
+      "target": "function:src/rag/retrieval.py:_dedup_by_parent",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:tests/rag/test_retrieval_dedup.py:test_different_parents_in_same_doc_all_kept",
+      "target": "function:src/rag/retrieval.py:_dedup_by_parent",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:tests/rag/test_retrieval_dedup.py:test_cross_document_identical_parent_not_folded",
+      "target": "function:src/rag/retrieval.py:_dedup_by_parent",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:tests/rag/test_retrieval_dedup.py:test_chunk_without_parent_kept_as_is",
+      "target": "function:src/rag/retrieval.py:_dedup_by_parent",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:tests/rag/test_retrieval_dedup.py:test_kept_order_is_score_desc",
+      "target": "function:src/rag/retrieval.py:_dedup_by_parent",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "document:src/cli/README.md",
+      "target": "file:src/cli/eval_ragas.py",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:src/cli/README.md",
+      "target": "file:src/cli/eval_ragas_generate.py",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:src/cli/README.md",
+      "target": "file:src/cli/compare_retrieval.py",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:src/cli/README.md",
+      "target": "file:src/cli/check_retrieval.py",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:src/cli/README.md",
+      "target": "file:src/rag/context.py",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
       "source": "file:alembic/env.py",
       "target": "file:src/infra/db/base.py",
       "type": "imports",
@@ -49740,6 +50133,54 @@
     {
       "source": "file:scripts/rewrite_content_seg.py",
       "target": "file:src/infra/search/tokenizer.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7,
+      "recoveredFromImportMap": true
+    },
+    {
+      "source": "file:scripts/verify_retrieval_dedup.py",
+      "target": "file:src/config/__init__.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7,
+      "recoveredFromImportMap": true
+    },
+    {
+      "source": "file:scripts/verify_retrieval_dedup.py",
+      "target": "file:src/infra/db/engine.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7,
+      "recoveredFromImportMap": true
+    },
+    {
+      "source": "file:scripts/verify_retrieval_dedup.py",
+      "target": "file:src/infra/db/vector_store/__init__.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7,
+      "recoveredFromImportMap": true
+    },
+    {
+      "source": "file:scripts/verify_retrieval_dedup.py",
+      "target": "file:src/models.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7,
+      "recoveredFromImportMap": true
+    },
+    {
+      "source": "file:scripts/verify_retrieval_dedup.py",
+      "target": "file:src/rag/__init__.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7,
+      "recoveredFromImportMap": true
+    },
+    {
+      "source": "file:scripts/verify_retrieval_dedup.py",
+      "target": "file:src/rag/retrieval.py",
       "type": "imports",
       "direction": "forward",
       "weight": 0.7,
@@ -51930,14 +52371,6 @@
       "recoveredFromImportMap": true
     },
     {
-      "source": "file:src/cli/compare_dedup.py",
-      "target": "file:src/cli/compare_retrieval.py",
-      "type": "imports",
-      "direction": "forward",
-      "weight": 0.7,
-      "recoveredFromImportMap": true
-    },
-    {
       "source": "file:src/cli/compare_retrieval.py",
       "target": "file:src/infra/db/engine.py",
       "type": "imports",
@@ -53284,14 +53717,6 @@
     {
       "source": "file:src/rag/retrieval.py",
       "target": "file:src/config/const.py",
-      "type": "imports",
-      "direction": "forward",
-      "weight": 0.7,
-      "recoveredFromImportMap": true
-    },
-    {
-      "source": "file:src/rag/retrieval.py",
-      "target": "file:src/config/settings.py",
       "type": "imports",
       "direction": "forward",
       "weight": 0.7,
@@ -54682,6 +55107,62 @@
       "recoveredFromImportMap": true
     },
     {
+      "source": "file:tests/agents/tools/test_rag_tools_timeout_dedup.py",
+      "target": "file:src/agents/graph/state.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7,
+      "recoveredFromImportMap": true
+    },
+    {
+      "source": "file:tests/agents/tools/test_rag_tools_timeout_dedup.py",
+      "target": "file:src/agents/tools/__init__.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7,
+      "recoveredFromImportMap": true
+    },
+    {
+      "source": "file:tests/agents/tools/test_rag_tools_timeout_dedup.py",
+      "target": "file:src/core/log_events.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7,
+      "recoveredFromImportMap": true
+    },
+    {
+      "source": "file:tests/agents/tools/test_rag_tools_timeout_dedup.py",
+      "target": "file:src/infra/db/vector_store/__init__.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7,
+      "recoveredFromImportMap": true
+    },
+    {
+      "source": "file:tests/agents/tools/test_rag_tools_timeout_dedup.py",
+      "target": "file:src/infra/db/vector_store/types.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7,
+      "recoveredFromImportMap": true
+    },
+    {
+      "source": "file:tests/agents/tools/test_rag_tools_timeout_dedup.py",
+      "target": "file:src/rag/__init__.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7,
+      "recoveredFromImportMap": true
+    },
+    {
+      "source": "file:tests/agents/tools/test_rag_tools_timeout_dedup.py",
+      "target": "file:src/rag/retrieval.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7,
+      "recoveredFromImportMap": true
+    },
+    {
       "source": "file:tests/agents/tools/test_registry.py",
       "target": "file:src/agents/tools/registry.py",
       "type": "imports",
@@ -55420,6 +55901,22 @@
     {
       "source": "file:tests/conftest.py",
       "target": "file:src/services/app_service.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7,
+      "recoveredFromImportMap": true
+    },
+    {
+      "source": "file:tests/core/test_log_events.py",
+      "target": "file:src/config/__init__.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7,
+      "recoveredFromImportMap": true
+    },
+    {
+      "source": "file:tests/core/test_log_events.py",
+      "target": "file:src/config/settings.py",
       "type": "imports",
       "direction": "forward",
       "weight": 0.7,
@@ -56235,7 +56732,7 @@
     },
     {
       "source": "file:tests/rag/test_retrieval_dedup.py",
-      "target": "file:src/infra/db/vector_store/types.py",
+      "target": "file:src/rag/context.py",
       "type": "imports",
       "direction": "forward",
       "weight": 0.7,
@@ -56943,7 +57440,6 @@
         "file:scripts/clean_all_data.py",
         "file:scripts/rebuild_kb_data.py",
         "file:scripts/rewrite_content_seg.py",
-        "file:src/cli/compare_dedup.py",
         "file:src/cli/compare_retrieval.py",
         "file:src/cli/check_abstain.py",
         "file:src/cli/check_retrieval.py",
@@ -56957,7 +57453,8 @@
         "file:src/cli/eval_ragas.py",
         "file:src/cli/purge_langfuse_traces.py",
         "document:src/cli/README.md",
-        "file:scripts/dev-worktree.sh"
+        "file:scripts/dev-worktree.sh",
+        "file:scripts/verify_retrieval_dedup.py"
       ]
     },
     {
@@ -57213,7 +57710,8 @@
         "file:tests/agents/graph/test_agent_node_tracing.py",
         "file:tests/services/test_run_generation_tracing.py",
         "file:tests/infra/llm/test_token_usage.py",
-        "file:tests/test_tracing_order.py"
+        "file:tests/test_tracing_order.py",
+        "file:tests/agents/tools/test_rag_tools_timeout_dedup.py"
       ]
     }
   ],
