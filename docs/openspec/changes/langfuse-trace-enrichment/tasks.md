@@ -2,7 +2,8 @@
 
 - [ ] 1.1 `src/config/settings.py` 新增模型输入 / 输出单价字段（env 驱动，默认 0 表示「未配置」），并同步 `.env.template` / `.env.example` 的注释 —— **注释必须写明「USD / 单个 token」并给出换算例**（$3 per 1M tokens → 填 `0.000003`；写成「每 1M」会让成本差 1e6 倍）
 - [ ] 1.2 新增 `src/cli/seed_langfuse_models.py`：用 `langfuse_context.client_instance.api.models` 的 `list`（**翻页遍历**）+ `create` 幂等写入；**`model_name` 取 `settings.LLM_MODEL`（不硬编码）**，`match_pattern` 由它构造为 `"(?i)^" + re.escape(model_name) + "$"`，`unit=TOKENS`；**单价为 0 时跳过并打印提示**，不写入零价模型定义
-- [ ] 1.3 CLI 单测：未配置时跳过；重复执行不产生重复模型定义；**断言 pattern 匹配目标模型**，并断言**不匹配**形近名（带版本后缀 / 形近写法）—— 注意 Postgres 的 `~` 是**子串匹配**，写宽了的后果是**误配**（把单价套到别的模型上），不是匹配不到；若断言"未锚定就匹配不到"会直接失败
+- [ ] 1.3 **seed 前的一致性检查**：先只读查询 `SELECT DISTINCT model FROM observations WHERE type='GENERATION'`，与 `settings.LLM_MODEL` 比对 —— **不等则先改配置、不执行 seed**（pattern 锚定的必须是**运行时 provider 名**，它来自 `response_metadata["model_name"]`，与配置值当前恰好相等但无全链保证）。不要为兼容后缀而放宽 pattern（会重新引入误配）
+- [ ] 1.4 CLI 单测：未配置时跳过；重复执行不产生重复模型定义；**断言 pattern 匹配目标模型**，并断言**不匹配**形近名（带版本后缀 / 形近写法）—— 注意 Postgres 的 `~` 是**子串匹配**，写宽了的后果是**误配**（把单价套到别的模型上），不是匹配不到；若断言"未锚定就匹配不到"会直接失败
 
 ## 2. 工具观测（核心）
 
@@ -11,8 +12,7 @@
 - [ ] 2.3 过滤判据**只用 `metadata.langgraph_node == "tools"`**；**不得**用 `checkpoint_ns` 判空 —— 实测 `on_tool_*` 的 `checkpoint_ns` 是 `tools:<uuid>`（非空），误用会**丢掉全部工具事件**
 - [ ] 2.4 工具 span 一律用 `langfuse_context.client_instance.span(trace_id=…)` 创建（**不调用 `client.trace()`**；**不 new `Langfuse()`**，否则绕过开关与 flush）；`_on_end` 从 `ToolMessage` 显式取 `.content` / `.tool_call_id` / `.name` 后再写入
 - [ ] 2.5 `src/services/agent_service.py` 的事件循环内挂 `tool_trace.consume(item)`，并在 `finally` 调用 `close()`
-- [ ] 2.6 预留三个 hook 的位置（入参归一化 / 输出摘要 / 来源标记）—— 仅把写死的行抽成小函数，**不实现逻辑**
-- [ ] 2.7 采集器单测：`run_id` 配对；`on_tool_error` 错误态；取消路径 `close()` 关闭未结束 span；`LANGFUSE_ENABLE=false` 时零产出；**同一轮并行多个工具时各自成 span 且都挂在同一条父 span 下**
+- [ ] 2.6 采集器单测：`run_id` 配对；`on_tool_error` 错误态；取消路径 `close()` 关闭未结束 span；`LANGFUSE_ENABLE=false` 时零产出；**同一轮并行多个工具时各自成 span 且都挂在同一条父 span 下**
 
 ## 3. generation 载荷与输出
 
@@ -28,14 +28,14 @@
 ## 5. 文档与 ADR
 
 - [ ] 5.1 新增 ADR：引入命令式 Langfuse client 接入（含「client 实例统一取 `langfuse_context.client_instance`」与「工具 span 路径不触碰 trace 行」的口径，与 `llm-tracing` 既有「纯装饰器」决策的取舍），并在 `docs/adr/README.md` 索引表登记
-- [ ] 5.2 `docs/agents/code-map.md` 登记 `src/infra/llm/tool_trace.py` 与 seed CLI 的落点；`docs/agents/cookbook.md` 补「seed 模型定价」的操作步骤（含 **USD / 单 token** 口径与换算例、`match_pattern` 由 `re.escape` 构造的说明）
+- [ ] 5.2 `docs/agents/code-map.md` 登记 `src/infra/llm/tool_trace.py` 与 seed CLI 的落点；`docs/agents/cookbook.md` 补「seed 模型定价」的操作步骤（含 **USD / 单 token** 口径与换算例、`match_pattern` 由 `re.escape` 构造的说明、以及**先比对运行时模型名**这一步）
 - [ ] 5.3 trace 记录范围的说明**落在 `docs/agents/` 的常驻档或本次新增的 ADR 里**；**不得原地修改已接受的 ADR（如 ADR-0012）正文**，若确需改其口径，按既有约定走「追加新 ADR + 旧 ADR 加 Status 反向指针 + 索引表登记」。内容须含：新增工具 span 与载荷字段，以及「fork 子代理工具（回调被 `executor.py:189` 切断）与工具内部子步骤不在主事件流内」这一已知边界
 
 ## 6. 验证
 
 - [ ] 6.1 质量门禁全绿：`pytest`（宿主侧带 `POSTGRES_HOST=localhost`）/ `ruff check .` / `pyright src/` / `check_docs` / `check_adr`
 - [ ] 6.2 关闭态回归：`LANGFUSE_ENABLE=false` 跑一轮对话 → Langfuse 零新增、SSE 事件序列与开启态一致
-- [ ] 6.3 dev E2E：一轮含 ≥3 次迭代、≥2 次工具调用 → **工具 span 数量 == 实际工具调用次数**（防过滤判据写错导致零 span）、每轮一条 `tools` 父 span + 逐工具子 span（含工具名 / 入参 / 返回 / 耗时）、工具轮 `output` 非空、`user_id` / `tags` / `metadata` 落库
+- [ ] 6.3 dev E2E：一轮含 ≥3 次迭代、≥2 次工具调用 → **工具 span 数量 == 实际工具调用次数**（防过滤判据写错导致零 span）、**所有工具 span 与 generation 的 `trace_id` 均等于本轮 trace id**、每轮一条 `tools` 父 span + 逐工具子 span（含工具名 / 入参 / 返回 / 耗时）、工具轮 `output` 非空、`user_id` / `tags` / `metadata` 落库
 - [ ] 6.4 取消路径 E2E：生成中取消 → 已开启的工具 span 均被关闭，无悬空节点
 - [ ] 6.5 **必过闸门**（不得降级为可选）：**先确认 Langfuse 真会算成本**（容器内没有 langfuse-worker 进程，摄入路径含 `event.model ~ match_pattern`，判断为 in-process 但未实跑）—— 填单价（USD / 单 token）并 seed 后，≥1 条 generation 的 `calculated_total_cost > 0`，且与「已知用量 × 已知单价」抽算对账一致（防 1e6 量纲错误照样过闸）；未配置时确认成本为空且无零价模型定义
 - [ ] 6.6 `openspec validate --changes langfuse-trace-enrichment` 通过
