@@ -96,7 +96,7 @@ docs/adr/NNNN-<kebab-case-短标题>.md
 
 | # | 决策（一句话） | Status | 取代关系 |
 |---|---|---|---|
-| [0001](0001-retrieval-fetch-and-dedup-scope.md) | 检索取数取消每文档配额，改为大候选池 + 内容级去重 | Accepted | — |
+| [0001](0001-retrieval-fetch-and-dedup-scope.md) | 检索取数取消每文档配额，改为大候选池 + 内容级去重 | Accepted | **「候选池成本收益」「多库路径 not kb_id 分支」两段陈述已被 0014 更正** |
 | [0002](0002-prompt-carrier-yaml-two-phase.md) | prompt 载体迁到 Git 内 YAML，终态为远端读取 | Accepted | 0010 为其第一阶段内部的子决策（不取代） |
 | [0003](0003-prompt-layering-six-sections.md) | prompt 六段模型，运行时各段恒定、base 三选一 | Accepted | **决策 3 已被 0009 取代**；0010 为其子决策 |
 | [0004](0004-storage-consolidation-single-postgres.md) | 三套存储收敛到单个 PostgreSQL 实例 | Accepted | **「trace 在 ClickHouse」一句已被 0011 推翻** |
@@ -109,6 +109,7 @@ docs/adr/NNNN-<kebab-case-短标题>.md
 | [0011](0011-langfuse-v2-downgrade.md) | 自托管 Langfuse 由 v3 降至 v2，去掉 ClickHouse 与 worker | Accepted | 局部推翻 0004 的一条附带陈述 |
 | [0012](0012-langfuse-trace-content-and-retention.md) | trace 记录请求/回答原文并保留 30 天 | Accepted | 承载 0011 复查条件②的复评（确认，不取代） |
 | [0013](0013-trace-retention-purge-via-langfuse-sql.md) | trace 保留期清理的后端定为直连 Langfuse PG 的 SQL | Accepted | 为 0012 的 30 天保留期提供可工作的删除机制（不取代） |
+| [0014](0014-candidate-pool-not-rerank-input-bound.md) | 更正 ADR-0001 的两段陈述（候选池非精排输入上界；多库路径死因） | Accepted | 局部更正 0001 的两段陈述（决策不变） |
 
 ## 模板
 

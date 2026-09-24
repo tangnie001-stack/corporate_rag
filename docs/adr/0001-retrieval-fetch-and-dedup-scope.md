@@ -1,13 +1,8 @@
 # ADR-0001：检索取数口径 —— 取消每文档配额，改用大候选池 + 内容级去重
 
-- **Status**：Accepted
+- **Status**：Accepted（**「候选池 30 的成本收益」与「多库路径的 `not kb_id` 分支」两段陈述已被 ADR-0014 更正**，其余决策与陈述仍有效）
 - **Date**：2026-09-18
 - **Deciders**：用户（决策）；Claude（调研与实测）
-- **修订记录（2026-09-24）**：正文按"只追加不可变"保留原文，以下**行号/机制引用已过期**（决策与结论未变），以本注记为准：
-  - 去重调用点在 `retrieval.py` 的 **`:102`**（hybrid）/ **`:116`**（非 hybrid），非正文所述 `:95`。
-  - `retrieval.search` **没有** `kb_id` 空分支 —— 空守卫在调用方：`rag_tools.py:132` 在 `kb_id` 为空时不调用 `search`（唯一生产调用方 `rag_tools.py:133`），非正文所述 `:136`/`:135` 的 `not kb_id` 分支。
-  - `[retrieval] retrieve replay` 的 `dedup_max_per_doc` **写方**在 `src/agents/tools/rag_tools.py`，非正文所述 `src/rag/retrieval.py:197`。
-  - **口径更正**：候选池 `TOP_K_RETRIEVAL` 约束的是**各支路取数**，**不是**精排输入的上界 —— hybrid 路径喂精排的是 RRF 融合结果，其上界为 `RRF_TOP_N`（当前 50）。故"候选池 30 使精排成本降约 40%"一类推论不成立（详见 change `retrieval-fetch-and-dedup` 的 design D3「口径更正」与 Open Questions 5）。
 
 ## 背景与问题
 
