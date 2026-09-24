@@ -2,9 +2,17 @@
 
 `_extract_text` / `_messages_payload` 原本内联在 `agent_node`，与其图节点逻辑
 无耦合；抽为独立模块以守住单文件行数红线（CLAUDE.md：单文件 ≤ 400 行）。
+
+载荷刻意用 **OpenAI 形态的 role**（而不是 LangChain 的 `m.type`）：`ai` / `human`
+这类类型名在 Langfuse 的对话视图里读不出来，规范化后可直接按对话渲染。
 """
 
-from langchain_core.messages import BaseMessage
+from typing import Any
+
+from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+
+#: LangChain 消息类型 → OpenAI 形态 role（未列出的原样透传）
+_ROLE_MAP = {"ai": "assistant", "human": "user"}
 
 
 def _extract_text(message: BaseMessage | None) -> str:
@@ -31,16 +39,34 @@ def _extract_text(message: BaseMessage | None) -> str:
     return str(content)
 
 
-def _messages_payload(messages: list[BaseMessage]) -> list[dict[str, str]]:
-    """把消息列表转成 Langfuse 输入载荷 [{role, content}]。
-
-    只取 role 与 content —— 消息对象上还挂着 id / response_metadata 等字段，
-    整对象交给序列化器会把不该进 trace 的东西带进去。
+def _messages_payload(messages: list[BaseMessage]) -> list[dict[str, Any]]:
+    """把消息列表转成 Langfuse 输入载荷。
 
     Args:
         messages: LangChain 消息列表
 
     Returns:
-        [{"role": <消息类型>, "content": <文本>}, ...]
+        `[{role, content}(, tool_calls)(, name)]`；assistant 条目在发起工具调用时
+        带 `tool_calls`，tool 条目在知道工具名时带 `name`。消息对象上还挂着 id /
+        response_metadata 等字段，**不得整对象交给序列化器**。
     """
-    return [{"role": m.type, "content": _extract_text(m)} for m in messages]
+    payload: list[dict[str, Any]] = []
+    for message in messages:
+        item: dict[str, Any] = {
+            "role": _ROLE_MAP.get(message.type, message.type),
+            "content": _extract_text(message),
+        }
+        if isinstance(message, AIMessage) and message.tool_calls:
+            item["tool_calls"] = [
+                {
+                    "id": call.get("id", ""),
+                    "name": call.get("name", ""),
+                    "args": call.get("args", {}),
+                }
+                for call in message.tool_calls
+                if isinstance(call, dict)
+            ]
+        elif isinstance(message, ToolMessage) and message.name:
+            item["name"] = message.name
+        payload.append(item)
+    return payload

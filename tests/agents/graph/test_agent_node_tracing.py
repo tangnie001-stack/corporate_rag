@@ -6,14 +6,14 @@ from src.agents.graph import agent_node
 from src.agents.graph.message_payload import _messages_payload
 
 
-def _msg_payload_has_no_internal_objects(payload: list[dict]) -> bool:
-    """input 只允许出现 role / content 两个键。"""
-    allowed = {"role", "content"}
+def _msg_payload_keys_are_whitelisted(payload: list[dict]) -> bool:
+    """input 只允许出现 role / content / tool_calls / name 四个键。"""
+    allowed = {"role", "content", "tool_calls", "name"}
     return all(set(item.keys()) <= allowed for item in payload)
 
 
-def test_messages_payload_shape():
-    """消息载荷是 [{role, content}]，不夹带对象引用。"""
+def test_messages_payload_shape_normalizes_roles():
+    """role 用 OpenAI 形态（human→user、ai→assistant），不是 LangChain 类型名。"""
     from langchain_core.messages import HumanMessage, SystemMessage
 
     payload = _messages_payload(
@@ -21,9 +21,33 @@ def test_messages_payload_shape():
     )
     assert payload == [
         {"role": "system", "content": "sys"},
-        {"role": "human", "content": "hi"},
+        {"role": "user", "content": "hi"},
     ]
-    assert _msg_payload_has_no_internal_objects(payload)
+    assert _msg_payload_keys_are_whitelisted(payload)
+
+
+def test_messages_payload_carries_tool_calls_and_tool_name():
+    """assistant 条目补 tool_calls，tool 条目补 name —— 否则「模型要调什么」读不出。"""
+    from langchain_core.messages import AIMessage, ToolMessage
+
+    payload = _messages_payload(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {"name": "retrieve_kb", "args": {"query": "q"}, "id": "call_1"}
+                ],
+            ),
+            ToolMessage(content="[1] 来源…", tool_call_id="call_1", name="retrieve_kb"),
+        ]
+    )
+    assert payload[0]["role"] == "assistant"
+    assert payload[0]["tool_calls"] == [
+        {"id": "call_1", "name": "retrieve_kb", "args": {"query": "q"}}
+    ]
+    assert payload[1]["role"] == "tool"
+    assert payload[1]["name"] == "retrieve_kb"
+    assert _msg_payload_keys_are_whitelisted(payload)
 
 
 def test_observe_decorator_disables_input_capture():
