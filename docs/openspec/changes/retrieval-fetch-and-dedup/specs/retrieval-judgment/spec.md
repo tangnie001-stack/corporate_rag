@@ -4,7 +4,7 @@
 
 检索结果 SHALL 做**内容级**去重：同一文档内同一父块下的多个 chunk 只保留**代表分最高**的一条。去重位置 SHALL 在 rerank **之后**、截断 `TOP_K_RERANK` 之前。
 
-**代表分的取值按路径显式指定**：精排成功路径取 `relevance_score`；精排超时降级路径（不进入 `rerank_results`、按检索原始顺序返回）取 `1 - distance`。实现 SHALL NOT 让去重函数内部自取分数 —— 两条路径分数语义不同，用一种取值会让降级路径的"保留最高分"退化为"保留融合首条"。
+**代表分的取值**：去重 SHALL 按每条候选**最终的 `score`** 取每父块最高者（输入 `list[RAGContext]`）。实现 SHALL NOT 让去重函数内部自取分数、也 SHALL NOT 按"哪个先出现"兜底 —— 分数语义按来源分三态：① 精排成功 = `relevance_score`；② `rerank_results` 内部异常（`RERANK_FAILED`）= `1 - distance`，仍落 `rerank done`；③ 精排超时（`rag_tools.py` 的 `except TimeoutError`）= `1 - distance`，不落 `rerank done`。按最终 `score` 取值在这三种情形下 SHALL 一致地正确。
 
 去重 SHALL 对**所有**检索返回路径生效，**包括精排超时的降级路径**——该路径不进入精排、按检索原始顺序返回，若不应用去重，同一父块会被重复渲染（逐字相同的正文进入上下文）。降级不是豁免理由。
 

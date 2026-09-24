@@ -28,6 +28,10 @@
 
 内容级去重 SHALL 自落一条 `[retrieval] dedup done` 事件，记录丢弃条数 `dropped`（**精排后条数 − 去重后条数**）与保留条数 `kept`，使"取数天花板是否仍在生效"直接可见。
 
+字段集 SHALL **仅为 `{dropped, kept}`** —— 不含 `kb_id` / `query`（靠 trace_id 关联；`rerank_results` 签名里没有 `kb_id`，加它会扩大改动面）。
+
+事件 SHALL 由**两条调用路径各自在去重后落**（`rerank_results` 内 / `rag_tools.py` 的精排超时降级分支），SHALL NOT 由去重函数内部落 —— 去重函数保持纯函数。
+
 该统计 SHALL NOT 通过扩展 `retrieval.search` 的返回值来向外传递 —— `search` 的契约是"返回检索结果列表"，把去重统计透传出去会把编排关注点塞进检索层，并迫使所有调用方改签名。
 
 #### Scenario: 去重丢弃量可见
