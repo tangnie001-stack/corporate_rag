@@ -3,8 +3,10 @@
 **为什么是幂等 CLI 而不是 UI 手配**：dev / prod 要各自落地同一份定价，手配不可复现；
 而 Langfuse v2 的 `LANGFUSE_INIT_*` 只能播种 project / user / key，**不能播种模型定价**。
 
-**为什么 0 要跳过**：0 是「未配置」的哨兵（见 `settings.py`）。写入一个单价为 0 的
-模型定义会让人误读成「免费」，比不写更糟。
+**为什么 0 要跳过**：0 是「未配置」的哨兵（见 `settings.py`），输入/输出两侧都必须
+配置齐全。任一侧为 0 都跳过：写入一个缺价（如 output 为 0）的模型定义会把补全 token
+按零价计，成本被静默低估，且下游 `calculated_total_cost > 0` 的成本闸门仍会通过；
+写一个单侧为 0 的定义比不写更糟。
 
 **为什么 pattern 必须锚定**：服务端用 Postgres 的 `~` 做匹配，那是**子串**正则 ——
 未锚定的 `(?i)qwen3.8-flash` 会命中 `prefix-qwen3.8-flash` / `qwen3.8-flash-old`
@@ -23,6 +25,7 @@ import re
 import sys
 from typing import Any
 
+from langfuse.api import CreateModelRequest
 from langfuse.decorators import langfuse_context
 
 from src.config import (
@@ -95,10 +98,15 @@ async def seed(
         output_price: 输出单价（USD / 单 token）
 
     Returns:
-        "skipped"（未配置单价）/ "exists"（同名已存在）/ "created"（本次创建）
+        "skipped"（单价未配置完整）/ "exists"（同名已存在）/ "created"（本次创建）
+
+    单价需两侧齐全：任一侧为 0（未配置哨兵）即跳过。
     """
-    if input_price == 0.0 and output_price == 0.0:
-        print("[skip] 单价未配置（0）——不写入零价模型定义")
+    if input_price == 0.0 or output_price == 0.0:
+        print(
+            f"[skip] 单价未配置完整（in={input_price} out={output_price}）"
+            "——不写入会低估成本的模型定义"
+        )
         return "skipped"
 
     models = client.api.models
@@ -107,7 +115,7 @@ async def seed(
         return "exists"
 
     request = build_model_request(model_name, input_price, output_price)
-    models.create(request=request)
+    models.create(request=CreateModelRequest(**request))
     print(
         f"[created] {model_name} "
         f"pattern={request['match_pattern']} "

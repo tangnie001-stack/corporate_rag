@@ -3,6 +3,8 @@
 from typing import Any
 
 import pytest
+from langfuse.api import CreateModelRequest
+from langfuse.api.core.jsonable_encoder import jsonable_encoder
 
 from src.cli.seed_langfuse_models import build_model_request, seed
 
@@ -82,6 +84,18 @@ async def test_skips_when_price_is_zero():
 
 
 @pytest.mark.asyncio
+async def test_skips_when_only_one_price_configured():
+    """只配一侧单价（另一侧为 0）时跳过：0 是「未配置」哨兵，需两侧齐全。"""
+    client = _Client([])
+    assert await seed(client, "m", 0.000003, 0.0) == "skipped"
+    assert client.api.models.created == []
+
+    client2 = _Client([])
+    assert await seed(client2, "m", 0.0, 0.000006) == "skipped"
+    assert client2.api.models.created == []
+
+
+@pytest.mark.asyncio
 async def test_creates_when_absent_and_idempotent_when_present():
     """不存在则创建；同名已存在则跳过（幂等判据只看 model_name）。"""
     client = _Client([])
@@ -92,3 +106,16 @@ async def test_creates_when_absent_and_idempotent_when_present():
     client2 = _Client(existing)
     assert await seed(client2, "m", 0.000003, 0.000006) == "exists"
     assert client2.api.models.created == []
+
+
+@pytest.mark.asyncio
+async def test_create_receives_createmodelrequest_with_camelcase_wire_keys():
+    """`models.create` 必须收到 CreateModelRequest（线格式 camelCase），而非裸 snake_case dict。"""
+    client = _Client([])
+    assert await seed(client, "m", 0.000003, 0.000006) == "created"
+    received = client.api.models.created[0]
+    assert isinstance(received, CreateModelRequest)
+    wire = jsonable_encoder(received)
+    assert set(wire) >= {"modelName", "matchPattern", "inputPrice", "outputPrice"}
+    assert wire["modelName"] == "m"
+    assert wire["matchPattern"] == "(?i)^m$"
