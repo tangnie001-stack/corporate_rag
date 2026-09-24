@@ -117,6 +117,39 @@ async def search(
     return results
 
 
+def _rerank_stats(reranked: list[dict], used_fallback: bool) -> dict:
+    """汇总精排分数的分位信息与来源标记（供 `rerank done` 事件使用）。
+
+    只取分位数、不取全量分数：该事件每次 `retrieve_kb` 都落，全量会放大日志体积。
+    不另记 `score_top1` —— `reranked` 按分数降序，top1 恒等于 `score_max`。
+
+    Args:
+        reranked: 精排结果（或降级回退结果），每项含 `relevance_score`
+        used_fallback: 是否走了 `except` 降级回退（分数来自 `1 - distance`）
+
+    Returns:
+        {"score_max","score_min","score_p50","scored"}；`scored` 取 "rerank" 或 "fallback"
+    """
+    scores = sorted(float(item.get("relevance_score", 0)) for item in reranked)
+    if used_fallback:
+        scored = "fallback"
+    else:
+        scored = "rerank"
+    if not scores:
+        return {"score_max": 0.0, "score_min": 0.0, "score_p50": 0.0, "scored": scored}
+    mid = len(scores) // 2
+    if len(scores) % 2 == 0:
+        p50 = (scores[mid - 1] + scores[mid]) / 2
+    else:
+        p50 = scores[mid]
+    return {
+        "score_max": scores[-1],
+        "score_min": scores[0],
+        "score_p50": p50,
+        "scored": scored,
+    }
+
+
 def rerank_results(
     query: str,
     results: list[ChunkResult],
@@ -138,6 +171,7 @@ def rerank_results(
         return []
 
     docs = [r.content for r in results]
+    used_fallback = False
     try:
         reranked = with_retry(
             reranker.rerank,
@@ -152,6 +186,7 @@ def rerank_results(
             query=query,
             err=str(e),
         )
+        used_fallback = True
         reranked = []
         for i, r in enumerate(results):
             if r.distance is not None:
@@ -193,6 +228,7 @@ def rerank_results(
             Event.RERANK_DONE,
             doc_count=len(results),
             query_len=len(query),
+            **_rerank_stats(reranked, used_fallback),
         )
     return contexts
 

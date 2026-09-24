@@ -21,7 +21,7 @@ from src.infra.db.vector_store.types import ChunkResult
 from src.infra.llm.chat_message import ChatMessage
 from src.rag import retrieval
 from src.rag.context import RAGContext
-from src.rag.retrieval import rerank_results
+from src.rag.retrieval import _rerank_stats, rerank_results
 
 
 def _cr(content, cid="c1") -> ChunkResult:
@@ -421,3 +421,29 @@ async def test_dense_only_when_hybrid_disabled(monkeypatch):
 
     assert called == []
     assert [r.id for r in results] == ["a"]
+
+
+def test_rerank_stats_percentiles_and_source():
+    """分位数取 max/min/p50；未降级时来源标记为 rerank。"""
+    reranked = [
+        {"index": 0, "relevance_score": 0.9},
+        {"index": 1, "relevance_score": 0.5},
+        {"index": 2, "relevance_score": 0.1},
+    ]
+    out = _rerank_stats(reranked, used_fallback=False)
+    assert out["score_max"] == 0.9
+    assert out["score_min"] == 0.1
+    assert out["score_p50"] == 0.5
+    assert out["scored"] == "rerank"
+
+
+def test_rerank_stats_marks_fallback_source():
+    """精排失败回退（1 - distance）时来源标记为 fallback。"""
+    reranked = [
+        {"index": 0, "relevance_score": 0.0},
+        {"index": 1, "relevance_score": 1.0},
+    ]
+    out = _rerank_stats(reranked, used_fallback=True)
+    assert out["scored"] == "fallback"
+    assert out["score_max"] == 1.0
+    assert out["score_min"] == 0.0

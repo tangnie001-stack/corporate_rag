@@ -38,7 +38,10 @@ EVENT_SPECS: dict[str, EventSpec] = {
     ),
     "rerank skip": EventSpec("rerank skip", "retrieval", "info", ("reason",)),
     "rerank done": EventSpec(
-        "rerank done", "retrieval", "info", ("doc_count", "query_len")
+        "rerank done",
+        "retrieval",
+        "info",
+        ("doc_count", "query_len", "score_max", "score_min", "score_p50", "scored"),
     ),
     "rerank failed": EventSpec(
         "rerank failed", "retrieval", "warning", ("attempts", "query", "err")
