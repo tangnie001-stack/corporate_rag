@@ -47,6 +47,8 @@ from src.infra.db.vector_store import VectorStore
 from src.infra.llm.chat_message import ChatMessage
 from src.infra.llm.prompt_manager import PromptManager
 from src.infra.llm.request_context import RequestContext
+from src.infra.llm.tool_trace import ToolTraceCollector
+from src.infra.llm.trace_context import current_trace_id
 from src.services.capability_service import CapabilityService
 from src.utils.sse import (
     SSEAbstentionEvent,
@@ -560,6 +562,7 @@ async def _run_generation(
     partial_holder: dict | None = None,
     abort_signal: asyncio.Event | None = None,
     direct_skill: str = "",
+    user_id: str = "",
 ) -> str:
     """后台生成任务：迭代图事件转换为带 seq 事件写入缓冲，返回完整回答。
 
@@ -594,6 +597,8 @@ async def _run_generation(
             在循环内尽快抛 CancelledError 中断生成，交由调用方收尾落库
         direct_skill: 本轮命令行直出的 fork skill 名（默认空=常规轮）；由
             stream_chat 解析 `/xxx` 后经 launch_context 传入，写进初始 state
+        user_id: 触发本轮的用户标识（请求内捕获后显式传入）。空串表示未取到，
+            写入 trace 前会转成 None —— `update_current_trace` 只过滤 None、不过滤空串
 
     Returns:
         完整回答（全部 token 累积结果）
@@ -606,18 +611,40 @@ async def _run_generation(
         raise ValueError("_run_generation 需显式传 graph（默认图由调用方注入）")
     # trace 级字段：输入只写该写的（根函数入参含 ctx/manager/graph/abort_signal，
     # 自动 capture 会把内部对象序列化进 trace，故装饰器已 capture_input=False）
-    trace_metadata: dict = {}
+    # trace 级字段：只读 RequestContext，不新增取数
+    if kb_id:
+        kb_tag = "kb"
+    else:
+        kb_tag = "no_kb"
+    trace_metadata: dict = {
+        "agent": ctx.agent,
+        "agent_display_name": ctx.agent_display_name,
+        "kb_id": kb_id,
+        "kb_domain": ctx.kb_domain,
+        "deep_thinking": deep_thinking,
+        "skill_action": ctx.skill_action,
+        "loaded_skills": list(ctx.loaded_skills),
+        "has_skills": ctx.has_skills,
+    }
     if direct_skill:
         trace_metadata["direct_skill"] = direct_skill
     langfuse_context.update_current_trace(
         input={"query": query, "kb_id": kb_id, "deep_thinking": deep_thinking},
         session_id=session_id,
+        # tags 只能加不能删（实测），故只放低基数稳定值；高基数一律进 metadata
+        tags=["chat", kb_tag],
+        # 空串必须转 None：SDK 的字段过滤是 `v is not None`
+        user_id=user_id or None,
         metadata=trace_metadata,
     )
     initial_state = AgentState.make_initial_state(
         session_id, kb_id, query, history, deep_thinking, direct_skill
     )
     capture = _StreamCapture()
+    tool_trace = ToolTraceCollector(
+        enabled=settings.LANGFUSE_ENABLE,
+        trace_id=current_trace_id.get() or "",
+    )
     full_answer = ""
     if partial_holder is not None:
         partial_holder["events_log"] = (
@@ -693,6 +720,7 @@ async def _run_generation(
                             "tier": event.tier,
                         }
                     )
+            tool_trace.consume(item)
             if abort_signal is not None and abort_signal.is_set():
                 raise asyncio.CancelledError
     finally:
@@ -700,6 +728,8 @@ async def _run_generation(
         # 澄清项已被并行任务即时消费，收尾时队列已空）
         drain_task.cancel()
         watch_task.cancel()  # 临时取证埋点：随生成结束一并取消
+        # 取消 / 异常路径同样走到这里 —— 不关的 span 会永远悬空
+        tool_trace.close()
         await asyncio.gather(drain_task, watch_task, return_exceptions=True)
         if partial_holder is not None:
             partial_holder["model_name"] = capture.model_used

@@ -13,7 +13,11 @@ from langfuse.decorators import langfuse_context, observe
 from langfuse.model import ModelUsage
 from langgraph.prebuilt import ToolNode
 
-from src.agents.graph.message_payload import _extract_text, _messages_payload
+from src.agents.graph.message_payload import (
+    _extract_text,
+    _messages_payload,
+    _observation_output,
+)
 from src.agents.graph.state import AgentState
 from src.agents.skills.prefix import clean_prefix
 from src.config import settings
@@ -159,9 +163,9 @@ def make_agent_model_node(llm, tools, prompt_manager) -> Callable:
     tool_names = frozenset(str(t.name) for t in tools)
     model = llm.bind_tools(tools)
 
-    # capture_output=False：模型只发 tool_calls、文本为空时，显式写入的 output 为空串
-    # （falsy），会走 SDK 的自动捕获回落；关掉自动捕获后回落得到 None，避免把节点返回的
-    # state dict（messages/_agent_iterations/...）写进 trace。显式非空 output 仍优先。
+    # 关闭输出自动捕获（capture_output）：仅当一轮既无文本也无 tool_calls 时，显式写入的
+    # output 才是空串（falsy），此时会走 SDK 的自动捕获回落，把节点返回的 state dict
+    # （messages/_agent_iterations/...）写进 trace；关掉后即避免该回落。显式非空 output 仍优先。
     @observe(
         name="agent_turn",
         as_type="generation",
@@ -245,7 +249,7 @@ def make_agent_model_node(llm, tools, prompt_manager) -> Callable:
         langfuse_context.update_current_observation(
             model=model_name,
             input=_messages_payload(messages),
-            output=_extract_text(result),
+            output=_observation_output(result),
             # ModelUsage 是 TypedDict 且字段声明为 Optional（键仍算必填），
             # pyright 误判部分键构造非法；运行时 TypedDict 调用即普通 dict，SDK 接受
             usage=ModelUsage(  # type: ignore[reportCallIssue]

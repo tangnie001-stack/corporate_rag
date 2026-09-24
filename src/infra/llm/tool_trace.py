@@ -1,0 +1,216 @@
+"""工具调用 → Langfuse span 采集器（事件流驱动，请求内私有）。
+
+消费 `_run_generation` 里既有的 `graph.astream_events(...)` 事件流：以节点级
+`on_chain_start/end(name=="tools")` 开合该轮的父 span，再把 `on_tool_start/end/error`
+按 `run_id` 配对成子 span。
+
+三条不变量（改动时不得破坏）：
+1. **不按工具名分支、`data.output` 原样透传** —— 对工具实现无感，MCP 工具经统一入口
+   进 ToolNode 即自动覆盖；
+2. span 一律用 `Langfuse.span(trace_id=...)` 建，**不调用 `client.trace()`** ——
+   后者会无条件覆盖 trace 的 `timestamp`；
+3. `close()` 必须被调用（挂 `finally`）—— 取消 / 异常路径不关的 span 会永远悬空。
+"""
+
+import logging
+from datetime import UTC, datetime
+from typing import Any
+
+from langchain_core.messages import ToolMessage
+from langfuse.decorators import langfuse_context
+
+logger = logging.getLogger(__name__)
+
+# 事件名与 `src/agents/graph/state.py::LangGraphEvent` 同值。此处刻意写字面量而不从
+# agents 层 import：infra 不应反向依赖 agents（同值字符串是稳定契约）。
+_EV_CHAIN_START = "on_chain_start"
+_EV_CHAIN_END = "on_chain_end"
+_EV_TOOL_START = "on_tool_start"
+_EV_TOOL_END = "on_tool_end"
+_EV_TOOL_ERROR = "on_tool_error"
+
+# 只认该节点下的事件（与 `_convert_event` 的既有口径一致）。
+# **不得**改用 `checkpoint_ns` 判空：实测 on_tool_* 的 checkpoint_ns 是
+# `tools:<uuid>`（非空），照此过滤会丢掉全部工具事件。
+_TOOLS_NODE = "tools"
+
+
+def _now() -> datetime:
+    """当前 UTC 时间（span 的起止时刻）。"""
+    return datetime.now(UTC)
+
+
+class ToolTraceCollector:
+    """把工具事件转成 Langfuse span 的请求内私有采集器。
+
+    每次请求 new 一个、绝不共享（跨事件累积状态 + 并发隔离）。
+
+    Args:
+        enabled: 是否产出（取自 `settings.LANGFUSE_ENABLE`；命令式路径不受
+            `configure(enabled=False)` 管，必须自己断电）
+        trace_id: 本轮 trace id（`current_trace_id.get()`）；空串视为无根、不产出
+        client: Langfuse 客户端；None 时惰性取 `langfuse_context.client_instance`
+            （**不得** `new Langfuse()`：那会绕过开关与关停 flush）
+    """
+
+    def __init__(self, enabled: bool, trace_id: str, client: Any = None) -> None:
+        self._enabled = enabled and bool(trace_id)
+        self._trace_id = trace_id
+        self._client = client
+        self._open: dict[str, Any] = {}  # run_id -> 尚未结束的工具 span
+        self._round: Any = None  # 当前 tools 父 span
+
+    # ---------- 对外 ----------
+
+    def consume(self, item: Any) -> None:
+        """事件循环每项调一次；非 tools 节点的事件直接返回。
+
+        Args:
+            item: `astream_events` 的单项（dict）
+        """
+        if not self._enabled or not isinstance(item, dict):
+            return
+        metadata = item.get("metadata") or {}
+        if metadata.get("langgraph_node") != _TOOLS_NODE:
+            return
+        kind = item.get("event", "")
+        if kind == _EV_CHAIN_START:
+            if item.get("name") == _TOOLS_NODE:
+                self._open_round()
+        elif kind == _EV_CHAIN_END:
+            if item.get("name") == _TOOLS_NODE:
+                self._close_round()
+        elif kind == _EV_TOOL_START:
+            self._on_tool_start(item)
+        elif kind == _EV_TOOL_END:
+            self._on_tool_end(item)
+        elif kind == _EV_TOOL_ERROR:
+            self._on_tool_error(item)
+
+    def close(self) -> None:
+        """收尾兜底：关闭所有未结束的 span（取消 / 异常路径必经）。"""
+        for span in list(self._open.values()):
+            self._end_span(span)
+        self._open.clear()
+        self._close_round()
+
+    # ---------- 扩展点（MCP 接入时在此加逻辑，本期不实现） ----------
+
+    def _normalize_input(self, item: dict) -> Any:
+        """事件 → span 入参。
+
+        Args:
+            item: 工具事件
+
+        Returns:
+            事件的 `data.input`（LLM 可见的干净实参，不含 InjectedState）
+        """
+        return (item.get("data") or {}).get("input")
+
+    def _normalize_output(self, item: dict) -> Any:
+        """事件 → span 输出。
+
+        `on_tool_end` 的 `data.output` 在工具路径下是 `ToolMessage` 对象 —— 必须显式
+        取字段后再写，整对象交给序列化器会落成不可读的东西。
+
+        Args:
+            item: 工具事件
+
+        Returns:
+            字符串原样返回；`ToolMessage` 拆成
+            `{tool_call_id, name, content}`；其他类型原样返回
+        """
+        output = (item.get("data") or {}).get("output")
+        if output is None:
+            return None
+        if not isinstance(output, ToolMessage):
+            return output
+        name = output.name if output.name is not None else ""
+        return {
+            "tool_call_id": output.tool_call_id,
+            "name": name,
+            "content": output.content,
+        }
+
+    # ---------- 内部 ----------
+
+    def _get_client(self) -> Any:
+        """取 Langfuse 客户端单例（与 configure / flush 同源）。"""
+        if self._client is None:
+            self._client = langfuse_context.client_instance
+        return self._client
+
+    def _open_round(self) -> None:
+        """开该轮的 `tools` 父 span（同一轮只开一次）。"""
+        if self._round is not None:
+            return
+        try:
+            self._round = self._get_client().span(
+                trace_id=self._trace_id, name=_TOOLS_NODE, start_time=_now()
+            )
+        except Exception:  # 观测失败不得影响对话
+            logger.warning("[tool_trace] open round span failed", exc_info=True)
+
+    def _close_round(self) -> None:
+        """关该轮父 span。"""
+        span, self._round = self._round, None
+        if span is not None:
+            self._end_span(span)
+
+    def _on_tool_start(self, item: dict) -> None:
+        """开一条工具 span，按 run_id 记账。"""
+        if self._round is not None:
+            parent_id = self._round.id
+        else:
+            parent_id = None
+        try:
+            span = self._get_client().span(
+                trace_id=self._trace_id,
+                parent_observation_id=parent_id,
+                name=str(item.get("name", "")),
+                input=self._normalize_input(item),
+                start_time=_now(),
+            )
+        except Exception:
+            logger.warning("[tool_trace] open tool span failed", exc_info=True)
+            return
+        self._open[str(item.get("run_id", ""))] = span
+
+    def _on_tool_end(self, item: dict) -> None:
+        """按 run_id 取回 span 并写入返回值。"""
+        span = self._open.pop(str(item.get("run_id", "")), None)
+        if span is None:
+            return
+        self._end_span(span, output=self._normalize_output(item))
+
+    def _on_tool_error(self, item: dict) -> None:
+        """工具抛错：标记 ERROR 并写入错误信息（此路径没有 on_tool_end）。"""
+        span = self._open.pop(str(item.get("run_id", "")), None)
+        if span is None:
+            return
+        data = item.get("data") or {}
+        self._end_span(
+            span,
+            output=data.get("input"),
+            level="ERROR",
+            status_message=str(data.get("error", "")),
+        )
+
+    def _end_span(
+        self,
+        span: Any,
+        *,
+        output: Any = None,
+        level: str = "DEFAULT",
+        status_message: str = "",
+    ) -> None:
+        """关一条 span；异常吞掉只记 warning。"""
+        try:
+            span.end(
+                end_time=_now(),
+                output=output,
+                level=level,
+                status_message=status_message,
+            )
+        except Exception:
+            logger.warning("[tool_trace] end span failed", exc_info=True)

@@ -338,6 +338,21 @@ LANGFUSE_HOST: str = os.getenv("LANGFUSE_HOST", "http://langfuse-web:3000")
 # 全局开关：false 时完全不产出 trace（且不影响对话）
 LANGFUSE_ENABLE: bool = os.getenv("LANGFUSE_ENABLE", "true").lower() == "true"
 
+# ====== 模型定价（Langfuse 成本计算）======
+# 供 seed CLI 写入 Langfuse 的模型定义；**单位是单个 token**（不是每 1M），价格字段本身
+# 不含币种。例：$3 per 1M tokens 要填 0.000003。
+# 本仓库为 qwen3.8-flash 部署配置的数值是**人民币**：0.8 / 2.7 元每百万 token 按数字原样
+# 写入为 0.0000008 / 0.0000027（取 cache-miss 输入价）。Langfuse 界面把价格硬编码标注为
+# USD，那个 `$` 只是名义币种，数值口径实为人民币，读成本列时不要按汇率换算。
+# 0.0 是哨兵值，表示「未配置」：seed CLI 会跳过，不在 Langfuse 里留下会被误读成
+# 「免费」的零价模型定义。
+MODEL_INPUT_PRICE_PER_TOKEN: float = float(
+    os.getenv("MODEL_INPUT_PRICE_PER_TOKEN", "0")
+)
+MODEL_OUTPUT_PRICE_PER_TOKEN: float = float(
+    os.getenv("MODEL_OUTPUT_PRICE_PER_TOKEN", "0")
+)
+
 # ====== 分块质量评估 ======
 # 分块质量评估开关：true 时上传文件后自动跑 3 个质量指标
 # 默认关闭，不影响现有流程

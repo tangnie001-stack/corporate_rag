@@ -110,6 +110,7 @@ docs/adr/NNNN-<kebab-case-短标题>.md
 | [0012](0012-langfuse-trace-content-and-retention.md) | trace 记录请求/回答原文并保留 30 天 | Accepted | 承载 0011 复查条件②的复评（确认，不取代） |
 | [0013](0013-trace-retention-purge-via-langfuse-sql.md) | trace 保留期清理的后端定为直连 Langfuse PG 的 SQL | Accepted | 为 0012 的 30 天保留期提供可工作的删除机制（不取代） |
 | [0014](0014-candidate-pool-not-rerank-input-bound.md) | 更正 ADR-0001 的两段陈述（候选池非精排输入上界；多库路径死因） | Accepted | 局部更正 0001 的两段陈述（决策不变） |
+| [0015](0015-langfuse-tool-spans-imperative-api.md) | 工具 span 用命令式 Langfuse client 创建（client 实例取 decorators 单例） | Accepted | 为 `llm-tracing` 扩展观测面；与「纯装饰器」并存，不取代任何在先 ADR |
 
 ## 模板
 

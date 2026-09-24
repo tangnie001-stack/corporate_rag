@@ -349,6 +349,26 @@ scripts/dev-worktree.sh down
 - 账号由 `.env` 的 `LANGFUSE_INIT_USER_*` 在**首次启动时播种**，故无需手工注册。**`LANGFUSE_INIT_PROJECT_ID` 是播种开关**：缺它则 project 与 key 都不建，而且**不报错**（静默失效）。库重建后正是靠它 + `_PUBLIC_KEY`/`_SECRET_KEY` 保住原有那对 key，因此这三个键必须与 `.env` 的 `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY` 是**同一对**。
 - 库重建后若 UI 里 project 名称是播种值（`Corporate RAG`）而非你后来改的名字，说明重建生效了，属预期。
 
+### Langfuse 模型定价：让成本算出来
+
+**场景**：Langfuse 里 trace 有 token 数但没有成本（`calculated_total_cost` 为空）—— 因为实际使用的模型没有模型定义。
+
+**步骤**：
+1. 在 `.env` 填单价，**单位是 USD / 单个 token**（例：$3 per 1M tokens 填 `0.000003`）：
+   `MODEL_INPUT_PRICE_PER_TOKEN=0.000003`、`MODEL_OUTPUT_PRICE_PER_TOKEN=0.000006`。保持 `0` 表示未配置。
+2. **先比对运行时模型名与配置名**（pattern 锚定的是运行时 provider 名，不是配置值）：
+   `docker exec corporate-rag-postgres psql -U langfuse -d langfuse -tAc "SELECT DISTINCT model FROM observations WHERE type='GENERATION'"`
+   与 `src/config/settings.py` 的 `LLM_MODEL`（或 `.env` 覆盖值）比对，**不等则先改配置**，不要放宽 pattern（放宽会误配到形近模型）。
+3. 预演：`docker exec corporate-rag-app python -m src.cli.seed_langfuse_models --dry-run`
+4. 写入：`docker exec corporate-rag-app python -m src.cli.seed_langfuse_models`
+
+**验证**：`docker exec corporate-rag-postgres psql -U langfuse -d langfuse -c "SELECT model_name, input_price, output_price, unit FROM models WHERE model_name LIKE 'qwen%'"` 有一行；随后发一轮对话，该 generation 的 `calculated_total_cost > 0`。
+
+**注意事项**：
+- **重复执行安全**：同名模型已存在则跳过（幂等判据只看 `model_name`）。
+- **单价填成「每 1M」会让成本差 1e6 倍**，而"成本 > 0"的检查照样通过 —— 务必按 Step 1 的口径填。
+- Langfuse v2 的 `LANGFUSE_INIT_*` **不能播种模型定价**，只能在库里建（故有这条 CLI）。
+
 ## 分区命名
 
 按操作主题分区，例如：`## 评估`、`## 分块`、`## 部署`。新主题首次出现时新建分区。

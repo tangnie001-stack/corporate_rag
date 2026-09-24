@@ -13,7 +13,11 @@ from src.chat.process_log import serialize_process
 from src.chat.streaming import StreamingRunManager, streaming_manager
 from src.config.const import SESSION_LOCK_TTL
 from src.infra.llm.request_context import RequestContext, current_request_ctx
-from src.infra.llm.trace_context import current_session_id, current_trace_id
+from src.infra.llm.trace_context import (
+    current_session_id,
+    current_trace_id,
+    current_user_id,
+)
 from src.services.agent_service import _run_generation
 from src.services.app_service import AppService
 from src.utils.sse import (
@@ -39,10 +43,12 @@ async def _run_with_finalize(
 ) -> None:
     """后台任务主体：跑生成，完成后按结果收尾落库，finally 释放锁并注销。
 
-    后台任务与调用方处于不同 asyncio task，contextvars 不会自动传播，因此本
-    函数在入口显式 set current_request_ctx / current_trace_id /
-    current_session_id（工具与节点经 contextvar 读取 clarify_channel /
-    tool_contexts / 日志格式段等），finally 中 reset。
+    后台任务与调用方处于不同 asyncio task，其 contextvars 是 create_task 在
+    创建时复制的一份快照；本函数仍在入口显式 set
+    current_request_ctx / current_trace_id / current_session_id（工具与节点
+    经 contextvar 读取 clarify_channel / tool_contexts / 日志格式段等），
+    是为不依赖该快照（create_task 之后写入的值到不了任务内，中间件顺序变化
+    也会静默丢失），finally 中 reset。
     trace_id 由调用方在 create_task 前从 current_trace_id.get() 捕获并显式
     传入，任务内据此 set contextvar 并写 done 终态事件，保证与请求 trace_id
     一致（单一事实来源）。session_id 直接取 ctx.session_id，供日志 patcher
@@ -201,9 +207,14 @@ async def _stream_rag_response(
     # 唤不醒澄清等待，会干等 ASK_USER_TIMEOUT 超时
     ctx.abort_signal = abort_signal
 
+    # trace_id 与 user_id 均在请求作用域内捕获后显式传入生成调用，不依赖后台任务
+    # 通过 contextvar 继承读取：任务的上下文是 create_task 创建时的拷贝，该时点之后写入
+    # 的值到不了任务内，依赖继承只会静默取空。
+    user_id = current_user_id.get()
+
     async def answer_builder() -> str:
         # 根 observation 的 id 即 trace id；任务入口已 set 过 current_trace_id，
-        # 此处按调用时读取（任务与请求不共享 context，必须显式传）
+        # 此处按调用时读取并显式传入，不依赖任务上下文的那份拷贝。
         return await _run_generation(
             launch_ctx["session_id"],
             launch_ctx["kb_id"],
@@ -216,6 +227,7 @@ async def _stream_rag_response(
             partial_holder=partial_holder,
             abort_signal=abort_signal,
             direct_skill=launch_ctx["direct_skill"],
+            user_id=user_id,
             # @observe 包装器在调用前取走 langfuse_observation_id（静态签名看不到），
             # 类型检查无法感知该 kwarg
             langfuse_observation_id=current_trace_id.get() or "",  # type: ignore[reportCallIssue]
