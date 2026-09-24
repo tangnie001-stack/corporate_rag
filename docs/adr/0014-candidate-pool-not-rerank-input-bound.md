@@ -27,7 +27,9 @@ ADR-0001（2026-09-18）决定取消每文档配额、改用内容级（父块�
 
 ## 附注（属"当时快照"，不构成单独取代）
 
-ADR-0001 正文的若干**行号引用**已随 `postgres-storage-*` 变更漂移（如去重调用点 `:95` 现为 `:102`；`dedup_max_per_doc` 的写方在 `src/agents/tools/rag_tools.py`，而非正文所写 `src/rag/retrieval.py:197`）。行号是写作时点的快照，不逐个取代；查现状以 `docs/agents/code-map.md` 与本 ADR 为准。
+ADR-0001 正文的若干**行号引用**已随 `postgres-storage-*` 变更漂移（如去重调用点 `:95` 现为 `:102`；`dedup_max_per_doc` 的写方在 `src/agents/tools/rag_tools.py`，而非正文所写 `src/rag/retrieval.py:197`）。行号是写作时点的快照，不逐个取代。
+
+同理，正文按文档统计的**父块数**（如「`b9e74e82`：38 chunk ÷ 10 父块、13 ÷ 4」）也是写作时点快照：按当前去重键 `(doc_id, parent_content)` 实测为 **33 个有父块的 chunk / 12 个父块**（`ea84fb72` 为 52/30），与正文数字不符。查现状以 change `retrieval-fetch-and-dedup` 的 `design.md` D1/D2 与 `docs/agents/code-map.md` 为准。
 
 ## 后果
 

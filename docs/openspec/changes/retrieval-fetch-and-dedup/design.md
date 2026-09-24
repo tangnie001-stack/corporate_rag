@@ -149,7 +149,7 @@ dense + 词法 → rrf_fusion
 
 ## Migration Plan
 
-**与 change `prompt-layering-and-domain-binding` 的顺序**：**本变更先落地**；对端的 **P0（YAML 载体搬运，零行为差异、零文件交集）可并行开工**。对端的 P1/P2 必须排在本变更之后 —— 它要重采两次基线（prompt 快照 + RAGAS eval），而基线所测的 context 内容正是本变更在改的东西，先采会直接作废。
+**与 change `prompt-layering-and-domain-binding` 的顺序**：**本变更晚于对端的 P0、早于对端的 P1/P2**。对端 P0（YAML 载体搬运 + 目录登记，零行为差异、零文件交集）须**先**到位（对端 tasks 4.4b 已如此约定）；对端的 P1/P2 必须排在本变更之后 —— 它要重采两次基线（prompt 快照 + RAGAS eval），而基线所测的 context 内容正是本变更在改的东西，先采会直接作废。
 
 1. **观测先行**：先落 D4（不改行为），跑一轮真实请求确认字段可读。
 2. **去重单位与位置切换**：改 `retrieval.py`（`search` 不再去重；去重移到 `rerank_results` 内、打分之后、截断之前），同步改 `tests/rag/test_retrieval.py` / `test_retrieval_dedup.py` 的去重断言（现有断言写的是 doc_id 语义与"rerank 前"，属契约变更）。

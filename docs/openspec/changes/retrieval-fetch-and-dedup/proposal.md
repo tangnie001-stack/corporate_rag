@@ -47,6 +47,7 @@
 - `src/core/log_events.py` / `log_event_specs.py` — `ReplayEvent` 去掉 `dedup_max_per_doc`；`rerank done` / `dedup done` 字段登记
 - `src/cli/replay_trace.py` — 去掉 `settings.RETRIEVAL_MAX_PER_DOC` 读取与 drift 的 `dedup` 轴
 - `src/cli/compare_retrieval.py` — 评测网格 `[5, 10, 15]` → `[10, 30, 50]`（与 spec 对齐）
+- `src/cli/eval_ragas.py` — 清理引用已作废 `compare_dedup` 的注释（悬空引用）
 
 **测试**
 
@@ -57,7 +58,8 @@
 - `docs/agents/glossary.md` — `dedup` / `RETRIEVAL_MAX_PER_DOC` 词条改写（单位变更）
 - `docs/agents/logging-rules.md` — 新字段按开放登记制登记
 - `README.md` — 配置表（已改）；`src/cli/README.md` — 评测网格描述
-- `docs/adr/0001-retrieval-fetch-and-dedup-scope.md` — 已写（本变更的决策记录）
+- `docs/agents/defensive-patterns.md` — 以 `_dedup_by_doc_id` 为例的段落随改名同步（`_dedup_by_parent`）
+- `docs/adr/0001-retrieval-fetch-and-dedup-scope.md` — 本变更的决策记录；`docs/adr/0014-candidate-pool-not-rerank-input-bound.md` — 更正其两段陈述（候选池非精排输入上界；多库路径死因）
 
 **失效资产**
 

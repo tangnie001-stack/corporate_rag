@@ -9,7 +9,7 @@ The system SHALL support overriding these values at evaluation time without modi
 
 #### Scenario: Parameter override via environment
 - **WHEN** user sets `TOP_K_RETRIEVAL=15` and `TOP_K_RERANK=8` in `.env`
-- **THEN** the RAG pipeline SHALL use 15 initial retrieval results and keep 8 after reranking
+- **THEN** the RAG pipeline SHALL fetch up to 15 results **per retrieval branch** and keep 8 after reranking（15 为**各支路**各取 15；hybrid 路径送入精排的是 RRF 融合结果，其上界为 `RRF_TOP_N`，不等于 15）
 
 #### Scenario: 候选池不构成最终上下文条数
 - **WHEN** `TOP_K_RETRIEVAL` 配置大于 `TOP_K_RERANK`

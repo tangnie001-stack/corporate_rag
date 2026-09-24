@@ -40,7 +40,7 @@ chunk 缺少父块内容时 SHALL 按自身保留（不去重）。
 
 #### Scenario: 精排降级路径同样去重
 - **WHEN** 精排超时（`rerank timeout`）走降级路径、按检索原始顺序返回
-- **THEN** 该路径 SHALL 同样应用内容级去重，同一父块只保留**该父块内 `1 - distance` 最高**的一条，且 SHALL 产生 `dedup done` 事件
+- **THEN** 该路径 SHALL 同样应用内容级去重，同一父块只保留**该父块内 `1 - distance` 最高**的一条，且 SHALL 产生 `dedup done` 事件（该路径无精排，`dropped` 取 **检索后条数 − 去重后条数**）
 
 #### Scenario: 无父块内容时不去重
 - **WHEN** 检索结果的 chunk 没有父块内容

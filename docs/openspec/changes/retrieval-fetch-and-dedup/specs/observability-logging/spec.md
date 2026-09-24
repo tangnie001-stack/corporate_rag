@@ -26,7 +26,7 @@
 
 ### Requirement: 去重丢弃量观测（dedup done dropped）
 
-内容级去重 SHALL 自落一条 `[retrieval] dedup done` 事件，记录丢弃条数 `dropped`（**精排后条数 − 去重后条数**）与保留条数 `kept`，使"取数天花板是否仍在生效"直接可见。
+内容级去重 SHALL 自落一条 `[retrieval] dedup done` 事件，记录丢弃条数 `dropped`（**精排后条数 − 去重后条数**）与保留条数 `kept`，使"取数天花板是否仍在生效"直接可见。**精排超时降级路径**未发生精排、不存在"精排后条数"，其 `dropped` SHALL 取 **检索后条数 − 去重后条数**（与成功路径口径同构）。
 
 字段集 SHALL **仅为 `{dropped, kept}`** —— 不含 `kb_id` / `query`（靠 trace_id 关联；`rerank_results` 签名里没有 `kb_id`，加它会扩大改动面）。
 
@@ -36,7 +36,7 @@
 
 #### Scenario: 去重丢弃量可见
 - **WHEN** 一次内容级去重执行完成且丢弃了若干条候选
-- **THEN** 日志 SHALL 出现 `dedup done` 行，`dropped` 等于精排后条数减去去重后条数，`kept` 等于去重后条数
+- **THEN** 日志 SHALL 出现 `dedup done` 行，`dropped` 等于精排后条数减去去重后条数（**精排超时降级路径**改取「检索后条数 − 去重后条数」），`kept` 等于去重后条数
 
 #### Scenario: 无丢弃时记零
 - **WHEN** 去重没有丢弃任何候选
