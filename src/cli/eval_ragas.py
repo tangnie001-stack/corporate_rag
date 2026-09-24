@@ -604,7 +604,7 @@ def main() -> None:
             embeddings_wrapper,
         )
 
-        # 指标均值输出到 stdout：compare_retrieval / compare_dedup 等 A/B 脚本以
+        # 指标均值输出到 stdout：compare_retrieval 等 A/B 脚本以
         # 子进程方式调用本脚本，靠 stdout 解析指标（parse_metrics）；logger 只写
         # 文件不落 stdout，故此处显式 print。--gate 模式下 check_gate 已打印指标行。
         if not args.gate:
@@ -630,7 +630,7 @@ def main() -> None:
 def _print_metric_averages(result: Any) -> None:
     """把四指标均值逐行打印到 stdout（供 A/B 子进程解析）。
 
-    compare_retrieval / compare_dedup 通过 subprocess 调用本脚本并用
+    compare_retrieval 通过 subprocess 调用本脚本并用
     parse_metrics 解析 stdout 里的指标均值；logger 只写日志文件，因此
     均值需显式 print。行格式与 check_gate 对齐：一行一指标、
     `指标名: 数值`，便于按指标名前缀匹配取值。

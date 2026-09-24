@@ -142,7 +142,7 @@
 
 ### 派生副本与权威来源分离时，读取侧必须显式重建契约键
 
-**现象**：字段从 blob/jsonb 升为独立列，或从「每库一集合」改为「单表 + 归属列」后，读取侧若直接把存储行原样返回，依赖契约键的下游会**静默失效** —— 不报错，只是取空或丢键。P2 把 `doc_id` / `chunk_index` / `chunk_total` / `source` / `page` 从 metadata 升为 `chunks` 列即属此类：`_dedup_by_doc_id` 读 `metadata["doc_id"]`、引用渲染读 `source`/`page`、实体透传读自定义键，列里没有副本就断链（`rag/retrieval.py`、`agents/tools/rag_tools.py`）。
+**现象**：字段从 blob/jsonb 升为独立列，或从「每库一集合」改为「单表 + 归属列」后，读取侧若直接把存储行原样返回，依赖契约键的下游会**静默失效** —— 不报错，只是取空或丢键。P2 把 `doc_id` / `chunk_index` / `chunk_total` / `source` / `page` 从 metadata 升为 `chunks` 列即属此类：`_dedup_by_parent` 读 `doc_id`/`parent_content`、引用渲染读 `source`/`page`、实体透传读自定义键，列里没有副本就断链（`rag/retrieval.py`、`agents/tools/rag_tools.py`）。
 
 **规则**：跨存储 / 跨表示的字段搬迁必须有一个**唯一**的映射函数：写入侧用它把契约键从源 metadata 剔除（`split_metadata()`），读取侧用它把权威列值 + jsonb 平铺合并回对外契约对象（`src/infra/db/vector_store/mapping.py::row_to_chunk_result()`，冲突以列为准）。该函数必须有单测钉住全部契约键与 jsonb 自定义键的原样透传；禁止各读取路径各自拼装 metadata。
 

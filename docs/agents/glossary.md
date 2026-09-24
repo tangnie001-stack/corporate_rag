@@ -37,8 +37,7 @@
 - **`lexical_score`**：`ChunkResult` 的词法路得分字段，**与引擎无关的命名**（取代 `bm25_score`）——它来自 PostgreSQL 全文检索的 `ts_rank`（子串兜底时为 0.0），不是 BM25；dense 检索与分页查询时为 None。字段契约见 api_contract.md §4.4
 - **`dense_rank` / `sparse_rank`**：结果在 dense 路 / 词法路的排名（0 起），未出现在该路时为 None；融合后仍按路保留（`hybrid-retrieval` 要求「融合结果的来源可辨」）
 - **`metadata 回填契约`**：`ChunkResult.metadata` 由「列值 + jsonb 平铺合并」得到（冲突以列为准），至少含 `doc_id` / `chunk_index` / `chunk_total` / `source` / `page` 五个契约键，jsonb 侧原样承载 chunker 全部自定义键（如 `parent_content`）。唯一实现是 `src/infra/db/vector_store/mapping.py::row_to_chunk_result()`；防复发规则见 defensive-patterns.md「派生副本与权威来源分离」
-- **dedup（按 doc_id 去重）**：`src/rag/retrieval.py::_dedup_by_doc_id` 对召回结果按文档分组，每文档至多保留前 N 条，提升上下文多样性；N 取 `RETRIEVAL_MAX_PER_DOC`（`src/config/settings.py`，环境变量可覆盖，默认 1 与旧行为一致）
-- **RETRIEVAL_MAX_PER_DOC**：检索去重上限配置项，含义见「dedup」；为 A/B 实验变量（N=1 vs N=2/3，结论待真实 KB 评估后写入 change 记录）
+- **父块级去重（parent-level dedup）**：`src/rag/retrieval.py::_dedup_by_parent` 在**精排之后**对候选按 `(doc_id, parent_content 哈希)` 折叠，同一文档内同一父块只保留 `.score` 最高的一条；`parent_content` 缺失的 chunk 按自身保留。目的是让精排窗口不被"同一父块正文的重复渲染"占满。
 
 ### 词法检索（lexical retrieval）
 
