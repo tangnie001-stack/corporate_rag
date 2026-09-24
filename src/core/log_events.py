@@ -54,6 +54,7 @@ class Event(str, Enum):
     RETRIEVE_DONE = "retrieve done"
     WEB_SEARCH_DONE = "web search done"
     RETRIEVE_REPLAY = "retrieve replay"
+    DEDUP_DONE = "dedup done"
 
     # [agent] agent 循环 / 图 / 编排事件（3.3 批迁移登记）
     ITERATION_DONE = "iteration done"

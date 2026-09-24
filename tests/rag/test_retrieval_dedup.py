@@ -1,59 +1,68 @@
-"""检索结果 doc_id 去重测试。"""
+"""检索结果内容级（父块）去重测试。"""
 
-from src.infra.db.vector_store.types import ChunkResult
-from src.rag.retrieval import _dedup_by_doc_id
+from src.rag.context import RAGContext
+from src.rag.retrieval import _dedup_by_parent
 
 
-def _chunk(cid: str, doc_id: str) -> ChunkResult:
-    return ChunkResult(
-        id=cid,
-        content=f"内容{cid}",
-        metadata={"doc_id": doc_id, "source": f"{doc_id}.pdf", "page": 1},
+def _ctx(cid: str, doc_id: str, parent: str | None, score: float) -> RAGContext:
+    return RAGContext(
+        content=f"子内容{cid}",
+        source=f"{doc_id}.pdf",
+        page=1,
+        doc_id=doc_id,
+        chunk_id=cid,
+        parent_content=parent,
+        score=score,
     )
 
 
-def test_dedup_keeps_first_per_doc():
-    """同一 doc_id 只保留最先出现的结果，不同 doc_id 全部保留。"""
-    results = [
-        _chunk("a1", "d1"),
-        _chunk("a2", "d1"),
-        _chunk("b1", "d2"),
-        _chunk("a3", "d1"),
+def test_same_parent_keeps_highest_score():
+    """同一父块的多个 chunk 只留 .score 最高的那条（不是最先出现的）。"""
+    parent = "同一段父块正文"
+    ctxs = [
+        _ctx("c1", "d1", parent, 0.20),
+        _ctx("c2", "d1", parent, 0.90),
+        _ctx("c3", "d1", parent, 0.50),
     ]
-    out = _dedup_by_doc_id(results)
-    assert [c.id for c in out] == ["a1", "b1"]
+    out = _dedup_by_parent(ctxs)
+    assert [c.chunk_id for c in out] == ["c2"]
 
 
-def test_dedup_keeps_items_without_doc_id():
-    """无 doc_id 的项按自身保留（不误删）。"""
-    results = [
-        _chunk("a1", "d1"),
-        ChunkResult(id="x1", content="x", metadata={}),
-        _chunk("a2", "d1"),
+def test_different_parents_in_same_doc_all_kept():
+    """同一文档的多个不同父块全部保留（取消每文档配额）。"""
+    ctxs = [
+        _ctx("c1", "d1", "父块A", 0.9),
+        _ctx("c2", "d1", "父块B", 0.8),
+        _ctx("c3", "d1", "父块C", 0.7),
     ]
-    out = _dedup_by_doc_id(results)
-    assert [c.id for c in out] == ["a1", "x1"]
+    out = _dedup_by_parent(ctxs)
+    assert [c.chunk_id for c in out] == ["c1", "c2", "c3"]
 
 
-def test_dedup_default_one_per_doc_keeps_existing_behavior():
-    """默认（max_per_doc 未传）每文档 1 条 — 现状不回归。"""
-    results = [
-        _chunk("a1", "d1"),
-        _chunk("a2", "d1"),
-        _chunk("b1", "d2"),
-        _chunk("a3", "d1"),
+def test_cross_document_identical_parent_not_folded():
+    """跨文档逐字相同的父块不折叠 —— 键必须含 doc_id。"""
+    same = "年报的重要提示（样板文本）"
+    ctxs = [_ctx("c1", "d1", same, 0.9), _ctx("c2", "d2", same, 0.8)]
+    out = _dedup_by_parent(ctxs)
+    assert [c.chunk_id for c in out] == ["c1", "c2"]
+
+
+def test_chunk_without_parent_kept_as_is():
+    """无 parent_content 的 chunk 按自身保留，不参与折叠。"""
+    ctxs = [
+        _ctx("c1", "d1", None, 0.9),
+        _ctx("c2", "d1", None, 0.8),
     ]
-    out = _dedup_by_doc_id(results)
-    assert [c.id for c in out] == ["a1", "b1"]
+    out = _dedup_by_parent(ctxs)
+    assert [c.chunk_id for c in out] == ["c1", "c2"]
 
 
-def test_dedup_max_per_doc_two():
-    """max_per_doc=2 时每文档保留前 2 条。"""
-    results = [
-        _chunk("a1", "d1"),
-        _chunk("a2", "d1"),
-        _chunk("a3", "d1"),
-        _chunk("b1", "d2"),
+def test_kept_order_is_score_desc():
+    """输出按 .score 降序（供后续按 TOP_K_RERANK 截断）。"""
+    ctxs = [
+        _ctx("c1", "d1", "父块A", 0.1),
+        _ctx("c2", "d2", "父块B", 0.9),
+        _ctx("c3", "d3", "父块C", 0.5),
     ]
-    out = _dedup_by_doc_id(results, max_per_doc=2)
-    assert [c.id for c in out] == ["a1", "a2", "b1"]
+    out = _dedup_by_parent(ctxs)
+    assert [c.chunk_id for c in out] == ["c2", "c3", "c1"]

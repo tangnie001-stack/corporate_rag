@@ -1,6 +1,7 @@
 """检索与查询改写 — 向量检索、Reranker 精排、查询分类与改写。"""
 
 import asyncio
+import hashlib
 
 from src.config import (
     HYBRID_SEARCH_ENABLED,
@@ -11,7 +12,6 @@ from src.config import (
     RRF_TOP_N,
     TOP_K_RERANK,
     TOP_K_RETRIEVAL,
-    settings,
 )
 from src.config.const import (
     ENTITY_OPTIONAL_TYPES,
@@ -32,36 +32,33 @@ from src.rag.fusion import rrf_fusion
 _ALL_ENTITY_KEYS: tuple[str, ...] = tuple(ENTITY_TYPES) + tuple(ENTITY_OPTIONAL_TYPES)
 
 
-def _dedup_by_doc_id(
-    results: list[ChunkResult], max_per_doc: int | None = None
-) -> list[ChunkResult]:
-    """按 doc_id 去重检索结果，每个文档最多保留 max_per_doc 条。
+def _dedup_by_parent(contexts: list[RAGContext]) -> list[RAGContext]:
+    """内容级去重：同一文档内同一父块只保留 `.score` 最高的一条。
 
-    默认（None）读 settings.RETRIEVAL_MAX_PER_DOC（=1 保持现状）；
-    无 doc_id 的项按自身保留，不计入配额。
+    去重键为 `(doc_id, md5(parent_content))` —— 必须含 `doc_id`：跨文档的样板文本
+    （年报"重要提示"等）可能逐字相同，只按内容哈希会把两个真实候选折叠成一个。
+    `parent_content` 为空的 chunk 按自身保留（不参与折叠）。
+    返回按 `.score` 降序排列；分数语义见调用方（精排分或降级回退分）。
 
     Args:
-        results: 检索结果列表（RRF 融合后）
-        max_per_doc: 每文档保留条数上限，None 时读 settings
+        contexts: 精排后（或降级回退后）的上下文列表，每项 `.score` 已填好
 
     Returns:
-        去重后的结果列表
+        去重后的列表，按 `.score` 降序
     """
-    if max_per_doc is None:
-        max_per_doc = settings.RETRIEVAL_MAX_PER_DOC
-    seen_count: dict[str, int] = {}
-    deduped: list[ChunkResult] = []
-    for r in results:
-        doc_id = r.metadata.get("doc_id")
-        if doc_id is None:
-            deduped.append(r)
+    best: dict[tuple[str, str], RAGContext] = {}
+    passthrough: list[RAGContext] = []
+    for c in contexts:
+        if not c.parent_content:
+            passthrough.append(c)
             continue
-        n = seen_count.get(doc_id, 0)
-        if n >= max_per_doc:
-            continue
-        seen_count[doc_id] = n + 1
-        deduped.append(r)
-    return deduped
+        key = (c.doc_id, hashlib.md5(c.parent_content.encode("utf-8")).hexdigest())
+        current = best.get(key)
+        if current is None or c.score > current.score:
+            best[key] = c
+    merged = [*best.values(), *passthrough]
+    merged.sort(key=lambda c: c.score, reverse=True)
+    return merged
 
 
 async def search(
@@ -69,7 +66,7 @@ async def search(
     kb_id: str,
     vector_store: VectorStore,
 ) -> list[ChunkResult]:
-    """执行检索：dense + 词法两路同源并发取数，融合与去重在应用层。
+    """执行检索：dense + 词法两路同源并发取数，融合在应用层。
 
     两路都经同一个 VectorStore（背后是同一个 PostgreSQL 实例的 chunks 表）——
     「某一支路半死而整体正常」的结构性原因由此消失。
@@ -99,7 +96,6 @@ async def search(
             sparse_count=len(sparse_results),
             result_count=len(results),
         )
-        results = _dedup_by_doc_id(results)
         return results
 
     results = await vector_store.dense_search(kb_id, query, k=TOP_K_RETRIEVAL)
@@ -113,8 +109,7 @@ async def search(
         query_len=len(query),
         result_count=result_count,
     )
-    results = _dedup_by_doc_id(results or [])
-    return results
+    return results or []
 
 
 def _rerank_stats(reranked: list[dict], used_fallback: bool) -> dict:
@@ -195,8 +190,8 @@ def rerank_results(
                 fallback_score = 0
             reranked.append({"index": i, "relevance_score": fallback_score})
 
-    contexts = []
-    for item in reranked[:TOP_K_RERANK]:
+    contexts: list[RAGContext] = []
+    for item in reranked:
         idx = item["index"]
         r = results[idx]
         score = item.get("relevance_score", 0)
@@ -226,11 +221,15 @@ def rerank_results(
     if contexts:
         log_event(
             Event.RERANK_DONE,
-            doc_count=len(results),
+            doc_count=len(contexts),
             query_len=len(query),
             **_rerank_stats(reranked, used_fallback),
         )
-    return contexts
+    before = len(contexts)
+    contexts = _dedup_by_parent(contexts)
+    if before != len(contexts):
+        log_event(Event.DEDUP_DONE, dropped=before - len(contexts), kept=len(contexts))
+    return contexts[:TOP_K_RERANK]
 
 
 def expand_query(query: str, history: list[ChatMessage]) -> str:

@@ -79,6 +79,8 @@
   的形态）/ none（命令未命中技能，record 为空）
 - `model turn` 扩 `temperature` / `temp_source`（explicit 逐轮直传档 / default 模型构造档）/
   `kb_bound`，不新增事件
+- `dedup done`（retrieval / info）——内容级去重丢弃量；字段 `dropped`/`kept`，明细以
+  `log_event_specs.py` 为准
 
 **不再扩 `iteration done`**：其「消息数拆分」意图已由 `prompt messages` 在组装点承载，
 不重复记录同一事实（避免后人再提）。

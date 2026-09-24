@@ -24,8 +24,18 @@ from src.rag.context import RAGContext
 from src.rag.retrieval import _rerank_stats, rerank_results
 
 
-def _cr(content, cid="c1") -> ChunkResult:
-    """构造一个 mock ChunkResult，字段满足 rerank_results 读取所需。"""
+def _cr(content, cid="c1", doc_id=None, parent=None) -> ChunkResult:
+    """构造一个 mock ChunkResult，字段满足 rerank_results 读取所需。
+
+    doc_id / parent 为 None 时不写进 metadata（保持既有用例的 metadata={} 行为）。
+    """
+    metadata: dict = {}
+    if doc_id is not None:
+        metadata["doc_id"] = doc_id
+        metadata["source"] = f"{doc_id}.pdf"
+        metadata["page"] = 1
+    if parent is not None:
+        metadata["parent_content"] = parent
     return cast(
         ChunkResult,
         type(
@@ -35,7 +45,7 @@ def _cr(content, cid="c1") -> ChunkResult:
                 "content": content,
                 "id": cid,
                 "distance": 0.3,
-                "metadata": {},
+                "metadata": metadata,
                 "lexical_score": None,
             },
         )(),
@@ -147,8 +157,8 @@ class TestRerank:
         ctx = rerank_results("q", results, _mock_reranker(scores))
         assert len(ctx) == TOP_K_RERANK
 
-    def test_rerank_fallback_keeps_raw_order(self):
-        """rerank 失败 fallback（1-distance 分数）保持 raw order，不应用阈值。"""
+    def test_rerank_fallback_orders_by_score_desc(self):
+        """rerank 失败 fallback（1-distance 分数）按分数降序排列，不应用绝对阈值。"""
         reranker = MagicMock()
         reranker.rerank.side_effect = RuntimeError("rerank down")
         results = [
@@ -160,12 +170,12 @@ class TestRerank:
             )
             for i in range(2)
         ]
-        # r0 距离 0.9 → 分 0.1，r1 距离 0.5 → 分 0.5；raw order 下先 r0 后 r1
+        # r0 距离 0.9 → 分 0.1，r1 距离 0.5 → 分 0.5；分数降序下先 r1 后 r0
         results[1].distance = 0.5
         with patch("src.rag.retrieval.with_retry", side_effect=lambda f, **kw: f):
             contexts = retrieval.rerank_results("query", results, reranker)
         assert len(contexts) == 2
-        assert [c.score for c in contexts] == pytest.approx([0.1, 0.5])
+        assert [c.score for c in contexts] == pytest.approx([0.5, 0.1])
 
     def test_kb_construction_assigns_tier_zero(self):
         """KB 构造点（rerank_results）显式产出 T0（内部文档）。"""
@@ -448,3 +458,19 @@ def test_rerank_stats_marks_fallback_source():
     assert out["score_max"] == 1.0
     assert out["score_min"] == 0.0
     assert out["score_p50"] == 0.5
+
+
+def test_rerank_dedups_before_truncating(monkeypatch):
+    """去重发生在 TOP_K_RERANK 截断之前：3 条同父块只占 1 个名额。"""
+    parent = "同一段父块正文"
+    results = [
+        _cr("a1", cid="c1", doc_id="d1", parent=parent),
+        _cr("a2", cid="c2", doc_id="d1", parent=parent),
+        _cr("a3", cid="c3", doc_id="d1", parent=parent),
+        _cr("b1", cid="c4", doc_id="d2", parent="另一段父块"),
+    ]
+    monkeypatch.setattr(retrieval, "TOP_K_RERANK", 2)
+    out = rerank_results("q", results, _mock_reranker([0.9, 0.89, 0.88, 0.87]))
+    assert len(out) == 2
+    assert out[0].chunk_id == "c1"  # 同父块里 .score 最高者
+    assert "c4" in [c.chunk_id for c in out]  # 另一父块未被重复项挤掉

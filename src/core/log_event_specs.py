@@ -43,6 +43,7 @@ EVENT_SPECS: dict[str, EventSpec] = {
         "info",
         ("doc_count", "query_len", "score_max", "score_min", "score_p50", "scored"),
     ),
+    "dedup done": EventSpec("dedup done", "retrieval", "info", ("dropped", "kept")),
     "rerank failed": EventSpec(
         "rerank failed", "retrieval", "warning", ("attempts", "query", "err")
     ),
