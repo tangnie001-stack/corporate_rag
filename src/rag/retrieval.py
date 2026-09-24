@@ -221,7 +221,7 @@ def rerank_results(
     if contexts:
         log_event(
             Event.RERANK_DONE,
-            doc_count=len(contexts),
+            doc_count=len(results),
             query_len=len(query),
             **_rerank_stats(reranked, used_fallback),
         )

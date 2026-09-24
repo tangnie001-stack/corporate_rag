@@ -23,6 +23,7 @@
 `design.md` 的 `Migration Plan` 写明「P1/P2 必须排在对端之后」，理由是 **P1 的验收闸门要重采端到端 prompt 快照，而快照里的 context 正是对端在改的东西**。
 
 - 该 change 目前 **0/33 项未落地**（代码可证：`src/config/settings.py:212` 的 `RETRIEVAL_MAX_PER_DOC` 仍在、`src/rag/retrieval.py:35` 仍是 `_dedup_by_doc_id`、`src/cli/compare_dedup.py` 仍在）。
+> ⚠ 交叉注记（`retrieval-fetch-and-dedup`）：此句前提已过时——`_dedup_by_doc_id` 与 `RETRIEVAL_MAX_PER_DOC` 已被删除、`src/cli/compare_dedup.py` 已作废；去重现为父块级（`_dedup_by_parent`）、在精排后执行。「每文档 1 条 × 文档数 = 硬顶」的旧口径已不再描述上线系统。
 - **本计划的任务 T1–T18 与该 change 零文件交集**，可立即开工。
 - **只有 T19 的「人工重采快照基线」需要等对端落地**。执行到 T19 时若对端仍未落地，先停下问用户，不要采一份注定作废的基线。
 - 另：`sources` 段里"第二次检索显式传 `top_k=10`"这类具体动作的措辞，`design.md:368` 的 OQ-1 说待对端 §5 结论后定稿。本计划按 `prompt-mapping.md` §3 的**完整保留**稿落地；若对端结论要改，那是**改 YAML**，不动代码。

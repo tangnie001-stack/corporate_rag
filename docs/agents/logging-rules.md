@@ -79,6 +79,9 @@
   的形态）/ none（命令未命中技能，record 为空）
 - `model turn` 扩 `temperature` / `temp_source`（explicit 逐轮直传档 / default 模型构造档）/
   `kb_bound`，不新增事件
+- `rerank done`（retrieval / info）——精排完成；`scored` 取 rerank（正常精排分）/
+  fallback（精排调用失败，分数来自 `1 - distance` 的降级回退）；数值字段明细以
+  `log_event_specs.py` 为准
 - `dedup done`（retrieval / info）——内容级去重丢弃量；字段 `dropped`/`kept`，明细以
   `log_event_specs.py` 为准
 

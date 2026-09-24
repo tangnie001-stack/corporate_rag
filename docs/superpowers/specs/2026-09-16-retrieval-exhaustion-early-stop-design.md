@@ -32,6 +32,7 @@
 用户要的是**东软的年报、多年份**；库里是**东软 2025 一季报**（季报非年报，仅 1 期）+ **腾讯 2024 年报**（无关公司）。**东软年报 0/3 覆盖。**
 
 **`result_count=2` 恒定的机制**：KB 只有 2 份文档，`_dedup_by_doc_id` 的 `RETRIEVAL_MAX_PER_DOC=1`（每文档至多 1 条）使上限恒为 2，与 query 无关。因此该 2 条必然是「1 条东软 + 1 条腾讯」——**每轮上下文有一半来自无关公司**。
+> ⚠ 交叉注记（`retrieval-fetch-and-dedup`，适用于全文）：本文多处（§1.3、§2 非目标、§6、§7）以 `_dedup_by_doc_id` / `RETRIEVAL_MAX_PER_DOC=1` 为前提推理，该前提已被 `retrieval-fetch-and-dedup` 变更改写——`_dedup_by_doc_id` 与 `RETRIEVAL_MAX_PER_DOC` 已被删除，去重现为父块级（`_dedup_by_parent`）、在精排后执行；「每文档 1 条 × 文档数 = 硬顶」的旧推理已不再描述上线系统。
 
 **结论：A 类（库里没有），且是极端版。5 轮检索在数学上不可能成功。**
 
