@@ -149,7 +149,6 @@ docker compose up -d --build
 |------|--------|------|------|
 | Nginx | `financial-qa-nginx` | `:80` | 反向代理 + 静态文件服务 |
 | FastAPI | `financial-qa-app` | `:8000` | REST API + SSE 流式 |
-| MySQL | `financial-qa-mysql` | `:3306` | 文档/知识库元数据 |
 | Redis | `financial-qa-redis` | `:6379` | 对话缓存 |
 | PostgreSQL | `financial-qa-postgres` | `:5432` | Langfuse 存储 |
 | Langfuse | `financial-qa-langfuse` | `:3000` | LLM Tracing 面板 |
@@ -160,27 +159,27 @@ docker compose up -d --build
 - **API 文档** → http://localhost/api/docs （Swagger UI）
 - **Langfuse** → http://localhost:3000
 
-### 2. 本地开发模式（热重载）
+### 2. 本地开发模式（热重载 + 前端反代）
 
-在不重启 Docker 的情况下修改代码即时生效：
+本地跑：**后端用宿主 `.venv` 起 uvicorn，前端用一个一次性 nginx 容器**反代静态文件与 `/api`。
+端口按 slot 分配，**多个 worktree 可并存**（本仓只有一套 compose 容器，worktree 内不跑 compose —— 原因与边界见 `docs/agents/cookbook.md`「并行会话（worktree）」）。
 
 ```bash
-# 启动依赖服务（不需要 app 和 nginx）
-docker compose up -d mysql redis postgres langfuse
-
-# 本地运行 FastAPI（--reload 热重载）
-uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
-
-# 在另一个终端启动静态文件服务（预览前端）
-python3 -m http.server 8080 --directory deploy/nginx/html/
+scripts/dev-worktree.sh up              # 默认 slot 1：后端 8001 / 前端 8080
+scripts/dev-worktree.sh up --slot 2     # 第二个 worktree 换 slot：后端 8002 / 前端 8081
+scripts/dev-worktree.sh status          # 查看当前端口与进程
+scripts/dev-worktree.sh down            # 停止
 ```
 
-此时前端访问 `http://localhost:8080`，API 访问 `http://localhost:8000`。
+- 前端 → `http://localhost:8080`（`/api/` 经反代打到本地 8001）
+- 接口 → `http://localhost:8001/docs`
+- 依赖服务（`postgres` / `redis` / `minio` / `langfuse-web`）仍用容器那套，无需另起；脚本已内置宿主侧必需的 `POSTGRES_HOST=localhost`。
+- 首次冷启动在 `/mnt/d`（9p）上约需 1 分钟，脚本会等到健康检查通过再返回。
+- 反代配置模板：`deploy/nginx/nginx.dev.conf.template`（与生产 `nginx.conf` 只差 `proxy_pass` 目标）。
 
-> 如需让前端通过 Nginx 访问（`:80/api/*` → `:8000`），单独启动 Nginx：
-> ```bash
-> docker compose up -d --build nginx
-> ```
+> ⚠️ **前端不要只用一个静态服务器**（如 `python3 -m http.server 8080`）：前端全部用相对路径 `fetch('/api/...')`，
+> 没有反代时 `/api/*` 会打到静态服务器上、全部 404。纯样式预览见下一节。
+> 也不要用容器 nginx（`:80`）来访问本地代码——它反代的是**容器里的 app**，与本地进程无关。
 
 ### 3. 纯前端预览（无需后端）
 
@@ -320,7 +319,7 @@ source .venv/bin/activate
 pip install -e .
 
 ### 本地开发（启动依赖服务）
-docker compose up -d mysql redis postgres langfuse
+docker compose up -d redis postgres minio langfuse-web
 
 ### 运行 API 服务（热重载）
 uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload

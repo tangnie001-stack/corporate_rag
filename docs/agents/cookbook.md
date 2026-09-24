@@ -293,12 +293,42 @@
 - **`core.symlinks=false`（本仓 git 配置）下，被跟踪的 symlink 会被写成普通文件**：`openspec` 在 git 里是 symlink（mode `120000`），检出到该环境却成了内容为 `docs/openspec` 的**文本文件** → `openspec` CLI 报 `Unknown item '<name>'`。修法：`rm openspec && ln -s docs/openspec openspec`（git 仍判定未变）。**任何新建的 worktree / clone 都会中这一条**。
 - **`.gitignore` 里带尾斜杠的条目忽略不了同名 symlink**：`/data/` 与 `.venv/` 都是这个形态，尾斜杠只匹配**目录**，而 symlink 不是目录 → 整体 symlink 过去会以**未跟踪文件**冒出来（`?? .venv`），有被 `git add .` 带进提交的风险。
   - `data`：改法是建**真目录** `data/`，只在里面 symlink 具体子目录（`data/ragas`）。
-  - `.venv`：不能改成真目录（要的就是同一个 venv）。**做法是提交时坚持显式 pathspec、永不 `git add .`**；或把 `.gitignore` 的 `.venv/` 改为不带斜杠的 `.venv`（仓库级改动，需单独决定）。
+  - `.venv`：不能改成真目录（要的就是同一个 venv）。**做法是提交时坚持显式 pathspec、永不 `git add .`**；或把 `.gitignore` 的 `.venv/` 改为不带斜杠的 `.venv`（仓库级改动，需单独决定）；或**只在本机生效**地加进 common dir 的 `info/exclude`：`printf '.venv\n' >> "$(git rev-parse --git-path info/exclude)"`（该文件被所有 worktree 共用、不进任何提交；同时解掉 UA 自动更新因 `?? .venv` 而 `failed: Working tree has relevant uncommitted changes` 的拦截）。
 - **venv 里有指向主工作区的 editable 安装**：`.venv` 内存在 `__editable__.corporate_rag-0.1.0.pth` → `<主工作区>/src`。于是「从 worktree 跑测试」是否真用到 worktree 的代码，**取决于 cwd** ——
   - 从 worktree **根目录**跑（`-c` / 脚本会把 cwd 放进 `sys.path[0]`）→ 解析到 **worktree 的 `src`** ✅
   - **cwd 一旦变化 → 静默回落主工作区的 `src`**，测试跑的是别人的代码而你不自知（无报错、结果看似正常）
   - 一行验证：`.venv/bin/python -c "import src; print(src.__file__)"`，应打印 **worktree** 路径
   - 要确定性时显式加 `PYTHONPATH=<worktree 根>`
+
+### worktree 里本地跑服务（后端 + 前端反代）
+
+**场景**：worktree 隔离了 git 但隔离不了 Docker（本仓只有一套容器）。要在 worktree 里看到效果，**不要在 worktree 里起 compose** —— 一律本地跑，按 slot 分配端口，多个 worktree 并存互不冲突。
+
+**步骤**：
+
+```bash
+scripts/dev-worktree.sh up            # 默认 slot 1：后端 8001 / 前端 8080
+scripts/dev-worktree.sh up --slot 2   # 另一个 worktree 换 slot：8002 / 8081
+scripts/dev-worktree.sh status
+scripts/dev-worktree.sh down
+```
+
+**机制**：
+
+- 后端 = 宿主 `.venv` 起 `uvicorn --reload`（脚本内置 `POSTGRES_HOST=localhost`：宿主解析不了 `.env` 里的服务名 `postgres`）。
+- 前端 = 一次性 nginx 容器（默认镜像 `corporate_rag-nginx:latest`，可用 `DEV_NGINX_IMAGE` 覆盖）：挂载静态文件，`/api/` 反代到宿主后端。conf 由 `deploy/nginx/nginx.dev.conf.template` 经镜像 entrypoint 的 envsubst 渲染，**只有一个变量 `BACKEND_PORT`**（容器内固定监听 80，宿主端口由 `-p` 决定，因此模板无需知道前端端口）。entrypoint 只替换「容器 env 里存在的」变量，`$http_upgrade` / `$host` 等 nginx 变量不受影响。
+- 端口约定：slot N → 后端 `8000+N`、前端 `8079+N`。容器名 `rag-dev-nginx-<worktree 目录名>`，按 worktree 天然唯一。
+- 状态落 `.dev-ports` / `.dev-uvicorn.pid`（已 gitignore），日志 `logs/dev-uvicorn.log`；`--force` 可跳过端口占用检查。
+
+**验证**：两个 worktree 分别 `--slot 1` / `--slot 2`，`8001/8080` 与 `8002/8081` 同时 `HTTP 200`；各自 `down` 后端口释放、无残留容器与状态文件。
+
+**注意事项**：
+
+- **首次冷启动慢**：`/mnt/d`（9p）上 import 全量依赖约需 1 分钟；脚本等健康检查（上限 180s）才返回，未就绪时反代返回 502（看 `logs/dev-uvicorn.log`）。
+- **`down` 要真杀掉后端**：`--reload` 是 supervisor + 子进程，且 `/mnt/d` 上进程可能停在 `D` 状态、SIGTERM 打不进 → 脚本按「谁在监听该端口」兜底结束（`kill_port`）。手工排查同理：**别用 `pkill -f "<模式>"`**，模式串会命中执行它的 shell 自身。
+- **前端不要只起静态服务器**（如 `python3 -m http.server`）：前端用相对路径 `fetch('/api/...')`，无反代时 `/api/*` 全部 404。纯样式预览另见 README「纯前端预览」。
+- **依赖服务仍是共享的那一套**（postgres / redis / minio / langfuse-web）：数据跨 worktree 共享，别做破坏性操作。
+- 该脚本与模板随分支走：**旧分支 / 未合并 `dev-wsl` 的 worktree 里不存在**，需先合并。
 
 ## 可观测（Langfuse）
 
