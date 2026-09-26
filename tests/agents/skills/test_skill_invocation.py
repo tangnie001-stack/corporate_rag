@@ -101,6 +101,7 @@ def test_dead_skill_warns(tmp_path):
         "---\n"
         "name: dead-skill\n"
         "description: 谁都用不了\n"
+        "context: inline\n"
         "user-invocable: false\n"
         "disable-model-invocation: true\n"
         "---\n"

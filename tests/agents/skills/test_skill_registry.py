@@ -14,23 +14,29 @@ def _write_skill(
     context: str = "inline",
     body: str = "正文",
     frontmatter_name: str | None = None,
+    allowed_tools: str = "",
 ) -> None:
-    """在 root/<name>/SKILL.md 写入合法 skill；frontmatter_name 覆盖 frontmatter 的 name。"""
+    """在 root/<name>/SKILL.md 写入合法 skill；frontmatter_name 覆盖 frontmatter 的 name。
+
+    context=fork 时须给 allowed_tools，否则子代理零工具（loader 会记 warning）。
+    """
     d = root / name
     d.mkdir(parents=True, exist_ok=True)
     if frontmatter_name is not None:
         fm_name = frontmatter_name
     else:
         fm_name = name
+    tools_line = f"allowed-tools: {allowed_tools}\n" if allowed_tools else ""
     (d / "SKILL.md").write_text(
-        f"---\nname: {fm_name}\ndescription: {name} 规则\ncontext: {context}\n---\n\n{body}",
+        f"---\nname: {fm_name}\ndescription: {name} 规则\ncontext: {context}\n"
+        f"{tools_line}---\n\n{body}",
         encoding="utf-8",
     )
 
 
 def test_registry_loads_all(tmp_path):
     _write_skill(tmp_path, "a")
-    _write_skill(tmp_path, "b", context="fork")
+    _write_skill(tmp_path, "b", context="fork", allowed_tools="retrieve_kb")
     reg = SkillRegistry(SkillLoader(tmp_path))
     reg.reload_if_changed()
     assert set(reg.names()) == {"a", "b"}
@@ -76,7 +82,7 @@ def test_lazy_reload_detects_new_skill(tmp_path):
     reg = SkillRegistry(SkillLoader(tmp_path))
     reg.reload_if_changed()
     assert reg.names() == ["a"]
-    _write_skill(tmp_path, "b", context="fork")
+    _write_skill(tmp_path, "b", context="fork", allowed_tools="retrieve_kb")
     reg.reload_if_changed()
     assert set(reg.names()) == {"a", "b"}
 
@@ -124,7 +130,8 @@ def test_user_visible_excludes_non_invocable(tmp_path):
     """user-invocable:false 的 skill 不出现在用户候选列表。"""
     registry = _make_registry(
         tmp_path,
-        "---\nname: hidden-skill\ndescription: 仅模型可用\nuser-invocable: false\n---\n正文\n",
+        "---\nname: hidden-skill\ndescription: 仅模型可用\ncontext: inline\n"
+        "user-invocable: false\n---\n正文\n",
         name="hidden-skill",
     )
 
@@ -136,7 +143,7 @@ def test_model_visible_excludes_disable_model_invocation(tmp_path):
     """disable-model-invocation:true 的 skill 不出现在模型候选列表。"""
     registry = _make_registry(
         tmp_path,
-        "---\nname: manual-only\ndescription: 仅用户可调\n"
+        "---\nname: manual-only\ndescription: 仅用户可调\ncontext: inline\n"
         "disable-model-invocation: true\n---\n正文\n",
         name="manual-only",
     )
@@ -149,7 +156,7 @@ def test_to_tool_description_only_lists_model_visible(tmp_path):
     """delegate_task 的可用列表只含模型可见 skill。"""
     registry = _make_registry(
         tmp_path,
-        "---\nname: manual-only\ndescription: 仅用户可调\n"
+        "---\nname: manual-only\ndescription: 仅用户可调\ncontext: inline\n"
         "disable-model-invocation: true\n---\n正文\n",
         name="manual-only",
     )

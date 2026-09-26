@@ -40,7 +40,7 @@ def test_load_fork_skill(tmp_path):
     _write_skill(
         tmp_path,
         "finance-analyst",
-        "description: 财务建模专家\ncontext: fork\nmodel: qwen3.8-max\n",
+        "description: 财务建模专家\ncontext: fork\nallowed-tools: retrieve_kb\nmodel: qwen3.8-max\n",
         "你是一名财务建模专家，基于给定材料做多步分析。",
     )
     records = SkillLoader(tmp_path).load_all()
@@ -95,7 +95,7 @@ def test_skill_name_defaults_to_dirname(tmp_path):
     _write_skill(
         tmp_path,
         "my-analyst",
-        "description: x\ncontext: fork\n",
+        "description: x\ncontext: inline\n",
         "正文",
     )
     rec = SkillLoader(tmp_path).load_all()[0]
@@ -122,7 +122,7 @@ def test_invalid_context_skips_skill(tmp_path):
         "description: x\ncontext: hybrid\n",
         "方法论正文",
     )
-    _write_skill(tmp_path, "good", "description: y\ncontext: fork\n", "正经正文")
+    _write_skill(tmp_path, "good", "description: y\ncontext: inline\n", "正经正文")
     with pytest.warns(UserWarning, match="已跳过"):
         records = SkillLoader(tmp_path).load_all()
     assert [r.name for r in records] == ["good"]
@@ -130,7 +130,12 @@ def test_invalid_context_skips_skill(tmp_path):
 
 def test_missing_context_defaults_to_fork(tmp_path):
     """未声明 context → 默认 fork（正文落 fork_body，不占主 agent 历史预算）。"""
-    _write_skill(tmp_path, "undeclared", "description: x\n", "方法论正文")
+    _write_skill(
+        tmp_path,
+        "undeclared",
+        "description: x\nallowed-tools: retrieve_kb\n",
+        "方法论正文",
+    )
     records = SkillLoader(tmp_path).load_all()
     rec = records[0]
     assert rec.context == SkillContext.FORK
@@ -149,8 +154,10 @@ def test_subdirectory_without_skill_md_ignored(tmp_path):
 
 def test_nested_skill_dirs_ignored(tmp_path):
     """只扫一层 skills/<name>/SKILL.md，不递归更深。"""
-    _write_skill(tmp_path, "a", "description: x\n", "正文")
-    _write_skill(tmp_path / "a" / "nested", "b", "description: y\n", "正文2")
+    _write_skill(tmp_path, "a", "description: x\ncontext: inline\n", "正文")
+    _write_skill(
+        tmp_path / "a" / "nested", "b", "description: y\ncontext: inline\n", "正文2"
+    )
     records = SkillLoader(tmp_path).load_all()
     assert len(records) == 1
     assert records[0].name == "a"
@@ -205,6 +212,7 @@ def test_deprecated_fields_are_ignored_with_warning(tmp_path):
         "---\n"
         "name: legacy-skill\n"
         "description: 遗留字段\n"
+        "context: inline\n"
         "thinking: true\n"
         "max-iterations: 3\n"
         "---\n"
@@ -230,6 +238,7 @@ def test_agent_field_is_parsed(tmp_path):
         "name: deep-analysis\n"
         "description: 深度分析\n"
         "context: fork\n"
+        "allowed-tools: retrieve_kb\n"
         "agent: finance-expert\n"
         "---\n"
         "任务：$ARGUMENTS\n",
@@ -252,6 +261,7 @@ def test_explicit_dual_axis_fields_are_parsed(tmp_path):
         "---\n"
         "name: report-publish\n"
         "description: 发布报告\n"
+        "context: inline\n"
         "user-invocable: false\n"
         "disable-model-invocation: true\n"
         "---\n"

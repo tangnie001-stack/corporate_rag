@@ -67,6 +67,14 @@ where = ["src"]
 # 跨 loop 复用导致 "Task got Future attached to a different loop"
 asyncio_default_test_loop_scope = "session"
 asyncio_default_fixture_loop_scope = "session"
+filterwarnings = [
+    # loader 对「fork 但未声明 allowed-tools」的提示性 warning。仓库现有唯一 fork skill
+    # (financial-statement-analyzer) 属分析型，零工具是既定设计（材料由主 agent 预检索
+    # 经 task 传入），因此凡加载真实 skills 目录的用例都会稳定命中，属预期噪声。
+    # 断言该 warning 的用例（tests/agents/skills/test_skill_loader.py）用 pytest.warns
+    # 自行捕获，pytest.warns 会覆盖本过滤器，不受影响。
+    "ignore:.*未声明 allowed-tools",
+]
 
 [tool.pyright]
 extraPaths = ["src"]
