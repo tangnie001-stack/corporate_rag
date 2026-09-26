@@ -71,11 +71,12 @@ def test_description_defaults_to_body_first_paragraph(tmp_path):
     assert "这是正文第一段" in rec.description
 
 
-def test_invalid_context_falls_back_fork(tmp_path):
-    """context 非法值 → 回落 fork + 记 warning（不抛异常）。
+def test_invalid_context_skips_skill(tmp_path):
+    """context 非法值 → 该 skill 解析失败被跳过 + 告警，不静默降级到任一模式。
 
-    与"未声明默认 fork"一致：非法值若回落 inline，拼错（如 `context: forkk`）会把
-    skill 正文静默写进主 agent 历史并占用其预算，正是要避免的失效。
+    与「名称非法」同款处理（走 load_all 的 fail-open 路径）：拼错就报错跳过、由作者
+    修正，而不是猜意图降级——降级到 inline 会静默占用主 agent 历史预算（超限后静默
+    被裁），降级到 fork 会得到零工具子代理。同目录的正常 skill 不受影响。
     """
     _write_skill(
         tmp_path,
@@ -83,12 +84,10 @@ def test_invalid_context_falls_back_fork(tmp_path):
         "description: x\ncontext: hybrid\n",
         "方法论正文",
     )
-    with pytest.warns(UserWarning, match="非法值"):
+    _write_skill(tmp_path, "good", "description: y\ncontext: fork\n", "正经正文")
+    with pytest.warns(UserWarning, match="已跳过"):
         records = SkillLoader(tmp_path).load_all()
-    rec = records[0]
-    assert rec.context == SkillContext.FORK
-    assert rec.fork_body is not None
-    assert "方法论正文" in rec.fork_body
+    assert [r.name for r in records] == ["good"]
 
 
 def test_missing_context_defaults_to_fork(tmp_path):

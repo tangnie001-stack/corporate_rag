@@ -5,7 +5,7 @@ name/description/context/model/allowed-tools/agent/user-invocable/disable-model-
 解析规则：
 - name 缺省用目录名；description 缺省用正文首段
 - name 必须是 ASCII slug（CAPABILITY_NAME_PATTERN），否则记 warning 并跳过该 skill
-- context 未声明或非法值一律取 fork，非法值另记 warning（fail-open，不阻塞加载）
+- context 未声明取 fork；非法值抛错 → 该 skill 跳过加载（同非法 name）
 - allowed-tools 用逗号分隔字符串书写，内部转 list
 - 正文按 context 存 inline_prompt（inline）或 fork_body（fork）
 - thinking / max-iterations 已废弃：忽略并记 warning
@@ -85,7 +85,7 @@ class SkillLoader:
         self._warn_deprecated_fields(meta)
         name = self._resolve_name(meta, fallback_name)
         description = self._resolve_description(meta, body)
-        context = self._resolve_context(meta, name)
+        context = self._resolve_context(meta)
         inline_prompt, fork_body = self._resolve_body(context, body)
         allowed_tools = self._resolve_allowed_tools(meta)
         user_invocable, disable_model_invocation = self._resolve_invocation_flags(
@@ -131,17 +131,20 @@ class SkillLoader:
             return self._first_paragraph(body)
         return description
 
-    def _resolve_context(self, meta: dict, name: str) -> str:
-        """context 未声明或非法值一律取 fork，非法值另记 warning。
+    def _resolve_context(self, meta: dict) -> str:
+        """解析 context；未声明取 fork，非法值抛 ValueError 由 load_all 跳过该 skill。
 
-        取 fork 的原因：inline 会把 skill 正文写进主 agent 的会话历史并长期占用其历史
-        预算（超限后静默被裁，见 requirements_pool F-13），而 fork 的失效可见（执行路径
-        不对）。故未声明与拼错（如 `context: forkk`）都不该落到 inline。
+        未声明取 fork：inline 会把 skill 正文写进主 agent 的会话历史并长期占用其历史
+        预算（超限后静默被裁，见 requirements_pool F-13），而 fork 的失效可见（执行
+        路径不对）。
+
+        非法值不回落任一模式，而是抛错让 load_all 跳过该 skill（与非法 name 同款）：
+        降级到 inline 是静默失效，降级到 fork 会得到零工具子代理，两者都在猜作者本意；
+        拼错应立即暴露给作者修正。
         """
         context = meta.get("context", SkillContext.FORK)
         if context not in (SkillContext.INLINE, SkillContext.FORK):
-            warnings.warn(f"skill {name} context 非法值 {context!r}，回落 fork")
-            return SkillContext.FORK
+            raise ValueError(f"context 非法值 {context!r}（仅允许 inline / fork）")
         return context
 
     def _resolve_body(self, context: str, body: str) -> tuple[str | None, str | None]:
