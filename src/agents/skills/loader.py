@@ -6,6 +6,7 @@ name/description/context/model/allowed-tools/agent/user-invocable/disable-model-
 - name 缺省用目录名；description 缺省用正文首段
 - name 必须是 ASCII slug（CAPABILITY_NAME_PATTERN），否则记 warning 并跳过该 skill
 - context 未声明取 fork；非法值抛错 → 该 skill 跳过加载（同非法 name）
+- context=fork 但未声明 allowed-tools 记 warning（子代理零工具，分析型 skill 属有意设计）
 - allowed-tools 用逗号分隔字符串书写，内部转 list
 - 正文按 context 存 inline_prompt（inline）或 fork_body（fork）
 - thinking / max-iterations 已废弃：忽略并记 warning
@@ -88,6 +89,7 @@ class SkillLoader:
         context = self._resolve_context(meta)
         inline_prompt, fork_body = self._resolve_body(context, body)
         allowed_tools = self._resolve_allowed_tools(meta)
+        self._warn_fork_without_tools(name, context, allowed_tools)
         user_invocable, disable_model_invocation = self._resolve_invocation_flags(
             meta, allowed_tools, name
         )
@@ -130,6 +132,22 @@ class SkillLoader:
         if not isinstance(description, str) or not description:
             return self._first_paragraph(body)
         return description
+
+    def _warn_fork_without_tools(
+        self, name: str, context: str, allowed_tools: list[str]
+    ) -> None:
+        """fork 未声明 allowed-tools 时记 warning：子代理会拿不到任何工具。
+
+        fork 的子代理工具 = 执行者 tools ∩ allowed-tools，白名单为空即零工具
+        （见 fork_tools.select_fork_tools）。对「分析型 skill」这是有意设计——材料由
+        主 agent 预检索后经 task 传入；但对遗忘了白名单的新 skill 是踩坑点，故提示。
+        inline 不适用（白名单只约束子代理工具，主 agent 工具不受其影响）。
+        """
+        if context == SkillContext.FORK and not allowed_tools:
+            warnings.warn(
+                f"skill {name} 声明 context: fork 但未声明 allowed-tools —— "
+                "子代理将拿不到任何工具；分析型 skill 需由主 agent 预检索材料并经 task 传入"
+            )
 
     def _resolve_context(self, meta: dict) -> str:
         """解析 context；未声明取 fork，非法值抛 ValueError 由 load_all 跳过该 skill。
