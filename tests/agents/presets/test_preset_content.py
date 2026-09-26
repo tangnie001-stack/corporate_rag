@@ -19,6 +19,21 @@ def test_finance_expert_preset_loads():
     assert preset.system_prompt
 
 
+def test_repo_presets_all_load_with_chinese_display_names():
+    """仓库内全部智能体预设均可加载（无跳过），且展示名为中文。
+
+    智能体下拉的数据源是 GET /api/agents（读同一 agents/ 目录），故本测试同时是
+    "新装预设在选择器里可见"的守卫：文件数须与解析数一致，避免静默跳过。
+    """
+    presets = AgentPresetLoader(REPO_ROOT / "agents").load_all()
+
+    assert len(presets) == len(list((REPO_ROOT / "agents").glob("*.md")))
+    for preset in presets:
+        assert preset.system_prompt, preset.name
+        assert preset.display_name, preset.name
+        assert not preset.display_name.isascii(), preset.name
+
+
 def test_repo_skills_all_load_and_are_named_ascii():
     """仓库内全部 skill 均通过名称校验且被解析（无跳过）。"""
     records = SkillLoader(REPO_ROOT / "skills").load_all()
