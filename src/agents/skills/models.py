@@ -27,7 +27,7 @@ class SkillRecord:
     Attributes:
         name: skill 名（ASCII slug，frontmatter name 或目录名；LLM 委派匹配依据）
         description: whenToUse 一句话描述（委派匹配与前端展示依据）
-        context: 执行形态（inline|fork，非法值回落 inline）
+        context: 执行形态（inline|fork；未声明或非法值一律取 fork）
         inline_prompt: context=inline 时正文（短方法论，≤500 字，可含 $ARGUMENTS）
         fork_body: context=fork 时正文（子代理的 user message 任务内容）
         agent: fork 执行者预设名（空=None 时按会话选定智能体或系统默认）

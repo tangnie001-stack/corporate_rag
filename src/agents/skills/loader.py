@@ -5,7 +5,7 @@ name/description/context/model/allowed-tools/agent/user-invocable/disable-model-
 解析规则：
 - name 缺省用目录名；description 缺省用正文首段
 - name 必须是 ASCII slug（CAPABILITY_NAME_PATTERN），否则记 warning 并跳过该 skill
-- context 非法值回落 inline 并记 warning（fail-open，不阻塞加载）
+- context 未声明或非法值一律取 fork，非法值另记 warning（fail-open，不阻塞加载）
 - allowed-tools 用逗号分隔字符串书写，内部转 list
 - 正文按 context 存 inline_prompt（inline）或 fork_body（fork）
 - thinking / max-iterations 已废弃：忽略并记 warning
@@ -132,11 +132,16 @@ class SkillLoader:
         return description
 
     def _resolve_context(self, meta: dict, name: str) -> str:
-        """context 非法值回落 inline 并记 warning。"""
-        context = meta.get("context", SkillContext.INLINE)
+        """context 未声明或非法值一律取 fork，非法值另记 warning。
+
+        取 fork 的原因：inline 会把 skill 正文写进主 agent 的会话历史并长期占用其历史
+        预算（超限后静默被裁，见 requirements_pool F-13），而 fork 的失效可见（执行路径
+        不对）。故未声明与拼错（如 `context: forkk`）都不该落到 inline。
+        """
+        context = meta.get("context", SkillContext.FORK)
         if context not in (SkillContext.INLINE, SkillContext.FORK):
-            warnings.warn(f"skill {name} context 非法值 {context!r}，回落 inline")
-            return SkillContext.INLINE
+            warnings.warn(f"skill {name} context 非法值 {context!r}，回落 fork")
+            return SkillContext.FORK
         return context
 
     def _resolve_body(self, context: str, body: str) -> tuple[str | None, str | None]:

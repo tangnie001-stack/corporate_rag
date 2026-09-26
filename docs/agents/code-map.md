@@ -185,7 +185,9 @@ Nginx 容器把本目录挂到 `/usr/share/nginx/html` 直接托管，**无 npm 
 
 - `skills/<name>/SKILL.md`：声明式能力文件（frontmatter：name / description / context /
   model / allowed-tools / agent / user-invocable / disable-model-invocation）。**业务侧管理，改内容免改代码**；
-  经 compose volume 挂载进容器 `/app/skills`。术语与委派机制见 `docs/agents/glossary.md`「技能委派」。
+  经 compose volume 挂载进容器 `/app/skills`。**`context` 未声明时默认 `fork`**——inline 会把正文写进主 agent
+  的会话历史并长期占用其预算（超限后静默被裁），故想用 inline 必须显式声明 `context: inline`。
+  术语与委派机制见 `docs/agents/glossary.md`「技能委派」。
 - `agents/<name>.md`：智能体预设（frontmatter 驼峰键 display_name / description / tools /
   skills / maxTurns；正文为 system prompt 人设）。术语见 `docs/agents/glossary.md`「智能体预设」。
 - 顶层 `skills/`（运行时内容）与 `.claude/skills/`（开发期工具链，如 openspec）语义不同，勿混淆。

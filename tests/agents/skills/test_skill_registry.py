@@ -91,7 +91,8 @@ def test_lazy_reload_detects_modified_content(tmp_path):
     assert rec.inline_prompt is not None
     assert "第一版" in rec.inline_prompt
     (tmp_path / "a" / "SKILL.md").write_text(
-        "---\nname: a\ndescription: a 规则\n---\n\n第二版内容", encoding="utf-8"
+        "---\nname: a\ndescription: a 规则\ncontext: inline\n---\n\n第二版内容",
+        encoding="utf-8",
     )
     reg.reload_if_changed()
     rec = reg.get("a")

@@ -71,8 +71,12 @@ def test_description_defaults_to_body_first_paragraph(tmp_path):
     assert "这是正文第一段" in rec.description
 
 
-def test_invalid_context_falls_back_inline(tmp_path):
-    """context 非法值 → 回落 inline + 记 warning（不抛异常）。"""
+def test_invalid_context_falls_back_fork(tmp_path):
+    """context 非法值 → 回落 fork + 记 warning（不抛异常）。
+
+    与"未声明默认 fork"一致：非法值若回落 inline，拼错（如 `context: forkk`）会把
+    skill 正文静默写进主 agent 历史并占用其预算，正是要避免的失效。
+    """
     _write_skill(
         tmp_path,
         "bad",
@@ -82,9 +86,20 @@ def test_invalid_context_falls_back_inline(tmp_path):
     with pytest.warns(UserWarning, match="非法值"):
         records = SkillLoader(tmp_path).load_all()
     rec = records[0]
-    assert rec.context == SkillContext.INLINE
-    assert rec.inline_prompt is not None
-    assert "方法论正文" in rec.inline_prompt
+    assert rec.context == SkillContext.FORK
+    assert rec.fork_body is not None
+    assert "方法论正文" in rec.fork_body
+
+
+def test_missing_context_defaults_to_fork(tmp_path):
+    """未声明 context → 默认 fork（正文落 fork_body，不占主 agent 历史预算）。"""
+    _write_skill(tmp_path, "undeclared", "description: x\n", "方法论正文")
+    records = SkillLoader(tmp_path).load_all()
+    rec = records[0]
+    assert rec.context == SkillContext.FORK
+    assert rec.fork_body is not None
+    assert "方法论正文" in rec.fork_body
+    assert rec.inline_prompt is None
 
 
 def test_subdirectory_without_skill_md_ignored(tmp_path):
