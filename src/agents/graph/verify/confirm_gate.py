@@ -97,11 +97,13 @@ async def ask_confirm_question(question: str, session_id: str) -> str | None:
     first = answers[0]
     if not isinstance(first, dict):
         return None
-    text = first.get("text")
+    # 契约形状为 {id, selected, custom}（docs/agents/api_contract.md §2.3.2）：本门的问题
+    # options 恒为空，前端只渲染自由输入框，答案只可能落在 custom；selected 仅在带选项的
+    # 问法（如 ask_confirm 的联网确认）下出现，故先取 custom、空则回退 selected。
+    text = first.get("custom")
     if not isinstance(text, str):
         text = ""
     if not text.strip():
-        # clarify.py 的既有消费形状是 selected 数组（自由问答也归一化到该字段）
         selected = first.get("selected")
         if isinstance(selected, list) and selected:
             text = " ".join(str(item) for item in selected)

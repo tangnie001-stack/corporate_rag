@@ -111,3 +111,20 @@ async def test_ask_returns_reply_text(monkeypatch):
         "src.agents.graph.verify.confirm_gate.wait_with_abort_and_timeout", _reply
     )
     assert await ask_confirm_question("问题？", "sess_1") == "按 2024 口径"
+
+
+@pytest.mark.asyncio
+async def test_ask_returns_custom_text_when_no_options(monkeypatch):
+    """自由文本问（本门的问题固定 options 为空）→ 答案只可能落在 custom，须返回该文本。
+
+    前端载荷形状恒为 {id, selected, custom}（chat.html），无选项时 selected 为空数组。
+    """
+    _patch_ctx(monkeypatch, _FakeCtx())
+
+    async def _reply(*args, **kwargs):
+        return [{"id": "fork_confirm", "selected": [], "custom": "确认"}]
+
+    monkeypatch.setattr(
+        "src.agents.graph.verify.confirm_gate.wait_with_abort_and_timeout", _reply
+    )
+    assert await ask_confirm_question("问题？", "sess_1") == "确认"
