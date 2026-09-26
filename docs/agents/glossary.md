@@ -38,6 +38,7 @@
 - **`dense_rank` / `sparse_rank`**：结果在 dense 路 / 词法路的排名（0 起），未出现在该路时为 None；融合后仍按路保留（`hybrid-retrieval` 要求「融合结果的来源可辨」）
 - **`metadata 回填契约`**：`ChunkResult.metadata` 由「列值 + jsonb 平铺合并」得到（冲突以列为准），至少含 `doc_id` / `chunk_index` / `chunk_total` / `source` / `page` 五个契约键，jsonb 侧原样承载 chunker 全部自定义键（如 `parent_content`）。唯一实现是 `src/infra/db/vector_store/mapping.py::row_to_chunk_result()`；防复发规则见 defensive-patterns.md「派生副本与权威来源分离」
 - **父块级去重（parent-level dedup）**：`src/rag/retrieval.py::_dedup_by_parent` 在**精排之后**对候选按 `(doc_id, parent_content 哈希)` 折叠，同一文档内同一父块只保留 `.score` 最高的一条；`parent_content` 缺失的 chunk 按自身保留。目的是让精排窗口不被"同一父块正文的重复渲染"占满。
+- **请求级内容折叠（request-level content collapsing）**：在**单个请求**范围内（同一轮对话的多次工具调用之间）把已出现过的来源条目折叠掉，不让同一来源因多次检索而重复占用上下文。命中键为 `(kind, source, page)`——与引用重建（`src/agents/graph/nodes.py`）所用的去重键一致，故折叠后的池与最终引用列表口径闭环。与「父块级去重」的区别在**作用域与目的**：父块级去重是**单次检索调用内**、保护精排窗口；内容折叠是**请求级（跨调用）**、省上下文 token 并让引用编号保持稠密。命中时**不静默跳过**，而是放一行占位（告知"本次亦命中同一来源"），避免模型误判"这次没搜到"而继续换词重试；若原内容已被裁剪出上下文，则重放完整内容但**复用原编号**。
 
 ### 词法检索（lexical retrieval）
 
@@ -74,6 +75,7 @@
 
 - **kind**：引用来源类型，取值 `kb`（知识库）/ `web`（网络搜索），默认 `kb`；承载于 `SSEInteractionTexts.CITATION_KIND_KB` / `CITATION_KIND_WEB`，贯穿 `RAGContext.kind` 与 citation 事件
 - **search_web**：联网搜索工具，KB 检索不达标时经 Tavily 兜底检索网页，结果与 retrieve_kb 共用 `tool_contexts` 编号（kind=web 区分来源）；受 `WEB_SEARCH_ENABLED` 开关与 `WEB_SEARCH_PER_TURN_LIMIT` 限次控制
+- **引用编号（citation index）**：回答正文的内联标记与引用抽屉条目的 `[n]`，既是"该来源在本次请求材料池中的位置"，也是正文内联引用与抽屉条目的对应键。当前编号按材料池位置推导（`RAGContext` 尚无编号字段）；「请求级内容折叠」要求改为由材料池条目**显式携带**（新增 `RAGContext.index`），以便重放已折叠来源时**复用其原编号**。最终引用列表按正文实际引用的编号、以 `(source, page)` 去重后生成（`src/agents/graph/nodes.py`）
 - **web_search**：SSE 状态阶段（`SSEStatusEvent.stage` 取值），联网搜索开始/完成状态提示（"正在联网搜索..." / "联网搜索完成，正在分析..."）
 - **来源等级（source tier）**：引用来源的权威等级，取值 T0（内部文档，KB 固定）/ T1（官方一手）/ T2（权威媒体）/ T3（一般，未命中默认中性档）/ T4（UGC），由 `SOURCE_TIER_RULES` 域名规则表确定性定档（`.gov.cn`/`.edu.cn` 模式升 T1），模型判断不改写已定档位；以徽标形式透明呈现在引用抽屉条目，系统不裁决可信度；字段语义与标签权威见 api_contract.md「citation.tier」
 - **候选规则信号**：种子清单（`SOURCE_TIER_RULES`）的成长机制——离线 SQL 从 `conversation_history.sources` 聚合全部域名引用次数，达阈值者经人工审核（对照规则表与拒绝清单、核对样本引用上下文）后加入规则表，被拒域名记入文档化拒绝清单（negative cache）；不使用 LLM 定档或自动升级；操作步骤见 cookbook.md「候选规则审核」
