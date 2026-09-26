@@ -10,7 +10,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SKILLS_DIR = PROJECT_ROOT / "skills"
 
 # 当前 skill 集：fork（长文领域内容走独立子代理上下文，不占主对话历史）
-FORK_SKILLS = ("financial-statement-analyzer",)
+FORK_SKILLS = (
+    "competitive-landscape",
+    "financial-statement-analyzer",
+    "market-sizing-analysis",
+)
 
 
 def test_skill_files_present():
