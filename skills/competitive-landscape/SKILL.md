@@ -1,9 +1,8 @@
 ---
 name: competitive-landscape
-description: 分析竞争格局与市场定位：用波特五力、蓝海战略与定位图识别可持续的差异化机会。当用户要求评估竞品、判断行业竞争强度、分析护城河/进入壁垒、或评估某业务的市场定位与竞争策略时使用。材料须由主 agent 预检索一并传入 task。
-context: fork
+description: Analyze competition, identify differentiation opportunities, and develop winning market positioning strategies using Porter's Five Forces, Blue Ocean Strategy, and positioning maps. Use this skill when evaluating competitors, assessing market positioning, identifying sustainable competitive advantages, or preparing competitive strategy analysis for a startup or investor pitch. 材料须由主 agent 预检索一并传入 task。
+version: 1.0.0
 ---
-
 
 # Competitive Landscape Analysis
 
