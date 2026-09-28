@@ -96,6 +96,9 @@ DELEGATE_RESULT_LIMIT = 1000  # fork 结果回流主 agent 的截断阈值（字
 # delegate = 主 agent 委派（[n] 由主 agent 按自身检索来源补标 → 子代理不标）。
 DELEGATE_VIA_DIRECT = "direct"
 DELEGATE_VIA_DELEGATE = "delegate"
+# 通用委派（省略 skill）在事件/trace 上的 skill 占位。用 ASCII 以保证日志值安全
+# （logging-rules：事件消息英文 k=v；中文仅限用户可见文案）。
+DELEGATE_GENERIC_SKILL_NAME = "(generic)"
 INLINE_PROMPT_MAX_CHARS = 500  # inline skill 正文规模上限（字符，防上下文累积膨胀）；未声明 context 时超出即自动改用 fork，显式 inline 时仅记 warning
 # skill / agent preset 名允许的字符集（ASCII slug）：/xxx 命令天然是 ASCII 惯例，
 # 非 ASCII 名会让 `/财报分析` 落进"非命令形态"分支被静默当普通文本（design D15）
@@ -280,6 +283,8 @@ class SSEInteractionTexts:
     # ── delegate_task 工具返回主 agent 的文本 ──
     # 未知 skill 返回模板：{skill}=请求的 skill 名；{available}=可用 skill 列表（空列表显示"无"）
     DELEGATE_UNKNOWN_SKILL: str = "skill 不存在: {skill}，可用 skill: {available}"
+    # 通用委派（省略 skill）的看板标题：无 skill 名可填，用通用占位
+    DELEGATE_GENERIC_TITLE: str = "通用分析任务"
     # 会话级委派预算触顶返回模板：{limit}=本会话委派上限次数；促模型改用自身能力作答
     DELEGATE_BUDGET_EXHAUSTED: str = (
         "本轮委派已达会话上限（{limit} 次）。请改用你自己的能力作答，不要再重试委派。"

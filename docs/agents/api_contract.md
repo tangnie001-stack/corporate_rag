@@ -271,8 +271,10 @@ data: {"error": "错误消息"}
 
 ### `delegate` 事件详情
 
-独立 SSE 事件 `event: delegate`，仅**主 agent 调用 `delegate_task` 委派 fork skill** 时产生
-（**inline 命中不推**——方法论注入主 agent，无独立子代理）。事件由 delegate_task fork
+独立 SSE 事件 `event: delegate`，仅**主 agent 调用 `delegate_task` 委派子代理**时产生
+（**inline 命中不推**——方法论注入主 agent，无独立子代理）；定点 fork skill 与通用委派
+（省略 `skill`）都推，通用委派的 `skill` 字段填占位 `DELEGATE_GENERIC_SKILL_NAME`
+（`"(generic)"`）。事件由 delegate_task fork
 分支与 executor 投递到 `ctx.clarify_channel`，经 `_drain_clarify_channel` 并行消费转
 `SSEDelegateEvent`（`src/utils/sse.py`），**不经外层 astream_events 映射**。action 三态
 `start` / `delta` / `end`，均携带 `delegate_id`（短 uuid，贯穿该次委派）+ `skill`：
@@ -302,7 +304,7 @@ data: {"delegate_id": "a1b2c3d4", "action": "end", "skill": "财务建模专家"
 |------|------|------|
 | `delegate_id` | str | 本次委派唯一 id（短 uuid，贯穿该次委派所有 start/增量/end 与 task execution 条目）；同一次回答内多次委派互不相同 |
 | `action` | str | `start`（委派开始）\| `delta`（过程增量）\| `end`（委派结束） |
-| `skill` | str | 命中的 skill 名 |
+| `skill` | str | 命中的 skill 名；通用委派（省略 `skill`）填占位 `"(generic)"` |
 | `kind` | str | 仅 delta 用：`thinking`（思考增量）\| `content`（正文增量）；start/end 为空串 |
 | `delta` | str | 仅 delta 用：增量文本（executor 聚合/节流后投递）；start/end 为空串 |
 | `ok` | bool | end 用：`true`=正常完成；`false`=中断/失败 |
@@ -327,7 +329,7 @@ failed=失败 / cancelled=已取消）——不再无条件推"完成"。
 （`src/chat/task_registry.py`，模块级单例 `task_registry`）在 create/update/mark_terminal
 变更后经 `emit_task_event` 写该 session 事件缓冲，SSE 推前端；同入缓冲，resume 经
 `from_payload` 原样回放。两类条目来源：`type=plan`=主 agent 经 Task 工具建项；
-`type=execution`=delegate_task fork 自动登记（`task_id=delegate_id`，与 delegate 事件
+`type=execution`=delegate_task 子代理（定点 fork / 通用委派）自动登记（`task_id=delegate_id`，与 delegate 事件
 贯穿）。前端看板只读，无写入口。
 
 ```json
@@ -345,7 +347,7 @@ data: {"action": "created", "task": {"task_id": "a1b2c3d4", "title": "财务建�
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `task_id` | str | 任务 id：plan=工具生成短 uuid；execution=delegate_id |
-| `title` | str | 标题（LLM 提供或 skill 名） |
+| `title` | str | 标题（LLM 提供或 skill 名；通用委派 execution 用 `SSEInteractionTexts.DELEGATE_GENERIC_TITLE`=「通用分析任务」） |
 | `type` | str | `plan`（主 agent Task 工具建项）/ `execution`（delegate 自动登记） |
 | `status` | str | `pending` / `running` / `done` / `failed` / `timeout` / `cancelled`（后四者为终态） |
 | `stage` | str | coarse 阶段（delegate start/end/中断边界更新，不做逐 delta 写入） |
@@ -1045,9 +1047,9 @@ agent（LLM + bind_tools）← entry_point
 
 | 参数 | 语义 |
 |------|------|
-| `record` | 命中的 `SkillRecord`；`context=inline` 返回渲染后方法论，`context=fork` 跑子代理 |
-| `task` | 主 agent 委托的任务文本；fork 时作子代理初始消息 + `$ARGUMENTS`/`{task}` 占位替换值，inline 时填入 `inline_prompt` 占位 |
-| `run` | 本次 fork 委派运行态；`None` = 用当前主 ctx 不隔离（inline / 无 ctx 路径）；非 `None` = 切到 `run.ctx` 子上下文执行，工具检索与引用编号落子池 |
+| `record` | 命中的 `SkillRecord`；`context=inline` 返回渲染后方法论，`context=fork` 跑子代理。`None` = 通用委派（design D6）：不加载 skill 正文、不查 `record.agent`/`model`/`allowed_tools`，`task` 原样作子代理输入，直接走 fork |
+| `task` | 主 agent 委托的任务文本；fork 时作子代理初始消息 + `$ARGUMENTS`/`{task}` 占位替换值，inline 时填入 `inline_prompt` 占位；通用委派时即子代理初始消息原文 |
+| `run` | 本次 fork 委派运行态；`None` = 用当前主 ctx 不隔离（inline / 无 ctx 路径）；非 `None` = 切到 `run.ctx` 子上下文执行，工具检索与引用编号落子池；`run.skill_name` 为本次委派 skill 标签（通用委派填 `DELEGATE_GENERIC_SKILL_NAME`） |
 
 返回值：inline 为渲染后方法论文本；fork 为子代理聚合纯文本（超 `DELEGATE_RESULT_LIMIT` 截断；idle/total/turn 中断返回超时文案并写 `fork_stop_reason`）。请求取消（`abort_signal` 置位）抛 `asyncio.CancelledError`，由调用方按取消路径收尾。
 
@@ -1056,7 +1058,7 @@ agent（LLM + bind_tools）← entry_point
 | 字段 | 类型 | 语义 |
 |------|------|------|
 | `delegate_id` | str | 本次委派短 id（事件/看板/日志贯穿） |
-| `skill_name` | str | 被调用 skill 名 |
+| `skill_name` | str | 本次委派 skill 标签（来源：定点=`record.name`、通用=`DELEGATE_GENERIC_SKILL_NAME`；用于事件 skill 字段与 trace span） |
 | `ctx` | `RequestContext` | 子代理独立上下文（主 `ctx.child()`；隔离引用池与计数） |
 | `stop_reason` | `str \| None` | 停止原因；`None` = 正常完成或未执行，否则取 `DelegateStopReason` 值 |
 | `result_text` | str | 子代理最终文本（含 idle/total/turn 中断文案） |

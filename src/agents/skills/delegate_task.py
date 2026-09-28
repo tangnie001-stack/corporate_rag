@@ -2,13 +2,15 @@
 
 工具职责：
 1. 调用前 reload registry（懒重载，design D16）
-2. 按 skill 命中分发：unknown → 返回"skill 不存在"+ 可用列表；inline → 返回
-   方法论（主 agent 自己答）；fork → SkillExecutor 跑子代理
-3. fork 分支先过会话级委派预算闸门（design D10）：触顶返回可读原因并记
-   `delegate skip`，不抛异常、不中断本轮
+2. 按 skill 命中分发：skill 省略 → 通用委派（不查注册表、不加载正文，task 直接作
+   子代理输入）；skill 非空 → unknown 返回"skill 不存在"+ 可用列表；inline 返回
+   方法论（主 agent 自己答）；fork 走 SkillExecutor 跑子代理
+3. 定点 fork 与通用委派先过同一处会话级委派预算闸门（design D10/D6）：触顶返回可读
+   原因并记 `delegate skip`，不抛异常、不中断本轮
 4. fork 执行期间经 ctx.clarify_channel 推 delegate start/end 事件（带 delegate_id
    与 ok/reason 终态；增量由 executor 投 delegate delta），inline 命中不推
-   （design D14）；不走外层 astream_events 映射
+   （design D14）；不走外层 astream_events 映射；通用委派沿用同一事件通道，
+   skill 字段填 DELEGATE_GENERIC_SKILL_NAME 占位
 """
 
 import asyncio
@@ -21,12 +23,13 @@ from pydantic import BaseModel, Field
 from src.agents.graph.verify.confirm_gate import strip_confirm_marker_prefix
 from src.agents.skills.delegate_run import DelegateRun
 from src.agents.skills.executor import SkillExecutor
-from src.agents.skills.models import SkillContext
+from src.agents.skills.models import SkillContext, SkillRecord
 from src.agents.skills.registry import SkillRegistry
 from src.chat.delegate_budget import delegate_budget
 from src.chat.task_registry import task_registry
 from src.config import settings
 from src.config.const import (
+    DELEGATE_GENERIC_SKILL_NAME,
     DELEGATE_TASK_TITLE_TMPL,
     DELEGATE_VIA_DELEGATE,
     DelegateStopReason,
@@ -45,7 +48,13 @@ class DelegateTaskArgs(BaseModel):
     task: str = Field(
         description="要委派的任务描述（fork 深度任务需带主 agent 预检索的材料）"
     )
-    skill: str = Field(description="要调用的 skill 名（可用列表见工具描述）")
+    skill: str | None = Field(
+        default=None,
+        description=(
+            "要调用的 skill 名（可用列表见工具描述）。"
+            "省略即通用委派：不加载任何 skill 正文，由通用子代理直接完成任务。"
+        ),
+    )
 
 
 def make_delegate_task(skill_registry: SkillRegistry, executor: SkillExecutor):
@@ -64,37 +73,41 @@ def make_delegate_task(skill_registry: SkillRegistry, executor: SkillExecutor):
         "delegate_task",
         args_schema=DelegateTaskArgs,
         description=(
-            "调用领域专家 skill 处理任务后返回结果。判断当前任务需要领域专家能力"
+            "调用领域专家 skill 处理任务后返回结果；省略 skill 即通用委派（由通用子代理"
+            "直接完成任务，不加载任何 skill 正文）。判断当前任务需要领域专家能力"
             "（深度分析/专用方法论）时调用；轻量领域问题优先自己答，不要为每个问题委派。"
             f"可用 skill：\n{skill_registry.to_tool_description()}"
         ),
     )
-    async def delegate_task(task: str, skill: str) -> str:
-        """调用领域专家 skill 处理任务后返回结果。
+    async def delegate_task(task: str, skill: str | None = None) -> str:
+        """调用领域专家 skill 处理任务后返回结果（省略 skill 即通用委派）。
 
         何时调用：判断当前任务需要领域专家能力（深度分析/专用方法论）时调用；
         轻量领域问题优先自己答，不要为每个问题委派。
         可用 skill 见工具描述（本 docstring 不直接给 LLM 展示，description 参数覆盖）。
         skill 的 context 决定执行方式：inline 返回方法论由你自己执行；fork 生成
         独立子代理深度分析后返回文本，由你整合进最终回答（引用仍指向你的检索来源）。
+        省略 skill 时走通用委派：不查注册表、不加载正文，直接生成通用子代理完成任务。
 
         Args:
             task: 任务描述（fork 深度分析需把预检索材料一并放入）
-            skill: 要调用的 skill 名
+            skill: 要调用的 skill 名；省略即通用委派
 
         Returns:
-            inline：方法论文本；fork：子代理分析文本（纯文本，无 [n]）；未知
-            skill 返回错误提示 + 可用列表
+            定点：inline 方法论文本 / fork 子代理分析文本（纯文本，无 [n]）；
+            通用：子代理分析文本；skill 非空但不存在返回错误提示 + 可用列表
         """
-        skill_registry.reload_if_changed()
-        record = skill_registry.get(skill)
-        if record is None:
-            available = ", ".join(skill_registry.names()) or "无"
-            return SSEInteractionTexts.DELEGATE_UNKNOWN_SKILL.format(
-                skill=skill, available=available
-            )
-        if record.context == SkillContext.INLINE:
-            return await executor.execute(record, task)
+        record: SkillRecord | None = None
+        if skill:
+            skill_registry.reload_if_changed()
+            record = skill_registry.get(skill)
+            if record is None:
+                available = ", ".join(skill_registry.names()) or "无"
+                return SSEInteractionTexts.DELEGATE_UNKNOWN_SKILL.format(
+                    skill=skill, available=available
+                )
+            if record.context == SkillContext.INLINE:
+                return await executor.execute(record, task)
 
         ctx = current_request_ctx.get()
         if ctx is None:
@@ -119,12 +132,19 @@ def make_delegate_task(skill_registry: SkillRegistry, executor: SkillExecutor):
             return SSEInteractionTexts.DELEGATE_BUDGET_EXHAUSTED.format(
                 limit=settings.DELEGATE_MAX_PER_SESSION
             )
+        # 本次委派的展示标识：定点用 skill 名，通用用占位；事件 skill 字段与看板标题共用
+        if record is not None:
+            skill_name = record.name
+            board_title = DELEGATE_TASK_TITLE_TMPL.format(skill=record.name)
+        else:
+            skill_name = DELEGATE_GENERIC_SKILL_NAME
+            board_title = SSEInteractionTexts.DELEGATE_GENERIC_TITLE
         # 每次委派独占运行态（design D15）：子代理的检索与引用编号落子池，不污染主池；
         # 停止原因由 executor 写 run，终态判定从这里读（不再走主 ctx 的单值字段）
         delegate_id = uuid.uuid4().hex[:8]
         run = DelegateRun(
             delegate_id=delegate_id,
-            skill_name=record.name,
+            skill_name=skill_name,
             ctx=ctx.child(),
             via=DELEGATE_VIA_DELEGATE,
         )
@@ -133,7 +153,7 @@ def make_delegate_task(skill_registry: SkillRegistry, executor: SkillExecutor):
         task_registry.create_task(
             ctx.session_id,
             TaskType.EXECUTION,
-            title=DELEGATE_TASK_TITLE_TMPL.format(skill=record.name),
+            title=board_title,
             delegate_id=delegate_id,
             status=TaskStatus.RUNNING,
             stage="正在分析…",
@@ -143,7 +163,7 @@ def make_delegate_task(skill_registry: SkillRegistry, executor: SkillExecutor):
                 "type": "delegate",
                 "action": "start",
                 "delegate_id": delegate_id,
-                "skill": record.name,
+                "skill": skill_name,
                 "kind": "",
                 "delta": "",
                 "ok": True,
@@ -153,7 +173,7 @@ def make_delegate_task(skill_registry: SkillRegistry, executor: SkillExecutor):
         core_logging.log_event(
             Event.DELEGATE_START,
             delegate_id=delegate_id,
-            skill=record.name,
+            skill=skill_name,
             thinking="true" if ctx.deep_thinking else "false",
             task_len=len(task),
         )
@@ -193,7 +213,7 @@ def make_delegate_task(skill_registry: SkillRegistry, executor: SkillExecutor):
                     "type": "delegate",
                     "action": "end",
                     "delegate_id": delegate_id,
-                    "skill": record.name,
+                    "skill": skill_name,
                     "kind": "",
                     "delta": "",
                     "ok": ok,

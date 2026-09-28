@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk
+from langchain_core.tools import tool as lc_tool
 
 from src.agents.skills.delegate_run import DelegateRun
 from src.agents.skills.delegate_task import DelegateTaskArgs, make_delegate_task
@@ -15,7 +16,7 @@ from src.agents.skills.executor import SkillExecutor
 from src.agents.skills.models import SkillContext, SkillRecord
 from src.agents.skills.registry import SkillRegistry
 from src.config import settings
-from src.config.const import DelegateStopReason
+from src.config.const import DelegateStopReason, SSEInteractionTexts
 from src.infra.llm.request_context import RequestContext, current_request_ctx
 from src.rag.context import RAGContext
 
@@ -105,6 +106,18 @@ def _drain_channel(ctx):
     while not ctx.clarify_channel.empty():
         out.append(ctx.clarify_channel.get_nowait())
     return out
+
+
+@lc_tool("retrieve_kb")
+def _generic_retrieve(query: str) -> str:
+    """只读工具代表（通用委派工具面测试用）。"""
+    return query
+
+
+@lc_tool("write_doc")
+def _generic_write_doc(text: str) -> str:
+    """写类工具代表（通用委派工具面测试用）。"""
+    return text
 
 
 @pytest.mark.asyncio
@@ -610,3 +623,126 @@ async def test_budget_skip_logged(monkeypatch):
     finally:
         current_request_ctx.reset(token)
     assert ("delegate skip", {"reason": "budget_exhausted"}) in captured
+
+
+@pytest.mark.asyncio
+async def test_generic_delegation_without_skill(monkeypatch):
+    """省略 skill → 通用委派：不查注册表、task 直接作子代理输入、事件与看板仍有条目。"""
+    import src.agents.skills.delegate_task as dt_mod
+    from src.chat.task_registry import SessionTaskRegistry
+
+    board = SessionTaskRegistry(on_change=None)  # 不写真实 buffer，防污染
+    tool = make_delegate_task(
+        _FakeRegistry({}),
+        SkillExecutor(main_llm=MagicMock()),  # 空注册表：若去查就会走未知 skill
+    )
+    fake_sub = _fake_sub_agent(
+        _event("on_chat_model_start"),
+        _event("on_chat_model_stream", chunk=AIMessageChunk(content="结论")),
+        _event("on_chat_model_end", output=AIMessage(content="结论")),
+    )
+    ctx = RequestContext(session_id="s1")
+    token = current_request_ctx.set(ctx)
+    try:
+        with (
+            patch.object(dt_mod, "task_registry", board),
+            patch("src.agents.skills.executor.create_agent", return_value=fake_sub),
+        ):
+            out = await tool.ainvoke({"task": "帮我查一下某公司近三年的营收"})
+            items = board.list_session("s1")
+    finally:
+        current_request_ctx.reset(token)
+    assert "结论" in out
+    assert items[0].title == SSEInteractionTexts.DELEGATE_GENERIC_TITLE
+
+
+@pytest.mark.asyncio
+async def test_generic_delegation_inherits_readonly_tools(monkeypatch):
+    """通用委派同样继承只读工具面（含 retrieve_kb），且不含写类/禁用集。"""
+    from src.agents.tools import readonly as readonly_module
+
+    monkeypatch.setattr(
+        readonly_module, "_TOOL_READONLY", {"retrieve_kb": True, "write_doc": False}
+    )
+
+    captured: dict = {}
+
+    def _fake_create_agent(*args, **kwargs):
+        captured.update(kwargs)
+        return _fake_sub_agent(
+            _event("on_chat_model_end", output=AIMessage(content="ok"))
+        )
+
+    executor = SkillExecutor(
+        main_llm=MagicMock(),
+        tool_provider=lambda: [_generic_retrieve, _generic_write_doc],
+    )
+    tool = make_delegate_task(_FakeRegistry({}), executor)
+    ctx = RequestContext(session_id="s1")
+    token = current_request_ctx.set(ctx)
+    try:
+        with patch(
+            "src.agents.skills.executor.create_agent", side_effect=_fake_create_agent
+        ):
+            await tool.ainvoke({"task": "查营收"})
+    finally:
+        current_request_ctx.reset(token)
+    assert [t.name for t in captured["tools"]] == ["retrieve_kb"]
+
+
+@pytest.mark.asyncio
+async def test_generic_delegation_consumes_budget():
+    """通用委派（省略 skill）同样过预算闸门：一次成功委派 used 从 0 变 1。
+
+    守住"两条分支共用同一闸门"——通用分支不得写成绕过闸门的独立早退路径。
+    """
+    import src.agents.skills.delegate_task as dt_mod
+    from src.chat.delegate_budget import delegate_budget
+    from src.chat.task_registry import SessionTaskRegistry
+
+    sid = "s-generic-budget"
+    delegate_budget.reset(sid)  # 共享单例为模块级，先清该会话避免残留
+    reg = SessionTaskRegistry(on_change=None)
+    tool = make_delegate_task(_FakeRegistry({}), SkillExecutor(main_llm=MagicMock()))
+    fake_sub = _fake_sub_agent(
+        _event("on_chat_model_start"),
+        _event("on_chat_model_end", output=AIMessage(content="结论")),
+    )
+    ctx = RequestContext(session_id=sid)
+    token = current_request_ctx.set(ctx)
+    try:
+        assert delegate_budget.used(sid) == 0
+        with (
+            patch.object(dt_mod, "task_registry", reg),
+            patch("src.agents.skills.executor.create_agent", return_value=fake_sub),
+        ):
+            await tool.ainvoke({"task": "帮我查营收"})
+        assert delegate_budget.used(sid) == 1
+    finally:
+        current_request_ctx.reset(token)
+        delegate_budget.reset(sid)  # 清该会话，避免影响同文件其它用例
+
+
+@pytest.mark.asyncio
+async def test_generic_delegation_rejected_when_budget_exhausted(monkeypatch):
+    """通用委派触顶同样被拒：返回可读原因且不启动子代理（共用同一闸门）。"""
+    from src.chat.delegate_budget import delegate_budget
+
+    monkeypatch.setattr(
+        delegate_budget, "_counts", {"s1": settings.DELEGATE_MAX_PER_SESSION}
+    )
+    # _touched 置为当前时间：避免 check_and_incr 的 TTL 惰性清理把已触顶的计数整条删除
+    monkeypatch.setattr(delegate_budget, "_touched", {"s1": time.time()})
+    tool = make_delegate_task(_FakeRegistry({}), SkillExecutor(main_llm=MagicMock()))
+    ctx = RequestContext(session_id="s1")
+    token = current_request_ctx.set(ctx)
+    try:
+        with patch(
+            "src.agents.skills.executor.create_agent",
+            side_effect=AssertionError("触顶时不得启动子代理"),
+        ):
+            out = await tool.ainvoke({"task": "帮我查营收"})
+    finally:
+        current_request_ctx.reset(token)
+    assert "上限" in out
+    assert "不要" in out

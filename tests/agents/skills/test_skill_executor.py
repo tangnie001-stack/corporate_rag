@@ -755,3 +755,74 @@ def test_fork_tools_without_provider_warns_when_tools_registered(monkeypatch):
     exe = SkillExecutor(main_llm=MagicMock(), tool_provider=None)
     with pytest.warns(UserWarning, match="tool_provider"):
         assert exe._fork_tools(_record(allowed_tools=[]), None) == []
+
+
+# ---- 通用委派（record=None，design D6）----
+
+
+@pytest.mark.asyncio
+async def test_generic_execute_none_record_uses_task_as_input():
+    """execute(record=None)：不渲染任何 skill 正文，task 直接作子代理初始 user message。"""
+    main_llm = MagicMock()
+    exe = SkillExecutor(main_llm=main_llm)
+    fake_sub = _fake_sub_agent(
+        _event("on_chat_model_start"),
+        _event("on_chat_model_stream", chunk=AIMessageChunk(content="通用结论")),
+        _event("on_chat_model_end", output=AIMessage(content="通用结论")),
+    )
+    with patch(
+        "src.agents.skills.executor.create_agent", return_value=fake_sub
+    ) as mock_create:
+        out = await exe.execute(None, task="查一下某公司近三年的营收")
+
+    msg = fake_sub.captured["inputs"]["messages"][0]
+    assert msg.content == "查一下某公司近三年的营收"
+    assert "通用结论" in out
+    args, _kwargs = mock_create.call_args
+    assert args[0] is main_llm  # 无 ctx 且无 record.model → 复用主 llm
+
+
+def test_render_fork_task_none_record_returns_task():
+    """_render_fork_task(None, task)：无正文可渲染，直接返回 task 原文。"""
+    exe = SkillExecutor(main_llm=MagicMock())
+    assert exe._render_fork_task(None, "查营收") == "查营收"
+
+
+def test_fork_tools_none_record_inherits_readonly(monkeypatch):
+    """_fork_tools(None, preset)：record 缺失 → allowed=[] 不收窄，仅继承只读面。"""
+    from src.agents.tools import readonly as readonly_module
+
+    monkeypatch.setattr(
+        readonly_module, "_TOOL_READONLY", {"retrieve_kb": True, "write_doc": False}
+    )
+    exe = SkillExecutor(
+        main_llm=MagicMock(), tool_provider=lambda: [_retrieve, _write_doc]
+    )
+    picked = exe._fork_tools(None, None)
+    assert [t.name for t in picked] == ["retrieve_kb"]
+
+
+@pytest.mark.asyncio
+async def test_generic_execute_none_record_skips_record_model():
+    """execute(record=None) 在请求上下文可及时不碰 record.model，按主 model_name 新建 llm。"""
+    fake_llm = MagicMock()
+    fake_sub = _fake_sub_agent(
+        _event("on_chat_model_start"),
+        _event("on_chat_model_end", output=AIMessage(content="ok")),
+    )
+    ctx = RequestContext(session_id="s1")
+    token = current_request_ctx.set(ctx)
+    try:
+        with (
+            patch("src.agents.skills.executor.create_agent", return_value=fake_sub),
+            patch(
+                "src.agents.skills.executor.get_llm", return_value=fake_llm
+            ) as mock_get_llm,
+        ):
+            main_llm = MagicMock()
+            main_llm.model_name = "main-model"
+            exe = SkillExecutor(main_llm=main_llm)
+            await exe.execute(None, task="分析")
+    finally:
+        current_request_ctx.reset(token)
+    assert mock_get_llm.call_args.kwargs["model"] == "main-model"
