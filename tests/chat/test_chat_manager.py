@@ -237,3 +237,16 @@ async def test_get_session_agent_async():
 
     cm._persistence = None
     assert await cm.get_session_agent_async("s1") == ""
+
+
+@pytest.mark.asyncio
+async def test_clear_history_resets_delegate_budget():
+    """会话历史清空 → 委派预算复位（design D10 的复位点）。"""
+    from src.chat.delegate_budget import delegate_budget
+    from src.chat.manager import ChatManager
+
+    delegate_budget.check_and_incr("s-budget", 5)
+    assert delegate_budget.used("s-budget") == 1
+    manager = ChatManager(redis_url="redis://localhost:6379/0")
+    await manager.clear_history_async("s-budget")
+    assert delegate_budget.used("s-budget") == 0
