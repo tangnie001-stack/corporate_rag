@@ -160,7 +160,7 @@ class SkillLoader:
         """
         if context == SkillContext.FORK and not allowed_tools:
             warnings.warn(
-                f"skill {name} 声明 context: fork 但未声明 allowed-tools —— "
+                f"skill {name} 按 fork 承载但未声明 allowed-tools —— "
                 "子代理将拿不到任何工具；分析型 skill 需由主 agent 预检索材料并经 task 传入"
             )
 

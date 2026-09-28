@@ -5,7 +5,8 @@
 按 `run_id` 配对成子 span。
 
 委派域（scope=delegate）：每次委派一个实例，先 open_delegate_span 再 consume 子代理
-事件流；span 名带 "delegate:" 前缀，父 span 标注 delegate_id / skill。
+事件流；委派父 span 名为 `delegate`（无前缀，标注 delegate_id / skill），`"delegate:"`
+前缀只加在该域的轮次 span 与工具 span 名上，便于在 trace 上区分归属。
 
 三条不变量（改动时不得破坏）：
 1. **不按工具名分支、`data.output` 原样透传** —— 对工具实现无感，MCP 工具经统一入口

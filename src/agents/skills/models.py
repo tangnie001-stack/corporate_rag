@@ -39,7 +39,8 @@ class SkillRecord:
         name: skill 名（ASCII slug，frontmatter name 或目录名；LLM 委派匹配依据）
         description: whenToUse 一句话描述（委派匹配与前端展示依据）
         context: 执行形态（inline|fork；未声明取 inline，正文超预算时自动改 fork，见 context_source）
-        inline_prompt: context=inline 时正文（短方法论，≤500 字，可含 $ARGUMENTS）
+        inline_prompt: context=inline 时正文（主 agent 注入执行，可含 $ARGUMENTS；显式声明
+            context: inline 时正文可超 INLINE_PROMPT_MAX_CHARS，加载期仅记 warning 不阻止）
         fork_body: context=fork 时正文（子代理的 user message 任务内容）
         agent: fork 执行者预设名（空=None 时按会话选定智能体或系统默认）
         model: fork 覆盖模型（空=None 继承主 agent llm）
@@ -53,7 +54,7 @@ class SkillRecord:
     name: str  # skill 名（ASCII slug）
     description: str  # whenToUse 一句话描述
     context: str = SkillContext.INLINE  # inline|fork
-    inline_prompt: str | None = None  # context=inline 时正文（短方法论）
+    inline_prompt: str | None = None  # context=inline 时正文（主 agent 注入执行）
     fork_body: str | None = None  # context=fork 时正文（子代理 user message）
     agent: str | None = None  # fork 执行者预设名，None=按会话选定智能体
     model: str | None = None  # fork 覆盖模型，None=继承主 agent llm

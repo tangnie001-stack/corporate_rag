@@ -33,9 +33,9 @@ def test_loads_with_expected_context():
 def test_all_inline_skills_within_budget():
     """所有 inline skill 的正文 ≤ INLINE_PROMPT_MAX_CHARS（防上下文累积膨胀）。
 
-    历史：`financial-statement-analyzer` 未声明 context → 默认 inline，正文 3002 字符
-    超限 6 倍（2026-09-18 登记 docs/agents/requirements_pool.md F-13），已改
-    `context: fork`。本测试保留为守卫：新增 inline skill 超限时直接失败。
+    加载期对未声明 context 的超限正文自动改按 fork 承载（ContextSource.AUTO_OVERSIZE），
+    故超限长文不会落成 inline；本测试保留为守卫：显式声明 context: inline 的 skill 超限时
+    直接失败（显式 inline 超限加载期只记 warning，不会自动改 fork）。
     """
     records = SkillLoader(SKILLS_DIR).load_all()
     oversized = {
