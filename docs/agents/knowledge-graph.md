@@ -45,16 +45,20 @@ git diff --name-only -- . ; git diff --cached --name-only -- . ; git ls-files --
 
 项目差异为空 ⇒ 图谱未过期，可正常作答；有输出 ⇒ 先提示"图谱可能遗漏这些改动"，建议刷新。
 
-## 自动更新（已启用）
+## 自动更新（已关闭）
 
-`autoUpdate: true` 写在 `.ua/config.json`（`/understand --auto-update` 即写此值）。驱动它的是**插件的两个钩子**，不是定时任务：
+`autoUpdate: false` 写在 `.ua/config.json`（`/understand --no-auto-update` 即写此值，`/understand --auto-update` 反之）。开关为 `false` 时插件**两个钩子都已静默**，图谱只在**人工手动**执行时更新：
 
-- `PostToolUse`（matcher `Bash`）：每次命令含 `git commit` 后触发增量更新
-- `SessionStart`：`meta.gitCommitHash` 与 HEAD 不同时，要求 agent **不询问用户**直接增量更新
+- `PostToolUse`（matcher `Bash`）：命令含 `git commit | merge | cherry-pick | rebase` 时注入增量更新指令 —— 被开关拦截
+- `SessionStart`：`meta.gitCommitHash` 与 HEAD 不同时提示"图谱可能过期" —— 被开关拦截
 
-成本分级（写在钩子的提示词里）：纯删除 / 纯忽略 / 仅生成物 / 仅外观变更**不派任何 LLM agent**；只有结构变更才派 file-analyzer；架构与导览 agent 仅在计划要求时运行。关闭：把 `autoUpdate` 置 `false`（或 `/understand --no-auto-update`）。
+**为什么关**：本仓库差量内含 `scripts/dev-worktree.sh` 等无确定性解析器的 shell 脚本，增量路径的符号校验会永久阻断（见下「已知坑」）；且累计差量已越过上游 `>30 个结构文件` 阈值，任何自动运行都会升级为 `FULL_UPDATE`（成本最高的全量重建）。关闭后改由人工择机执行。
 
-自动更新链：`prepare-incremental.mjs` →（按需）`compute-batches.mjs --changed-files=` → file-analyzer → `merge-batch-graphs.py` → （`PARTIAL_UPDATE` 时不派 architecture/tour）→ `finalize-incremental.mjs`。**该路径不派 assemble-reviewer / graph-reviewer。**
+**手动跑法**：需要更新时执行 `/understand`（需全量时 `/understand --full`）。基线不推进期间差量持续累积，一次跑完即覆盖全部累积改动，不会丢。
+
+**重开时的注意**：本地在**插件缓存**里给 `FULL_UPDATE` 加了"必须经用户确认"的闸门（`hooks/hooks.json`、`hooks/post-tool-use-auto-update.mjs`、`hooks/auto-update-prompt.md` 三处，属对上游"立即 invoke"行为的**有意偏离**）。一旦把 `autoUpdate` 改回 `true`，钩子重新生效，全量重建会先来问用户；若发现它未经询问就跑全量，说明插件升级覆盖了这三处。该改动在插件缓存内，**插件升级会覆盖**。
+
+成本分级与链路（供重开时参考）：纯删除 / 纯忽略 / 仅生成物 / 仅外观变更**不派任何 LLM agent**；只有结构变更才派 file-analyzer，架构与导览 agent 仅在计划要求时运行。链路 `prepare-incremental.mjs` →（按需）`compute-batches.mjs --changed-files=` → file-analyzer → `merge-batch-graphs.py` →（`PARTIAL_UPDATE` 时不派 architecture/tour）→ `finalize-incremental.mjs`；**该路径不派 assemble-reviewer / graph-reviewer**。
 
 ## 已知坑
 
