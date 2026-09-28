@@ -6,7 +6,7 @@ import pytest
 from langchain_core.tools import tool
 
 from src.agents.skills.fork_tools import select_fork_tools
-from src.agents.tools.readonly import readonly_map
+from src.agents.tools.readonly import declare_readonly, readonly_map
 from src.agents.tools.task_tools import make_task_tools
 from src.config.const import FORK_EXCLUSIVE_TOOL_PREFIXES, FORK_FORBIDDEN_TOOLS
 
@@ -52,7 +52,7 @@ _RO = {"retrieve_kb": True, "search_web": True, "ask_user": True, "delegate_task
 
 
 def test_empty_allowed_inherits_readonly_face():
-    """allowed-tools 为空 → 不收窄，继承只读面（D7 反转了"空 = 零工具"的旧语义）。"""
+    """allowed-tools 为空表示不收窄，继承只读面。"""
     picked = select_fork_tools([], [_retrieve, _search], None, _RO)
     assert [t.name for t in picked] == ["retrieve_kb", "search_web"]
 
@@ -116,12 +116,18 @@ def test_empty_readonly_map_fails_closed():
         assert select_fork_tools([], [_retrieve, _search], None, {}) == []
 
 
-def test_real_tool_pool_guard():
+def test_real_tool_pool_guard(monkeypatch):
     """守卫：域是**真实工具池**（`make_rag_tools` + `make_task_tools`），不是 ToolRegistry
     —— `task_*` 不进注册表，遍历注册表会漏掉 D8 最担心的对象。
 
     以**空 allowed-tools** 装配时：结果不得含任何非只读工具、不得含禁用集成员。
+
+    真实池里**没有**「非只读且不以 `task_` 开头」的成员（四件套全 `readonly=True`，
+    `task_*` 被前缀规则剔除），故单独跑真实池时「非只读过滤」这段回归无人拦。这里补一个
+    **显式登记为写类**的替身 `write_doc`（它在 `readonly_map()` 里**有值且为 False**，
+    既非缺项也非只读），使步骤②被删掉时本用例必然失败。
     """
+    from src.agents.tools import readonly as readonly_module
     from src.agents.tools.rag_tools import make_rag_tools
 
     pool = [
@@ -140,8 +146,18 @@ def test_real_tool_pool_guard():
     readonly = readonly_map()
     assert readonly, "真实注册路径下只读表应已填充（build_graph 期注册，早于请求）"
 
+    # 用 monkeypatch 锚定进程级表（`readonly_map()` 每次读该模块级字典并返回副本），
+    # 再经真实注册路径 declare_readonly 记入写类替身，避免污染同文件其它用例。
+    monkeypatch.setattr(readonly_module, "_TOOL_READONLY", dict(readonly))
+    declare_readonly("write_doc", False)
+    pool.append(_write_doc)
+    readonly = readonly_map()
+    assert readonly["write_doc"] is False, "写类替身须显式登记为非只读（非缺项）"
+
     picked = select_fork_tools([], pool, None, readonly)
     picked_names = {t.name for t in picked}
+    # 步骤②（非只读过滤）的直接回归：空 allowed 下写类工具不得下发
+    assert "write_doc" not in picked_names, "写类工具（非只读）不得进入子代理工具面"
     for name in picked_names:
         assert name not in FORK_FORBIDDEN_TOOLS, f"{name} 属禁用集却下发了"
         for prefix in FORK_EXCLUSIVE_TOOL_PREFIXES:

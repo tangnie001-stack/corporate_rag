@@ -9,7 +9,7 @@
 3. **`allowed-tools` 是收窄项**：不声明即**不收窄**（继承只读面）；声明了才取交集。
 4. 执行者预设声明 `tools` 时再取交集。
 
-**空表极性（design D7，第二轮评审指出）**：`readonly_map()` 为空（工具尚未注册）时 fork 侧
+**空表极性（design D7）**：`readonly_map()` 为空（工具尚未注册）时 fork 侧
 **fail-closed**——一个都不下发。这与 `invocation.derive_invocation_flags` 对空表的
 **fail-open** 极性**相反且都是有意为之**：同一张表的两个消费者失败代价不同——双轴推导空表时
 不锁只是少了一层保护，而 fork 侧空表时"按只读放行"会把写权限下发给子代理。
@@ -58,14 +58,18 @@ def select_fork_tools(
     Returns:
         过滤后的工具列表（保持 available 原顺序）；空表时返回空列表（fail-closed）
     """
-    readonly = tool_readonly if tool_readonly is not None else {}
+    readonly: dict[str, bool] = {}
+    if tool_readonly is not None:
+        readonly = tool_readonly
     if not readonly:
         warnings.warn(
             "工具只读表为空（工具尚未注册），fork 子代理工具面按 fail-closed 处理：不下发任何工具"
         )
         return []
     declared = set(allowed)
-    executor_allowed = set(executor_tools) if executor_tools else set()
+    executor_allowed: set[str] = set()
+    if executor_tools:
+        executor_allowed = set(executor_tools)
     picked = []
     for tool in available:
         if not isinstance(tool, BaseTool):
