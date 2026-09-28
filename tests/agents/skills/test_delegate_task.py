@@ -2,16 +2,20 @@
 
 import asyncio
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock, patch
 
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk
 
+from src.agents.skills.delegate_run import DelegateRun
 from src.agents.skills.delegate_task import DelegateTaskArgs, make_delegate_task
 from src.agents.skills.executor import SkillExecutor
 from src.agents.skills.models import SkillContext, SkillRecord
 from src.agents.skills.registry import SkillRegistry
+from src.config.const import DelegateStopReason
 from src.infra.llm.request_context import RequestContext, current_request_ctx
+from src.rag.context import RAGContext
 
 
 def _record(
@@ -381,3 +385,68 @@ def test_make_rag_tools_without_delegate_keeps_fixed_set():
     tools = make_rag_tools(MagicMock(), MagicMock(), MagicMock())
     names = [t.name for t in tools]
     assert "delegate_task" not in names
+
+
+class _StubExecutor(SkillExecutor):
+    """替身执行器：记录收到的 run，并模拟子代理向自己的上下文写检索结果。"""
+
+    def __init__(self, stop_reason: str | None = None):
+        super().__init__(main_llm=MagicMock())
+        self.seen_run: DelegateRun | None = None
+        self.stop_reason = stop_reason
+
+    async def execute(self, record, task, run=None):
+        self.seen_run = run
+        if run is not None:
+            run.ctx.tool_contexts.append(cast(RAGContext, _Ctx("子代理材料")))
+            run.stop_reason = self.stop_reason
+        return "子代理结论"
+
+
+class _Ctx:
+    def __init__(self, content: str):
+        self.content = content
+
+
+@pytest.mark.asyncio
+async def test_delegate_passes_run_and_isolates_pool():
+    """委派路径必须自建 DelegateRun：子代理写入落子池，主池保持为空。"""
+    parent = RequestContext(session_id="s1", kb_id="k1", kb_bound=True)
+    token = current_request_ctx.set(parent)
+    executor = _StubExecutor()
+    tool = make_delegate_task(
+        _FakeRegistry({"analyst": _record("analyst", SkillContext.FORK, "正文")}),
+        executor,
+    )
+    try:
+        out = await tool.ainvoke({"task": "任务", "skill": "analyst"})
+    finally:
+        current_request_ctx.reset(token)
+    assert out == "子代理结论"
+    assert executor.seen_run is not None
+    assert executor.seen_run.ctx is not parent  # 独立子上下文
+    assert executor.seen_run.ctx.tool_contexts  # 写入落在子池
+    assert parent.tool_contexts == []  # 主池未被污染
+
+
+@pytest.mark.asyncio
+async def test_delegate_end_reason_from_run_not_main_ctx():
+    """中断原因必须从 run 读：executor 写在 run 上，读主 ctx 会恒 None 而误记 normal。"""
+    parent = RequestContext(session_id="s1", kb_id="k1", kb_bound=True)
+    token = current_request_ctx.set(parent)
+    executor = _StubExecutor(stop_reason=DelegateStopReason.TURN)
+    tool = make_delegate_task(
+        _FakeRegistry({"analyst": _record("analyst", SkillContext.FORK, "正文")}),
+        executor,
+    )
+    try:
+        await tool.ainvoke({"task": "任务", "skill": "analyst"})
+    finally:
+        current_request_ctx.reset(token)
+    events = []
+    while not parent.clarify_channel.empty():
+        events.append(parent.clarify_channel.get_nowait())
+    end = [e for e in events if e.get("action") == "end"]
+    assert len(end) == 1
+    assert end[0]["ok"] is False
+    assert end[0]["reason"] == DelegateStopReason.TURN.value

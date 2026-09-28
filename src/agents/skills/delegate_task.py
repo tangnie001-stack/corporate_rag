@@ -16,6 +16,7 @@ import uuid
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
+from src.agents.skills.delegate_run import DelegateRun
 from src.agents.skills.executor import SkillExecutor
 from src.agents.skills.models import SkillContext
 from src.agents.skills.registry import SkillRegistry
@@ -91,12 +92,16 @@ def make_delegate_task(skill_registry: SkillRegistry, executor: SkillExecutor):
 
         ctx = current_request_ctx.get()
         if ctx is None:
+            # 无请求上下文时没有父上下文可派生，按既有 fail-open 直接用主上下文执行
             return await executor.execute(record, task)
-        # fork 可观测（design D6/D8）：分配 delegate_id 贯穿 start/增量/end；
-        # ctx.fork_stop_reason 由 executor 中断时写，finally 读取并复位
+        # 每次委派独占运行态（design D15）：子代理的检索与引用编号落子池，不污染主池；
+        # 停止原因由 executor 写 run，终态判定从这里读（不再走主 ctx 的单值字段）
         delegate_id = uuid.uuid4().hex[:8]
-        ctx.delegate_id = delegate_id
-        ctx.fork_stop_reason = None
+        run = DelegateRun(
+            delegate_id=delegate_id,
+            skill_name=record.name,
+            ctx=ctx.child(),
+        )
         # 任务看板自动登记（task-board）：execution 条目 task_id=delegate_id，
         # stage 仅 coarse 边界更新（此处 start、finally 终态）
         task_registry.create_task(
@@ -132,7 +137,7 @@ def make_delegate_task(skill_registry: SkillRegistry, executor: SkillExecutor):
         ok = True
         try:
             try:
-                out = await executor.execute(record, task)
+                out = await executor.execute(record, task, run)
                 result_len = len(out)
             except asyncio.CancelledError:
                 stop_reason = DelegateStopReason.CANCELLED
@@ -142,16 +147,19 @@ def make_delegate_task(skill_registry: SkillRegistry, executor: SkillExecutor):
                 stop_reason = DelegateStopReason.FAILED
                 ok = False
                 raise
-            # 正常返回但 executor 曾中断（idle/total/turn）→ reason 已写入 ctx
-            stop_reason = ctx.fork_stop_reason
+            # 正常返回但 executor 曾中断（idle/total/turn）→ 原因已写在 run 上
+            stop_reason = run.stop_reason
             ok = stop_reason is None
             return out
         finally:
-            reason = (
-                DelegateStopReason.NORMAL
-                if ok
-                else (stop_reason or DelegateStopReason.FAILED)
-            )
+            # run.stop_reason 契约上只承载 DelegateStopReason 值（None=未中断）；
+            # 显式收敛为词表枚举，作为 reason 的静态类型依据
+            if ok:
+                reason = DelegateStopReason.NORMAL
+            elif isinstance(stop_reason, DelegateStopReason):
+                reason = stop_reason
+            else:  # 非枚举值按 failed 收敛
+                reason = DelegateStopReason.FAILED
             await ctx.clarify_channel.put(
                 {
                     "type": "delegate",
@@ -189,7 +197,5 @@ def make_delegate_task(skill_registry: SkillRegistry, executor: SkillExecutor):
                 terminal_status,
                 reason="" if ok else reason.value,
             )
-            ctx.delegate_id = ""
-            ctx.fork_stop_reason = None
 
     return delegate_task
