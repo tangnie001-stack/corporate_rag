@@ -85,9 +85,16 @@ frontmatter 字段：`name`（缺省用文件名；**仅允许 ASCII slug** `^[A
 
 #### Scenario: 预加载 skill
 
-- **WHEN** 预设声明 `skills: [financial-statement-analyzer]` 且为该会话首轮
-- **THEN** 该 skill 正文在首轮生成前以隐藏消息注入会话上下文（不进 system prompt）
+- **WHEN** 预设声明 `skills: [a]`（`a` 为 inline skill）且为该会话首轮
+- **THEN** 该 skill 的 **inline 正文**在首轮生成前以隐藏消息注入会话上下文（不进 system prompt）
 - **AND** 后续轮次持续可见且不重复注入
+
+#### Scenario: fork skill 不被预加载
+
+- **WHEN** 预设声明的 `skills` 列表中含 `context: fork` 的 skill
+- **THEN** 记 warning 并跳过该项（**不注入其 `fork_body`**），其余项正常预加载
+- **AND** 理由：`fork_body` 是写给子代理的任务/方法论 prompt，注入主 agent 会造成语义错配，且与 fork 的"正文不进主 agent 上下文"直接冲突
+- **AND** 需要使用 fork skill 时由主 agent 通过委派机制触发，不靠预加载
 
 #### Scenario: 预加载声明的 skill 不存在
 

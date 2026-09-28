@@ -302,6 +302,11 @@ DELEGATE_TOTAL_TIMEOUT_S: float = float(os.getenv("DELEGATE_TOTAL_TIMEOUT_S", "2
 DELEGATE_TOTAL_TIMEOUT_THINKING_S: float = float(
     os.getenv("DELEGATE_TOTAL_TIMEOUT_THINKING_S", "600")
 )
+# 每会话"模型裁量委派"次数上限（design D10）。
+# 只对 `delegate_task` 计数；`/xxx` 直出不消耗。取值依据：P2 前提确认实测的
+# 真实会话委派高水位为 3/会话（79 会话中仅 2 个有委派），50 约为其 16 倍，
+# 宁宽不宁紧；配合 `delegate skip` 的命中率观测，上线一版数据后再收紧。
+DELEGATE_MAX_PER_SESSION: int = int(os.getenv("DELEGATE_MAX_PER_SESSION", "50"))
 
 # ====== 重试策略 ======
 # 外部调用（DashScope / PostgreSQL / Redis）失败时的指数退避参数

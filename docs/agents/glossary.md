@@ -151,10 +151,13 @@
 | `skill` | 磁盘声明式能力文件（`skills/<name>/SKILL.md`，frontmatter 声明元数据 + 正文按 context 存方法论/子代理 prompt）；skill 是内容/配置而非代码 | ❌ 与开发期 `.claude/skills/` 工具链 skill 混为一谈 |
 | `SkillRecord` | skill 文件解析后的运行时对象（name/description/context/inline_prompt/fork_body/双轴等），由 `SkillLoader` 产出（`src/agents/skills/models.py`） | ❌ 直接用 SKILL.md 原文当结构体 |
 | inline 执行 | skill `context=inline`：方法论注入主 agent 上下文，主 agent 自己执行 | — |
-| fork 执行 | skill `context=fork`：`SkillExecutor` 生成零工具子代理独立深度分析，结果纯文本回主 agent | — |
+| fork 执行 | skill `context=fork`：`SkillExecutor` 生成持有只读工具面的子代理独立深度分析，结果纯文本回主 agent | — |
+| 按路径的引用编号策略 | fork 子代理的 `[n]` 指示按**入口路径**分派（design D16，载体 `DelegateRun.via`）：**委派路径**（`delegate_task` → `DELEGATE_VIA_DELEGATE`）子代理检索落子池、`[n]` 由主 agent 按自身检索来源统一补标，子代理**不标**；**直出路径**（`/xxx` → `DELEGATE_VIA_DIRECT`）无上游补标，子代理须自检索并自标 `[n]`（子池即本轮引用池）。两条策略**不同且有意为之**，不得"统一" | ❌ 以为两条路径共用同一执行器就该共用 `[n]` 策略；在委派路径让子代理自标 |
+| `context_source` | skill 的 `context` 取值来源：`default`（未声明→inline）/ `explicit`（frontmatter 显式）/ `auto_oversize`（未声明但正文超 `INLINE_PROMPT_MAX_CHARS`，加载期自动改 fork） | ❌ 以为"未声明"就是固定某一侧；长文 skill 的承载方式随正文长度自动变化 |
 | `skill_direct`（直出节点） | `/xxx` 命中 fork skill 时主 agent 零 LLM 轮：直接跑 fork 子代理，把结果与"本轮材料"（引用池 + 要求覆盖年份）搬进 `AgentState` 交 verify/format；入口分派与节点契约见 api_contract.md「5.5 fork 执行层契约」 | — |
-| 执行者选择 | fork 子代理的执行者人设按 `skill.agent` > 会话绑定智能体 > 系统默认人设的优先级选取（`src/agents/skills/executor.py`） | ❌ 以为 fork 恒用系统默认人设 |
-| `delegate_task` | 主 agent 委派工具 `delegate_task(task, skill)`，按命中 skill 的 context 分发 inline/fork；unknown 返回"skill 不存在 + 可用列表" | 引用会指向子代理产出（实际引用仍只指向主 agent 自身检索来源） |
+| 执行者选择 | fork 子代理的执行者人设按 `skill.agent` > 会话绑定智能体 > 系统默认人设的优先级选取（`src/agents/skills/executor.py`）；通用委派无 `skill.agent` 可查，跳过该档直接用会话智能体 | ❌ 以为 fork 恒用系统默认人设 |
+| `delegate_task` | 主 agent 委派工具 `delegate_task(task, skill=None)`：`skill` 省略即通用委派（不查注册表、不加载正文，`task` 直接作子代理输入）；`skill` 非空按命中 skill 的 context 分发 inline/fork，unknown 返回"skill 不存在 + 可用列表" | 引用会指向子代理产出（实际引用仍只指向主 agent 自身检索来源） |
+| 通用委派 | `delegate_task` 省略 `skill` 的委派形态（design D6）：无 skill 正文、无 `allowed-tools` 收窄（仅继承只读面）、无 `skill.agent`/`model` 声明；与定点 fork **共用同一预算闸门与 `_run_fork` 执行路径**（超时/轮次/取消/引用池隔离）。事件 `skill` 字段与看板标题用用户可见标签 `SSEInteractionTexts.DELEGATE_GENERIC_LABEL`（`"通用分析"`，看板标题经 `DELEGATE_TASK_TITLE_TMPL` 渲染为「通用分析 · 领域专家分析」） | ❌ 以为通用委派可绕过预算闸门；另起一条执行路径 |
 | `delegate_id` | 单次 delegate_task fork 的唯一标识（短 uuid），随该次委派的 start/增量/end 与 task execution 条目贯穿；同一次回答内多次委派互不相同 | ❌ 各事件各自随机生成导致无法关联 |
 | `DelegateStopReason` | fork 结束原因统一枚举：`normal / idle / total / turn / failed / cancelled`（const 定义）；delegate end `ok/reason` 与 task 注册表终态共用同一词表 | ❌ 各层另起一套原因词 |
 | delegate end `ok/reason` | 委派结束事件语义：`ok=true` 文案"领域专家分析完成"；`ok=false` 携带 reason，文案"分析中断·原因" | ❌ 无条件推"完成"（原实现缺陷） |

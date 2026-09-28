@@ -152,6 +152,12 @@ EVENT_SPECS: dict[str, EventSpec] = {
     "skill preload skip": EventSpec(
         "skill preload skip", "session", "warning", ("skill", "reason")
     ),
+    "skill resolved": EventSpec(
+        "skill resolved",
+        "session",
+        "info",
+        ("skill", "context", "context_source", "body_chars"),
+    ),
     # [db] 向量检索 / 文件存储（3.4 批）
     "bucket created": EventSpec("bucket created", "db", "info", ("bucket",)),
     "file upload failed": EventSpec(

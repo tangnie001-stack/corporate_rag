@@ -60,8 +60,9 @@ def _resolve_stream_ctx(run: DelegateRun | None) -> tuple[RequestContext | None,
     上下文均无），由调用方按既有分支处理。
 
     Args:
-        run: 本次委派运行态；None 时读当前请求上下文（生产 delegate_task 的
-            两参路径），非 None 时读 run.ctx 子上下文
+        run: 本次委派运行态；非 None 时读 run.ctx 子上下文。None 仅见于无请求
+            上下文的 fail-open 路径（delegate_task 直接调 execute 未传 run），
+            此时读当前请求上下文
 
     Returns:
         (ctx, delegate_id)：ctx 可能为 None；ctx 为 None 时 delegate_id 为空串
@@ -83,18 +84,23 @@ async def consume_fork_events(
     user_content: str,
     skill_name: str,
     max_turns: int,
+    trace_collector=None,
 ) -> str:
     """迭代子代理 astream_events(v2)：聚合正文/思考、防失控、转发 delegate delta。
 
     Args:
         sub_agent: create_agent 返回的子代理（astream_events 事件源）
-        run: 本次委派运行态；None 时读当前请求上下文（生产 delegate_task 的两参
-            路径），非 None 时读 run.ctx 子上下文
+        run: 本次委派运行态；非 None 时读 run.ctx 子上下文。None 仅见于无请求
+            上下文的 fail-open 路径（delegate_task 直接调 execute 未传 run），
+            此时读当前请求上下文
         user_content: 子代理初始 user message（skill 正文，任务已注入）
         skill_name: 投递 delegate 增量时附带的 skill 标签。用形参而非
-            run.skill_name：生产 delegate_task 仍走 run=None 路径，从 run 取会丢
-            标签；同时避免本模块与 SkillRecord 结构耦合
+            run.skill_name：run 仍可能为 None（fail-open 路径），从 run 取会丢
+            标签；同时避免本模块与 run 结构耦合
         max_turns: turn 上限（DELEGATE_DEFAULT_MAX_TURNS）
+        trace_collector: 委派域工具 span 采集器；None 时不采集（既有路径）。
+            采集靠显式喂事件，不靠恢复 LangChain 配置继承——事件流与 SSE 的隔离
+            （executor 里的 var_child_runnable_config.set(None)）必须保持不变。
 
     Returns:
         聚合后的子代理最终正文纯文本（不含 reasoning）
@@ -130,7 +136,7 @@ async def consume_fork_events(
             if ev is None:
                 break  # 事件源正常收尾
             stop_text = await _handle_fork_event(
-                ev, ctx, delegate_id, skill_name, state
+                ev, ctx, delegate_id, skill_name, state, trace_collector
             )
             if stop_text is not None:
                 return stop_text
@@ -214,7 +220,7 @@ async def _next_fork_event(agen, abort_task, ctx, state: _ForkStreamState):
 
 
 async def _handle_fork_event(
-    ev, ctx, delegate_id: str, skill: str, state: _ForkStreamState
+    ev, ctx, delegate_id: str, skill: str, state: _ForkStreamState, trace_collector=None
 ) -> str | None:
     """处理单个事件：刷新活跃时间、turn 计数、model turn 日志、增量聚合与节流 flush。
 
@@ -224,10 +230,14 @@ async def _handle_fork_event(
         delegate_id: 本次委派 id（事件标签）
         skill: skill 标签（delegate delta 用）
         state: fork 消费累加状态（读写计数与增量缓冲）
+        trace_collector: 委派域工具 span 采集器；None 时不采集（既有路径）。
+            采集器自身吞异常降级，不向上抛（观测故障不得影响对话）
 
     Returns:
         turn 超限时的 DELEGATE_TIMEOUT_TEXT；其余返回 None（继续消费）
     """
+    if trace_collector is not None:
+        trace_collector.consume(ev)
     state.last_activity = time.monotonic()
     kind = ev.get("event", "")
     data = ev.get("data") or {}

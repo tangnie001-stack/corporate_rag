@@ -89,11 +89,14 @@ TEMPORAL_RECENT_N_YEARS = 3
 MAX_DELEGATE_BONUS = (
     2  # delegate 轮后主 agent 迭代上限放宽轮数（整合余量，单请求总上限仍封顶）
 )
-DELEGATE_DEFAULT_MAX_TURNS = 5  # fork 零工具默认 turn 上限（防御）
+DELEGATE_DEFAULT_MAX_TURNS = 5  # fork 子代理默认 turn 上限（防御）
 DELEGATE_RESULT_LIMIT = 1000  # fork 结果回流主 agent 的截断阈值（字符）
-INLINE_PROMPT_MAX_CHARS = (
-    500  # inline skill 正文规模上限（字符，防上下文累积膨胀，超出仅记 warning）
-)
+# 委派路径标识（DelegateRun.via）：执行器据此决定给子代理的引用编号指示（design D16）。
+# direct = /xxx 直出（**没有主 agent 补标** → 子代理须自检索并自标 [n]）；
+# delegate = 主 agent 委派（[n] 由主 agent 按自身检索来源补标 → 子代理不标）。
+DELEGATE_VIA_DIRECT = "direct"
+DELEGATE_VIA_DELEGATE = "delegate"
+INLINE_PROMPT_MAX_CHARS = 500  # inline skill 正文规模上限（字符，防上下文累积膨胀）；未声明 context 时超出即自动改用 fork，显式 inline 时仅记 warning
 # skill / agent preset 名允许的字符集（ASCII slug）：/xxx 命令天然是 ASCII 惯例，
 # 非 ASCII 名会让 `/财报分析` 落进"非命令形态"分支被静默当普通文本（design D15）
 CAPABILITY_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
@@ -108,6 +111,12 @@ SKILL_TASK_PLACEHOLDERS = ("$ARGUMENTS", "{task}")
 # ask_user —— D18：子代理不直接交互，需要确认时由编排层确认门代为询问；
 # delegate_task —— D7：子代理不再委派，防递归与上下文爆炸。
 FORK_FORBIDDEN_TOOLS = ("ask_user", "delegate_task")
+# fork 子代理永不可持有的主 agent 专属工具**前缀**（design D8 第三档）：
+# task_*（task_create/get/list/update/output/stop）是主 agent 的执行面（任务看板），
+# 子代理是被委派的执行体，持有它会让子代理看见并改写主 agent 的任务编排。
+# 与上面两项分列而不合并：三档理由不同（语义禁止 / 防递归 / 角色专属）。
+# 用前缀而非逐名枚举：将来新增 task_* 工具时自动被挡，不必同步这份清单。
+FORK_EXCLUSIVE_TOOL_PREFIXES = ("task_",)
 SKILL_INJECTION_PREFIX: str = "[[skill-injection]]"
 """注入型隐藏消息的内容前缀标记。
 
@@ -271,6 +280,12 @@ class SSEInteractionTexts:
     # ── delegate_task 工具返回主 agent 的文本 ──
     # 未知 skill 返回模板：{skill}=请求的 skill 名；{available}=可用 skill 列表（空列表显示"无"）
     DELEGATE_UNKNOWN_SKILL: str = "skill 不存在: {skill}，可用 skill: {available}"
+    # 通用委派（省略 skill）的用户可见标签：无 skill 名可填，作看板标题与事件 skill 字段
+    DELEGATE_GENERIC_LABEL: str = "通用分析"
+    # 会话级委派预算触顶返回模板：{limit}=本会话委派上限次数；促模型改用自身能力作答
+    DELEGATE_BUDGET_EXHAUSTED: str = (
+        "本轮委派已达会话上限（{limit} 次）。请改用你自己的能力作答，不要再重试委派。"
+    )
     # 未注册前缀的用户可见文案：{skill}=请求的 skill 名；{available}=可用 skill 列表
     UNKNOWN_SKILL_PREFIX: str = "技能不存在：/{skill}。可用技能：{available}"
     # 已注册但 user-invocable:false 的前缀用户可见文案：{skill}=请求的 skill 名（spec:66 只能由模型调用）

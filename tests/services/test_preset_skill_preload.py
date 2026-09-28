@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from src.config.const import SKILL_INJECTION_PREFIX
+from src.core.log_events import Event
 from src.services.agent_service import AgentService
 
 
@@ -27,17 +28,48 @@ def _service(records: dict[str, _Record]) -> AgentService:
 
 
 def test_preload_renders_in_declared_order():
-    """按 skills 声明顺序拼接，inline_prompt 优先于 fork_body。"""
+    """按 skills 声明顺序拼接（两份都是 inline 正文）。"""
     svc = _service(
         {
             "a": _Record("a", inline="方法论 A：$ARGUMENTS"),
-            "b": _Record("b", fork="方法论 B"),
+            "b": _Record("b", inline="方法论 B"),
         }
     )
     text, names = svc._preload_skills_text(["a", "b"])
     assert text.index("方法论 A") < text.index("方法论 B")
-    assert text.count("\n\n") == 1
     assert names == ["a", "b"]
+
+
+def test_preload_skips_fork_skill(monkeypatch):
+    """fork skill 的正文是子代理 prompt，不得注入主 agent；记 warning 并跳过。"""
+    logged: list[dict] = []
+    monkeypatch.setattr(
+        "src.services.agent_service.core_logging.log_event",
+        lambda event, **fields: logged.append({"event": event, **fields}),
+    )
+    svc = _service(
+        {
+            "a": _Record("a", inline="方法论 A"),
+            "f": _Record("f", fork="子代理用的任务 prompt"),
+        }
+    )
+    text, names = svc._preload_skills_text(["a", "f"])
+    assert text == "方法论 A"
+    assert names == ["a"]
+    assert "子代理用的任务 prompt" not in text
+    assert any(
+        item.get("event") == Event.SKILL_PRELOAD_SKIP
+        and item.get("reason") == "not_inline"
+        for item in logged
+    )
+
+
+def test_preload_all_fork_returns_empty():
+    """全部命中 fork skill → 什么都不注入。"""
+    svc = _service({"f": _Record("f", fork="子代理 prompt")})
+    text, names = svc._preload_skills_text(["f"])
+    assert text == ""
+    assert names == []
 
 
 def test_preload_renders_without_task_text():

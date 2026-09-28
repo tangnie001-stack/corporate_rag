@@ -77,6 +77,14 @@
 - `skill dispatch`（session / info）——命令形态分派；`kind` 取 plain（普通文本，不记）/
   known（命中技能）/ unknown（未注册命令）；`context` 取 inline / fork（技能 frontmatter
   的形态）/ none（命令未命中技能，record 为空）
+- `skill resolved`（session / info）——加载每个 skill 时记其承载方式；`skill` 为 skill 名，
+  `context` 取生效形态 inline / fork（**非 frontmatter 原值**），`context_source` 取
+  default（未声明→inline）/ explicit（frontmatter 显式）/ auto_oversize（未声明但正文超
+  `INLINE_PROMPT_MAX_CHARS`，加载期自动改 fork），`body_chars` 为正文（frontmatter 之后）
+  字符数
+- `skill preload skip`（session / warning）——预设预绑定首轮预加载跳过某 skill；`reason` 取
+  not_found（预设声明的 skill 名查不到）/ not_inline（命中的 skill 是 fork，正文属子代理
+  prompt，不注入主 agent）
 - `model turn` 扩 `temperature` / `temp_source`（explicit 逐轮直传档 / default 模型构造档）/
   `kb_bound`，不新增事件
 - `rerank done`（retrieval / info）——精排完成；`scored` 取 rerank（正常精排分）/
@@ -84,6 +92,9 @@
   `log_event_specs.py` 为准
 - `dedup done`（retrieval / info）——内容级去重丢弃量；字段 `dropped`/`kept`，明细以
   `log_event_specs.py` 为准
+- `delegate skip`（app / warning）——委派未被装配或未发起；`reason` 取 registry_empty
+  （skills 目录存在但无任何 skill）/ skills_dir_missing（skills 目录不存在，附 `skills_dir`）/
+  budget_exhausted（会话级委派预算触顶，`delegate_task` 拒绝该次委派并返回可读原因）
 
 **不再扩 `iteration done`**：其「消息数拆分」意图已由 `prompt messages` 在组装点承载，
 不重复记录同一事实（避免后人再提）。

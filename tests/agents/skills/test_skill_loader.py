@@ -1,12 +1,13 @@
 """测试 SkillLoader — SKILL.md frontmatter 解析与目录扫描。"""
 
-import warnings
 from pathlib import Path
 
 import pytest
 
 from src.agents.skills.loader import SkillLoader
-from src.agents.skills.models import SkillContext
+from src.agents.skills.models import ContextSource, SkillContext
+from src.config.const import INLINE_PROMPT_MAX_CHARS
+from src.core.log_events import Event
 
 
 def _write_skill(root: Path, name: str, frontmatter: str, body: str) -> Path:
@@ -53,43 +54,6 @@ def test_load_fork_skill(tmp_path):
     assert rec.inline_prompt is None
 
 
-def test_fork_without_allowed_tools_warns(tmp_path):
-    """fork 未声明 allowed-tools → 记 warning（子代理会零工具），但仍正常加载。
-
-    该组合对「分析型 skill」是有意设计（主 agent 预检索材料经 task 传入），故不阻断加载，
-    只提示；对遗忘声明的新 skill 则是踩坑点。
-    """
-    _write_skill(tmp_path, "analyst", "description: x\ncontext: fork\n", "分析方法论")
-    with pytest.warns(UserWarning, match="allowed-tools"):
-        records = SkillLoader(tmp_path).load_all()
-    assert [r.name for r in records] == ["analyst"]
-
-
-def test_fork_with_allowed_tools_does_not_warn(tmp_path):
-    """fork 声明了 allowed-tools → 不触发该 warning。"""
-    _write_skill(
-        tmp_path,
-        "retriever",
-        "description: x\ncontext: fork\nallowed-tools: retrieve_kb\n",
-        "检索后分析",
-    )
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        SkillLoader(tmp_path).load_all()
-    assert not [w for w in caught if "allowed-tools" in str(w.message)]
-
-
-def test_inline_without_allowed_tools_does_not_warn(tmp_path):
-    """inline 未声明 allowed-tools 属正常（白名单只约束 fork 的子代理工具）→ 不告警。"""
-    _write_skill(
-        tmp_path, "methodology", "description: x\ncontext: inline\n", "短方法论"
-    )
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        SkillLoader(tmp_path).load_all()
-    assert not [w for w in caught if "allowed-tools" in str(w.message)]
-
-
 def test_skill_name_defaults_to_dirname(tmp_path):
     """frontmatter 缺 name → 用目录名。"""
     _write_skill(
@@ -128,20 +92,42 @@ def test_invalid_context_skips_skill(tmp_path):
     assert [r.name for r in records] == ["good"]
 
 
-def test_missing_context_defaults_to_fork(tmp_path):
-    """未声明 context → 默认 fork（正文落 fork_body，不占主 agent 历史预算）。"""
-    _write_skill(
-        tmp_path,
-        "undeclared",
-        "description: x\nallowed-tools: retrieve_kb\n",
-        "方法论正文",
-    )
+def test_missing_context_defaults_to_inline(tmp_path):
+    """未声明 context → 取 inline（与上游一致：不写即 inline）。"""
+    _write_skill(tmp_path, "finance-qa", "description: 财务问答\n", "先检索再作答。")
     records = SkillLoader(tmp_path).load_all()
+    assert len(records) == 1
     rec = records[0]
+    assert rec.context == SkillContext.INLINE
+    assert rec.inline_prompt is not None
+    assert rec.fork_body is None
+    assert rec.context_source == ContextSource.DEFAULT
+
+
+def test_explicit_fork_records_source(tmp_path):
+    """显式声明 context 时来源记为 explicit。"""
+    _write_skill(tmp_path, "analyst", "description: 财务专家\ncontext: fork\n", "正文")
+    rec = SkillLoader(tmp_path).load_all()[0]
     assert rec.context == SkillContext.FORK
-    assert rec.fork_body is not None
-    assert "方法论正文" in rec.fork_body
-    assert rec.inline_prompt is None
+    assert rec.context_source == ContextSource.EXPLICIT
+
+
+def test_skill_resolved_event_logged(tmp_path, monkeypatch):
+    """加载每个 skill 时记 skill resolved，字段含 context 与来源，供无 E2E 时判定承载方式。"""
+    logged: list[dict] = []
+    monkeypatch.setattr(
+        "src.agents.skills.loader.core_logging.log_event",
+        lambda event, **fields: logged.append({"event": event, **fields}),
+    )
+    _write_skill(tmp_path, "finance-qa", "description: 财务问答\n", "先检索再作答。")
+    SkillLoader(tmp_path).load_all()
+    assert len(logged) == 1
+    item = logged[0]
+    assert item["event"] == Event.SKILL_RESOLVED
+    assert item["skill"] == "finance-qa"
+    assert item["context"] == SkillContext.INLINE
+    assert item["context_source"] == ContextSource.DEFAULT
+    assert item["body_chars"] > 0  # 正文含换行，别断言精确长度
 
 
 def test_subdirectory_without_skill_md_ignored(tmp_path):
@@ -274,3 +260,53 @@ def test_explicit_dual_axis_fields_are_parsed(tmp_path):
 
     assert records[0].user_invocable is False
     assert records[0].disable_model_invocation is True
+
+
+def test_oversize_body_auto_forks_with_warning(tmp_path):
+    """未声明 context 且正文超预算 → 自动按 fork，来源记为 auto_oversize。"""
+    long_body = "字" * (INLINE_PROMPT_MAX_CHARS + 1)
+    _write_skill(tmp_path, "long-skill", "description: 长文方法论\n", long_body)
+    with pytest.warns(UserWarning, match="已自动按 fork"):
+        rec = SkillLoader(tmp_path).load_all()[0]
+    assert rec.context == SkillContext.FORK
+    assert rec.context_source == ContextSource.AUTO_OVERSIZE
+    assert rec.fork_body == long_body
+    assert rec.inline_prompt is None
+
+
+def test_short_body_without_context_stays_inline(tmp_path):
+    """未声明 context 且正文未超预算 → 保持 inline（边界内侧）。"""
+    _write_skill(
+        tmp_path,
+        "short-skill",
+        "description: 短方法论\n",
+        "字" * INLINE_PROMPT_MAX_CHARS,
+    )
+    rec = SkillLoader(tmp_path).load_all()[0]
+    assert rec.context == SkillContext.INLINE
+    assert rec.context_source == ContextSource.DEFAULT
+
+
+def test_explicit_inline_oversize_keeps_inline_with_warning(tmp_path):
+    """显式声明优先：显式 inline 且超预算 → 仍按 inline，只记 warning。"""
+    long_body = "字" * (INLINE_PROMPT_MAX_CHARS + 1)
+    _write_skill(
+        tmp_path,
+        "force-inline",
+        "description: 强制 inline\ncontext: inline\n",
+        long_body,
+    )
+    with pytest.warns(UserWarning, match="仍按 inline 处理"):
+        rec = SkillLoader(tmp_path).load_all()[0]
+    assert rec.context == SkillContext.INLINE
+    assert rec.context_source == ContextSource.EXPLICIT
+
+
+def test_explicit_fork_short_body_stays_fork(tmp_path):
+    """显式 fork 与正文长度无关。"""
+    _write_skill(
+        tmp_path, "short-fork", "description: 短 fork\ncontext: fork\n", "正文"
+    )
+    rec = SkillLoader(tmp_path).load_all()[0]
+    assert rec.context == SkillContext.FORK
+    assert rec.context_source == ContextSource.EXPLICIT

@@ -85,6 +85,7 @@ class Event(str, Enum):
     TASK_REGISTERED = "task registered"
     # [session] 预设预绑定 skill 预加载跳过（声明名查不到，不影响其余技能）
     SKILL_PRELOAD_SKIP = "skill preload skip"
+    SKILL_RESOLVED = "skill resolved"
 
     # [db] 数据库层事件（3.4 批迁移登记：vector_store / file_store）
     BUCKET_CREATED = "bucket created"

@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from src.agents.skills.loader import SkillLoader
-from src.agents.skills.models import SkillContext
+from src.agents.skills.models import ContextSource, SkillContext
 from src.config.const import INLINE_PROMPT_MAX_CHARS
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -33,9 +33,9 @@ def test_loads_with_expected_context():
 def test_all_inline_skills_within_budget():
     """所有 inline skill 的正文 ≤ INLINE_PROMPT_MAX_CHARS（防上下文累积膨胀）。
 
-    历史：`financial-statement-analyzer` 未声明 context → 默认 inline，正文 3002 字符
-    超限 6 倍（2026-09-18 登记 docs/agents/requirements_pool.md F-13），已改
-    `context: fork`。本测试保留为守卫：新增 inline skill 超限时直接失败。
+    加载期对未声明 context 的超限正文自动改按 fork 承载（ContextSource.AUTO_OVERSIZE），
+    故超限长文不会落成 inline；本测试保留为守卫：显式声明 context: inline 的 skill 超限时
+    直接失败（显式 inline 超限加载期只记 warning，不会自动改 fork）。
     """
     records = SkillLoader(SKILLS_DIR).load_all()
     oversized = {
@@ -74,3 +74,19 @@ def test_no_duplicate_of_system_rules():
         body = rec.inline_prompt or rec.fork_body or ""
         for phrase in duplicated_phrases:
             assert phrase not in body, f"{rec.name} 正文与系统段规则重复：{phrase}"
+
+
+def test_in_repo_long_skills_resolve_as_auto_oversize():
+    """在库三份长文 skill 未声明 context → 全部落 auto_oversize（按 fork 承载）。
+
+    这是 P1 的核心验收点：默认值翻转后，长文 skill 仍不占主 agent 历史预算。
+    """
+    records = {r.name: r for r in SkillLoader(SKILLS_DIR).load_all()}
+    for name in (
+        "financial-statement-analyzer",
+        "competitive-landscape",
+        "market-sizing-analysis",
+    ):
+        rec = records[name]
+        assert rec.context == SkillContext.FORK, name
+        assert rec.context_source == ContextSource.AUTO_OVERSIZE, name

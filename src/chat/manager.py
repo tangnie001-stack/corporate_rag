@@ -16,6 +16,7 @@ import json
 import redis as redis_sync
 import redis.asyncio as redis_async
 
+from src.chat.delegate_budget import delegate_budget
 from src.chat.persistence import PersistenceService
 from src.config import REDIS_TTL, REDIS_URL
 from src.core import logging as core_logging
@@ -306,6 +307,9 @@ class ChatManager:
         Args:
             session_id: 会话 ID
         """
+        # 复位委派预算：必须放方法体开头（下方 _in_memory 分支会 early return，
+        # 放末尾则走该路径时不会复位）
+        delegate_budget.reset(session_id)
         await self._ensure_redis_async()
         if self._in_memory:
             self._memory_store.pop(session_id, None)

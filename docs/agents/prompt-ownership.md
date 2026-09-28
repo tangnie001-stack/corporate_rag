@@ -52,6 +52,10 @@
 | `[n]` 引用编码 | `output-citation` | 无 | 无 |
 | 委派返回内容的引用规则 | `output-delegate-citation` | `delegate_task` | 无 |
 
+> `output-delegate-citation` 管的是**主 agent 侧**的委派引用规则。fork 子代理侧的 `[n]`
+> 指示按**入口路径**分派（委派路径子代理不标、直出路径子代理自标），载体 `DelegateRun.via`；
+> 术语与语义归属见 glossary.md「按路径的引用编号策略」，本文件不复制其正文。
+
 > 上表 `sources-kb-unbound` / `sources-kb-unbound-web` 两条不属 `_SECTION_RULES`（`src/rag/prompt.py`），
 > 其判据在 `_build_unbound_message`（同文件，读 `search_web` 是否注册决定是否追加联网句）；
 > 它们产出的是**态 A 第二条 system 消息**，而非五段之一。
