@@ -55,32 +55,6 @@ def test_load_fork_skill(tmp_path):
     assert rec.inline_prompt is None
 
 
-def test_fork_without_allowed_tools_warns(tmp_path):
-    """fork 未声明 allowed-tools → 记 warning（子代理会零工具），但仍正常加载。
-
-    该组合对「分析型 skill」是有意设计（主 agent 预检索材料经 task 传入），故不阻断加载，
-    只提示；对遗忘声明的新 skill 则是踩坑点。
-    """
-    _write_skill(tmp_path, "analyst", "description: x\ncontext: fork\n", "分析方法论")
-    with pytest.warns(UserWarning, match="allowed-tools"):
-        records = SkillLoader(tmp_path).load_all()
-    assert [r.name for r in records] == ["analyst"]
-
-
-def test_fork_with_allowed_tools_does_not_warn(tmp_path):
-    """fork 声明了 allowed-tools → 不触发该 warning。"""
-    _write_skill(
-        tmp_path,
-        "retriever",
-        "description: x\ncontext: fork\nallowed-tools: retrieve_kb\n",
-        "检索后分析",
-    )
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        SkillLoader(tmp_path).load_all()
-    assert not [w for w in caught if "allowed-tools" in str(w.message)]
-
-
 def test_inline_without_allowed_tools_does_not_warn(tmp_path):
     """inline 未声明 allowed-tools 属正常（白名单只约束 fork 的子代理工具）→ 不告警。"""
     _write_skill(

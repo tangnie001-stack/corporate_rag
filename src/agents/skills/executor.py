@@ -1,9 +1,10 @@
 """SkillExecutor — inline 指令注入 / fork 子代理执行。
 
 - inline：返回 skill 正文（render 后的方法论），主 agent 自己执行（不产生子代理）。
-- fork：create_agent(model, tools=白名单筛选结果, system_prompt=执行者人设) 生成独立
+- fork：create_agent(model, tools=只读面筛选结果, system_prompt=执行者人设) 生成独立
   子代理；初始 user message = skill 正文（task 已注入），返回纯文本（不带 [n]）。
-  未声明 allowed-tools 时零工具 = 防递归硬保证。执行期把 current_request_ctx 切到
+  子代理工具面默认继承执行者的只读面（allowed-tools 只作收窄，未声明即不收窄）；
+  防递归由禁用集（delegate_task / task_*）硬保证。执行期把 current_request_ctx 切到
   子上下文（run.ctx）：工具检索与引用编号落子池，不污染主 agent 引用池（design D7/D8/D9/R3）。
 
 可观测性（design D11）：fork 子代理复用主 agent 的 llm 实例（或 get_llm 新建实例）——
@@ -28,6 +29,7 @@ CancelledError 由主任务按取消路径收尾。
 """
 
 import asyncio
+import warnings
 from collections.abc import Callable
 
 from langchain.agents import create_agent
@@ -40,6 +42,7 @@ from src.agents.skills.fork_stream import consume_fork_events
 from src.agents.skills.fork_tools import select_fork_tools
 from src.agents.skills.models import SkillContext, SkillRecord
 from src.agents.skills.rendering import render_skill_body
+from src.agents.tools.readonly import readonly_map
 from src.config import settings
 from src.config.const import (
     DELEGATE_DEFAULT_MAX_TURNS,
@@ -314,16 +317,36 @@ class SkillExecutor:
         return FORK_DEFAULT_EXECUTOR_PROMPT + FORK_EXECUTION_CONTRACT
 
     def _fork_tools(self, record: SkillRecord, preset):
-        """按 allowed-tools ∩ 执行者 tools 选子代理工具（无 provider 时为零工具）。"""
+        """按 design D7 口径选子代理工具面（继承只读面 − 禁用集 ∩ 声明收窄）。
+
+        只读表从进程级声明读取（`readonly_map()`）——工具在 `build_graph` 期注册，
+        **早于任何请求**，故生产路径上此处恒非空；空表由 `select_fork_tools` 按
+        fail-closed 处理。
+
+        Args:
+            record: fork SkillRecord（读 allowed_tools 作收窄项）
+            preset: 执行者预设（读 tools 作再收窄）；None 表示不再收窄
+
+        Returns:
+            子代理工具列表。未装配 tool_provider 且**工具已注册过**时记 warning 并返回空
+            （真实装配缺陷，不再静默零工具）；工具从未注册（离线/单测）时静默返回空。
+        """
         if self._tool_provider is not None:
             available = self._tool_provider()
         else:
             available = []
+            if readonly_map():
+                # 表非空说明工具确实注册过，却拿不到 provider → 装配缺陷，必须可见
+                warnings.warn(
+                    "SkillExecutor 未装配 tool_provider，但工具已注册：fork 子代理工具面为空"
+                )
         if preset is not None:
             executor_tools = preset.tools
         else:
             executor_tools = None
-        return select_fork_tools(record.allowed_tools, available, executor_tools)
+        return select_fork_tools(
+            record.allowed_tools, available, executor_tools, readonly_map()
+        )
 
     @staticmethod
     def _fork_total_timeout(ctx) -> float:

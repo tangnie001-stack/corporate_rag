@@ -42,6 +42,18 @@ def _record(**overrides) -> SkillRecord:
     return SkillRecord(**defaults)
 
 
+@tool("retrieve_kb")
+def _retrieve(query: str) -> str:
+    """检索。"""
+    return query
+
+
+@tool("write_doc")
+def _write_doc(text: str) -> str:
+    """写文件（写类工具的代表）。"""
+    return text
+
+
 def _event(kind, chunk=None, output=None):
     """构造 langgraph v2 事件 dict（fake astream_events 事件源元素）。"""
     data = {}
@@ -719,3 +731,27 @@ async def test_fork_with_llm_lacking_model_name_does_not_crash():
     args, _kwargs = mock_create.call_args
     assert args[0] is llm
     assert "分析" in out
+
+
+def test_fork_tools_uses_readonly_map(monkeypatch):
+    """未声明 allowed-tools 时继承只读面（不再零工具），且非只读工具被挡。"""
+    from src.agents.tools import readonly as readonly_module
+
+    monkeypatch.setattr(
+        readonly_module, "_TOOL_READONLY", {"retrieve_kb": True, "write_doc": False}
+    )
+    exe = SkillExecutor(
+        main_llm=MagicMock(), tool_provider=lambda: [_retrieve, _write_doc]
+    )
+    picked = exe._fork_tools(_record(allowed_tools=[]), None)
+    assert [t.name for t in picked] == ["retrieve_kb"]
+
+
+def test_fork_tools_without_provider_warns_when_tools_registered(monkeypatch):
+    """工具确实注册过却拿不到 provider → 记 warning（不再静默零工具）。"""
+    from src.agents.tools import readonly as readonly_module
+
+    monkeypatch.setattr(readonly_module, "_TOOL_READONLY", {"retrieve_kb": True})
+    exe = SkillExecutor(main_llm=MagicMock(), tool_provider=None)
+    with pytest.warns(UserWarning, match="tool_provider"):
+        assert exe._fork_tools(_record(allowed_tools=[]), None) == []
