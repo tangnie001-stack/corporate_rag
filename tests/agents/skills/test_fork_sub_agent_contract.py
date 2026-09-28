@@ -4,10 +4,11 @@ import pytest
 
 from src.agents.skills.executor import SkillExecutor
 from src.agents.skills.models import SkillContext, SkillRecord
-from src.config.const import DELEGATE_VIA_DELEGATE
+from src.config.const import DELEGATE_VIA_DELEGATE, DELEGATE_VIA_DIRECT
 from src.config.prompts import (
     FORK_DEFAULT_EXECUTOR_PROMPT,
     FORK_DELEGATE_CITATION_INSTRUCTION,
+    FORK_DIRECT_CITATION_INSTRUCTION,
     FORK_EXECUTION_CONTRACT,
 )
 
@@ -43,6 +44,34 @@ async def test_sub_agent_uses_system_prompt_and_user_body(monkeypatch):
     assert captured["system_prompt"]  # 执行者人设非空（无 preset → 系统默认人设）
     assert captured["tools"] == []  # available 为空 → 交集为空
     assert captured["middleware"] == []
+
+
+@pytest.mark.asyncio
+async def test_sub_agent_system_prompt_carries_via_citation_instruction(monkeypatch):
+    """_build_sub_agent 收到的 via 原样决定子代理 system prompt 的引用编号指示。"""
+    captured = {}
+
+    def _fake_create_agent(
+        model, tools=None, system_prompt=None, middleware=None, **kw
+    ):
+        captured["system_prompt"] = system_prompt
+        return _FakeAgent()
+
+    monkeypatch.setattr("src.agents.skills.executor.create_agent", _fake_create_agent)
+    executor = SkillExecutor(main_llm=object(), tool_provider=list)
+    record = SkillRecord(
+        name="finance-analyst",
+        description="d",
+        context=SkillContext.FORK,
+        fork_body="按方法论分析。\n任务：$ARGUMENTS",
+        allowed_tools=["retrieve_kb"],
+    )
+
+    executor._build_sub_agent(record, preset=None, via=DELEGATE_VIA_DIRECT)
+    assert captured["system_prompt"].endswith(FORK_DIRECT_CITATION_INSTRUCTION)
+
+    executor._build_sub_agent(record, preset=None, via=DELEGATE_VIA_DELEGATE)
+    assert captured["system_prompt"].endswith(FORK_DELEGATE_CITATION_INSTRUCTION)
 
 
 def test_render_fork_task_replaces_declared_placeholder():

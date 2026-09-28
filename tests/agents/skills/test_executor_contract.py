@@ -2,7 +2,12 @@
 
 from src.agents.skills.executor import SkillExecutor
 from src.config.const import DELEGATE_VIA_DELEGATE, DELEGATE_VIA_DIRECT
-from src.config.prompts import FORK_DEFAULT_EXECUTOR_PROMPT, FORK_EXECUTION_CONTRACT
+from src.config.prompts import (
+    FORK_DEFAULT_EXECUTOR_PROMPT,
+    FORK_DELEGATE_CITATION_INSTRUCTION,
+    FORK_DIRECT_CITATION_INSTRUCTION,
+    FORK_EXECUTION_CONTRACT,
+)
 
 
 def test_system_prompt_always_carries_execution_contract():
@@ -52,5 +57,10 @@ def test_preset_persona_also_gets_path_citation_instruction():
 
 
 def test_default_executor_prompt_has_no_unconditional_citation_rule():
-    """默认人设里不得再留无条件的 [n] 禁令（那会与直出路径矛盾）。"""
-    assert "不标注引用编号" not in FORK_DEFAULT_EXECUTOR_PROMPT
+    """默认人设里不得留任何引用编号约束（那会与直出路径矛盾，且应由按路径指示承载）。"""
+    assert "引用编号" not in FORK_DEFAULT_EXECUTOR_PROMPT
+
+
+def test_two_path_citation_instructions_differ():
+    """两条按路径的引用指示文案不同且有意为之，不得被"统一"。"""
+    assert FORK_DIRECT_CITATION_INSTRUCTION != FORK_DELEGATE_CITATION_INSTRUCTION

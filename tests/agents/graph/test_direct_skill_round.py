@@ -9,6 +9,7 @@ from src.agents.graph.state import AgentState
 from src.agents.graph.workflow import build_graph
 from src.agents.skills.models import SkillContext, SkillRecord
 from src.config.const import (
+    DELEGATE_VIA_DIRECT,
     FORK_CONFIRM_MARKER,
     VERIFY_CITATION_MARKER,
     VERIFY_KB_CITATION_MARKER,
@@ -137,6 +138,41 @@ async def test_direct_round_keeps_child_citations_and_zero_agent_rounds():
     assert final["verify_temporal_years"] == [2024]  # 子 ctx 年份传播进 state
     assert main_ctx.tool_contexts == []  # 主池保持为空（D7/D24）
     assert main_ctx.temporal_years == []
+
+
+@pytest.mark.asyncio
+async def test_direct_round_marks_run_via_direct():
+    """直出轮构造的 DelegateRun 必须标 via=DELEGATE_VIA_DIRECT（决定子代理自标 [n]）。
+
+    直出是 [n] 策略的入口侧语义落点：漏填会静默回落到 DELEGATE_VIA_DELEGATE 默认值，
+    子代理退回"不得自标 [n]"策略——正是本变更要修的反向缺陷，故在此钉死。
+    """
+    record = SkillRecord(
+        name="finance-analyst",
+        description="d",
+        context=SkillContext.FORK,
+        fork_body="任务：$ARGUMENTS",
+        allowed_tools=[],
+    )
+    fake = _FakeExecutor()
+    graph = _graph(fake, record)
+    main_ctx = RequestContext(session_id="s1", kb_id="kb1", kb_bound=True)
+    token = current_request_ctx.set(main_ctx)
+    try:
+        await _run_updates(
+            graph,
+            AgentState(
+                session_id="s1",
+                kb_id="kb1",
+                query="2024 年营收",
+                direct_skill=record.name,
+            ),
+        )
+    finally:
+        current_request_ctx.reset(token)
+
+    assert fake.seen_run is not None
+    assert fake.seen_run.via == DELEGATE_VIA_DIRECT
 
 
 @pytest.mark.asyncio
