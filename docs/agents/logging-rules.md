@@ -83,7 +83,8 @@
   `INLINE_PROMPT_MAX_CHARS`，加载期自动改 fork），`body_chars` 为正文（frontmatter 之后）
   字符数
 - `skill preload skip`（session / warning）——预设预绑定首轮预加载跳过某 skill；`reason` 取
-  not_inline（命中的 skill 是 fork，正文属子代理 prompt，不注入主 agent）
+  not_found（预设声明的 skill 名查不到）/ not_inline（命中的 skill 是 fork，正文属子代理
+  prompt，不注入主 agent）
 - `model turn` 扩 `temperature` / `temp_source`（explicit 逐轮直传档 / default 模型构造档）/
   `kb_bound`，不新增事件
 - `rerank done`（retrieval / info）——精排完成；`scored` 取 rerank（正常精排分）/
