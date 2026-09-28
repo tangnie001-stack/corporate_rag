@@ -152,6 +152,7 @@
 | `SkillRecord` | skill 文件解析后的运行时对象（name/description/context/inline_prompt/fork_body/双轴等），由 `SkillLoader` 产出（`src/agents/skills/models.py`） | ❌ 直接用 SKILL.md 原文当结构体 |
 | inline 执行 | skill `context=inline`：方法论注入主 agent 上下文，主 agent 自己执行 | — |
 | fork 执行 | skill `context=fork`：`SkillExecutor` 生成零工具子代理独立深度分析，结果纯文本回主 agent | — |
+| 按路径的引用编号策略 | fork 子代理的 `[n]` 指示按**入口路径**分派（design D16，载体 `DelegateRun.via`）：**委派路径**（`delegate_task` → `DELEGATE_VIA_DELEGATE`）子代理检索落子池、`[n]` 由主 agent 按自身检索来源统一补标，子代理**不标**；**直出路径**（`/xxx` → `DELEGATE_VIA_DIRECT`）无上游补标，子代理须自检索并自标 `[n]`（子池即本轮引用池）。两条策略**不同且有意为之**，不得"统一" | ❌ 以为两条路径共用同一执行器就该共用 `[n]` 策略；在委派路径让子代理自标 |
 | `context_source` | skill 的 `context` 取值来源：`default`（未声明→inline）/ `explicit`（frontmatter 显式）/ `auto_oversize`（未声明但正文超 `INLINE_PROMPT_MAX_CHARS`，加载期自动改 fork） | ❌ 以为"未声明"就是固定某一侧；长文 skill 的承载方式随正文长度自动变化 |
 | `skill_direct`（直出节点） | `/xxx` 命中 fork skill 时主 agent 零 LLM 轮：直接跑 fork 子代理，把结果与"本轮材料"（引用池 + 要求覆盖年份）搬进 `AgentState` 交 verify/format；入口分派与节点契约见 api_contract.md「5.5 fork 执行层契约」 | — |
 | 执行者选择 | fork 子代理的执行者人设按 `skill.agent` > 会话绑定智能体 > 系统默认人设的优先级选取（`src/agents/skills/executor.py`） | ❌ 以为 fork 恒用系统默认人设 |

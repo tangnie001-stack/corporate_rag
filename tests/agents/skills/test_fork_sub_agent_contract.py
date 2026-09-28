@@ -4,7 +4,12 @@ import pytest
 
 from src.agents.skills.executor import SkillExecutor
 from src.agents.skills.models import SkillContext, SkillRecord
-from src.config.prompts import FORK_DEFAULT_EXECUTOR_PROMPT, FORK_EXECUTION_CONTRACT
+from src.config.const import DELEGATE_VIA_DELEGATE
+from src.config.prompts import (
+    FORK_DEFAULT_EXECUTOR_PROMPT,
+    FORK_DELEGATE_CITATION_INSTRUCTION,
+    FORK_EXECUTION_CONTRACT,
+)
 
 
 class _FakeAgent:
@@ -33,7 +38,7 @@ async def test_sub_agent_uses_system_prompt_and_user_body(monkeypatch):
         fork_body="按方法论分析。\n任务：$ARGUMENTS",
         allowed_tools=["retrieve_kb"],
     )
-    executor._build_sub_agent(record, preset=None)
+    executor._build_sub_agent(record, preset=None, via=DELEGATE_VIA_DELEGATE)
 
     assert captured["system_prompt"]  # 执行者人设非空（无 preset → 系统默认人设）
     assert captured["tools"] == []  # available 为空 → 交集为空
@@ -70,20 +75,24 @@ def test_render_fork_task_appends_when_no_placeholder():
 
 
 def test_executor_system_prompt_falls_back_to_default():
-    """无 preset：返回系统默认执行者人设 + 执行契约。"""
+    """无 preset：返回系统默认执行者人设 + 执行契约 + 委派路径引用指示。"""
     executor = SkillExecutor(main_llm=object())
-    assert executor._executor_system_prompt(None) == (
-        FORK_DEFAULT_EXECUTOR_PROMPT + FORK_EXECUTION_CONTRACT
+    assert executor._executor_system_prompt(None, DELEGATE_VIA_DELEGATE) == (
+        FORK_DEFAULT_EXECUTOR_PROMPT
+        + FORK_EXECUTION_CONTRACT
+        + FORK_DELEGATE_CITATION_INSTRUCTION
     )
 
 
 def test_executor_system_prompt_uses_preset_persona():
-    """有 preset：返回 preset.system_prompt + 执行契约。"""
+    """有 preset：返回 preset.system_prompt + 执行契约 + 委派路径引用指示。"""
 
     class _Preset:
         system_prompt = "你是一名资深财务分析师。"
 
     executor = SkillExecutor(main_llm=object())
-    assert executor._executor_system_prompt(_Preset()) == (
-        "你是一名资深财务分析师。" + FORK_EXECUTION_CONTRACT
+    assert executor._executor_system_prompt(_Preset(), DELEGATE_VIA_DELEGATE) == (
+        "你是一名资深财务分析师。"
+        + FORK_EXECUTION_CONTRACT
+        + FORK_DELEGATE_CITATION_INSTRUCTION
     )

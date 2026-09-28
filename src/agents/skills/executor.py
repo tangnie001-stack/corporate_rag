@@ -47,12 +47,16 @@ from src.config import settings
 from src.config.const import (
     DELEGATE_DEFAULT_MAX_TURNS,
     DELEGATE_RESULT_LIMIT,
+    DELEGATE_VIA_DELEGATE,
+    DELEGATE_VIA_DIRECT,
     SKILL_TASK_PLACEHOLDERS,
     DelegateStopReason,
     SSEInteractionTexts,
 )
 from src.config.prompts import (
     FORK_DEFAULT_EXECUTOR_PROMPT,
+    FORK_DELEGATE_CITATION_INSTRUCTION,
+    FORK_DIRECT_CITATION_INSTRUCTION,
     FORK_EXECUTION_CONTRACT,
     FORK_TASK_APPEND_TMPL,
 )
@@ -184,7 +188,12 @@ class SkillExecutor:
             child_ctx = ctx
         user_content = self._render_fork_task(record, task)
         preset = self._resolve_executor(record, session_agent)
-        sub_agent = self._build_sub_agent(record, preset)
+        if run is not None:
+            via = run.via
+        else:
+            # run 为空只出现在无请求上下文的 fail-open 分支（委派路径），保持既有引用策略
+            via = DELEGATE_VIA_DELEGATE
+        sub_agent = self._build_sub_agent(record, preset, via)
         max_turns = self._fork_max_turns(preset)
         total_timeout = self._fork_total_timeout(child_ctx)
         # 委派域 trace（design D11）：父 span 标注 delegate_id / skill，其下挂子代理的工具 span。
@@ -278,7 +287,7 @@ class SkillExecutor:
             return DELEGATE_DEFAULT_MAX_TURNS
         return preset.max_turns
 
-    def _build_sub_agent(self, record: SkillRecord, preset):
+    def _build_sub_agent(self, record: SkillRecord, preset, via: str):
         """构建 fork 子代理：system=执行者人设、user=skill 正文、tools=只读面筛选结果。
 
         初始 user message（skill 正文 + 任务）由 _run_fork 渲染后经
@@ -287,6 +296,7 @@ class SkillExecutor:
         Args:
             record: fork SkillRecord
             preset: 执行者 AgentPreset（None → 系统默认人设）
+            via: 执行路径（DELEGATE_VIA_DIRECT|DELEGATE_VIA_DELEGATE），决定引用编号指示
 
         Returns:
             create_agent 编译产物（astream_events 事件源）
@@ -294,27 +304,31 @@ class SkillExecutor:
         return create_agent(
             self._resolve_fork_llm(record),
             tools=self._fork_tools(record, preset),
-            system_prompt=self._executor_system_prompt(preset),
+            system_prompt=self._executor_system_prompt(preset, via),
             middleware=[],
         )
 
-    def _executor_system_prompt(self, preset) -> str:
-        """解析 fork 子代理的 system prompt（执行者人设 + 执行契约）。
+    def _executor_system_prompt(self, preset, via: str) -> str:
+        """解析 fork 子代理 system prompt（执行者人设 + 执行契约 + 按路径的引用指示）。
 
         Args:
             preset: 执行者 AgentPreset；None 表示未选执行者预设
+            via: 执行路径（DELEGATE_VIA_DIRECT|DELEGATE_VIA_DELEGATE），决定引用编号指示
 
         Returns:
             preset 非空且 system_prompt 非空时返回其人设，否则返回系统默认
-            FORK_DEFAULT_EXECUTOR_PROMPT；两种情况下均在末尾追加执行契约
-            FORK_EXECUTION_CONTRACT（契约是执行约束，不由内容作者决定）。
+            FORK_DEFAULT_EXECUTOR_PROMPT；两者都追加执行契约 FORK_EXECUTION_CONTRACT
+            与按 via 选择的引用指示（统一放在最末，保证预设人设也受同一约束）。
             本层不构造 PromptManager、不拉 Langfuse。
         """
-        if preset is not None:
-            prompt = preset.system_prompt
-            if prompt:
-                return prompt + FORK_EXECUTION_CONTRACT
-        return FORK_DEFAULT_EXECUTOR_PROMPT + FORK_EXECUTION_CONTRACT
+        base = FORK_DEFAULT_EXECUTOR_PROMPT
+        if preset is not None and preset.system_prompt:
+            base = preset.system_prompt
+        if via == DELEGATE_VIA_DIRECT:
+            citation = FORK_DIRECT_CITATION_INSTRUCTION
+        else:
+            citation = FORK_DELEGATE_CITATION_INSTRUCTION
+        return base + FORK_EXECUTION_CONTRACT + citation
 
     def _fork_tools(self, record: SkillRecord, preset):
         """按 design D7 口径选子代理工具面（继承只读面 − 禁用集 ∩ 声明收窄）。

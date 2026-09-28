@@ -78,9 +78,22 @@ FORK_TASK_APPEND_TMPL: str = "任务：{task}"
 # fork 执行者预设缺省时的系统人设（create_agent 的 system_prompt）。skill 正文承载
 # "按哪本手册干"（初始 user message），本常量承载"谁在干活"的默认身份。Plan 3 会与
 # prompt 组装器对齐（build_system_prompt(persona=...) 的产物）。
+# 引用编号指示不写在此处：按路径分派，见下方两条 FORK_*_CITATION_INSTRUCTION。
 FORK_DEFAULT_EXECUTOR_PROMPT: str = (
     "你是一个企业知识库智能助手，作为委派子代理执行被指派的具体任务。"
-    "只依据任务给出的材料与方法论作答，不得编造；输出结构化分析文本，不标注引用编号 [n]。"
+    "只依据任务给出的材料与方法论作答，不得编造；输出结构化分析文本。"
+)
+
+# 引用编号指示按**路径**分派（design D16）：两条路径的 [n] 策略**不同且有意为之**，
+# 实施者不得"统一"它们。
+# 委派路径：子代理检索落子池、不回流主池，[n] 由主 agent 按**自身**检索来源统一补标，
+#   故子代理不得自标（否则编号语义会与主池错配）。
+FORK_DELEGATE_CITATION_INSTRUCTION: str = "\n\n引用编号：不要标注引用编号 [n]（本轮编号由编排方按主 agent 的检索来源统一补标）。"
+# 直出路径（/xxx）：没有主 agent 补标，子代理须自行检索并自标 [n]，
+#   其子引用池即本轮引用池。
+FORK_DIRECT_CITATION_INSTRUCTION: str = (
+    "\n\n引用编号：本轮没有上游补标——请先自行检索，并在句末标注与检索结果一致的 [n]"
+    "（编号与你检索到的材料顺序一致）。"
 )
 
 # fork 执行契约（design D18）：追加进子代理 system prompt，要求子代理需要用户确认时

@@ -89,8 +89,13 @@ TEMPORAL_RECENT_N_YEARS = 3
 MAX_DELEGATE_BONUS = (
     2  # delegate 轮后主 agent 迭代上限放宽轮数（整合余量，单请求总上限仍封顶）
 )
-DELEGATE_DEFAULT_MAX_TURNS = 5  # fork 零工具默认 turn 上限（防御）
+DELEGATE_DEFAULT_MAX_TURNS = 5  # fork 子代理默认 turn 上限（防御）
 DELEGATE_RESULT_LIMIT = 1000  # fork 结果回流主 agent 的截断阈值（字符）
+# 委派路径标识（DelegateRun.via）：执行器据此决定给子代理的引用编号指示（design D16）。
+# direct = /xxx 直出（**没有主 agent 补标** → 子代理须自检索并自标 [n]）；
+# delegate = 主 agent 委派（[n] 由主 agent 按自身检索来源补标 → 子代理不标）。
+DELEGATE_VIA_DIRECT = "direct"
+DELEGATE_VIA_DELEGATE = "delegate"
 INLINE_PROMPT_MAX_CHARS = 500  # inline skill 正文规模上限（字符，防上下文累积膨胀）；未声明 context 时超出即自动改用 fork，显式 inline 时仅记 warning
 # skill / agent preset 名允许的字符集（ASCII slug）：/xxx 命令天然是 ASCII 惯例，
 # 非 ASCII 名会让 `/财报分析` 落进"非命令形态"分支被静默当普通文本（design D15）

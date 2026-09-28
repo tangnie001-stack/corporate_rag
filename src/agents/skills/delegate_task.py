@@ -3,7 +3,7 @@
 工具职责：
 1. 调用前 reload registry（懒重载，design D16）
 2. 按 skill 命中分发：unknown → 返回"skill 不存在"+ 可用列表；inline → 返回
-   方法论（主 agent 自己答）；fork → SkillExecutor 跑零工具子代理
+   方法论（主 agent 自己答）；fork → SkillExecutor 跑子代理
 3. fork 执行期间经 ctx.clarify_channel 推 delegate start/end 事件（带 delegate_id
    与 ok/reason 终态；增量由 executor 投 delegate delta），inline 命中不推
    （design D14）；不走外层 astream_events 映射
@@ -24,6 +24,7 @@ from src.agents.skills.registry import SkillRegistry
 from src.chat.task_registry import task_registry
 from src.config.const import (
     DELEGATE_TASK_TITLE_TMPL,
+    DELEGATE_VIA_DELEGATE,
     DelegateStopReason,
     SSEInteractionTexts,
     TaskStatus,
@@ -104,6 +105,7 @@ def make_delegate_task(skill_registry: SkillRegistry, executor: SkillExecutor):
             delegate_id=delegate_id,
             skill_name=record.name,
             ctx=ctx.child(),
+            via=DELEGATE_VIA_DELEGATE,
         )
         # 任务看板自动登记（task-board）：execution 条目 task_id=delegate_id，
         # stage 仅 coarse 边界更新（此处 start、finally 终态）

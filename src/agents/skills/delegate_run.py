@@ -7,6 +7,7 @@ delegate_id / 停止原因写在 RequestContext 的单值字段上会互相覆�
 
 from dataclasses import dataclass
 
+from src.config.const import DELEGATE_VIA_DELEGATE
 from src.infra.llm.request_context import RequestContext
 
 
@@ -20,6 +21,7 @@ class DelegateRun:
         ctx: 子代理的独立请求上下文（来源：主 ctx.child()；用途：隔离引用池与计数）
         stop_reason: 中断原因（来源：executor 中断时写入；用途：终态区分 normal 与中断）
         result_text: 子代理最终文本（来源：executor 聚合；用途：直出轮写 answer）
+        via: 执行路径（来源：调用方按入口填；用途：执行器据此选引用编号指示）
     """
 
     delegate_id: str  # 本次委派短 id
@@ -27,3 +29,4 @@ class DelegateRun:
     ctx: RequestContext  # 子代理独立上下文
     stop_reason: str | None = None  # None=正常完成或未执行
     result_text: str = ""  # 子代理最终文本
+    via: str = DELEGATE_VIA_DELEGATE  # 执行路径（DELEGATE_VIA_DIRECT|DELEGATE_VIA_DELEGATE；决定引用编号指示）
