@@ -6,6 +6,7 @@ from src.agents.graph.verify.confirm_gate import (
     ask_confirm_question,
     detect_confirm_request,
     strip_confirm_marker,
+    strip_confirm_marker_prefix,
 )
 from src.config.const import FORK_CONFIRM_MARKER, SSEInteractionTexts
 
@@ -41,6 +42,30 @@ def test_strip_confirm_marker_only_strips_line_starting_marker():
     """marker 出现在行中（非行首）不剥离，仅行首 marker 行被移除。"""
     text = f"前文 {FORK_CONFIRM_MARKER} 不是行首\n{FORK_CONFIRM_MARKER} 待确认\n收尾"
     assert strip_confirm_marker(text) == f"前文 {FORK_CONFIRM_MARKER} 不是行首\n收尾"
+
+
+def test_strip_confirm_marker_prefix_keeps_question():
+    """剥协议前缀但保留问题文本（委派路径用；整行删除会吞掉"在等什么确认"）。"""
+    text = "先给结论。\nCONFIRM_REQUIRED: 请提供公司代码\n其余内容照旧。"
+    out = strip_confirm_marker_prefix(text)
+    assert "CONFIRM_REQUIRED" not in out
+    assert "请提供公司代码" in out
+    assert "先给结论。" in out
+    assert "其余内容照旧。" in out
+
+
+def test_strip_confirm_marker_prefix_noop_without_marker():
+    """无标记时原样返回（只去首尾空白）。"""
+    assert strip_confirm_marker_prefix("正常结论") == "正常结论"
+
+
+def test_strip_confirm_marker_still_drops_whole_line():
+    """既有的整行删除行为不变（直出路径依赖它）。"""
+    text = "结论。\nCONFIRM_REQUIRED: 请提供公司代码\n尾注。"
+    out = strip_confirm_marker(text)
+    assert "请提供公司代码" not in out
+    assert "结论。" in out
+    assert "尾注。" in out
 
 
 @pytest.mark.asyncio

@@ -390,17 +390,18 @@ def test_make_rag_tools_without_delegate_keeps_fixed_set():
 class _StubExecutor(SkillExecutor):
     """替身执行器：记录收到的 run，并模拟子代理向自己的上下文写检索结果。"""
 
-    def __init__(self, stop_reason: str | None = None):
+    def __init__(self, stop_reason: str | None = None, output: str = "子代理结论"):
         super().__init__(main_llm=MagicMock())
         self.seen_run: DelegateRun | None = None
         self.stop_reason = stop_reason
+        self.output = output
 
     async def execute(self, record, task, run=None):
         self.seen_run = run
         if run is not None:
             run.ctx.tool_contexts.append(cast(RAGContext, _Ctx("子代理材料")))
             run.stop_reason = self.stop_reason
-        return "子代理结论"
+        return self.output
 
 
 class _Ctx:
@@ -450,3 +451,23 @@ async def test_delegate_end_reason_from_run_not_main_ctx():
     assert len(end) == 1
     assert end[0]["ok"] is False
     assert end[0]["reason"] == DelegateStopReason.TURN.value
+
+
+@pytest.mark.asyncio
+async def test_delegate_strips_confirm_marker_prefix_keeps_question():
+    """委派路径剥掉 `CONFIRM_REQUIRED:` 协议前缀，但保留问题文本（主 agent 据此决定是否提问）。"""
+    parent = RequestContext(session_id="s1", kb_id="k1", kb_bound=True)
+    token = current_request_ctx.set(parent)
+    executor = _StubExecutor(
+        output="先给结论。\nCONFIRM_REQUIRED: 请提供公司代码\n其余内容照旧。"
+    )
+    tool = make_delegate_task(
+        _FakeRegistry({"analyst": _record("analyst", SkillContext.FORK, "正文")}),
+        executor,
+    )
+    try:
+        out = await tool.ainvoke({"task": "任务", "skill": "analyst"})
+    finally:
+        current_request_ctx.reset(token)
+    assert "CONFIRM_REQUIRED" not in out
+    assert "请提供公司代码" in out

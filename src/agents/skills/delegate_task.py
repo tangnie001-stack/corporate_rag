@@ -16,6 +16,7 @@ import uuid
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
+from src.agents.graph.verify.confirm_gate import strip_confirm_marker_prefix
 from src.agents.skills.delegate_run import DelegateRun
 from src.agents.skills.executor import SkillExecutor
 from src.agents.skills.models import SkillContext
@@ -138,6 +139,8 @@ def make_delegate_task(skill_registry: SkillRegistry, executor: SkillExecutor):
         try:
             try:
                 out = await executor.execute(record, task, run)
+                # 内部协议串不外泄；但保留问题文本——主 agent 据此自行决定是否向用户提问
+                out = strip_confirm_marker_prefix(out)
                 result_len = len(out)
             except asyncio.CancelledError:
                 stop_reason = DelegateStopReason.CANCELLED
