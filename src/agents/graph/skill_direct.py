@@ -16,6 +16,7 @@ from src.agents.graph.verify.confirm_gate import (
 from src.agents.skills.delegate_run import DelegateRun
 from src.agents.skills.models import SkillContext
 from src.config.const import (
+    DELEGATE_VIA_DIRECT,
     VERIFY_CITATION_MARKER,
     VERIFY_KB_CITATION_MARKER,
     SSEInteractionTexts,
@@ -93,6 +94,7 @@ def make_skill_direct_node(skill_registry, executor):
             delegate_id=uuid.uuid4().hex[:8],
             skill_name=record.name,
             ctx=main_ctx.child(),
+            via=DELEGATE_VIA_DIRECT,
         )
         # 重跑消费 verify 注入的引用标注指引：state.messages 里含 VERIFY_CITATION_MARKER
         # 或 VERIFY_KB_CITATION_MARKER 的 SystemMessage（verify 护栏注入）即上一轮
@@ -131,6 +133,7 @@ def make_skill_direct_node(skill_registry, executor):
                 delegate_id=uuid.uuid4().hex[:8],
                 skill_name=record.name,
                 ctx=main_ctx.child(),
+                via=DELEGATE_VIA_DIRECT,
             )
             text = await executor.execute(
                 record, f"{state.query}\n\n用户补充说明：{reply}", run

@@ -882,6 +882,8 @@ class AgentService:
         Returns:
             (用 "\\n\\n" 拼接的正文, 成功解析的技能名列表——去重、按声明顺序保序；
             全部查不到时正文为空串、名单为空列表)
+            只注入 inline 正文；fork skill 被跳过（记 skill preload skip）——
+            fork 正文属于子代理 prompt，注入主 agent 是语义错配。
         """
         parts: list[str] = []
         resolved: list[str] = []
@@ -896,8 +898,11 @@ class AgentService:
                 continue
             body = record.inline_prompt
             if not body:
-                body = record.fork_body
-            if not body:
+                # fork skill 的正文是写给子代理的任务 prompt，注入主 agent 属语义错配
+                # 且与 fork 的"正文不进主 agent 上下文"冲突；需要用 fork skill 时走委派
+                core_logging.log_event(
+                    Event.SKILL_PRELOAD_SKIP, skill=name, reason="not_inline"
+                )
                 continue
             parts.append(render_skill_body(body, ""))
             if name not in resolved:

@@ -44,6 +44,29 @@ def strip_confirm_marker(answer: str) -> str:
     return "\n".join(kept).strip()
 
 
+def strip_confirm_marker_prefix(answer: str) -> str:
+    """移除"需确认"标记的协议前缀，但保留该行上的问题文本。
+
+    与 strip_confirm_marker 的分工：后者整行删除，适用于直出路径（问题已被确认门
+    取走并经 ask_user 问过用户，正文里再留一行属内部协议串泄漏）；委派路径没有
+    确认门，需要把"子代理在等什么确认"交给主 agent 决定是否提问，故只剥前缀。
+
+    Args:
+        answer: 子代理聚合文本
+
+    Returns:
+        剥掉 marker 前缀后的文本（无标记时原样返回）
+    """
+    kept: list[str] = []
+    for line in answer.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(FORK_CONFIRM_MARKER):
+            kept.append(stripped[len(FORK_CONFIRM_MARKER) :].strip())
+        else:
+            kept.append(line)
+    return "\n".join(kept).strip()
+
+
 async def ask_confirm_question(question: str, session_id: str) -> str | None:
     """经澄清链路向用户提问并等待答复。
 

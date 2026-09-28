@@ -121,6 +121,38 @@ async def test_retrieve_kb_unbound_returns_empty(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_retrieve_kb_fork_dict_state_falls_back_to_ctx(monkeypatch):
+    """fork 子代理场景：state 为普通 dict（create_agent 图无 InjectedState 的 AgentState），
+    不抛 AttributeError，kb_id 回退取 current_request_ctx 的 kb_id（子 ctx 已复制）。"""
+    search_called = []
+
+    async def fake_search(query, kb_id, vector_store):
+        """mock search：记录底层检索被以哪个 kb_id 调用。"""
+        search_called.append(kb_id)
+        return []
+
+    monkeypatch.setattr(retrieval, "search", fake_search)
+    monkeypatch.setattr(retrieval, "rerank_results", lambda q, r, rk: [])
+
+    tool = make_rag_tools(
+        vector_store=cast(VectorStore, None),
+        reranker=None,
+        prompt_manager=None,
+    )[0]
+
+    ctx = RequestContext(session_id="s1", kb_id="kb_fork")
+    token = current_request_ctx.set(ctx)
+    try:
+        # 子代理图注入的是普通 dict（仅 messages），无 kb_id / _agent_iterations 属性
+        out = await tool.ainvoke({"query": "腾讯营收", "state": {"messages": []}})
+    finally:
+        current_request_ctx.reset(token)
+
+    assert out == ""
+    assert search_called == ["kb_fork"]
+
+
+@pytest.mark.asyncio
 async def test_retrieve_kb_rerank_timeout_falls_back_raw_order(monkeypatch):
     """rerank 超时后降级为检索原始顺序上下文，不返回空结果触发 abstain。"""
     from src.agents.tools import rag_tools as rag_tools_mod

@@ -85,6 +85,24 @@ def test_no_registry_falls_back_to_system_default():
     )
 
 
+def test_none_record_skips_skill_agent_uses_session_agent(tmp_path):
+    """record 为 None（通用委派）→ 跳过 record.agent 分支，只用会话选定智能体。"""
+    exe = SkillExecutor(
+        main_llm=object(), preset_registry=_registry(tmp_path, [("finance-expert", 7)])
+    )
+    preset = exe._resolve_executor(None, "finance-expert")
+    assert preset is not None
+    assert preset.name == "finance-expert"
+
+
+def test_none_record_without_session_agent_falls_back_to_default(tmp_path):
+    """record 为 None 且无会话智能体 → None（系统默认人设）。"""
+    exe = SkillExecutor(
+        main_llm=object(), preset_registry=_registry(tmp_path, [("finance-expert", 7)])
+    )
+    assert exe._resolve_executor(None, "") is None
+
+
 def test_fork_max_turns_uses_preset_then_default(tmp_path):
     """maxTurns：preset 声明值优先；未声明或 preset 为 None 时用 DELEGATE_DEFAULT_MAX_TURNS。"""
     exe = SkillExecutor(

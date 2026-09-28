@@ -4,6 +4,10 @@
 `on_chain_start/end(name=="tools")` 开合该轮的父 span，再把 `on_tool_start/end/error`
 按 `run_id` 配对成子 span。
 
+委派域（scope=delegate）：每次委派一个实例，先 open_delegate_span 再 consume 子代理
+事件流；委派父 span 名为 `delegate`（无前缀，标注 delegate_id / skill），`"delegate:"`
+前缀只加在该域的轮次 span 与工具 span 名上，便于在 trace 上区分归属。
+
 三条不变量（改动时不得破坏）：
 1. **不按工具名分支、`data.output` 原样透传** —— 对工具实现无感，MCP 工具经统一入口
    进 ToolNode 即自动覆盖；
@@ -34,6 +38,8 @@ _EV_TOOL_ERROR = "on_tool_error"
 # `tools:<uuid>`（非空），照此过滤会丢掉全部工具事件。
 _TOOLS_NODE = "tools"
 
+_DELEGATE_SPAN = "delegate"  # 委派父 span 名（与 scope=delegate 对应）
+
 
 def _now() -> datetime:
     """当前 UTC 时间（span 的起止时刻）。"""
@@ -45,22 +51,67 @@ class ToolTraceCollector:
 
     每次请求 new 一个、绝不共享（跨事件累积状态 + 并发隔离）。
 
-    Args:
-        enabled: 是否产出（取自 `settings.LANGFUSE_ENABLE`；命令式路径不受
-            `configure(enabled=False)` 管，必须自己断电）
-        trace_id: 本轮 trace id（`current_trace_id.get()`）；空串视为无根、不产出
-        client: Langfuse 客户端；None 时惰性取 `langfuse_context.client_instance`
-            （**不得** `new Langfuse()`：那会绕过开关与关停 flush）
+    `client` 为 None 时惰性取 `langfuse_context.client_instance`（**不得**
+    `new Langfuse()`：那会绕过开关与关停 flush）。构造参数见 `__init__`。
     """
 
-    def __init__(self, enabled: bool, trace_id: str, client: Any = None) -> None:
+    def __init__(
+        self,
+        enabled: bool,
+        trace_id: str,
+        client: Any = None,
+        scope: str = "main",
+        parent_span: Any = None,
+        name_prefix: str = "",
+    ) -> None:
+        """初始化采集器。
+
+        Args:
+            enabled: 是否产出（取自 settings.LANGFUSE_ENABLE）
+            trace_id: 本轮 trace id
+            client: Langfuse 客户端；None 时惰性取单例
+            scope: 该采集器所属域（main=主图；delegate=fork 子代理），记录后供调用方 /
+                排查辨识；当前实现不据它分支，委派域由 open_delegate_span 与
+                name_prefix 落地
+            parent_span: 委派父 span（scope=delegate 时由 open_delegate_span 产出并回填）
+            name_prefix: span 名前缀（委派域传 "delegate:"，便于在 trace 上区分归属）
+        """
         self._enabled = enabled and bool(trace_id)
         self._trace_id = trace_id
         self._client = client
+        self._scope = scope
+        self._parent_span = parent_span
+        self._name_prefix = name_prefix
         self._open: dict[str, Any] = {}  # run_id -> 尚未结束的工具 span
         self._round: Any = None  # 当前 tools 父 span
+        self._delegate_span: Any = None  # 委派父 span（仅 scope=delegate）
 
     # ---------- 对外 ----------
+
+    def open_delegate_span(self, delegate_id: str, skill: str) -> Any | None:
+        """开委派父 span（标注 delegate_id / skill），供该次委派的工具 span 挂靠。
+
+        Args:
+            delegate_id: 本次委派短 id
+            skill: 被调用的 skill 名（通用委派传占位名）
+
+        Returns:
+            委派父 span；未启用或建 span 失败时返回 None（观测失败不得影响对话）
+        """
+        if not self._enabled:
+            return None
+        try:
+            self._delegate_span = self._get_client().span(
+                trace_id=self._trace_id,
+                name=_DELEGATE_SPAN,
+                start_time=_now(),
+                metadata={"delegate_id": delegate_id, "skill": skill},
+            )
+        except Exception:
+            logger.warning("[tool_trace] open delegate span failed", exc_info=True)
+            return None
+        self._parent_span = self._delegate_span
+        return self._delegate_span
 
     def consume(self, item: Any) -> None:
         """事件循环每项调一次；非 tools 节点的事件直接返回。
@@ -93,6 +144,10 @@ class ToolTraceCollector:
             self._end_span(span)
         self._open.clear()
         self._close_round()
+        if self._delegate_span is not None:
+            span, self._delegate_span = self._delegate_span, None
+            self._parent_span = None
+            self._end_span(span)
 
     # ---------- 扩展点（MCP 接入时在此加逻辑，本期不实现） ----------
 
@@ -141,12 +196,18 @@ class ToolTraceCollector:
         return self._client
 
     def _open_round(self) -> None:
-        """开该轮的 `tools` 父 span（同一轮只开一次）。"""
+        """开该轮的 tools 父 span（同一轮只开一次）。"""
         if self._round is not None:
             return
+        parent_id = None
+        if self._parent_span is not None:
+            parent_id = self._parent_span.id
         try:
             self._round = self._get_client().span(
-                trace_id=self._trace_id, name=_TOOLS_NODE, start_time=_now()
+                trace_id=self._trace_id,
+                parent_observation_id=parent_id,
+                name=self._name_prefix + _TOOLS_NODE,
+                start_time=_now(),
             )
         except Exception:  # 观测失败不得影响对话
             logger.warning("[tool_trace] open round span failed", exc_info=True)
@@ -167,7 +228,7 @@ class ToolTraceCollector:
             span = self._get_client().span(
                 trace_id=self._trace_id,
                 parent_observation_id=parent_id,
-                name=str(item.get("name", "")),
+                name=self._name_prefix + str(item.get("name", "")),
                 input=self._normalize_input(item),
                 start_time=_now(),
             )

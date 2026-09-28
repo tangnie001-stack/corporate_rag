@@ -17,12 +17,14 @@ class _FakeSpan:
         parent_id: str | None,
         trace_id: str | None,
         input: Any,
+        metadata: dict | None,
     ):
         self.id = span_id
         self.name = name
         self.parent_observation_id = parent_id
         self.trace_id = trace_id
         self.input = input
+        self.metadata = metadata
         self.ended: dict | None = None
 
     def end(self, **kwargs):
@@ -42,6 +44,7 @@ class _FakeClient:
             kwargs.get("parent_observation_id"),
             kwargs.get("trace_id"),
             kwargs.get("input"),
+            kwargs.get("metadata"),
         )
         self.spans.append(span)
         return span
@@ -235,3 +238,56 @@ def test_spans_carry_trace_id_and_tool_input():
     assert round_span.trace_id == "t1"
     assert tool_span.trace_id == "t1"
     assert tool_span.input == {"query": "q"}
+
+
+def test_default_scope_is_main_unchanged():
+    """缺省参数下行为与既有完全一致（回归）。"""
+    client = _FakeClient()
+    collector = ToolTraceCollector(enabled=True, trace_id="t1", client=client)
+    collector.consume(_item("on_chain_start", name="tools"))
+    collector.consume(_item("on_tool_start", name="retrieve_kb", run_id="r1"))
+    collector.consume(_item("on_tool_end", run_id="r1", output="ok"))
+    collector.close()
+    assert [s.name for s in client.spans] == ["tools", "retrieve_kb"]
+    assert client.spans[0].parent_observation_id is None
+
+
+def test_delegate_scope_prefixes_names_and_nests_under_parent():
+    """委派域：名字带前缀，且挂在该次委派的父 span 之下。"""
+    client = _FakeClient()
+    collector = ToolTraceCollector(
+        enabled=True,
+        trace_id="t1",
+        client=client,
+        scope="delegate",
+        name_prefix="delegate:",
+    )
+    parent = collector.open_delegate_span(delegate_id="d1", skill="analyst")
+    assert parent is not None
+    collector.consume(_item("on_chain_start", name="tools"))
+    collector.consume(_item("on_tool_start", name="retrieve_kb", run_id="r1"))
+    collector.consume(_item("on_tool_end", run_id="r1", output="ok"))
+    collector.close()
+    names = [s.name for s in client.spans]
+    assert names == ["delegate", "delegate:tools", "delegate:retrieve_kb"]
+    assert client.spans[0].metadata == {"delegate_id": "d1", "skill": "analyst"}
+    assert client.spans[1].parent_observation_id == parent.id  # round 挂在父下
+    assert (
+        client.spans[2].parent_observation_id == client.spans[1].id
+    )  # 工具挂在 round 下
+
+
+def test_delegate_span_failure_does_not_break_conversation():
+    """观测失败不影响对话：父 span 建不出来时返回 None，工具 span 仍可产出。"""
+
+    class _BrokenClient(_FakeClient):
+        def span(self, **kwargs):
+            if kwargs.get("name") == "delegate":
+                raise RuntimeError("langfuse down")
+            return super().span(**kwargs)
+
+    collector = ToolTraceCollector(
+        enabled=True, trace_id="t1", client=_BrokenClient(), scope="delegate"
+    )
+    assert collector.open_delegate_span(delegate_id="d1", skill="s") is None
+    collector.close()  # 不得抛

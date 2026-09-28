@@ -53,7 +53,7 @@ async def test_fork_writes_child_pool_not_parent(monkeypatch):
     fake = _FakeSubAgent()
 
     executor = SkillExecutor(main_llm=object())
-    monkeypatch.setattr(executor, "_build_sub_agent", lambda record, preset: fake)
+    monkeypatch.setattr(executor, "_build_sub_agent", lambda record, preset, via: fake)
     monkeypatch.setattr(executor, "_fork_tools", lambda record, preset: [])
     record = SkillRecord(
         name="finance-analyst",
@@ -80,7 +80,7 @@ async def test_context_var_restored_after_fork(monkeypatch):
     token = current_request_ctx.set(parent)
     executor = SkillExecutor(main_llm=object())
     monkeypatch.setattr(
-        executor, "_build_sub_agent", lambda record, preset: _FakeSubAgent()
+        executor, "_build_sub_agent", lambda record, preset, via: _FakeSubAgent()
     )
     monkeypatch.setattr(executor, "_fork_tools", lambda record, preset: [])
     record = SkillRecord(

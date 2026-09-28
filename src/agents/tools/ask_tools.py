@@ -78,6 +78,8 @@ async def ask_user(
     ctx = current_request_ctx.get()
     if ctx is None:
         return SSEInteractionTexts.ASK_USER_CTX_UNAVAILABLE
+    # ask_user 恒在 FORK_FORBIDDEN_TOOLS 内、只由主图调用，注入的必是 AgentState；
+    # 若将来把它移出禁用集，须同 retrieve_kb 一样加 isinstance(state, AgentState) 守卫
     if state is not None:
         query_text = state.query
         iteration = state._agent_iterations

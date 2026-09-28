@@ -1,10 +1,14 @@
 """SkillExecutor — inline 指令注入 / fork 子代理执行。
 
 - inline：返回 skill 正文（render 后的方法论），主 agent 自己执行（不产生子代理）。
-- fork：create_agent(model, tools=白名单筛选结果, system_prompt=执行者人设) 生成独立
+- fork：create_agent(model, tools=只读面筛选结果, system_prompt=执行者人设) 生成独立
   子代理；初始 user message = skill 正文（task 已注入），返回纯文本（不带 [n]）。
-  未声明 allowed-tools 时零工具 = 防递归硬保证。执行期把 current_request_ctx 切到
+  子代理工具面默认继承执行者的只读面（allowed-tools 只作收窄，未声明即不收窄）；
+  防递归由禁用集（delegate_task / task_*）硬保证。执行期把 current_request_ctx 切到
   子上下文（run.ctx）：工具检索与引用编号落子池，不污染主 agent 引用池（design D7/D8/D9/R3）。
+- 通用委派（record 为 None，design D6）：不加载任何 skill 正文，task 直接作子代理初始
+  user message；执行者人设只用会话选定智能体（无 skill.agent 可查）；工具面的
+  allowed-tools 收窄项为空（仅继承只读面）。其余 fork 机制（超时/轮次/取消/引用池）完全复用。
 
 可观测性（design D11）：fork 子代理复用主 agent 的 llm 实例（或 get_llm 新建实例）——
 与主 agent **同级观测**（同一实例自带 callbacks；Langfuse 是否捕获取决于网关层，应用层
@@ -28,6 +32,7 @@ CancelledError 由主任务按取消路径收尾。
 """
 
 import asyncio
+import warnings
 from collections.abc import Callable
 
 from langchain.agents import create_agent
@@ -40,20 +45,27 @@ from src.agents.skills.fork_stream import consume_fork_events
 from src.agents.skills.fork_tools import select_fork_tools
 from src.agents.skills.models import SkillContext, SkillRecord
 from src.agents.skills.rendering import render_skill_body
+from src.agents.tools.readonly import readonly_map
 from src.config import settings
 from src.config.const import (
     DELEGATE_DEFAULT_MAX_TURNS,
     DELEGATE_RESULT_LIMIT,
+    DELEGATE_VIA_DELEGATE,
+    DELEGATE_VIA_DIRECT,
     SKILL_TASK_PLACEHOLDERS,
     DelegateStopReason,
     SSEInteractionTexts,
 )
 from src.config.prompts import (
     FORK_DEFAULT_EXECUTOR_PROMPT,
+    FORK_DELEGATE_CITATION_INSTRUCTION,
+    FORK_DIRECT_CITATION_INSTRUCTION,
     FORK_EXECUTION_CONTRACT,
     FORK_TASK_APPEND_TMPL,
 )
 from src.infra.llm.request_context import current_request_ctx
+from src.infra.llm.tool_trace import ToolTraceCollector
+from src.infra.llm.trace_context import current_trace_id
 from src.models import get_llm  # 模块级 import：测试需 patch executor.get_llm
 
 
@@ -89,12 +101,13 @@ class SkillExecutor:
         self._main_model_name = model_name
 
     async def execute(
-        self, record: SkillRecord, task: str, run: DelegateRun | None = None
+        self, record: SkillRecord | None, task: str, run: DelegateRun | None = None
     ) -> str:
         """执行一个 skill，返回给主 agent 的文本。
 
         Args:
-            record: 命中的 SkillRecord
+            record: 命中的 SkillRecord；None = 通用委派（不加载 skill 正文，直接走
+                fork 子代理，task 原样作子代理输入）
             task: 主 agent 委托的任务描述（fork 时同时作子代理初始消息与正文
                 $ARGUMENTS/{task} 占位替换值；inline 时填入 inline_prompt 占位）
             run: 本次 fork 委派运行态；None 时用当前主 ctx、不隔离（既有 inline /
@@ -103,7 +116,7 @@ class SkillExecutor:
         Returns:
             inline：渲染后的方法论文本；fork：子代理纯文本（截断/防失控超时文案）
         """
-        if record.context == SkillContext.INLINE:
+        if record is not None and record.context == SkillContext.INLINE:
             return self._render_inline(record, task)
         return await self._run_fork(record, task, run)
 
@@ -119,19 +132,22 @@ class SkillExecutor:
         """
         return render_skill_body(record.inline_prompt or "", task)
 
-    def _render_fork_task(self, record: SkillRecord, task: str) -> str:
+    def _render_fork_task(self, record: SkillRecord | None, task: str) -> str:
         """渲染 fork 子代理的初始 user message（skill 正文，任务已注入）。
 
         fork 正文声明了任务占位符（SKILL_TASK_PLACEHOLDERS 任一成员）时直接渲染；
         未声明时在正文末尾追加默认任务段，保证子代理始终拿到任务文本。
+        通用委派（record 为 None）无正文可渲染，直接返回 task 原样。
 
         Args:
-            record: fork SkillRecord（读 fork_body）
+            record: fork SkillRecord（读 fork_body）；None = 通用委派
             task: 主 agent 委托的任务文本
 
         Returns:
-            渲染后的正文，作为子代理初始 HumanMessage 内容
+            渲染后的正文，作为子代理初始 HumanMessage 内容；通用委派即 task
         """
+        if record is None:
+            return task
         body = record.fork_body or ""
         declared = False
         for placeholder in SKILL_TASK_PLACEHOLDERS:
@@ -143,12 +159,12 @@ class SkillExecutor:
         return render_skill_body(body, task)
 
     async def _run_fork(
-        self, record: SkillRecord, task: str, run: DelegateRun | None = None
+        self, record: SkillRecord | None, task: str, run: DelegateRun | None = None
     ) -> str:
         """fork 执行：子上下文隔离 + astream 级消费 + 三层防失控 + 思考跟随请求档。
 
         Args:
-            record: fork SkillRecord
+            record: fork SkillRecord；None = 通用委派（task 原样作子代理输入）
             task: 任务描述（渲染进 skill 正文，作子代理初始 HumanMessage）
             run: 本次委派运行态；None 时用当前主 ctx（不隔离），非 None 时切到
                 run.ctx 子上下文执行，工具检索写入子引用池
@@ -177,11 +193,34 @@ class SkillExecutor:
             child_ctx = run.ctx
         else:
             child_ctx = ctx
+        # 本次委派的 skill 标签：run 存在时以其 skill_name 为准（定点填 record.name、
+        # 通用填 SSEInteractionTexts.DELEGATE_GENERIC_LABEL）；无 run 的 fail-open 路径由 record 回退
+        if run is not None:
+            skill_name = run.skill_name
+        elif record is not None:
+            skill_name = record.name
+        else:
+            skill_name = SSEInteractionTexts.DELEGATE_GENERIC_LABEL
         user_content = self._render_fork_task(record, task)
         preset = self._resolve_executor(record, session_agent)
-        sub_agent = self._build_sub_agent(record, preset)
+        if run is not None:
+            via = run.via
+        else:
+            # run 为空只出现在无请求上下文的 fail-open 分支（委派路径），保持既有引用策略
+            via = DELEGATE_VIA_DELEGATE
+        sub_agent = self._build_sub_agent(record, preset, via)
         max_turns = self._fork_max_turns(preset)
         total_timeout = self._fork_total_timeout(child_ctx)
+        # 委派域 trace（design D11）：父 span 标注 delegate_id / skill，其下挂子代理的工具 span。
+        # 每委派一个实例——_round 是单值状态，共用实例会跨流串台。
+        trace_collector = ToolTraceCollector(
+            enabled=settings.LANGFUSE_ENABLE,
+            trace_id=current_trace_id.get() or "",
+            scope="delegate",
+            name_prefix="delegate:",
+        )
+        if run is not None:
+            trace_collector.open_delegate_span(run.delegate_id, skill_name)
         # 隔离子代理回调传播：不 reset 会经 var_child_runnable_config 把外层
         # callback handler 传进 create_agent，子代理 LLM 事件泄漏到外层
         # graph.astream_events（SSE token 污染 + full_answer 累积子代理原文）。
@@ -194,7 +233,12 @@ class SkillExecutor:
             try:
                 text = await asyncio.wait_for(
                     consume_fork_events(
-                        sub_agent, run, user_content, record.name, max_turns
+                        sub_agent,
+                        run,
+                        user_content,
+                        skill_name,
+                        max_turns,
+                        trace_collector,
                     ),
                     timeout=total_timeout,
                 )
@@ -221,24 +265,27 @@ class SkillExecutor:
             # 勿当死代码清理
             if run is not None:
                 run.stop_reason = run.ctx.fork_stop_reason
+            # 委派父 span 必须关：取消/异常路径不关会留下悬空 span
+            trace_collector.close()
             current_request_ctx.reset(token_ctx)
             var_child_runnable_config.reset(token)
 
     def _resolve_executor(
-        self, record: SkillRecord, session_agent: str
+        self, record: SkillRecord | None, session_agent: str
     ) -> AgentPreset | None:
         """按优先级选执行者预设：skill.agent > 会话智能体 > None（系统默认）。
 
         Args:
-            record: fork SkillRecord（其 agent 字段为最高优先级）
+            record: fork SkillRecord（其 agent 字段为最高优先级）；None = 通用委派
+                （无 skill.agent 可查，跳过该分支，只用会话智能体）
             session_agent: 会话绑定智能体名（空串=未绑定）
 
         Returns:
-            命中的 AgentPreset；两处都查不到（或未装配 registry）返回 None
+            命中的 AgentPreset；都查不到（或未装配 registry）返回 None
         """
         if self._preset_registry is None:
             return None
-        if record.agent:
+        if record is not None and record.agent:
             preset = self._preset_registry.get(record.agent)
             if preset is not None:
                 return preset
@@ -256,15 +303,16 @@ class SkillExecutor:
             return DELEGATE_DEFAULT_MAX_TURNS
         return preset.max_turns
 
-    def _build_sub_agent(self, record: SkillRecord, preset):
-        """构建 fork 子代理：system=执行者人设、user=skill 正文、tools=交集。
+    def _build_sub_agent(self, record: SkillRecord | None, preset, via: str):
+        """构建 fork 子代理：system=执行者人设、user=skill 正文、tools=只读面筛选结果。
 
         初始 user message（skill 正文 + 任务）由 _run_fork 渲染后经
-        consume_fork_events 传入；本方法只负责装配人设、工具交集与 middleware。
+        consume_fork_events 传入；本方法只负责装配人设、只读面筛选结果与 middleware。
 
         Args:
-            record: fork SkillRecord
+            record: fork SkillRecord；None = 通用委派（工具面不收窄、不声明 model）
             preset: 执行者 AgentPreset（None → 系统默认人设）
+            via: 执行路径（DELEGATE_VIA_DIRECT|DELEGATE_VIA_DELEGATE），决定引用编号指示
 
         Returns:
             create_agent 编译产物（astream_events 事件源）
@@ -272,39 +320,66 @@ class SkillExecutor:
         return create_agent(
             self._resolve_fork_llm(record),
             tools=self._fork_tools(record, preset),
-            system_prompt=self._executor_system_prompt(preset),
+            system_prompt=self._executor_system_prompt(preset, via),
             middleware=[],
         )
 
-    def _executor_system_prompt(self, preset) -> str:
-        """解析 fork 子代理的 system prompt（执行者人设 + 执行契约）。
+    def _executor_system_prompt(self, preset, via: str) -> str:
+        """解析 fork 子代理 system prompt（执行者人设 + 执行契约 + 按路径的引用指示）。
 
         Args:
             preset: 执行者 AgentPreset；None 表示未选执行者预设
+            via: 执行路径（DELEGATE_VIA_DIRECT|DELEGATE_VIA_DELEGATE），决定引用编号指示
 
         Returns:
             preset 非空且 system_prompt 非空时返回其人设，否则返回系统默认
-            FORK_DEFAULT_EXECUTOR_PROMPT；两种情况下均在末尾追加执行契约
-            FORK_EXECUTION_CONTRACT（契约是执行约束，不由内容作者决定）。
+            FORK_DEFAULT_EXECUTOR_PROMPT；两者都追加执行契约 FORK_EXECUTION_CONTRACT
+            与按 via 选择的引用指示（统一放在最末，保证预设人设也受同一约束）。
             本层不构造 PromptManager、不拉 Langfuse。
         """
-        if preset is not None:
-            prompt = preset.system_prompt
-            if prompt:
-                return prompt + FORK_EXECUTION_CONTRACT
-        return FORK_DEFAULT_EXECUTOR_PROMPT + FORK_EXECUTION_CONTRACT
+        base = FORK_DEFAULT_EXECUTOR_PROMPT
+        if preset is not None and preset.system_prompt:
+            base = preset.system_prompt
+        if via == DELEGATE_VIA_DIRECT:
+            citation = FORK_DIRECT_CITATION_INSTRUCTION
+        else:
+            citation = FORK_DELEGATE_CITATION_INSTRUCTION
+        return base + FORK_EXECUTION_CONTRACT + citation
 
-    def _fork_tools(self, record: SkillRecord, preset):
-        """按 allowed-tools ∩ 执行者 tools 选子代理工具（无 provider 时为零工具）。"""
+    def _fork_tools(self, record: SkillRecord | None, preset):
+        """按 design D7 口径选子代理工具面（继承只读面 − 禁用集 ∩ 声明收窄）。
+
+        只读表从进程级声明读取（`readonly_map()`）——工具在 `build_graph` 期注册，
+        **早于任何请求**，故生产路径上此处恒非空；空表由 `select_fork_tools` 按
+        fail-closed 处理。
+
+        Args:
+            record: fork SkillRecord（读 allowed_tools 作收窄项）；None = 通用委派
+                （无声明收窄项，allowed=[] 不收窄，仅继承只读面）
+            preset: 执行者预设（读 tools 作再收窄）；None 表示不再收窄
+
+        Returns:
+            子代理工具列表。未装配 tool_provider 且**工具已注册过**时记 warning 并返回空
+            （真实装配缺陷，不再静默零工具）；工具从未注册（离线/单测）时静默返回空。
+        """
+        if record is not None:
+            allowed = record.allowed_tools
+        else:
+            allowed = []
         if self._tool_provider is not None:
             available = self._tool_provider()
         else:
             available = []
+            if readonly_map():
+                # 表非空说明工具确实注册过，却拿不到 provider → 装配缺陷，必须可见
+                warnings.warn(
+                    "SkillExecutor 未装配 tool_provider，但工具已注册：fork 子代理工具面为空"
+                )
         if preset is not None:
             executor_tools = preset.tools
         else:
             executor_tools = None
-        return select_fork_tools(record.allowed_tools, available, executor_tools)
+        return select_fork_tools(allowed, available, executor_tools, readonly_map())
 
     @staticmethod
     def _fork_total_timeout(ctx) -> float:
@@ -321,11 +396,11 @@ class SkillExecutor:
             return settings.DELEGATE_TOTAL_TIMEOUT_THINKING_S
         return settings.DELEGATE_TOTAL_TIMEOUT_S
 
-    def _resolve_fork_llm(self, record: SkillRecord):
+    def _resolve_fork_llm(self, record: SkillRecord | None):
         """解析 fork 子代理的 llm 实例（model / deep_thinking 消费）。
 
         Args:
-            record: fork SkillRecord
+            record: fork SkillRecord；None = 通用委派（无 model 声明）
 
         Returns:
             llm 实例：
@@ -341,12 +416,16 @@ class SkillExecutor:
             thinking = None
         else:
             thinking = ctx.deep_thinking
-        if record.model is None and thinking is None:
+        if record is not None:
+            record_model = record.model
+        else:
+            record_model = None
+        if record_model is None and thinking is None:
             return self._main_llm
 
         kwargs: dict = {}
-        if record.model is not None:
-            kwargs["model"] = record.model
+        if record_model is not None:
+            kwargs["model"] = record_model
         elif self._main_model_name is not None:
             kwargs["model"] = self._main_model_name
         if thinking is not None:
