@@ -279,10 +279,10 @@ class SkillExecutor:
         return preset.max_turns
 
     def _build_sub_agent(self, record: SkillRecord, preset):
-        """构建 fork 子代理：system=执行者人设、user=skill 正文、tools=交集。
+        """构建 fork 子代理：system=执行者人设、user=skill 正文、tools=只读面筛选结果。
 
         初始 user message（skill 正文 + 任务）由 _run_fork 渲染后经
-        consume_fork_events 传入；本方法只负责装配人设、工具交集与 middleware。
+        consume_fork_events 传入；本方法只负责装配人设、只读面筛选结果与 middleware。
 
         Args:
             record: fork SkillRecord

@@ -1,6 +1,5 @@
 """测试 SkillLoader — SKILL.md frontmatter 解析与目录扫描。"""
 
-import warnings
 from pathlib import Path
 
 import pytest
@@ -53,17 +52,6 @@ def test_load_fork_skill(tmp_path):
     assert rec.fork_body is not None
     assert "财务建模专家" in rec.fork_body
     assert rec.inline_prompt is None
-
-
-def test_inline_without_allowed_tools_does_not_warn(tmp_path):
-    """inline 未声明 allowed-tools 属正常（白名单只约束 fork 的子代理工具）→ 不告警。"""
-    _write_skill(
-        tmp_path, "methodology", "description: x\ncontext: inline\n", "短方法论"
-    )
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        SkillLoader(tmp_path).load_all()
-    assert not [w for w in caught if "allowed-tools" in str(w.message)]
 
 
 def test_skill_name_defaults_to_dirname(tmp_path):
