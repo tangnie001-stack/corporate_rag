@@ -77,6 +77,13 @@
 - `skill dispatch`（session / info）——命令形态分派；`kind` 取 plain（普通文本，不记）/
   known（命中技能）/ unknown（未注册命令）；`context` 取 inline / fork（技能 frontmatter
   的形态）/ none（命令未命中技能，record 为空）
+- `skill resolved`（session / info）——加载每个 skill 时记其承载方式；`skill` 为 skill 名，
+  `context` 取生效形态 inline / fork（**非 frontmatter 原值**），`context_source` 取
+  default（未声明→inline）/ explicit（frontmatter 显式）/ auto_oversize（未声明但正文超
+  `INLINE_PROMPT_MAX_CHARS`，加载期自动改 fork），`body_chars` 为正文（frontmatter 之后）
+  字符数
+- `skill preload skip`（session / warning）——预设预绑定首轮预加载跳过某 skill；`reason` 取
+  not_inline（命中的 skill 是 fork，正文属子代理 prompt，不注入主 agent）
 - `model turn` 扩 `temperature` / `temp_source`（explicit 逐轮直传档 / default 模型构造档）/
   `kb_bound`，不新增事件
 - `rerank done`（retrieval / info）——精排完成；`scored` 取 rerank（正常精排分）/
