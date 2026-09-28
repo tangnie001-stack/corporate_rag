@@ -409,3 +409,25 @@ tests/infra/llm/      test_tool_trace.py
 **新引入矛盾：无。** 仅两条非阻断措辞建议（"次数为零"限定偏窄、责任实体写作"装配入口"而实际落在节点）——**也已顺手改掉**：前者简化为"有效上限减一"（该式对上限为 1 同样成立），后者改为"装配产出的运行链路 SHALL……由调用方在构造图输入时 seed"。
 
 **最终状态**：`openspec validate one-loop-two-roles` 通过；4/4 工件完整；`0/76` 任务未开工。**提案已达 Approve，可进入 ⑥ 执行阶段**（需先退出 explore 模式；且 §0.2 的开工闸门要求 `skill-execution-and-delegation` 的 P1+P2 已落地）。
+
+## 十六、dev-wsl 落地后的重核（2026-09-28 晚）
+
+**背景**：对方完成并推送——`skill-execution-and-delegation` **P1+P2 已落地、合并（`95c81ff`）、归档（`c6c8ea8`）**，其 delta 已同步进在效主 spec。我方 worktree 前滚合并（零冲突），已提交本轮提案工作（提交 `21c349a`，pre-commit 全绿）。
+
+**逐条重核结论**：
+
+| 我方提案依赖的事实 | 合并后现状 | 结论 |
+|---|---|---|
+| regen 预算复位"三处" | `guardrails.py:105/106`、`:180/181`、`regen_decision.py:174/175` 仍在原位 | ✅ 保持 |
+| SSE 谓词仍为 `"agent"` | `agent_service.py:250/267` 仍是 `== "agent"`（docstring `:186-201` 同） | ✅ 本变更要改的正是它 |
+| `ToolTraceCollector` 参数化且缺省行为不变 | 已是 `(enabled, trace_id, client=None, scope="main", parent_span=None, name_prefix="")` | ✅ D8 的假设成立 |
+| **§0.2 开工闸门** | 对方 P1+P2 已落地并归档 | ✅ **闸门已满足，本变更可随时开工** |
+
+**两处结论因对方落地而改变**：
+
+1. **F-36（工具 `InjectedState` 形状）被对方**自己发现并修了一半**——提交 `8014d64`：`rag_tools.py` 的 `kb_id` 改为「注入状态优先、**`ctx.kb_id` 回退**」，并补回归用例。**其口径比我方方案更简**（不必把字段重复 seed 进子图 state；请求上下文本就是这些字段的权威来源）。⇒ 我方 `design.md` D11 与 `agent-assembly` 的该条要求**已按此口径重写**：改为「上下文可得字段走 `ctx` 回退；**上下文不可得的字段（迭代序号）必须由装配带入图状态**；缺字段降级须记 warning」。
+2. **独立 change `tool-state-access-shape` 被撤销**：我建它的理由是"对方的 P2 会**先**踩中"，而对方在自己的 P2 里就修了 ⇒ 前提消失。剩余只有 `ask_tools.py` **3 处**（对方**有意未修**并留注释：`ask_user` 在 fork 禁用集里、其范围内不是活 bug）——但**主循环改由 `create_agent` 承载后它就是活 bug**，而触发者**只有本变更**。为一个"只有另一个 change 会触发、且只有 3 处"的修复单开 change 属一事两档 ⇒ **撤掉，并回本变更 tasks 2.7**（`rag_tools` 的迭代序号一项归 tasks 2.6）。
+
+**新发现（合并后才看清的一条）**：`rag_tools.py` 的**迭代序号**守卫是 `isinstance(state, AgentState)` ⇒ 主循环改由 `create_agent` 承载后（dict 状态）**恒取 0**，主循环检索信号会**丢真实轮次**。该值在**请求上下文里没有对应项**，故**必须由装配带入图状态** ⇒ 已写入 `agent-assembly` 的要求、D11、tasks 2.6 与 7.13。
+
+**`delegate-task` delta 已 rebase**：其 `fork 执行` requirement 的工具面口径已被对方同步进主 spec，我方 delta 已重新复制其**落地后全文**、只改 middleware 那一条（原顶部"归档前须 rebase"的提示已兑现）。

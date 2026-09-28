@@ -48,36 +48,35 @@
 - **WHEN** 两个请求并发使用同一 middleware 实例
 - **THEN** 各自的本轮计数与参数 SHALL 相互独立，不出现跨请求污染
 
-### Requirement: 工具取图状态 MUST 与图实现无关
+### Requirement: 装配后图内工具仍能取到必需的运行态字段
 
-工具经图状态注入（`langgraph.prebuilt.InjectedState`）拿到的值，其**具体形状由承载它的图实现决定**——外层自建图给 `dataclass` 实例，`create_agent` 给 `dict`。因此工具 SHALL NOT 无条件假定该值为某一种形状：既不得只做属性访问，也不得只做下标访问。
+主循环改由装配入口产出后，图内工具的注入状态**形状随之改变**（外层自建图给 `AgentState` 实例，`create_agent` 给 `dict`）。装配 SHALL 保证工具在**两条承载下都能取到其运行所需字段**，取数口径 SHALL 沿用既有约定（2026-09-28 由 `skill-execution-and-delegation` 落地）：
 
-工具 SHALL 以**显式形状判定**取数（先判 `isinstance(state, dict)`，再走对应通道；两条路径都要有取值行为），SHALL NOT 使用 `getattr(..., default)` 之类的隐式兜底。
+- **上下文可得的字段**（如会话 `kb_id`、本轮 `query`）→ 工具按「注入状态优先、`current_request_ctx` 回退」取值；**装配 SHALL NOT 要求把这些字段重复 seed 进图状态**
+- **上下文不可得的字段**（主循环的**迭代序号**——请求上下文里没有这一项）→ 装配 SHALL 把该值**带入图状态**，使主循环内的工具仍能读到真实序号；SHALL NOT 让它静默退化为固定值
 
-装配产出的运行链路 SHALL 把**工具运行所需的字段**（至少会话的 `kb_id`、本轮 `query`、迭代序号）传入图状态——由调用方在**构造图输入**时 seed；SHALL NOT 让工具只能从图状态之外取这些值。未传字段时工具会走"显式降级"分支，症状是**静默取空**（检索恒空、澄清恒失败），与形状不兼容同样危险。
+工具侧 SHALL 以**显式形状判定**取数（不得假定 dataclass 或 dict 之一），`CLAUDE.md` 的「显式类型检查」规则适用于此；字段缺失走降级分支时 SHALL 记 warning（不得静默取空——那会让"检索恒空"这类故障在日志上看不出来）。
 
-**理由**：本仓工具现以属性访问取 `kb_id` / `query` / 迭代序号；主循环改由 `create_agent` 承载后，该访问方式会抛 `AttributeError`，且会被工具节点的错误回喂吞成普通工具错误——表现为"检索恒空、澄清恒失败"而图照常跑完，日志上看不出来（2026-09-28 实测复现）。同理，fork 子代理一旦拿到工具面（默认继承规则）也会踩同一条。
+#### Scenario: 主循环内工具取到真实 kb_id
 
-#### Scenario: 两种图实现下取数一致
+- **WHEN** 主循环经装配入口运行，并在图内调用 `retrieve_kb`
+- **THEN** SHALL 取到真实 `kb_id`（由注入状态或请求上下文回退提供），SHALL NOT 落在降级分支
 
-- **WHEN** 同一工具在主循环（`create_agent`）与子代理路径下被调用，且图状态同时含有该字段
-- **THEN** 工具 SHALL 在两种形态下都取到相同的值，SHALL NOT 出现 `AttributeError`
+#### Scenario: 主循环内工具取到真实迭代序号
 
-#### Scenario: 字段缺失时显式降级
+- **WHEN** 主循环经装配入口运行，并在第 N 轮（N > 0）调用 `retrieve_kb`
+- **THEN** 该工具读到的迭代序号 SHALL 为真实值，SHALL NOT 恒为 0
 
-- **WHEN** 注入的图状态中不含该工具需要的字段
+#### Scenario: 字段缺失时显式降级并留痕
+
+- **WHEN** 注入状态与请求上下文都取不到某工具需要的字段
 - **THEN** 工具 SHALL 走显式判定的降级分支（按缺失处理），SHALL NOT 抛异常
+- **AND** SHALL 记一条 warning（含工具名与缺失字段名）
 
-#### Scenario: 生产链路端到端携带字段
+#### Scenario: 生产链路端到端覆盖
 
-- **WHEN** 主循环经装配入口运行，并在图内调用 `retrieve_kb` / `ask_user`
-- **THEN** 这两个工具 SHALL 取到**真实的** `kb_id` / `query`（SHALL NOT 落在降级分支）
-- **AND** 该断言 SHALL 覆盖"生产节点 → 子图 → 工具"的完整链路，SHALL NOT 用测试中手工塞入的 state 替代
-
-#### Scenario: 覆盖断言存在
-
-- **WHEN** 工具取数逻辑或装配入口的字段传递被修改
-- **THEN** SHALL 存在至少一条在 `create_agent` 承载下断言取数正确的测试（含 `retrieve_kb` 与 `ask_user`）
+- **WHEN** 验收本要求
+- **THEN** 断言 SHALL 覆盖「生产节点 → 子图 → 工具」的完整链路，SHALL NOT 用测试中手工塞入的 state 替代
 
 ### Requirement: 回合上限由装配参数决定并可动态放宽
 

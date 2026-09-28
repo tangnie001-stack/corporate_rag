@@ -97,13 +97,20 @@
 - 决策：本变更 apply 排在 `skill-execution-and-delegation` 之后；`agent-round-budget` 排在本变更之后。
 - 理由：`docs/adr/README.md` 的「一条决策一文件」与并行分支编号会撞车的既有教训（`check_adr` 要求编号连续，重编号须与合并同一提交）。
 
-### D11 工具取图状态的形状：显式双形状访问（评审 Blocker 的修正）
+### D11 装配后工具取数：沿用对方已落地的口径，只补两处
 
-- 背景：工具经 `langgraph.prebuilt.InjectedState` 拿到的值，其**形状由承载它的图实现决定**——外层自建图给 `AgentState` 实例，`create_agent` 给 `dict`。本仓有 5 处工具取数用属性访问：`rag_tools.py:102`（`state.kb_id`）/ `:187`（`state._agent_iterations`）、`ask_tools.py:82`（`state.query`）/ `:83`（`state._agent_iterations`）/ `:166-167`（`state.kb_id`）。
-- 实测（对照探针，本仓 venv）：自建 `StateGraph` + `ToolNode` 注入 `MyState` 实例（属性可用）；`create_agent(state_schema=<dataclass>)` **与**默认 schema 都注入 `dict` → `AttributeError: 'dict' object has no attribute 'kb_id'`。该异常被工具节点的错误回喂吞成普通 `ToolMessage` 错误 ⇒ **检索恒空、澄清恒失败**，而图照常跑完、日志上看不出异常。
-- 决策：这 5 处改为**显式形状判定**（先判 `isinstance(state, dict)`，再走对应通道；两条路径都要有取值行为），**不用** `getattr(..., default)` 之类的隐式兜底（CLAUDE.md 明令）。并新增断言：在 `create_agent` 承载下 `retrieve_kb` / `ask_user` 的取数正确。
-- 连带（不属于本变更、但必须同步）：`skill-execution-and-delegation` 的 D7/D8「默认继承工具面」会让 fork 子代理**首次拿到 `retrieve_kb`**，而子代理正跑在 `create_agent` 上 ⇒ **同一缺陷会在它那个 change 里先爆**。已在 `requirements_pool` 登记（F-36）并写入简报供其取用。
-- 备选：保留属性访问 + 让 `create_agent` 接受 dataclass 状态 → 实测不可行（`create_agent` 的状态 schema 无条件生成 TypedDict）。
+**背景**：工具经 `langgraph.prebuilt.InjectedState` 拿到的值，其形状由承载它的图决定——外层自建图给 `AgentState` 实例，`create_agent` 给 `dict`（实测两次：`state_schema=<dataclass>` 与默认 schema 都注入 dict）。主循环改由 `create_agent` 承载后，属性访问会 `AttributeError`，且被错误回喂吞成 `ToolMessage` 错误 ⇒ 检索恒空、澄清恒失败。
+
+**对方已解决的部分（2026-09-28 落地，本变更不重复）**：`skill-execution-and-delegation` 在其 P2 中已修 `retrieve_kb`（提交 `8014d64`）：**`kb_id` 改为「注入的 AgentState 优先、`current_request_ctx.kb_id` 回退」**，并补了回归用例。其口径比"把字段搬进子图 state"更简——请求上下文本来就是这些字段的权威来源。⇒ 本变更**不要求**把 `kb_id` / `query` 重复 seed 进图状态。
+
+**本变更仍需补的两处**：
+
+1. **`ask_tools.py` 的 3 处取数**（`:84` `state.query` / `:85` `state._agent_iterations`、`:168-169` `state.kb_id`）。对方**有意未修**并留了注释：「若将来把它移出禁用集，须同 `retrieve_kb` 一样加 `isinstance(state, AgentState)` 守卫」——该判断**在它的范围内成立**（`ask_user` 在 `FORK_FORBIDDEN_TOOLS` 里，fork 子代理调不到，故其范围内不是活 bug）；但**主循环改由 `create_agent` 承载后，`ask_user` 就在 dict 状态下被调用** ⇒ 本变更必须处理。修法同既有口径（`isinstance` 分流 + `kb_id` 走 `ctx` 回退）。
+2. **`retrieve_kb` 的迭代序号**：其现有守卫是 `if isinstance(state, AgentState): iteration = state._agent_iterations` ⇒ dict 状态下**恒取 0**，主循环的检索信号会**丢失真实轮次**。迭代序号在请求上下文里**没有对应项**，故这一项**必须由装配带入图状态**：dict 分支改读子图 schema 的 `_turn_count`（键名见 tasks 1.2），使主循环内工具仍上报真实序号。
+
+**降级必须留痕**：字段缺失走降级时 SHALL 记 warning（含工具名与缺失字段名）。对方修法里 `kb_id` 回退失败会得到空串（静默），若再叠加"缺字段静默降级"，故障在日志上就完全不可见。
+
+**备选**：让 `create_agent` 接受 dataclass 状态 → 实测不可行（其状态 schema 无条件生成 TypedDict）。备选：主循环不换 `create_agent`（评审提出的"参数化自建循环"）→ 见 D12。
 
 ### D12 备选「参数化自建循环」被评估并否决（评审提出，记录取舍）
 
@@ -120,9 +127,9 @@
 ## Risks / Trade-offs
 
 - **[`delegate-task` 的 `fork 执行` requirement 与对方 delta 撞车]** → 我方该 delta 基于当前文本，同步会回退其工具面改动 ⇒ 该 delta 文件顶部已写明"归档前 MUST 重新复制其落地后的 requirement 全文"；tasks 中列为验收前置。
-- **[工具经 `InjectedState` 取数在 `create_agent` 下崩溃]**（评审 Blocker，已实测复现） → 见 D11：5 处改显式形状判定 + 加断言；同时通知对方（其 D7/D8 会先触发）。
+- **[工具经 `InjectedState` 取数在 `create_agent` 下崩溃]**（评审 Blocker，已实测复现） → 见 D11：`retrieve_kb` 的 `kb_id` 与其形状守卫**已由对方落地时修复**；本变更补 `ask_tools` 3 处 + `retrieve_kb` 的迭代序号 + 降级 warning。
 - **[重生成轮的 system 段丢失]**（评审 Blocker） → 见 D2：载体放**外层 `AgentState` 的声明字段**（跨 invoke 持久），并断言"重生成轮仍含完整 system 段且不触发第二次组装"。
-- **[交付顺序先于对方落地会导致"只有主角色被统一"]** → **收口取 (a)**：§5（子角色接入）设为**必须**，对方 P2 未落地则本变更**不开工**；`agent-assembly` 的「不得存在第二套装配」与之一致（不再存在"中间态"的相反结论）。
+- **[交付顺序先于对方落地会导致"只有主角色被统一"]** → **已消解（2026-09-28）**：对方 P1+P2 已落地并归档 ⇒ 闸门满足；`agent-assembly` 的「不得存在第二套装配」此时是可直接达成的约束，不再需要"中间态"例外。
 - **[`iteration limit` 的产出条件与今天不同]** → 见 D3：日志产出与 jump 判定**解耦**，"计数达上限即记"。
 - **[委派放宽语义不完整会丢余量、甚至跳过委派]** → 见 D3：必须"本轮命中先置位 **OR** 此前已置位"两者兼有；补"上限同轮声明的委派仍被执行"断言。
 - **[regen 预算复位是三处、`ctx.web_count` 是两处]** → `_agent_iterations` / `_delegate_used` 在 `guardrails.py:105/106`、`:180/181`、**`regen_decision.py:174/175`**（三处）；`ctx.web_count = 0` 在 `guardrails.py:99`、`regen_decision.py:169`（**两处**，与主循环预算无关故保留）。分别统一处置，并同步 `test_verify_node.py` 的多处返回值断言。
@@ -136,10 +143,10 @@
 
 ## Migration Plan
 
-- **顺序**：① 等 `skill-execution-and-delegation` 的 P1 **与 P2** 落地（**闸门**，见下） → ② 本变更（装配入口 + middleware + `agent` 节点 + SSE 谓词 + 工具形状修正 + 字段清理 → 子角色接入） → ③ `agent-round-budget`。
-- **闸门（收口取 (a)）**：对方的 P2 未落地时本变更**不开工**——本变更的全部价值是消除两套装配，只统一主循环等于未达成目标；`agent-assembly` 的「不得存在第二套装配」不接受"中间态"。
+- **顺序**：① `skill-execution-and-delegation` 的 P1 与 P2 **已落地并归档**（2026-09-28） ⇒ 前置满足 → ② 本变更（装配入口 + middleware + `agent` 节点 + SSE 谓词 + 工具取数补两处 + 字段清理 → 子角色接入） → ③ `agent-round-budget`。
+- **闸门（原收口 (a)）**：曾规定"对方 P2 未落地则不开工"，**该条件已满足**——本变更可随时开工；`agent-assembly` 的「不得存在第二套装配」须在本变更内直接达成（不再有"中间态"）。
 - **无 DB 迁移、无 API 破坏**；`delegate_task` 参数契约不变。
-- **回滚**：恢复 `agent` 节点为原 `make_agent_model_node` / `make_agent_tools_node` / `route_agent`，恢复 SSE 判别谓词为 `"agent"`，恢复 `AgentState` 三个字段与 regen 复位；装配入口与 middleware 可整体弃用（新文件，删除即回滚）。工具侧的显式形状判定**不回滚**（向后兼容两种形状，且对方的 D7/D8 需要它）。无数据面回滚。
+- **回滚**：恢复 `agent` 节点为原 `make_agent_model_node` / `make_agent_tools_node` / `route_agent`，恢复 SSE 判别谓词为 `"agent"`，恢复 `AgentState` 三个字段与 regen 复位；装配入口与 middleware 可整体弃用（新文件，删除即回滚）。工具侧的改动**不回滚**（`ask_tools` 的形状判定向后兼容两种承载；`retrieve_kb` 的迭代序号读取在主图承载下仍需保留）。无数据面回滚。
 - **验收前置**：本变更的 `delegate-task` delta 须 rebase 到对方落地后的主规格文本。
 
 ## Open Questions

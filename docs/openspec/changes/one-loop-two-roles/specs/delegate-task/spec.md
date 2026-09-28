@@ -1,6 +1,6 @@
 # delegate-task Specification (Delta)
 
-> ⚠️ **协调提示（归档前必读）**：本 delta 的 MODIFIED 块**基于当前主规格文本**。`skill-execution-and-delegation` 的 delta **同样 MODIFIED 这条 `fork 执行` requirement**（它改子代理工具面：默认继承 + 只读收窄 + 禁用集）。两者归档顺序为「它先、本变更后」⇒ **本块在同步前 MUST 重新复制其落地后的 requirement 全文再施加本节改动**，否则会把它的工具面改动回退掉。
+> 本 delta 的 MODIFIED 块**已 rebase 到 `skill-execution-and-delegation` 落地后的主规格文本**（2026-09-28，其归档提交 `c6c8ea8` 已把该 requirement 的工具面口径同步进在效主 spec）。本节**仅改动 `生成子代理` 的 middleware 那一条**，其余逐字保留。
 
 ## MODIFIED Requirements
 
@@ -14,19 +14,26 @@
 - **THEN** 用 `langchain.agents.create_agent` 生成独立子代理（**不使用已废弃的 `langgraph.prebuilt.create_react_agent`**）
 - **AND** 子代理 system_prompt = 执行者人设（优先级：skill 的 `agent:` 声明 > 本会话选定智能体 > 系统默认 prompt）
 - **AND** 子代理初始 user message = skill 内容（任务/方法论）；由 `/xxx` 触发时，`/` 后的剩余文本作为输入
-- **AND** 子代理工具集 = 执行者预设 tools ∩ skill 的 allowed-tools（allowed-tools 为空则继承执行者预设 tools；均为空则零工具）
-- **AND** 子代理使用独立 RequestContext（独立 tool_contexts / 引用编号 / pending_asks），不污染主 agent
+- **AND** 子代理工具面 = **本轮主 agent 启用工具集** − 禁用集（`FORK_FORBIDDEN_TOOLS` + 主 agent 专属工具类）− **非只读工具**（依 `readonly_map()` 判定；表中缺项按非只读处理，不下发）∩（skill 声明 `allowed-tools` 时）allowed-tools ∩（执行者预设声明 `tools` 时）preset.tools
+- **AND** `allowed-tools` 的语义是**收窄项**：不声明即不收窄（但仍受禁用集与只读约束），SHALL NOT 因未声明而退化为零工具；**显式声明可放行非只读工具**（白名单退为例外通道）
+- **AND** 子代理使用独立 RequestContext（独立的 `tool_contexts` / 引用编号；`pending_asks` 为进程级按 session 的单槽、**不随子上下文复制**），不污染主 agent
 - **AND** 子代理最大轮次取执行者预设的 `maxTurns`（未声明则用系统默认上限）
-- **AND** 子代理 SHALL 经由与主 agent **共用的装配工厂**生成（见 `agent-assembly` 的「主/子角色共用同一 agent 装配」）；其 `middleware` SHALL 按角色装配——子角色按自身需要（如观测）装配，主角色另装配 system 施加 / 回合预算 / 观测三件套。原先「middleware 参数保留装配位但默认传空（v1 不启用）」的表述自本变更起不再成立
+- **AND** 子代理 SHALL 经由与主 agent **共用的装配入口**生成（见 `agent-assembly` 的「主/子角色共用同一装配入口」）；其 `middleware` SHALL **按角色装配**——子角色按自身需要装配（如观测），主角色另装配 system 施加 / 回合预算 / 观测三件套。原先「`create_agent` 的 middleware 参数保留装配位但默认传空（v1 不启用）」的表述自本变更起不再成立
 
-#### Scenario: fork 执行者的选择顺序
+#### Scenario: 工具面缺省为继承
 
-- **WHEN** 一个 fork skill 被执行
-- **THEN** 执行者按优先级：skill 的 `agent:` 声明 > 本会话选定智能体 > 系统默认 prompt
+- **WHEN** 一个 fork skill 未声明 `allowed-tools`，执行者预设也未声明 `tools`
+- **THEN** 子代理拿到与主 agent 相同的**只读**工具面（减去禁用集与非只读工具），可自主检索
+- **AND** 不产生"零工具告警"（该告警的语义已作废）
 
-#### Scenario: 模型覆盖
+#### Scenario: 非只读工具默认不下发
 
-- **WHEN** skill frontmatter 声明了 model
-- **THEN** fork 子代理用 `get_llm(model=record.model)` 新建实例（仅 fork 生效）
-- **WHEN** skill 未声明 model
-- **THEN** 复用主 agent 的 llm 实例
+- **WHEN** 主 agent 工具面中存在非只读工具（依 `readonly_map()`；表中**缺项**按非只读处理），且 skill 未在 `allowed-tools` 中显式声明它
+- **THEN** 该工具不出现在子代理工具面
+- **AND** 理由：子代理（尤其 `/xxx` 直出，其调用早于任何用户确认）不得自动获得写权限；写权限必须由 skill 显式声明
+
+#### Scenario: 只读表为空时的极性（与双轴推导不同，须写明）
+
+- **WHEN** 装配 fork 工具面时 `readonly_map()` 为空（工具尚未注册）
+- **THEN** 按 **fail-closed** 处理（不下发任何工具）并记 warning——与 `derive_invocation_flags` 对空表的 **fail-open**（`src/agents/skills/invocation.py:33-36`）**极性相反**
+- **AND** 该差异是**有意为之**：同一张表的两个消费者失败代价不同——双轴推导空表时不锁只是少了一层保护，而 fork 侧空表时"按只读放行"会把写权限下发给子代理。实施者不得为"统一"而改掉任一极

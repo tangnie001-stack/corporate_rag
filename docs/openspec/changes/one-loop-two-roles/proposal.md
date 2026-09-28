@@ -12,7 +12,7 @@
 - **L2（外壳）参数化到 middleware**：system 段的施加、KB 温度分档、`extra_body.enable_thinking`、回合上限、Langfuse `agent_turn` generation span 全部由 middleware 承担。
 - **L3（领域阶段）不动**：`verify` / `format` / `agent_finalize` / `skill_direct` 仍是外层图节点，位置与职责不变（`skill_direct` 依据 `skill-execution-and-delegation` 的 D4 保留）。
 - **首轮组装一次完成、按类型拆两半**：`build_prompt(...)` 的产出里，system 段写入**外层 `AgentState` 的新增声明字段**（跨 invoke 持久，含未绑 KB 时的第二条 system），非 system 段（注入 + 历史 + 当前 user）作为子图输入 ⇒ `build_system_prompt` 每次生成仍只调一次，`prompt assembled` / `prompt messages` 两条日志的**产点与字段零变化**；**重生成轮**照常取到同一份 system 段。
-- **工具取图状态的形状改为与图实现无关**：本仓 5 处工具取数（`rag_tools.py:102/187`、`ask_tools.py:82/83/166/167`）现用属性访问，而 `create_agent` 经 `InjectedState` 注入的是 **`dict`** ⇒ 会 `AttributeError` 并被错误回喂吞成工具错误（**检索恒空、澄清恒失败**，实测复现）。改为**显式形状判定**（`isinstance` 分支，不用 `getattr` 兜底）并补断言。
+- **装配后图内工具仍能取到必需字段**：`create_agent` 经 `InjectedState` 注入的是 **`dict`**（外层自建图给 `AgentState` 实例），属性访问会 `AttributeError` 并被错误回喂吞成工具错误（**检索恒空、澄清恒失败**）。其中 `retrieve_kb` 的 `kb_id` **已由 `skill-execution-and-delegation` 落地时修复**（`8014d64`：注入状态优先 + `ctx` 回退，口径更简）；本变更补两处：① `ask_tools.py` 的 **3 处**取数（对方有意未修——`ask_user` 在 fork 禁用集里、其范围内不是活 bug；但主循环改由 `create_agent` 承载后就是活 bug）；② `retrieve_kb` 的**迭代序号**（其现有守卫在 dict 下**恒取 0**，会丢主循环真实轮次；该项在请求上下文里没有对应项，必须由装配带入图状态）。降级分支 SHALL 记 warning（不得静默取空）。
 - **回合上限改用自定义 middleware**（不用官方 `ModelCallLimitMiddleware`——它会注入一条英文限流 AIMessage）：判定放 `after_model`，命中时 `jump_to: end`，**不注入任何消息**；`iteration limit` 日志**与 jump 判定解耦**（计数达上限即记，与"该轮是否仍声明工具调用"无关，与今天一致）；委派放宽取「**本轮命中先置位** 或 **此前已置位**」两者兼有。
 - **`AgentState` 删除三个循环字段**（`_agent_iterations` / `_max_agent_iterations` / `_delegate_used`）并删除 `route_agent` 函数；**BREAKING（内部契约）**——`const.py` 的 `MAX_AGENT_ITERATIONS` / `MAX_DELEGATE_BONUS` 仍保留为 middleware 参数。
 - **SSE 转换层判别谓词小改**：主循环的模型事件 `metadata.langgraph_node` 由 `"agent"` 变为 `"model"`，判据只用「节点判别键 + `scope == "main"`」两维（**不引入 `checkpoint_ns` 兜底**）；域节点（`format` / `agent_finalize` / `skill_direct`）与 `ToolTraceCollector` 的 `"tools"` 判据**均不变**；同模块 docstring 里残留的 `"agent"` 一并更正。
@@ -23,7 +23,7 @@
 
 ### New Capabilities
 
-- `agent-assembly`：**唯一的 agent 装配入口**——主 agent 循环与 fork 子代理 SHALL 由同一装配入口生成，差异仅由参数（system 提供方式 / 工具面 / 回合上限 / middleware 集合 / 角色名）提供；含五条硬约束：装配入口不产出编译日志、middleware 不得持有 per-request 实例状态、**工具取图状态 MUST 与图实现无关**（`InjectedState` 在两种承载下形状不同）、回合上限参数化、委派放宽须「本轮先置位 OR 此前已置位」。
+- `agent-assembly`：**唯一的 agent 装配入口**——主 agent 循环与 fork 子代理 SHALL 由同一装配入口生成，差异仅由参数（system 提供方式 / 工具面 / 回合上限 / middleware 集合 / 角色名）提供。六条 requirement 含四条硬约束：装配入口不产出编译日志、middleware 不得持有 per-request 实例状态、**装配后图内工具仍能取到必需字段**（`InjectedState` 在两种承载下形状不同；上下文可得字段走 `ctx` 回退、迭代序号须由装配带入图状态、缺字段降级须记 warning）、回合上限参数化且委派放宽须「本轮先置位 OR 此前已置位」。
 
 ### Modified Capabilities
 
@@ -41,15 +41,16 @@
 - `src/agents/graph/agent_node.py` — 删 `make_agent_model_node` / `make_agent_tools_node` / `route_agent`；保留并裁剪 `_initial_messages`（产两半）与 `make_agent_finalize_node`
 - `src/agents/graph/workflow.py` — `agent` 节点改为 invoke 子图的包装节点；`tool_sink` / `delegate_task` / `skill_direct_node` 注入面不变
 - `src/agents/graph/state.py` — 删三个循环字段，**新增一个承载 system 段的声明字段**（跨 invoke 持久）；`timings` / `_token_usage` 是已核实死字段，不在本变更处理，仅登记
-- `src/agents/tools/rag_tools.py` / `src/agents/tools/ask_tools.py` — 5 处工具取数改**显式形状判定**（`InjectedState` 在 `create_agent` 下是 `dict`）
+- `src/agents/tools/ask_tools.py` — 3 处取数（`:84` / `:85` / `:168-169`）改显式形状判定（`kb_id` 按既有口径走 `ctx` 回退）
+- `src/agents/tools/rag_tools.py` — 仅补**迭代序号**一处（`kb_id` 与形状守卫已由 `skill-execution-and-delegation` 落地）
 - `src/services/agent_service.py` — `_convert_event` 的模型事件判别谓词 + 同模块 docstring 里残留的 `"agent"`
 - `src/agents/graph/verify/guardrails.py` 与 `src/agents/graph/verify/regen_decision.py` — 删两文件共三处 regen 预算复位（`_agent_iterations` / `_delegate_used`）；`ctx.web_count` 保留
-- `src/agents/skills/executor.py` — `_build_sub_agent` 改调 `build_agent`（**依赖 `skill-execution-and-delegation` 的 P1+P2 先落地，为开工闸门**）
+- `src/agents/skills/executor.py` — `_build_sub_agent` 改调 `build_agent`（**前置已满足**：`skill-execution-and-delegation` 的 P1+P2 已落地并归档）
 
 **测试**：12 个文件受影响，见 design 的 Impact 与 tasks 的测试组
 
 **文档**：`code-map.md` / `data-flow.md` / `api_contract.md` / `glossary.md` / `prompt-ownership.md` / `defensive-patterns.md`（新增缺陷类别：middleware `state_schema` 静默丢弃未声明键）
 
-**依赖与排序**：`skill-execution-and-delegation`（最高优先级）在先——其 P1 已将子代理侧 `create_agent` 化并提供 `ToolTraceCollector` 的参数化接口，其 P2 会改写 `executor.py`。本变更 **apply 排在其后**；`agent-round-budget` 排在本变更之后（其标定对象是统一后的循环）。
+**依赖与排序**：`skill-execution-and-delegation` **已于 2026-09-28 落地并归档**（归档 `c6c8ea8`、合并 `95c81ff`）——子代理侧已 `create_agent` 化、`ToolTraceCollector` 已参数化（缺省行为不变）、其工具面与委派预算已在库 ⇒ **本变更的前置闸门已满足，随时可开工**。`agent-round-budget` 排在本变更之后（其标定对象是统一后的循环）。
 
 **ADR**：本变更含不可逆取舍（循环统一到 `create_agent`、领域阶段留外层图、回合上限改用 middleware），需按 `docs/adr/README.md` 撰写；**编号须在 `skill-execution-and-delegation` 写完之后取**（现最大 `0015`，其将先占 `0016`）。

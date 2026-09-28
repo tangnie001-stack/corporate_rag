@@ -1,10 +1,10 @@
 ## 0. 前置与排序
 
-- [ ] 0.1 确认 `skill-execution-and-delegation` 的 P1 已落地（`executor.py` / `fork_stream.py` / `tool_trace.py` 的参数化接口与 `scope` 分域已在库）；未落地则本变更不得开工
-- [ ] 0.2 **开工闸门（收口取 (a)）**：其 **P2**（工具面继承 / 通用委派 / 预算）也必须已落地——本变更的全部价值是消除两套装配，只统一主循环等于未达成目标；`agent-assembly` 的「不得存在第二套装配」不接受"中间态"。P2 未落地时本变更**不开工**，不得以"记录中间态"放行
+- [ ] 0.1 **闸门已过（2026-09-28 核对）**：`skill-execution-and-delegation` 的 P1+P2 均已落地并归档（归档提交 `c6c8ea8`；合并提交 `95c81ff`），`executor.py` / `fork_stream.py` / `fork_tools.py` / `tool_trace.py` / `delegate_task.py` 的新形态已在库
+- [ ] 0.2 **开工基线复核**：确认对方已按其 D11 落地 `ToolTraceCollector` 的 `scope` / `parent_span` / `name_prefix` 三参数（缺省行为不变），且 `_convert_event` 的模型事件判别仍为 `"agent"`（本变更要改为 `"model"`）
 - [ ] 0.3 建立本变更的分支/worktree 并在计划顶部写明排序声明（本变更 after `skill-execution-and-delegation`，before `agent-round-budget`）
 - [ ] 0.4 记录当前基线：`POSTGRES_HOST=localhost pytest tests/ -v` 全绿、`ruff check .` 无错误、`pyright src/` 无新增 error（作为后续对比基线）
-- [ ] 0.5 取到对方**落地后**的主规格文本，用于 §10.9 的 `delegate-task` delta rebase
+- [ ] 0.5 `delegate-task` delta 已在其归档后 rebase（2026-09-28 完成，见该 delta 文件顶部说明）
 
 ## 1. 装配入口与 middleware（新文件）
 
@@ -22,9 +22,9 @@
 - [ ] 2.3 同文件 — **删除** `make_agent_model_node` / `make_agent_tools_node` / `route_agent`；保留 `make_agent_finalize_node` 原样
 - [ ] 2.4 `src/agents/graph/workflow.py` — `add_node("agent", make_agent_loop_node(bundle))`（节点名保持 `"agent"`，`route_verify` 回边不变）；`tool_sink` 供给链、`delegate_task` / `skill_direct_node` 注入面保持不变；`graph compiled` 仍在此处发一次
 - [ ] 2.5 确认 `agent_node.py` 行数回落至 400 行以内（红线）
-- [ ] 2.6 `src/agents/tools/rag_tools.py` — `:102` 的 `state.kb_id` 与 `:187` 的 `state._agent_iterations` 改为**显式形状判定**（先判 `isinstance(state, dict)`，再走对应通道；两条路径都要有取值行为），**不用 `getattr(..., default)` 隐式兜底**；迭代序号改为读子图 schema 的 **`_turn_count`**（键名见 1.2），缺失时走显式降级分支
-- [ ] 2.7 `src/agents/tools/ask_tools.py` — 同法处理 `:82`（`state.query`）/ `:83`（`state._agent_iterations`）/ `:166-167`（`state.kb_id`）
-- [ ] 2.8 在两文件的方法 docstring 写明：注入状态的形状由**承载它的图实现**决定（外层自建图给 dataclass / `create_agent` 给 dict），故必须显式判定
+- [ ] 2.6 `src/agents/tools/rag_tools.py` — **`kb_id` 与形状守卫已由 `skill-execution-and-delegation` 落地**（其提交 `8014d64`：`isinstance(state, AgentState)` 优先 + `ctx.kb_id` 回退）。本变更只需补一处：**迭代序号**。A 之后主循环的注入状态是 dict，其现有守卫会让 `iteration` 恒取 **0** ⇒ 改为「dict 状态下读子图 schema 的 `_turn_count`（键名见 1.2）」或等价显式判定，使主循环内工具仍上报真实序号
+- [ ] 2.7 `src/agents/tools/ask_tools.py` — **3 处取数需修**（`:84` `state.query` / `:85` `state._agent_iterations`、`:168-169` `state.kb_id`）：改显式形状判定（`isinstance` 分流；`kb_id` 按既有约定走 `ctx` 回退）。⚠️ 对方**有意未修**此处并留了注释「若将来把它移出禁用集，须同 retrieve_kb 一样加 `isinstance(state, AgentState)` 守卫」——其判断在**它的范围内成立**（`ask_user` 在 fork 禁用集里，子代理调不到），但**主循环改由 `create_agent` 承载后 `ask_user` 就在 dict 状态下被调用** ⇒ 本变更必须处理
+- [ ] 2.8 两文件的方法 docstring 写明：注入状态的形状由**承载它的图实现**决定；并**沿用对方的既有口径**（上下文可得字段走 `ctx` 回退，不重复 seed 进图状态）
 
 ## 3. SSE 判别谓词
 
@@ -71,7 +71,7 @@
 - [ ] 7.10 `tests/infra/llm/test_tool_trace.py` — 主图工具 span 结构不回归（应为零改动）
 - [ ] 7.11 `tests/agents/graph/test_direct_skill_round.py` / `test_verify_node.py` / `test_verify_material_source.py` — 直出轮与 verify 材料来源不回归
 - [ ] 7.12 `tests/agents/skills/test_skill_executor.py` / `test_delegate_task.py` — 子角色改走装配入口后的装配断言
-- [ ] 7.13 **新增**：`create_agent` 承载下工具取数正确 —— 在 `create_agent` 图内调用 `retrieve_kb` 与 `ask_user`，断言注入状态为 `dict` 时两工具都能取到 `kb_id` / `query` / 迭代序号且不抛 `AttributeError`（评审 Blocker 的守卫；当前全仓 0 覆盖 `InjectedState`）
+- [ ] 7.13 **新增**：`create_agent` 承载下工具取数正确 —— ①在 `create_agent` 图内调用 `ask_user`，断言注入状态为 `dict` 时仍取到 `query` / `kb_id` 且不抛 `AttributeError`；②`retrieve_kb` 的**迭代序号**在主循环（dict 状态）下为真实值、**不为 0**；③降级分支产出 warning（含工具名与缺失字段名）
 - [ ] 7.14 **新增**：重生成轮的 system 段不丢 —— 首轮组装后经 `verify` 触发重生成，断言重生成轮的模型请求仍含完整 system 段（含未绑 KB 的第二条）且 `prompt assembled` 只产出一条
 - [ ] 7.15 **新增**：五条日志的**产出次数** —— 一次生成内 `iteration done` / `iteration limit` / `model turn` / `prompt messages` / `prompt assembled` 的条数与变更前一致；含"上限轮恰好正常收尾也产出 `iteration limit`"这一情形
 - [ ] 7.16 **新增**：取消/断连穿过"节点内 invoke 子图" —— 置位 `abort_signal` 后断言主任务收到 `CancelledError`、子图不遗留悬挂、`tool_trace.close()` 被调（评审 Important；须在**单元层**覆盖，不能只靠 E2E）
@@ -102,4 +102,4 @@
 - [ ] 9.6 `agent_turn` generation observation 在 Langfuse 上仍出现且字段完整（迁 middleware 的验证）；失败则回退为命令式 span 并记录
 - [ ] 9.7 **归档前置**：把本变更的 `delegate-task` delta 重新复制 `skill-execution-and-delegation` 落地后的 `fork 执行` requirement 全文再施加本节改动（否则会回退其工具面改动）
 - [ ] 9.8 `openspec validate one-loop-two-roles` 通过；ADR 通过 `src/cli/check_adr.py`
-- [ ] 9.9 **同步对方**：把「工具经 `InjectedState` 取数在 `create_agent` 下是 `dict`」这条（`requirements_pool` F-36）告知 `skill-execution-and-delegation` 的负责会话——其 D7/D8 会让 fork 子代理首次拿到 `retrieve_kb`，**会先于本变更踩中**；确认由哪一方承担工具侧修复（该修复须先于其 D7/D8 生效）
+- [ ] 9.9 **同步对方（已部分自然解决）**：`requirements_pool` F-36 所报的 `InjectedState` 缺陷，对方在 `skill-execution-and-delegation` 落地时**自己发现并修了 `retrieve_kb`**（`8014d64`）⇒ 原计划的"紧急同步"不再必要。剩余动作：把 F-36 的**收窄后状态**（`ask_user` 3 处 + 迭代序号，皆由本变更承接）在对方知情的前提下登记完毕（已在 `requirements_pool` 更新）
