@@ -508,7 +508,7 @@ git commit -m "feat(fork): executor 按只读表装配工具面；作废零工�
 - Modify: `src/config/prompts/__init__.py`（默认执行者 prompt + 两条按路径指示）
 - Modify: `src/agents/skills/executor.py`（`_executor_system_prompt` 按 `via` 分支；`_build_sub_agent` 透传）
 - Modify: `docs/agents/glossary.md`、`docs/agents/prompt-ownership.md`
-- Test: `tests/agents/skills/test_fork_executor_selection.py`（或该文件既有的 prompt 断言位置）
+- Test: `tests/agents/skills/test_executor_contract.py`（追加）+ **修正** `tests/agents/skills/test_executor_contract.py`、`tests/agents/skills/test_fork_sub_agent_contract.py` 里**已有的 4 条** prompt 断言
 
 **Interfaces:**
 - Consumes: `DelegateRun`（`delegate_id` / `skill_name` / `ctx`）
@@ -538,26 +538,49 @@ DELEGATE_VIA_DELEGATE = "delegate"
 
 - [ ] **Step 2: 写失败测试**
 
-在既有断言执行者 prompt 的测试文件里追加：
+在 `tests/agents/skills/test_executor_contract.py` 追加（该文件主题即"执行契约随人设下发"，且已 import `FORK_EXECUTION_CONTRACT`；构造方式是直接 `SkillExecutor(main_llm=object())`，见其 `:9`——**该文件没有 `_executor()` 助手**）：
 
 ```python
-def test_executor_prompt_direct_asks_for_citations():
-    """直出路径：子代理须自标 [n]（没有主 agent 补标）。"""
-    prompt = _executor()._executor_system_prompt(None, DELEGATE_VIA_DIRECT)
-    assert "[n]" in prompt
+def test_direct_path_asks_for_citations():
+    """直出路径：子代理须自检索并自标 [n]（没有主 agent 补标）。"""
+    exe = SkillExecutor(main_llm=object())
+    prompt = exe._executor_system_prompt(None, DELEGATE_VIA_DIRECT)
     assert "自行检索" in prompt
+    assert "[n]" in prompt
 
 
-def test_executor_prompt_delegate_forbids_citations():
+def test_delegate_path_forbids_citations():
     """委派路径：子代理不得自标 [n]（编号由主 agent 统一补标）。"""
-    prompt = _executor()._executor_system_prompt(None, DELEGATE_VIA_DELEGATE)
+    exe = SkillExecutor(main_llm=object())
+    prompt = exe._executor_system_prompt(None, DELEGATE_VIA_DELEGATE)
     assert "不要标注引用编号 [n]" in prompt
+
+
+def test_preset_persona_also_gets_path_citation_instruction():
+    """预设人设同样受按路径的引用指示约束（指示统一追加在最末）。"""
+
+    class _Preset:
+        system_prompt = "你是财务专家。"
+
+    exe = SkillExecutor(main_llm=object())
+    prompt = exe._executor_system_prompt(_Preset(), DELEGATE_VIA_DIRECT)
+    assert prompt.startswith("你是财务专家。")
+    assert "自行检索" in prompt
 
 
 def test_default_executor_prompt_has_no_unconditional_citation_rule():
     """默认人设里不得再留无条件的 [n] 禁令（那会与直出路径矛盾）。"""
     assert "不标注引用编号" not in FORK_DEFAULT_EXECUTOR_PROMPT
 ```
+
+**同批必须修正的 4 条既有断言**（签名变化 + 返回串多了一段，不改就红）：
+
+1. `test_executor_contract.py:10` → `exe._executor_system_prompt(None)` 补第二实参 `DELEGATE_VIA_DELEGATE`
+2. `test_executor_contract.py:21` → `exe._executor_system_prompt(_Preset())` 同上
+3. `test_fork_sub_agent_contract.py:75-76` → 现在是**等值断言** `== (FORK_DEFAULT_EXECUTOR_PROMPT + FORK_EXECUTION_CONTRACT)`，须改成 `== (FORK_DEFAULT_EXECUTOR_PROMPT + FORK_EXECUTION_CONTRACT + FORK_DELEGATE_CITATION_INSTRUCTION)`，并补 `DELEGATE_VIA_DELEGATE` 实参
+4. `test_fork_sub_agent_contract.py:86` 附近（preset 人设那条）→ 同样补 `via` 实参，并按需断言引用指示已在末尾
+
+同文件 import 区补 `from src.config.const import DELEGATE_VIA_DELEGATE, DELEGATE_VIA_DIRECT`（以及 `FORK_DELEGATE_CITATION_INSTRUCTION`，按需）。
 
 - [ ] **Step 3: 跑测试确认失败**
 
@@ -1014,6 +1037,8 @@ git commit -m "feat(delegate): 委派预算触顶返回可读原因并记 delega
 **Interfaces:**
 - Produces: `DelegateTaskArgs.skill: str | None = None`；`SkillExecutor.execute(record: SkillRecord | None, task: str, run: DelegateRun | None = None) -> str`
 
+**承载性约束（预检扫描发现，必须遵守）**：Task 5 已把预算闸门插在 `delegate_task` 的 fork 分支里（`ctx is None` 判断之后）。本任务重构同一函数、拆出通用分支时，**两条分支必须共用同一处闸门**（或各自显式调用同一次 `check_and_incr`）——**不得**把通用分支写成绕过闸门的独立早退路径。通用委派同样是"模型裁量的委派"，按 design D10 必须消耗预算。**并在本任务的测试里加一条断言**：通用委派（省略 `skill`）同样消耗预算（触顶时被拒）。
+
 - [ ] **Step 1: 加常量**
 
 `src/config/const.py` 追加：
@@ -1230,6 +1255,13 @@ git status --short   # 只提交本阶段应有的改动；临时探针/试验�
 4. `Task 4 Step 6` 初稿写 `ChatManager(...)` —— 既有写法是 `ChatManager(redis_url="redis://localhost:6379/0")`（`tests/chat/test_chat_manager.py:71`）→ 已写实。
 
 **2c. 自查发现的计划外必改项**：`tests/agents/skills/test_skill_loader.py:57-81` 有**两个用例**断言 `Task 2` 要删除的那个 warning（一个 `pytest.warns` 命中、一个断言不命中）→ 已在 Task 2 明写删除。`pyproject.toml` 的那条 `filterwarnings` ignore 正对应同一 warning → 已写明同批删除。
+
+**2d. 执行前预检扫描追加修正的三处**（派单前对全计划做的成对/自洽扫描，详见 P2 台账）：
+1. **Task 3 漏列必须同步修正的既有断言** —— `_executor_system_prompt` 签名变化（加 `via`）会影响 **4 条**既有断言：`test_executor_contract.py:10`、`:21`，`test_fork_sub_agent_contract.py:75-76`（**等值断言**，还须计入新增的引用指示）、`:86` 附近。已在 Task 3 的 Files 与步骤里写实。
+2. **Task 3 的测试助手名错**：初稿用 `_executor()`，但两个候选文件都**没有**该助手（实况是 `SkillExecutor(main_llm=object())` 直接构造）→ 已改为直接构造，并把追加测试落到 `test_executor_contract.py`（主题一致且已 import `FORK_EXECUTION_CONTRACT`）。
+3. **Task 6 会与 Task 5 的闸门位置重叠**：T5 把预算闸门插在 fork 分支内、T6 随后拆分通用分支 —— 若 T6 让通用分支早退绕过闸门，通用委派即可绕过预算 → 已在 Task 6 写明"两条分支必须共用同一处闸门"并在其测试里加断言。
+
+**1b. 执行前预检扫描（P2）**：成对共享文件/接口与逐任务自洽的完整表见 P2 台账 `.superpowers/sdd/2026-09-28-skill-execution-p2/progress.md`。除 2d 的三处外，扫描结论：`delegate_task.py` 被 T3/T5/T6 **三个任务**依次修改（顺序严格，且已识别 T5↔T6 的闸门覆盖风险）；`executor.py` 被 T2/T3/T6 依次修改（`_fork_tools` 的两次演进已按序声明）；`const.py` 被 T1/T3/T5/T6 在**不同区段**追加常量（无冲突）；`test_delegate_task.py:356` 显式传 `skill`，改可选后仍通过，无需修正。
 
 **3. 类型与命名一致性**：`select_fork_tools(allowed, available, executor_tools=None, tool_readonly=None)` 在 Task 1 定义、Task 2 消费，位置参数与关键字名一致；`DELEGATE_VIA_DIRECT/DELEGATE_VIA_DELEGATE` 在 Task 3 定义并使用；`delegate_budget.check_and_incr(session_id, limit)` 在 Task 4 定义、Task 5 消费；`DELEGATE_GENERIC_SKILL_NAME` / `DELEGATE_GENERIC_TITLE` 在 Task 6 定义并使用。跨任务签名变化（`_executor_system_prompt` 加 `via`、`_build_sub_agent` 加 `via`、`execute` 的 `record` 可空）已在其 Interfaces 块显式标注。
 
