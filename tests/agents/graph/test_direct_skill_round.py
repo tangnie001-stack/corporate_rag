@@ -414,6 +414,64 @@ async def test_unconfirmed_answer_strips_confirm_marker(monkeypatch):
     assert result["_needs_regenerate"] is False
 
 
+class _ConfirmRerunExecutor:
+    """替身：首轮返回带确认 marker 的答案，重跑返回残留 marker，并记录每次收到的 run/task。"""
+
+    def __init__(self):
+        self.runs = []
+        self.tasks = []
+
+    async def execute(self, record, task, run):
+        self.runs.append(run)
+        self.tasks.append(task)
+        if len(self.runs) == 1:
+            return f"结论正文。\n{FORK_CONFIRM_MARKER} 要按哪个口径？"
+        return f"重跑结论。\n{FORK_CONFIRM_MARKER} 仍需确认？"
+
+
+@pytest.mark.asyncio
+async def test_confirm_rerun_marks_run_via_direct(monkeypatch):
+    """确认门命中且用户答复后，重跑重建的 DelegateRun 仍须标 via=DELEGATE_VIA_DIRECT。
+
+    确认门重跑分支独立重建一个 DelegateRun，与首轮构造是 via 的两个不同落点。
+    漏填会静默回落 DELEGATE_VIA_DELEGATE，重跑轮子代理退回"不得自标 [n]"策略。
+    首轮那次也是 direct，故断言第二次调用记录到的 run.via 以精确覆盖该重跑落点。
+    """
+    record = SkillRecord(
+        name="finance-analyst",
+        description="d",
+        context=SkillContext.FORK,
+        fork_body="任务：$ARGUMENTS",
+        allowed_tools=[],
+    )
+    fake = _ConfirmRerunExecutor()
+    node = make_skill_direct_node(_FakeRegistry(record), fake)
+
+    async def _reply(*args, **kwargs):
+        return "某公司"
+
+    monkeypatch.setattr("src.agents.graph.skill_direct.ask_confirm_question", _reply)
+    state = AgentState(
+        session_id="s1",
+        kb_id="kb1",
+        query="2024 年营收",
+        direct_skill=record.name,
+    )
+    main_ctx = RequestContext(session_id="s1", kb_id="kb1", kb_bound=True)
+    token = current_request_ctx.set(main_ctx)
+    try:
+        result = await node(state)
+    finally:
+        current_request_ctx.reset(token)
+
+    assert len(fake.runs) == 2  # 首轮 + 确认后重跑
+    assert fake.runs[1].via == DELEGATE_VIA_DIRECT
+    assert fake.tasks[1] == "2024 年营收\n\n用户补充说明：某公司"
+    # 重跑结果不再过确认门，残留 marker 行仍被剥离
+    assert "CONFIRM_REQUIRED:" not in result["answer"]
+    assert result["answer"] == "重跑结论。"
+
+
 @pytest.mark.asyncio
 async def test_direct_round_passes_query_unchanged_without_guidance():
     """直出轮无 verify 指引：task 保持原 query，不追加空指引段。"""
