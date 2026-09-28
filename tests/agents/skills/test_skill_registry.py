@@ -18,7 +18,8 @@ def _write_skill(
 ) -> None:
     """在 root/<name>/SKILL.md 写入合法 skill；frontmatter_name 覆盖 frontmatter 的 name。
 
-    context=fork 时须给 allowed_tools，否则子代理零工具（loader 会记 warning）。
+    context=fork 的子代理默认继承执行者的只读工具面；allowed-tools 是收窄项，
+    空即不收窄（故不写 allowed-tools 并非"零工具"）。
     """
     d = root / name
     d.mkdir(parents=True, exist_ok=True)
