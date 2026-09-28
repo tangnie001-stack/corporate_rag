@@ -273,8 +273,8 @@ data: {"error": "错误消息"}
 
 独立 SSE 事件 `event: delegate`，仅**主 agent 调用 `delegate_task` 委派子代理**时产生
 （**inline 命中不推**——方法论注入主 agent，无独立子代理）；定点 fork skill 与通用委派
-（省略 `skill`）都推，通用委派的 `skill` 字段填占位 `DELEGATE_GENERIC_SKILL_NAME`
-（`"(generic)"`）。事件由 delegate_task fork
+（省略 `skill`）都推，通用委派的 `skill` 字段填用户可见标签 `SSEInteractionTexts.DELEGATE_GENERIC_LABEL`
+（`"通用分析"`）。事件由 delegate_task fork
 分支与 executor 投递到 `ctx.clarify_channel`，经 `_drain_clarify_channel` 并行消费转
 `SSEDelegateEvent`（`src/utils/sse.py`），**不经外层 astream_events 映射**。action 三态
 `start` / `delta` / `end`，均携带 `delegate_id`（短 uuid，贯穿该次委派）+ `skill`：
@@ -304,7 +304,7 @@ data: {"delegate_id": "a1b2c3d4", "action": "end", "skill": "财务建模专家"
 |------|------|------|
 | `delegate_id` | str | 本次委派唯一 id（短 uuid，贯穿该次委派所有 start/增量/end 与 task execution 条目）；同一次回答内多次委派互不相同 |
 | `action` | str | `start`（委派开始）\| `delta`（过程增量）\| `end`（委派结束） |
-| `skill` | str | 命中的 skill 名；通用委派（省略 `skill`）填占位 `"(generic)"` |
+| `skill` | str | 命中的 skill 名；通用委派（省略 `skill`）填 `SSEInteractionTexts.DELEGATE_GENERIC_LABEL`（`"通用分析"`） |
 | `kind` | str | 仅 delta 用：`thinking`（思考增量）\| `content`（正文增量）；start/end 为空串 |
 | `delta` | str | 仅 delta 用：增量文本（executor 聚合/节流后投递）；start/end 为空串 |
 | `ok` | bool | end 用：`true`=正常完成；`false`=中断/失败 |
@@ -347,7 +347,7 @@ data: {"action": "created", "task": {"task_id": "a1b2c3d4", "title": "财务建�
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `task_id` | str | 任务 id：plan=工具生成短 uuid；execution=delegate_id |
-| `title` | str | 标题（LLM 提供或 skill 名；通用委派 execution 用 `SSEInteractionTexts.DELEGATE_GENERIC_TITLE`=「通用分析任务」） |
+| `title` | str | 标题（LLM 提供或 skill 名；通用委派 execution 用 `DELEGATE_TASK_TITLE_TMPL.format(skill=SSEInteractionTexts.DELEGATE_GENERIC_LABEL)`=「通用分析 · 领域专家分析」） |
 | `type` | str | `plan`（主 agent Task 工具建项）/ `execution`（delegate 自动登记） |
 | `status` | str | `pending` / `running` / `done` / `failed` / `timeout` / `cancelled`（后四者为终态） |
 | `stage` | str | coarse 阶段（delegate start/end/中断边界更新，不做逐 delta 写入） |
@@ -1049,7 +1049,7 @@ agent（LLM + bind_tools）← entry_point
 |------|------|
 | `record` | 命中的 `SkillRecord`；`context=inline` 返回渲染后方法论，`context=fork` 跑子代理。`None` = 通用委派（design D6）：不加载 skill 正文、不查 `record.agent`/`model`/`allowed_tools`，`task` 原样作子代理输入，直接走 fork |
 | `task` | 主 agent 委托的任务文本；fork 时作子代理初始消息 + `$ARGUMENTS`/`{task}` 占位替换值，inline 时填入 `inline_prompt` 占位；通用委派时即子代理初始消息原文 |
-| `run` | 本次 fork 委派运行态；`None` = 用当前主 ctx 不隔离（inline / 无 ctx 路径）；非 `None` = 切到 `run.ctx` 子上下文执行，工具检索与引用编号落子池；`run.skill_name` 为本次委派 skill 标签（通用委派填 `DELEGATE_GENERIC_SKILL_NAME`） |
+| `run` | 本次 fork 委派运行态；`None` = 用当前主 ctx 不隔离（inline / 无 ctx 路径）；非 `None` = 切到 `run.ctx` 子上下文执行，工具检索与引用编号落子池；`run.skill_name` 为本次委派 skill 标签（通用委派填 `SSEInteractionTexts.DELEGATE_GENERIC_LABEL`） |
 
 返回值：inline 为渲染后方法论文本；fork 为子代理聚合纯文本（超 `DELEGATE_RESULT_LIMIT` 截断；idle/total/turn 中断返回超时文案并写 `fork_stop_reason`）。请求取消（`abort_signal` 置位）抛 `asyncio.CancelledError`，由调用方按取消路径收尾。
 
@@ -1058,14 +1058,21 @@ agent（LLM + bind_tools）← entry_point
 | 字段 | 类型 | 语义 |
 |------|------|------|
 | `delegate_id` | str | 本次委派短 id（事件/看板/日志贯穿） |
-| `skill_name` | str | 本次委派 skill 标签（来源：定点=`record.name`、通用=`DELEGATE_GENERIC_SKILL_NAME`；用于事件 skill 字段与 trace span） |
+| `skill_name` | str | 本次委派 skill 标签（来源：定点=`record.name`、通用=`SSEInteractionTexts.DELEGATE_GENERIC_LABEL`；用于事件 skill 字段与 trace span） |
 | `ctx` | `RequestContext` | 子代理独立上下文（主 `ctx.child()`；隔离引用池与计数） |
 | `stop_reason` | `str \| None` | 停止原因；`None` = 正常完成或未执行，否则取 `DelegateStopReason` 值 |
 | `result_text` | str | 子代理最终文本（含 idle/total/turn 中断文案） |
 
-#### `select_fork_tools(allowed, available, executor_tools=None) -> list`
+#### `select_fork_tools(allowed, available, executor_tools=None, tool_readonly=None) -> list`
 
-交集口径：`allowed` 为空 → 零工具；否则先减去禁用集 `FORK_FORBIDDEN_TOOLS`（`ask_user` / `delegate_task`，防交互泄漏与递归），`executor_tools` 非空时再收窄到两者交集；名字对不上的白名单项忽略（不抛，避免笔误打断整次委派）。返回值恒不含禁用集，保持 `available` 原顺序。
+按 design D7/D8 口径筛选可下发子代理的工具，**四步顺序即语义（勿调换）**：
+
+1. **先减禁用集**：`FORK_FORBIDDEN_TOOLS`（`ask_user` / `delegate_task`，防交互泄漏与递归）与 `FORK_EXCLUSIVE_TOOL_PREFIXES`（`task_*`，主 agent 执行面）永不下发，**优先于白名单**（即使 `allowed` 显式声明也不放行）。
+2. **再按只读性筛**：非只读工具默认不下发；仅当 `allowed` **显式声明**该工具时才放行（白名单即"写权限的例外通道"）。`tool_readonly` 表中**缺项**按非只读处理（fail-safe）。
+3. **`allowed` 非空才收窄为交集**（**空 = 不收窄**，继承只读面）。
+4. `executor_tools` 非空时再收窄为交集。
+
+`tool_readonly`（`readonly_map()`）为空（工具尚未注册）→ **fail-closed（不下发任何工具）**。这与 `invocation.derive_invocation_flags` 对空表的 **fail-open** 极性**相反且都是有意为之**：同一张表的两个消费者失败代价不同——fork 侧空表时"按只读放行"会把写权限下发给子代理。名字对不上的白名单项忽略（不抛，避免笔误打断整次委派）。返回值恒不含禁用集，保持 `available` 原顺序。
 
 #### `make_skill_direct_node(skill_registry, executor)`
 

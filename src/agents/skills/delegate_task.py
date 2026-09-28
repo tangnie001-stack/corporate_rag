@@ -10,7 +10,7 @@
 4. fork 执行期间经 ctx.clarify_channel 推 delegate start/end 事件（带 delegate_id
    与 ok/reason 终态；增量由 executor 投 delegate delta），inline 命中不推
    （design D14）；不走外层 astream_events 映射；通用委派沿用同一事件通道，
-   skill 字段填 DELEGATE_GENERIC_SKILL_NAME 占位
+   skill 字段填 SSEInteractionTexts.DELEGATE_GENERIC_LABEL
 """
 
 import asyncio
@@ -29,7 +29,6 @@ from src.chat.delegate_budget import delegate_budget
 from src.chat.task_registry import task_registry
 from src.config import settings
 from src.config.const import (
-    DELEGATE_GENERIC_SKILL_NAME,
     DELEGATE_TASK_TITLE_TMPL,
     DELEGATE_VIA_DELEGATE,
     DelegateStopReason,
@@ -132,13 +131,15 @@ def make_delegate_task(skill_registry: SkillRegistry, executor: SkillExecutor):
             return SSEInteractionTexts.DELEGATE_BUDGET_EXHAUSTED.format(
                 limit=settings.DELEGATE_MAX_PER_SESSION
             )
-        # 本次委派的展示标识：定点用 skill 名，通用用占位；事件 skill 字段与看板标题共用
+        # 本次委派的展示标识：定点用 skill 名，通用用用户可见标签；事件 skill 字段与看板标题共用
         if record is not None:
             skill_name = record.name
             board_title = DELEGATE_TASK_TITLE_TMPL.format(skill=record.name)
         else:
-            skill_name = DELEGATE_GENERIC_SKILL_NAME
-            board_title = SSEInteractionTexts.DELEGATE_GENERIC_TITLE
+            skill_name = SSEInteractionTexts.DELEGATE_GENERIC_LABEL
+            board_title = DELEGATE_TASK_TITLE_TMPL.format(
+                skill=SSEInteractionTexts.DELEGATE_GENERIC_LABEL
+            )
         # 每次委派独占运行态（design D15）：子代理的检索与引用编号落子池，不污染主池；
         # 停止原因由 executor 写 run，终态判定从这里读（不再走主 ctx 的单值字段）
         delegate_id = uuid.uuid4().hex[:8]

@@ -49,7 +49,6 @@ from src.agents.tools.readonly import readonly_map
 from src.config import settings
 from src.config.const import (
     DELEGATE_DEFAULT_MAX_TURNS,
-    DELEGATE_GENERIC_SKILL_NAME,
     DELEGATE_RESULT_LIMIT,
     DELEGATE_VIA_DELEGATE,
     DELEGATE_VIA_DIRECT,
@@ -195,13 +194,13 @@ class SkillExecutor:
         else:
             child_ctx = ctx
         # 本次委派的 skill 标签：run 存在时以其 skill_name 为准（定点填 record.name、
-        # 通用填 DELEGATE_GENERIC_SKILL_NAME）；无 run 的 fail-open 路径由 record 回退
+        # 通用填 SSEInteractionTexts.DELEGATE_GENERIC_LABEL）；无 run 的 fail-open 路径由 record 回退
         if run is not None:
             skill_name = run.skill_name
         elif record is not None:
             skill_name = record.name
         else:
-            skill_name = DELEGATE_GENERIC_SKILL_NAME
+            skill_name = SSEInteractionTexts.DELEGATE_GENERIC_LABEL
         user_content = self._render_fork_task(record, task)
         preset = self._resolve_executor(record, session_agent)
         if run is not None:

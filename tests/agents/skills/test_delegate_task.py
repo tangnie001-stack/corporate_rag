@@ -16,7 +16,11 @@ from src.agents.skills.executor import SkillExecutor
 from src.agents.skills.models import SkillContext, SkillRecord
 from src.agents.skills.registry import SkillRegistry
 from src.config import settings
-from src.config.const import DelegateStopReason, SSEInteractionTexts
+from src.config.const import (
+    DELEGATE_TASK_TITLE_TMPL,
+    DelegateStopReason,
+    SSEInteractionTexts,
+)
 from src.infra.llm.request_context import RequestContext, current_request_ctx
 from src.rag.context import RAGContext
 
@@ -653,7 +657,15 @@ async def test_generic_delegation_without_skill(monkeypatch):
     finally:
         current_request_ctx.reset(token)
     assert "结论" in out
-    assert items[0].title == SSEInteractionTexts.DELEGATE_GENERIC_TITLE
+    assert items[0].title == DELEGATE_TASK_TITLE_TMPL.format(
+        skill=SSEInteractionTexts.DELEGATE_GENERIC_LABEL
+    )
+    # 事件 skill 字段钉住用户可见标签（前端据此渲染分节标题；不得回退为日志占位）
+    delegate_items = [it for it in _drain_channel(ctx) if it.get("type") == "delegate"]
+    assert delegate_items[0]["action"] == "start"
+    assert delegate_items[-1]["action"] == "end"
+    assert delegate_items[0]["skill"] == SSEInteractionTexts.DELEGATE_GENERIC_LABEL
+    assert delegate_items[-1]["skill"] == SSEInteractionTexts.DELEGATE_GENERIC_LABEL
 
 
 @pytest.mark.asyncio
