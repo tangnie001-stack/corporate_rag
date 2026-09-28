@@ -4,7 +4,9 @@
 1. 调用前 reload registry（懒重载，design D16）
 2. 按 skill 命中分发：unknown → 返回"skill 不存在"+ 可用列表；inline → 返回
    方法论（主 agent 自己答）；fork → SkillExecutor 跑子代理
-3. fork 执行期间经 ctx.clarify_channel 推 delegate start/end 事件（带 delegate_id
+3. fork 分支先过会话级委派预算闸门（design D10）：触顶返回可读原因并记
+   `delegate skip`，不抛异常、不中断本轮
+4. fork 执行期间经 ctx.clarify_channel 推 delegate start/end 事件（带 delegate_id
    与 ok/reason 终态；增量由 executor 投 delegate delta），inline 命中不推
    （design D14）；不走外层 astream_events 映射
 """
@@ -21,7 +23,9 @@ from src.agents.skills.delegate_run import DelegateRun
 from src.agents.skills.executor import SkillExecutor
 from src.agents.skills.models import SkillContext
 from src.agents.skills.registry import SkillRegistry
+from src.chat.delegate_budget import delegate_budget
 from src.chat.task_registry import task_registry
+from src.config import settings
 from src.config.const import (
     DELEGATE_TASK_TITLE_TMPL,
     DELEGATE_VIA_DELEGATE,
@@ -98,6 +102,23 @@ def make_delegate_task(skill_registry: SkillRegistry, executor: SkillExecutor):
             # 交回主 agent 的文本同样剥协议前缀（保留问题文本），不因走主上下文而外泄
             out = await executor.execute(record, task)
             return strip_confirm_marker_prefix(out)
+        # 会话级委派预算闸门（design D10）：触顶返回可读原因、不抛异常、不中断本轮。
+        # 位置：定点/通用两条委派分支之后的共同路径（计数需 ctx.session_id，故在
+        # ctx is None 判断之后）——通用分支必须与本处共用同一闸门，不得另写或绕过。
+        # 不消耗/不计数情形：① inline 命中在本闸门之前 return，天然不计数；
+        # ② ctx is None 的 fail-open 分支早退，无 session 可归属，如实不计数；
+        # ③ 取消/异常不回滚——计数已在子代理启动前发生；④ /xxx 直出走 skill_direct，
+        # 不经本工具，天然不消耗。
+        if not delegate_budget.check_and_incr(
+            ctx.session_id, settings.DELEGATE_MAX_PER_SESSION
+        ):
+            core_logging.log_event(
+                Event.DELEGATE_SKIP,
+                reason="budget_exhausted",
+            )
+            return SSEInteractionTexts.DELEGATE_BUDGET_EXHAUSTED.format(
+                limit=settings.DELEGATE_MAX_PER_SESSION
+            )
         # 每次委派独占运行态（design D15）：子代理的检索与引用编号落子池，不污染主池；
         # 停止原因由 executor 写 run，终态判定从这里读（不再走主 ctx 的单值字段）
         delegate_id = uuid.uuid4().hex[:8]

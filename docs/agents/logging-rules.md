@@ -92,6 +92,9 @@
   `log_event_specs.py` 为准
 - `dedup done`（retrieval / info）——内容级去重丢弃量；字段 `dropped`/`kept`，明细以
   `log_event_specs.py` 为准
+- `delegate skip`（app / warning）——委派未被装配或未发起；`reason` 取 registry_empty
+  （skills 目录存在但无任何 skill）/ skills_dir_missing（skills 目录不存在，附 `skills_dir`）/
+  budget_exhausted（会话级委派预算触顶，`delegate_task` 拒绝该次委派并返回可读原因）
 
 **不再扩 `iteration done`**：其「消息数拆分」意图已由 `prompt messages` 在组装点承载，
 不重复记录同一事实（避免后人再提）。

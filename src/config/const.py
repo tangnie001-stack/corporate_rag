@@ -280,6 +280,10 @@ class SSEInteractionTexts:
     # ── delegate_task 工具返回主 agent 的文本 ──
     # 未知 skill 返回模板：{skill}=请求的 skill 名；{available}=可用 skill 列表（空列表显示"无"）
     DELEGATE_UNKNOWN_SKILL: str = "skill 不存在: {skill}，可用 skill: {available}"
+    # 会话级委派预算触顶返回模板：{limit}=本会话委派上限次数；促模型改用自身能力作答
+    DELEGATE_BUDGET_EXHAUSTED: str = (
+        "本轮委派已达会话上限（{limit} 次）。请改用你自己的能力作答，不要再重试委派。"
+    )
     # 未注册前缀的用户可见文案：{skill}=请求的 skill 名；{available}=可用 skill 列表
     UNKNOWN_SKILL_PREFIX: str = "技能不存在：/{skill}。可用技能：{available}"
     # 已注册但 user-invocable:false 的前缀用户可见文案：{skill}=请求的 skill 名（spec:66 只能由模型调用）

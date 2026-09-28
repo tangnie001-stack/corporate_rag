@@ -1,6 +1,7 @@
 """测试 delegate_task 工具 — inline 命中 / fork 命中 / 未知 skill / SSE delegate 事件推送。"""
 
 import asyncio
+import time
 from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock, patch
@@ -492,3 +493,77 @@ async def test_delegate_fail_open_without_ctx_strips_confirm_marker():
     out = await tool.ainvoke({"task": "任务", "skill": "analyst"})
     assert "CONFIRM_REQUIRED" not in out
     assert "请提供公司代码" in out
+
+
+@pytest.mark.asyncio
+async def test_budget_exhausted_returns_readable_reason(monkeypatch):
+    """触顶：返回可读原因、不抛异常、**不启动子代理**（且提示不要再重试）。"""
+    from src.chat.delegate_budget import delegate_budget
+
+    monkeypatch.setattr(delegate_budget, "_counts", {"s1": 50})
+    # _touched 置为当前时间：避免 check_and_incr 的 TTL 惰性清理把已触顶的计数整条删除
+    monkeypatch.setattr(delegate_budget, "_touched", {"s1": time.time()})
+    rec = _record("finance-analyst", SkillContext.FORK, "你是财务建模专家")
+    tool = make_delegate_task(
+        _FakeRegistry({"finance-analyst": rec}), SkillExecutor(main_llm=MagicMock())
+    )
+    ctx = RequestContext(session_id="s1")
+    token = current_request_ctx.set(ctx)
+    try:
+        with patch(
+            "src.agents.skills.executor.create_agent",
+            side_effect=AssertionError("触顶时不得启动子代理"),
+        ):
+            out = await tool.ainvoke({"task": "分析", "skill": "finance-analyst"})
+    finally:
+        current_request_ctx.reset(token)
+    assert "上限" in out
+    assert "不要" in out
+
+
+@pytest.mark.asyncio
+async def test_inline_hit_does_not_consume_budget(monkeypatch):
+    """inline 命中不启动子代理 → 不消耗预算。"""
+    from src.chat.delegate_budget import delegate_budget
+
+    monkeypatch.setattr(delegate_budget, "_counts", {})
+    monkeypatch.setattr(delegate_budget, "_touched", {})
+    rec = _record("finance-qa", SkillContext.INLINE, "请按规则作答：{task}")
+    tool = make_delegate_task(
+        _FakeRegistry({"finance-qa": rec}), SkillExecutor(main_llm=MagicMock())
+    )
+    ctx = RequestContext(session_id="s1")
+    token = current_request_ctx.set(ctx)
+    try:
+        await tool.ainvoke({"task": "2024营收多少", "skill": "finance-qa"})
+    finally:
+        current_request_ctx.reset(token)
+    assert delegate_budget.used("s1") == 0
+
+
+@pytest.mark.asyncio
+async def test_budget_skip_logged(monkeypatch):
+    """触顶记 delegate skip / reason=budget_exhausted。"""
+    import src.agents.skills.delegate_task as dt_mod
+    from src.chat.delegate_budget import delegate_budget
+
+    monkeypatch.setattr(delegate_budget, "_counts", {"s1": 50})
+    # _touched 置为当前时间：避免 TTL 惰性清理清空已触顶计数（同触顶用例）
+    monkeypatch.setattr(delegate_budget, "_touched", {"s1": time.time()})
+    captured: list[tuple] = []
+    monkeypatch.setattr(
+        dt_mod.core_logging,
+        "log_event",
+        lambda ev, **kw: captured.append((ev.value, kw)),
+    )
+    rec = _record("finance-analyst", SkillContext.FORK, "你是财务建模专家")
+    tool = make_delegate_task(
+        _FakeRegistry({"finance-analyst": rec}), SkillExecutor(main_llm=MagicMock())
+    )
+    ctx = RequestContext(session_id="s1")
+    token = current_request_ctx.set(ctx)
+    try:
+        await tool.ainvoke({"task": "分析", "skill": "finance-analyst"})
+    finally:
+        current_request_ctx.reset(token)
+    assert ("delegate skip", {"reason": "budget_exhausted"}) in captured
