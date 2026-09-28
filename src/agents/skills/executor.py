@@ -54,6 +54,8 @@ from src.config.prompts import (
     FORK_TASK_APPEND_TMPL,
 )
 from src.infra.llm.request_context import current_request_ctx
+from src.infra.llm.tool_trace import ToolTraceCollector
+from src.infra.llm.trace_context import current_trace_id
 from src.models import get_llm  # 模块级 import：测试需 patch executor.get_llm
 
 
@@ -182,6 +184,16 @@ class SkillExecutor:
         sub_agent = self._build_sub_agent(record, preset)
         max_turns = self._fork_max_turns(preset)
         total_timeout = self._fork_total_timeout(child_ctx)
+        # 委派域 trace（design D11）：父 span 标注 delegate_id / skill，其下挂子代理的工具 span。
+        # 每委派一个实例——_round 是单值状态，共用实例会跨流串台。
+        trace_collector = ToolTraceCollector(
+            enabled=settings.LANGFUSE_ENABLE,
+            trace_id=current_trace_id.get() or "",
+            scope="delegate",
+            name_prefix="delegate:",
+        )
+        if run is not None:
+            trace_collector.open_delegate_span(run.delegate_id, record.name)
         # 隔离子代理回调传播：不 reset 会经 var_child_runnable_config 把外层
         # callback handler 传进 create_agent，子代理 LLM 事件泄漏到外层
         # graph.astream_events（SSE token 污染 + full_answer 累积子代理原文）。
@@ -194,7 +206,12 @@ class SkillExecutor:
             try:
                 text = await asyncio.wait_for(
                     consume_fork_events(
-                        sub_agent, run, user_content, record.name, max_turns
+                        sub_agent,
+                        run,
+                        user_content,
+                        record.name,
+                        max_turns,
+                        trace_collector,
                     ),
                     timeout=total_timeout,
                 )
@@ -221,6 +238,8 @@ class SkillExecutor:
             # 勿当死代码清理
             if run is not None:
                 run.stop_reason = run.ctx.fork_stop_reason
+            # 委派父 span 必须关：取消/异常路径不关会留下悬空 span
+            trace_collector.close()
             current_request_ctx.reset(token_ctx)
             var_child_runnable_config.reset(token)
 
