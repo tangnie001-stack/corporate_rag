@@ -50,7 +50,11 @@ def test_all_inline_skills_within_budget():
 
 
 def test_fork_prompt_must_not_mention_tool_names():
-    """fork skill 正文不出现任何工具名（零工具子代理，见 design D7/D9）。"""
+    """在库三份 fork skill 的正文不点名工具名。
+
+    正文是方法论、不含工具装配；工具面由执行者的只读面与 skill 的 `allowed-tools`
+    决定（见 delegate-task「fork 执行」），不由正文声明。
+    """
     records = {r.name: r for r in SkillLoader(SKILLS_DIR).load_all()}
     for name in FORK_SKILLS:
         body = records[name].fork_body or ""
