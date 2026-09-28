@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from src.agents.skills.loader import SkillLoader
-from src.agents.skills.models import SkillContext
+from src.agents.skills.models import ContextSource, SkillContext
 from src.config.const import INLINE_PROMPT_MAX_CHARS
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -74,3 +74,19 @@ def test_no_duplicate_of_system_rules():
         body = rec.inline_prompt or rec.fork_body or ""
         for phrase in duplicated_phrases:
             assert phrase not in body, f"{rec.name} 正文与系统段规则重复：{phrase}"
+
+
+def test_in_repo_long_skills_resolve_as_auto_oversize():
+    """在库三份长文 skill 未声明 context → 全部落 auto_oversize（按 fork 承载）。
+
+    这是 P1 的核心验收点：默认值翻转后，长文 skill 仍不占主 agent 历史预算。
+    """
+    records = {r.name: r for r in SkillLoader(SKILLS_DIR).load_all()}
+    for name in (
+        "financial-statement-analyzer",
+        "competitive-landscape",
+        "market-sizing-analysis",
+    ):
+        rec = records[name]
+        assert rec.context == SkillContext.FORK, name
+        assert rec.context_source == ContextSource.AUTO_OVERSIZE, name

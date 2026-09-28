@@ -91,9 +91,7 @@ MAX_DELEGATE_BONUS = (
 )
 DELEGATE_DEFAULT_MAX_TURNS = 5  # fork 零工具默认 turn 上限（防御）
 DELEGATE_RESULT_LIMIT = 1000  # fork 结果回流主 agent 的截断阈值（字符）
-INLINE_PROMPT_MAX_CHARS = (
-    500  # inline skill 正文规模上限（字符，防上下文累积膨胀，超出仅记 warning）
-)
+INLINE_PROMPT_MAX_CHARS = 500  # inline skill 正文规模上限（字符，防上下文累积膨胀）；未声明 context 时超出即自动改用 fork，显式 inline 时仅记 warning
 # skill / agent preset 名允许的字符集（ASCII slug）：/xxx 命令天然是 ASCII 惯例，
 # 非 ASCII 名会让 `/财报分析` 落进"非命令形态"分支被静默当普通文本（design D15）
 CAPABILITY_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")

@@ -5,7 +5,8 @@ name/description/context/model/allowed-tools/agent/user-invocable/disable-model-
 解析规则：
 - name 缺省用目录名；description 缺省用正文首段
 - name 必须是 ASCII slug（CAPABILITY_NAME_PATTERN），否则记 warning 并跳过该 skill
-- context 未声明取 fork；非法值抛错 → 该 skill 跳过加载（同非法 name）
+- context 未声明取 inline（与上游一致）；正文超 INLINE_PROMPT_MAX_CHARS 时自动改用 fork
+- 非法值抛错 → 该 skill 跳过加载（同非法 name）
 - context=fork 但未声明 allowed-tools 记 warning（子代理零工具，分析型 skill 属有意设计）
 - allowed-tools 用逗号分隔字符串书写，内部转 list
 - 正文按 context 存 inline_prompt（inline）或 fork_body（fork）
@@ -19,9 +20,15 @@ from pathlib import Path
 import yaml
 
 from src.agents.skills.invocation import derive_invocation_flags
-from src.agents.skills.models import SkillContext, SkillRecord
+from src.agents.skills.models import ContextSource, SkillContext, SkillRecord
 from src.agents.tools.readonly import readonly_map
-from src.config.const import CAPABILITY_NAME_PATTERN, DEPRECATED_SKILL_FIELDS
+from src.config.const import (
+    CAPABILITY_NAME_PATTERN,
+    DEPRECATED_SKILL_FIELDS,
+    INLINE_PROMPT_MAX_CHARS,
+)
+from src.core import logging as core_logging
+from src.core.log_events import Event
 
 
 class SkillLoader:
@@ -86,12 +93,19 @@ class SkillLoader:
         self._warn_deprecated_fields(meta)
         name = self._resolve_name(meta, fallback_name)
         description = self._resolve_description(meta, body)
-        context = self._resolve_context(meta)
+        context, context_source = self._resolve_context(meta, body)
         inline_prompt, fork_body = self._resolve_body(context, body)
         allowed_tools = self._resolve_allowed_tools(meta)
         self._warn_fork_without_tools(name, context, allowed_tools)
         user_invocable, disable_model_invocation = self._resolve_invocation_flags(
             meta, allowed_tools, name
+        )
+        core_logging.log_event(
+            Event.SKILL_RESOLVED,
+            skill=name,
+            context=context,
+            context_source=context_source,
+            body_chars=len(body),
         )
         return SkillRecord(
             name=name,
@@ -105,6 +119,7 @@ class SkillLoader:
             user_invocable=user_invocable,
             disable_model_invocation=disable_model_invocation,
             source_path=path.resolve(),
+            context_source=context_source,
         )
 
     def _resolve_name(self, meta: dict, fallback_name: str) -> str:
@@ -149,21 +164,37 @@ class SkillLoader:
                 "子代理将拿不到任何工具；分析型 skill 需由主 agent 预检索材料并经 task 传入"
             )
 
-    def _resolve_context(self, meta: dict) -> str:
-        """解析 context；未声明取 fork，非法值抛 ValueError 由 load_all 跳过该 skill。
+    def _resolve_context(self, meta: dict, body: str) -> tuple[str, str]:
+        """解析 context 与其来源；非法值抛 ValueError 由 load_all 跳过该 skill。
 
-        未声明取 fork：inline 会把 skill 正文写进主 agent 的会话历史并长期占用其历史
-        预算（超限后静默被裁，见 requirements_pool F-13），而 fork 的失效可见（执行
-        路径不对）。
+        未声明取 inline（与上游一致：不写即 inline）；但正文超 INLINE_PROMPT_MAX_CHARS
+        时自动改用 fork —— 正文注入后会留在 messages 历史并挤占历史预算，fork 的隔离
+        让长文不占主对话。该自动判定使外部来源的 skill 无需人工补 frontmatter。
 
-        非法值不回落任一模式，而是抛错让 load_all 跳过该 skill（与非法 name 同款）：
-        降级到 inline 是静默失效，降级到 fork 会得到零工具子代理，两者都在猜作者本意；
-        拼错应立即暴露给作者修正。
+        显式声明永远优先：显式 inline 且超预算只记 warning（超限守卫测试承担失败），
+        显式 fork 与正文长度无关。
+
+        Returns:
+            (context, context_source)
         """
-        context = meta.get("context", SkillContext.FORK)
-        if context not in (SkillContext.INLINE, SkillContext.FORK):
-            raise ValueError(f"context 非法值 {context!r}（仅允许 inline / fork）")
-        return context
+        declared = meta.get("context")
+        if declared is None:
+            if len(body) > INLINE_PROMPT_MAX_CHARS:
+                warnings.warn(
+                    f"skill 正文 {len(body)} 字符超出 inline 预算"
+                    f"（INLINE_PROMPT_MAX_CHARS={INLINE_PROMPT_MAX_CHARS}），已自动按 fork 处理；"
+                    "如确需 inline 请显式声明 context: inline 并精简正文"
+                )
+                return SkillContext.FORK, ContextSource.AUTO_OVERSIZE
+            return SkillContext.INLINE, ContextSource.DEFAULT
+        if declared not in (SkillContext.INLINE, SkillContext.FORK):
+            raise ValueError(f"context 非法值 {declared!r}（仅允许 inline / fork）")
+        if declared == SkillContext.INLINE and len(body) > INLINE_PROMPT_MAX_CHARS:
+            warnings.warn(
+                f"skill 显式声明 context: inline 但正文 {len(body)} 字符超出预算"
+                f"（{INLINE_PROMPT_MAX_CHARS}），仍按 inline 处理"
+            )
+        return declared, ContextSource.EXPLICIT
 
     def _resolve_body(self, context: str, body: str) -> tuple[str | None, str | None]:
         """按 context 把正文落到 inline_prompt 或 fork_body。"""

@@ -20,6 +20,17 @@ class SkillContext:
     FORK: str = "fork"  # fork 执行形态
 
 
+class ContextSource:
+    """`context` 取值的来源（写入 SkillRecord.context_source）。
+
+    与 SkillContext 同类且同处：两者都属于 skill 的"执行形态"语义。
+    """
+
+    DEFAULT: str = "default"  # frontmatter 未声明，按缺省取 inline
+    EXPLICIT: str = "explicit"  # frontmatter 显式声明
+    AUTO_OVERSIZE: str = "auto_oversize"  # 未声明但正文超预算，加载期自动改用 fork
+
+
 @dataclass
 class SkillRecord:
     """单个 skill 的运行时对象（由 SkillLoader 解析 SKILL.md 产出）。
@@ -27,7 +38,7 @@ class SkillRecord:
     Attributes:
         name: skill 名（ASCII slug，frontmatter name 或目录名；LLM 委派匹配依据）
         description: whenToUse 一句话描述（委派匹配与前端展示依据）
-        context: 执行形态（inline|fork；未声明取 fork，非法值使该 skill 加载失败被跳过）
+        context: 执行形态（inline|fork；未声明取 inline，正文超预算时自动改 fork，见 context_source）
         inline_prompt: context=inline 时正文（短方法论，≤500 字，可含 $ARGUMENTS）
         fork_body: context=fork 时正文（子代理的 user message 任务内容）
         agent: fork 执行者预设名（空=None 时按会话选定智能体或系统默认）
@@ -36,6 +47,7 @@ class SkillRecord:
         user_invocable: 是否允许用户 `/xxx` 调用（frontmatter 显式值或按工具只读性推导）
         disable_model_invocation: 是否禁止模型自动 delegate_task 调用（同上）
         source_path: SKILL.md 文件绝对路径（懒重载 signature 用）
+        context_source: context 取值的来源（default|explicit|auto_oversize）
     """
 
     name: str  # skill 名（ASCII slug）
@@ -51,3 +63,6 @@ class SkillRecord:
     user_invocable: bool = True  # 允许用户 /xxx 调用
     disable_model_invocation: bool = False  # 禁止模型自动调用
     source_path: Path = field(default_factory=Path)  # SKILL.md 绝对路径
+    context_source: str = (
+        ContextSource.DEFAULT
+    )  # context 取值来源（default|explicit|auto_oversize）
