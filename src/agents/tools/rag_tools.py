@@ -93,19 +93,24 @@ def make_rag_tools(
         Args:
             query: 检索查询文本
             top_k: 返回条数上限（默认 TOP_K_RERANK，精排后按此截断）
-            state: LangGraph 注入的 AgentState，读取 kb_id（空 = 未绑定 KB 不检索）
+            state: LangGraph 注入的执行状态：主图注入 AgentState（读其 kb_id，空 = 未绑定 KB
+                不检索）；fork 子代理图由 create_agent 建图、无此注入，注入的是普通 dict，
+                此时回退 current_request_ctx 的 kb_id
 
         Returns:
             带全局递增引用编号的精排上下文文本，如 "[1] 来源: xxx (第3页)\\n内容: ..."
         """
-        if state is not None:
+        # kb_id 取值：主图注入的 AgentState 优先，ctx 回退（子代理图 dict 无 kb_id）。
+        # ctx 同时供后续检索计数 / temporal / 信号读写，此处一次读取、全程复用
+        ctx = current_request_ctx.get()
+        kb_id = ""
+        if isinstance(state, AgentState):
             kb_id = state.kb_id
-        else:
-            kb_id = ""
+        if not kb_id and ctx is not None:
+            kb_id = ctx.kb_id
 
         # 同 turn 检索调用计数：reretrieve 换词信号判定用（retrieve_call_seq >= 2）。
         # ctx 为 None（无请求上下文）时不计数——计数只为信号服务，无 ctx 即无消费方
-        ctx = current_request_ctx.get()
         if ctx is not None:
             ctx.retrieve_call_seq += 1
 
@@ -183,10 +188,11 @@ def make_rag_tools(
             )
         contexts = contexts[:top_k]
 
-        if state is not None:
+        # iteration：主图 AgentState 读其计数；子代理图注入 dict 无该字段，取 0
+        # （iteration 仅入日志/信号，子代理场景不消费主图迭代语义）
+        iteration = 0
+        if isinstance(state, AgentState):
             iteration = state._agent_iterations
-        else:
-            iteration = 0
 
         # 检索重放上下文（L1）：query/kb 为重放输入，其余参数为"当时值"供 drift 对照；
         # 态 A（kb_id 空）不检索、不落 replay 行
@@ -226,7 +232,6 @@ def make_rag_tools(
         )
 
         # 全局递增编号：同步块内读取偏移并追加，无 await，asyncio 单线程保证原子
-        ctx = current_request_ctx.get()
         if ctx is not None:
             collector = ctx.tool_contexts
         else:
