@@ -93,8 +93,10 @@ def make_delegate_task(skill_registry: SkillRegistry, executor: SkillExecutor):
 
         ctx = current_request_ctx.get()
         if ctx is None:
-            # 无请求上下文时没有父上下文可派生，按既有 fail-open 直接用主上下文执行
-            return await executor.execute(record, task)
+            # 无请求上下文时没有父上下文可派生，按既有 fail-open 直接用主上下文执行；
+            # 交回主 agent 的文本同样剥协议前缀（保留问题文本），不因走主上下文而外泄
+            out = await executor.execute(record, task)
+            return strip_confirm_marker_prefix(out)
         # 每次委派独占运行态（design D15）：子代理的检索与引用编号落子池，不污染主池；
         # 停止原因由 executor 写 run，终态判定从这里读（不再走主 ctx 的单值字段）
         delegate_id = uuid.uuid4().hex[:8]

@@ -471,3 +471,24 @@ async def test_delegate_strips_confirm_marker_prefix_keeps_question():
         current_request_ctx.reset(token)
     assert "CONFIRM_REQUIRED" not in out
     assert "请提供公司代码" in out
+
+
+@pytest.mark.asyncio
+async def test_delegate_fail_open_without_ctx_strips_confirm_marker():
+    """无请求上下文（fail-open 仍走主上下文）时同样剥确认标记前缀、只留问题文本。
+
+    覆盖 delegate_task 的 `ctx is None` 早退分支：不隔离（无父上下文可派生，仍用
+    主上下文执行），但交回主 agent 的文本仍不得外泄 `CONFIRM_REQUIRED:` 协议串。
+    """
+    executor = _StubExecutor(
+        output="先给结论。\nCONFIRM_REQUIRED: 请提供公司代码\n其余内容照旧。"
+    )
+    tool = make_delegate_task(
+        _FakeRegistry({"analyst": _record("analyst", SkillContext.FORK, "正文")}),
+        executor,
+    )
+    # 不设置 current_request_ctx —— 命中 ctx is None 的 fail-open 早退分支
+    assert current_request_ctx.get() is None
+    out = await tool.ainvoke({"task": "任务", "skill": "analyst"})
+    assert "CONFIRM_REQUIRED" not in out
+    assert "请提供公司代码" in out
