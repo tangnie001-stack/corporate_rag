@@ -106,6 +106,12 @@ SKILL_TASK_PLACEHOLDERS = ("$ARGUMENTS", "{task}")
 # ask_user —— D18：子代理不直接交互，需要确认时由编排层确认门代为询问；
 # delegate_task —— D7：子代理不再委派，防递归与上下文爆炸。
 FORK_FORBIDDEN_TOOLS = ("ask_user", "delegate_task")
+# fork 子代理永不可持有的主 agent 专属工具**前缀**（design D8 第三档）：
+# task_*（task_create/get/list/update/output/stop）是主 agent 的执行面（任务看板），
+# 子代理是被委派的执行体，持有它会让子代理看见并改写主 agent 的任务编排。
+# 与上面两项分列而不合并：三档理由不同（语义禁止 / 防递归 / 角色专属）。
+# 用前缀而非逐名枚举：将来新增 task_* 工具时自动被挡，不必同步这份清单。
+FORK_EXCLUSIVE_TOOL_PREFIXES = ("task_",)
 SKILL_INJECTION_PREFIX: str = "[[skill-injection]]"
 """注入型隐藏消息的内容前缀标记。
 
