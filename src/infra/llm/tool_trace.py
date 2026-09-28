@@ -69,7 +69,9 @@ class ToolTraceCollector:
             enabled: 是否产出（取自 settings.LANGFUSE_ENABLE）
             trace_id: 本轮 trace id
             client: Langfuse 客户端；None 时惰性取单例
-            scope: 事件归属域（main=主图；delegate=fork 子代理），仅用于委派父 span 的定位
+            scope: 该采集器所属域（main=主图；delegate=fork 子代理），记录后供调用方 /
+                排查辨识；当前实现不据它分支，委派域由 open_delegate_span 与
+                name_prefix 落地
             parent_span: 委派父 span（scope=delegate 时由 open_delegate_span 产出并回填）
             name_prefix: span 名前缀（委派域传 "delegate:"，便于在 trace 上区分归属）
         """

@@ -17,12 +17,14 @@ class _FakeSpan:
         parent_id: str | None,
         trace_id: str | None,
         input: Any,
+        metadata: dict | None,
     ):
         self.id = span_id
         self.name = name
         self.parent_observation_id = parent_id
         self.trace_id = trace_id
         self.input = input
+        self.metadata = metadata
         self.ended: dict | None = None
 
     def end(self, **kwargs):
@@ -42,6 +44,7 @@ class _FakeClient:
             kwargs.get("parent_observation_id"),
             kwargs.get("trace_id"),
             kwargs.get("input"),
+            kwargs.get("metadata"),
         )
         self.spans.append(span)
         return span
@@ -267,6 +270,7 @@ def test_delegate_scope_prefixes_names_and_nests_under_parent():
     collector.close()
     names = [s.name for s in client.spans]
     assert names == ["delegate", "delegate:tools", "delegate:retrieve_kb"]
+    assert client.spans[0].metadata == {"delegate_id": "d1", "skill": "analyst"}
     assert client.spans[1].parent_observation_id == parent.id  # round 挂在父下
     assert (
         client.spans[2].parent_observation_id == client.spans[1].id
