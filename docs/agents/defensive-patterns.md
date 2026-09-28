@@ -120,6 +120,22 @@
 
 **历史实例**：classifier / rewrite / entity 三个远端模板各有一条（提交 `0aab2e9`、`005c572`）。
 
+## agent 循环与 LangChain 中间件
+
+### 自定义 middleware 必须声明 state_schema，否则自定义键被静默丢弃
+
+**现象**：给 `create_agent` 写自定义 `AgentMiddleware` 时，**只有声明在 `state_schema` 里的键才会进入图状态**。未声明的键读写都不报错、直接被丢——写进去的值读回来就是缺失的（`state.get("_n", 0)` 恒为 0），据此判定的护栏**静默失效**，而日志、异常、返回结构全都正常。
+
+2026-09-28 调研 `one-loop-two-roles` 时**连踩四次**，其中一次据此得出「`after_model` 的 `jump_to: "end"` 不生效」的**错误结论**——真因是计数键未声明、判定条件恒为假，与 API 行为无关。
+
+**规则**：自定义 middleware 承载任何计数或携带数据时——(1) MUST 定义 `state_schema`（`AgentState` 子类），把**所有**自定义键声明进去并给全默认值；(2) MUST 有断言覆盖该键（改键名时测试必须失败）；(3) 排查「middleware 逻辑不生效」时，**先确认键在 schema 内**，再怀疑 API 行为。
+
+### middleware 实例跨请求共享，per-request 状态不得存在实例属性上
+
+**现象**：`create_agent` 的 middleware 实例随图**构造一次**、跨请求复用（生产单 worker 下即全进程共用）。把本轮计数、本轮参数等存在实例属性上，会在并发请求间**串号**，且不报错、日志上看不出来。
+
+**规则**：middleware 实例只保存**进程级常量**（上限值、模型名、标志位等）；per-request 数据一律经 `state_schema` 或请求上下文（ContextVar）传递。
+
 ## 接口契约
 
 ### 前端消费的响应形状必须以契约文档为准，且形状漂移只能降级不能抛错

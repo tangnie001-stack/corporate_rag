@@ -1,0 +1,38 @@
+# agent-loop-observability Specification (Delta)
+
+## ADDED Requirements
+
+### Requirement: 循环回合上限命中时的消息状态
+
+回合上限命中时，系统 SHALL 记录 warn 级日志（沿用 `MAX_AGENT_ITERATIONS` 命中语义：含 query 与 iteration），并 SHALL 以如下**确切状态**结束该轮循环：
+
+- 计数达到有效上限时**即**产出该 warn 日志——产出条件 SHALL NOT 依赖"该轮是否仍声明工具调用"（模型在上限轮恰好正常收尾时，日志同样产出）
+- 模型调用次数 SHALL 恰好等于该轮有效上限（含委派放宽后的值）
+- 工具执行次数 SHALL 等于**有效上限减一**——即最后一轮模型声明的工具调用**不执行**；该式对上限为 1 的情形同样成立（此时工具执行次数为零）
+- 消息序列末条 SHALL 是**含 `tool_calls` 的 `AIMessage`**；若上限轮为正常收尾（无工具调用），末条 SHALL 是该轮正常的 `AIMessage`
+
+由此，该轮的答案文本 SHALL 允许为空串，且 SHALL NOT 被替换为提示性文案或工具返回内容。
+
+**理由**：这是既有行为的确切语义，也是"触顶后用户看到空回答"这一已知缺陷的载体（见 `requirements_pool` F-35）。上游修复（轮次/时长护栏取值与兜底）由独立变更承担；在此之前本语义 SHALL 保持不变，任何改动都须显式可见。
+
+#### Scenario: 上限轮正常收尾也产出告警
+
+- **WHEN** 模型在第 N 次调用（N 等于有效上限）中未声明工具调用、正常收尾
+- **THEN** 系统 SHALL 仍产出回合上限命中的 warn 日志（含 query 与 iteration）
+
+#### Scenario: 触顶时的模型调用与工具执行次数
+
+- **WHEN** 主循环达到有效回合上限且最后一轮模型声明了工具调用
+- **THEN** 模型 SHALL 被调用恰好上限次，工具 SHALL 被执行上限减一次
+- **AND** 最后一轮声明的工具调用 SHALL NOT 被执行
+
+#### Scenario: 触顶时末条消息为含工具调用的 AIMessage
+
+- **WHEN** 主循环达到有效回合上限且最后一轮声明了工具调用
+- **THEN** 该轮消息序列的末条 SHALL 是含 `tool_calls` 的 `AIMessage`
+- **AND** 该消息的正文 SHALL 允许为空串，SHALL NOT 被自动填充为工具结果或限流提示文案
+
+#### Scenario: 不注入限流提示消息
+
+- **WHEN** 回合上限命中
+- **THEN** 系统 SHALL NOT 向消息序列注入任何提示性（如"已达调用上限"）消息
