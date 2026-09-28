@@ -14,6 +14,7 @@ from src.agents.skills.delegate_task import DelegateTaskArgs, make_delegate_task
 from src.agents.skills.executor import SkillExecutor
 from src.agents.skills.models import SkillContext, SkillRecord
 from src.agents.skills.registry import SkillRegistry
+from src.config import settings
 from src.config.const import DelegateStopReason
 from src.infra.llm.request_context import RequestContext, current_request_ctx
 from src.rag.context import RAGContext
@@ -500,7 +501,9 @@ async def test_budget_exhausted_returns_readable_reason(monkeypatch):
     """触顶：返回可读原因、不抛异常、**不启动子代理**（且提示不要再重试）。"""
     from src.chat.delegate_budget import delegate_budget
 
-    monkeypatch.setattr(delegate_budget, "_counts", {"s1": 50})
+    monkeypatch.setattr(
+        delegate_budget, "_counts", {"s1": settings.DELEGATE_MAX_PER_SESSION}
+    )
     # _touched 置为当前时间：避免 check_and_incr 的 TTL 惰性清理把已触顶的计数整条删除
     monkeypatch.setattr(delegate_budget, "_touched", {"s1": time.time()})
     rec = _record("finance-analyst", SkillContext.FORK, "你是财务建模专家")
@@ -542,12 +545,52 @@ async def test_inline_hit_does_not_consume_budget(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_successful_fork_consumes_one_budget():
+    """一次正常完成的 fork 委派消耗一次预算：used 从 0 变 1。
+
+    守住调用点走的是 check_and_incr（自增），而非只读检查（`used(...) >= limit`）——
+    后者计数永不增长、闸门永不触发，而"触顶被拒"用例因预置计数仍会全绿。
+    """
+    import src.agents.skills.delegate_task as dt_mod
+    from src.chat.delegate_budget import delegate_budget
+    from src.chat.task_registry import SessionTaskRegistry
+
+    sid = "s-budget-consume"
+    delegate_budget.reset(sid)  # 共享单例为模块级，先清该会话避免残留
+    reg = SessionTaskRegistry(on_change=None)  # 不写真实 buffer，防污染
+    rec = _record("finance-analyst", SkillContext.FORK, "你是财务建模专家")
+    tool = make_delegate_task(
+        _FakeRegistry({"finance-analyst": rec}), SkillExecutor(main_llm=MagicMock())
+    )
+    fake_sub = _fake_sub_agent(
+        _event("on_chat_model_start"),
+        _event("on_chat_model_stream", chunk=AIMessageChunk(content="分析")),
+        _event("on_chat_model_end", output=AIMessage(content="分析")),
+    )
+    ctx = RequestContext(session_id=sid)
+    token = current_request_ctx.set(ctx)
+    try:
+        assert delegate_budget.used(sid) == 0
+        with (
+            patch.object(dt_mod, "task_registry", reg),
+            patch("src.agents.skills.executor.create_agent", return_value=fake_sub),
+        ):
+            await tool.ainvoke({"task": "分析", "skill": "finance-analyst"})
+        assert delegate_budget.used(sid) == 1
+    finally:
+        current_request_ctx.reset(token)
+        delegate_budget.reset(sid)  # 清该会话，避免影响同文件其它用例
+
+
+@pytest.mark.asyncio
 async def test_budget_skip_logged(monkeypatch):
     """触顶记 delegate skip / reason=budget_exhausted。"""
     import src.agents.skills.delegate_task as dt_mod
     from src.chat.delegate_budget import delegate_budget
 
-    monkeypatch.setattr(delegate_budget, "_counts", {"s1": 50})
+    monkeypatch.setattr(
+        delegate_budget, "_counts", {"s1": settings.DELEGATE_MAX_PER_SESSION}
+    )
     # _touched 置为当前时间：避免 TTL 惰性清理清空已触顶计数（同触顶用例）
     monkeypatch.setattr(delegate_budget, "_touched", {"s1": time.time()})
     captured: list[tuple] = []
