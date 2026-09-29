@@ -461,3 +461,90 @@ async def test_agent_turn_writes_imperative_generation(monkeypatch):
     assert kwargs["trace_id"] == "trace-x"
     assert kwargs["parent_observation_id"] == "obs-parent"
     assert kwargs["usage"]["input"] >= 1
+
+
+def _patch_langfuse(monkeypatch) -> list[dict]:
+    """把 langfuse context 换成记录式 fake，返回收到的 generation kwargs 列表。"""
+    recorded: list[dict] = []
+
+    class _FakeGeneration:
+        def end(self, **kwargs):
+            pass
+
+    class _FakeClient:
+        def generation(self, **kwargs):
+            recorded.append(kwargs)
+            return _FakeGeneration()
+
+    class _FakeCtx:
+        client_instance = _FakeClient()
+
+        @staticmethod
+        def get_current_trace_id():
+            return "trace-x"
+
+        @staticmethod
+        def get_current_observation_id():
+            return "obs-parent"
+
+    monkeypatch.setattr(settings, "LANGFUSE_ENABLE", True)
+    monkeypatch.setattr("src.agents.graph.middleware.langfuse_context", _FakeCtx)
+    return recorded
+
+
+@pytest.mark.asyncio
+async def test_agent_turn_input_includes_system_message(monkeypatch):
+    """观测 input 必须是"本轮实收集合"：system 段在前，其后才是 request.messages。
+
+    回归守卫：`SystemMessagesMiddleware` 用 `override(system_message=…)` 施加 system，
+    而 `ModelRequest.messages` 明确**不含** system（该字段单独存放）。观测若只取
+    `request.messages`，system 段会从 trace 里彻底消失（已在真实 trace 上复现：
+    改动前 iter1 是 `[system, user]`，改动后变成 `[user]`）。
+    """
+    recorded = _patch_langfuse(monkeypatch)
+    model = _RecordingModel(messages=iter([AIMessage(content="ok")]))
+    agent = build_agent(
+        model,
+        tools=[],
+        system=None,
+        middleware_extra=[SystemMessagesMiddleware(), AgentSpanMiddleware()],
+    )
+    await agent.ainvoke(
+        {
+            "messages": [HumanMessage(content="hi")],
+            "kb_id": "kb-1",
+            "_system_messages": _sysmsgs("SYS-ONE", "SYS-TWO"),
+        }
+    )
+    assert len(recorded) == 1
+    payload = recorded[0]["input"]
+    assert [m["role"] for m in payload] == ["system", "system", "user"]
+    assert payload[0]["content"] == "SYS-ONE"
+    assert payload[1]["content"] == "SYS-TWO"
+    assert payload[2]["content"] == "hi"
+
+
+@pytest.mark.asyncio
+async def test_agent_turn_usage_estimate_includes_system(monkeypatch):
+    """用量估算的输入同样含 system 段（漏掉会让每轮估算系统性偏小）。
+
+    口径：`estimate_usage` 把消息 content 以空格连接后 `len // 2`。
+    `"SYS-ONE SYS-TWO hi"` → 18 // 2 = **9**；若只算 `request.messages`（丢 system）
+    则为 `"hi"` → 1 —— 该断言正是用来钉住这一点。
+    """
+    recorded = _patch_langfuse(monkeypatch)
+    model = _RecordingModel(messages=iter([AIMessage(content="ok")]))
+    agent = build_agent(
+        model,
+        tools=[],
+        system=None,
+        middleware_extra=[SystemMessagesMiddleware(), AgentSpanMiddleware()],
+    )
+    await agent.ainvoke(
+        {
+            "messages": [HumanMessage(content="hi")],
+            "kb_id": "kb-1",
+            "_system_messages": _sysmsgs("SYS-ONE", "SYS-TWO"),
+        }
+    )
+    assert recorded[0]["usage"]["input"] == 9

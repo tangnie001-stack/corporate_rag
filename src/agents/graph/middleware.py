@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from langchain.agents.middleware import AgentMiddleware, hook_config
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, BaseMessage
 from langfuse.decorators import langfuse_context
 from langfuse.model import ModelUsage
 
@@ -178,6 +178,29 @@ def _extract_ai_message(response: Any) -> AIMessage | None:
     return None
 
 
+def _sent_messages(request: Any) -> list[BaseMessage]:
+    """本轮**实际送入模型**的完整消息列表：system 段在前 + `request.messages`。
+
+    为什么需要它：`SystemMessagesMiddleware` 用 `request.override(system_message=…)`
+    施加 system 段，而 LangChain 的 `ModelRequest.messages` 明确**不含** system
+    （该字段单独存放）⇒ 观测与用量估算若只取 `request.messages`，system 段会整体
+    缺失。system 恰是 prompt 里最大的一块（实测某轮估算口径差约 40 倍），故凡
+    "记录/估算本轮送了什么"的地方都必须经本函数取列表。
+
+    静态 system（`build_agent(system="…")`）由框架直接并入 messages，
+    此时 `system_message` 为 None，本函数不重复追加。
+
+    Args:
+        request: 最内层 middleware 收到的 ModelRequest
+
+    Returns:
+        `[system_message, *request.messages]`；无 system 时即 `request.messages`
+    """
+    system = getattr(request, "system_message", None)
+    messages = list(request.messages)
+    return [system, *messages] if isinstance(system, BaseMessage) else messages
+
+
 class AgentSpanMiddleware(AgentMiddleware):
     """主循环观测（模型轮次日志 + Langfuse generation span）。
 
@@ -239,17 +262,21 @@ class AgentSpanMiddleware(AgentMiddleware):
         并标 usage_estimated）/ metadata（iteration / usage_estimated /
         temperature / temp_source / kb_bound）。kb_bound 与档位判据同源
         （ctx 优先，缺失回退 state.kb_id）。
+        用量估算的输入是**本轮实收消息**（含 system 段，见 `_sent_messages`）——
+        system 是 prompt 里最大的一块，漏掉会让估算系统性偏小。
         """
         result = _extract_ai_message(response)
         if result is None:
             return
+        # 本轮实收消息（含 system 段）：观测 input 与用量估算同源，避免两处口径分叉
+        sent = _sent_messages(request)
         meta = result.usage_metadata
         if meta and (meta.get("input_tokens") or meta.get("output_tokens")):
             usage_in = int(meta.get("input_tokens") or 0)
             usage_out = int(meta.get("output_tokens") or 0)
             usage_estimated = False
         else:
-            est = estimate_usage(request.messages, _extract_text(result))
+            est = estimate_usage(sent, _extract_text(result))
             usage_in = est.prompt_tokens
             usage_out = est.completion_tokens
             usage_estimated = True
@@ -288,12 +315,12 @@ class AgentSpanMiddleware(AgentMiddleware):
             "kb_bound": kb_bound,
         }
         self._write_observation(
-            request, result, model_name, usage_in, usage_out, metadata, latency_ms
+            sent, result, model_name, usage_in, usage_out, metadata, latency_ms
         )
 
     def _write_observation(
         self,
-        request: Any,
+        sent: list[BaseMessage],
         result: AIMessage,
         model_name: str,
         usage_in: int,
@@ -310,6 +337,10 @@ class AgentSpanMiddleware(AgentMiddleware):
         起止时刻由本次调用耗时反推，使 generation 时长与今天 @observe 包节点一致；
         `completion_start_time` 在 middleware 内不可观测（无 chunk 可见性），
         故不设置。
+
+        Args:
+            sent: 本轮实收消息（含 system 段，见 `_sent_messages`）—— 作为观测
+                `input`，使 trace 能还原"模型到底收到了什么"
         """
         if not settings.LANGFUSE_ENABLE:
             return
@@ -323,7 +354,7 @@ class AgentSpanMiddleware(AgentMiddleware):
                 name="agent_turn",
                 start_time=start_time,
                 model=model_name,
-                input=_messages_payload(request.messages),
+                input=_messages_payload(sent),
                 output=_observation_output(result),
                 # ModelUsage 是 TypedDict 且字段声明为 Optional（键仍算必填），
                 # pyright 误判部分键构造非法；运行时 TypedDict 调用即普通 dict，SDK 接受
