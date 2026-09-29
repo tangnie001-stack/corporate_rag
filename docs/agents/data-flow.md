@@ -40,15 +40,15 @@
 RAG 检索 + 验证）** 与 **链路 2b（未绑 KB 纯对话链，联网兜底）**。`kb_id` 由前端绑定，
 `chat_stream` 透传给 `agent_service.stream_chat`，后者写 `ctx.kb_bound = bool(kb_id)`
 （src/api/chat.py:401、src/services/agent_service.py:592）。分裂并非两条独立图，而是同一
-StateGraph 拓扑（`agent ↔ tools 循环 → agent_finalize → verify → format → END`，
-workflow.py:37-87）上的四处分叉：
+StateGraph 拓扑（`agent（内化循环）→ agent_finalize → verify → format → END`，
+workflow.py:78-152）上的四处分叉：
 
 1. **prompt**：未绑 KB 时在系统指令后追加未绑定提示（`src/config/prompts/templates/sources.yaml`
    的 `sources-kb-unbound`；联网句 `sources-kb-unbound-web` 仅在 `search_web` 已注册时追加），
-   禁止调用检索（`src/agents/graph/agent_node.py` 的 `_initial_messages` 以
+   禁止调用检索（`src/agents/graph/agent_node.py` 的 `_split_initial_messages` 以
    `kb_bound=bool(state.kb_id)` 调 `build_prompt`；`src/rag/prompt.py` 的
    `_build_unbound_message` 注入）。组装点为
-   `agent_node._initial_messages` → `build_prompt` → `build_system_prompt`
+   `agent_node._split_initial_messages` → `build_prompt` → `build_system_prompt`
    （system 段 persona/条件注入 → 技能注入消息 → 历史），组装点记 `prompt messages`
    日志（见 logging-rules.md「来源与 prompt 观测事件」）
 2. **retrieve_kb 内部**：`kb_id` 为空直接返回空结果，不检索（rag_tools.py:127-130 硬保证）
@@ -62,10 +62,11 @@ verify 直通（settings.py:68-72）；`WEB_SEARCH_ENABLED=false` → 无联网�
 数据源、直接跳过（settings.py:62-66）。
 
 ```
-agent ──(末条含 tool_calls 且未超限)→ tools ─→ agent（循环）
-  │
-  └(无 tool_calls / 达迭代上限)→ agent_finalize → verify ─(通过)→ format → END
-                                                    └(_needs_regenerate)→ agent
+agent（外层节点：组装首轮 → invoke 装配产物；model↔tools 循环内化在产物内部）
+  │ 外层图不再有 tools 节点与回边，循环本体对 SSE 转换层不可见
+  ▼
+agent_finalize → verify ─(通过)→ format → END
+                  └(_needs_regenerate)→ agent（重生成：外层 messages 非空，只回写新增段）
 ```
 
 ### delegate 分支（主从委派，两条链路通用）
@@ -87,8 +88,9 @@ agent 判定需领域专家 → delegate_task(task, skill)
   end，见 api_contract.md「delegate 事件详情」）
 - fork 结果为纯文本，**无 [n] 引用**：引用仍只指向主 agent 自身检索来源（tool_contexts），
   不指向子代理产出
-- delegate 轮放宽迭代上限：`_delegate_used` 置位后 route_agent 上限
-  +`MAX_DELEGATE_BONUS`（整合余量，agent_node.py:131-155）
+- delegate 轮放宽迭代上限：`AgentTurnBudget`（`src/agents/graph/middleware.py`）在
+  `after_model` 检测本轮声明 `delegate_task` 后放宽上限 +`MAX_DELEGATE_BONUS`（整合余量，
+  且标志跨轮保持）；回合上限经装配入口 `build_agent(max_turns=…)` 注入该 middleware
 - 实现与术语：src/agents/skills/（SkillRecord/SkillLoader/SkillRegistry/
   SkillExecutor/make_delegate_task），术语见 glossary.md「技能委派」
 
@@ -146,7 +148,7 @@ api_contract.md「task 事件详情」）：
   `retrieve` 检索阶段，引用 `kind=kb`（检索不足联网补数据时混入 `kind=web`）。
 
 ```
-agent（bind_tools）
+agent（装配产物内：bind_tools 循环）
   ├ retrieve_kb：hybrid 混合检索 + rerank 精排 → ctx.tool_contexts（kind=kb）
   │   dense 路：chunks 表按 kb_id 过滤 + pgvector `<=>` 余弦距离 top-k
   │   词法路：PostgreSQL 全文检索（chunks.tsv @@ to_tsquery('simple', 词元:* | …)，
@@ -192,7 +194,7 @@ src/agents/tools/rag_tools.py:192-204；拒答 → SSEAbstentionEvent（含 abst
   （未联网的纯闲聊则无引用）。
 
 ```
-agent（bind_tools，同一工具列表）
+agent（装配产物内，同一工具列表）
   ├ retrieve_kb：禁止调用（prompt 软引导 + kb_id 空返回空硬保证，双保险）
   ├ search_web：Tavily 并行搜索 + 正文抽取 → ctx.tool_contexts（kind=web），
   │   每轮最多 WEB_SEARCH_PER_TURN_LIMIT 次调用（web_tools.py:61-67）
@@ -209,7 +211,7 @@ verify（态 A，verify/node.py:35-41）：
 
 关键代码：态 A 分派 src/agents/graph/verify/node.py:35-41；联网引用引导
 src/agents/graph/verify/guardrails.py:68-104；未绑 KB 禁检索指令由
-`src/agents/graph/agent_node.py` 的 `_initial_messages` 与 `src/rag/prompt.py` 的
+`src/agents/graph/agent_node.py` 的 `_split_initial_messages` 与 `src/rag/prompt.py` 的
 `_build_unbound_message` 承载（模板 `sources-kb-unbound` / `sources-kb-unbound-web` 见
 `src/config/prompts/templates/sources.yaml`，联网句按 `search_web` 是否注册条件追加）；
 空 kb_id 不检索 src/agents/tools/rag_tools.py:127-130；web 结果写入
@@ -237,11 +239,13 @@ src/agents/tools/web_tools.py:131-141。
 **几个易忽略的机制**：
 
 - **regen = 一段全新主循环**：verify 指派 regen 时除注入 SystemMessage 外，还**复位**
-  `_agent_iterations=0` 与 `ctx.web_count=0`——否则 regen 轮的 `search_web` 会因配额耗尽
-  而返回限流文案、不真正执行，verify 据此误判"网络也没覆盖"。
+  `ctx.web_count=0`——否则 regen 轮的 `search_web` 会因配额耗尽而返回限流文案、不真正执行，
+  verify 据此误判"网络也没覆盖"。**回合计数无需复位**：`agent` 节点每次 invoke 都以字面
+  初值 seed 子图（`_turn_count=0` / `_delegate_used=False`），本就每轮全新。
 - **`ctx.web_guided`**：verify 指派联网时置 `True`，用于区分"正常补数据"与"agent 自主降级
   联网"（只有后者才发 TO_WEB 缺陷信号）。
-- **两个护栏的保险丝不同**：`kb_citation_guardrail` 只复位主循环预算、**不占** verify 保险丝；
+- **两个护栏的保险丝不同**：`kb_citation_guardrail` 只复位 `search_web` 请求级配额
+  （`ctx.web_count`）、**不占** verify 保险丝；
   `_verify_regenerations` 仅由决策化路径自增。
 - **引用预览不是截开头**：`_relevant_snippet` 用最长公共子串定位"回答真正依据的那一段"，
   避免 parent-child 长 chunk（相关句在深处）的预览与回答无关、误导用户以为引用不支撑回答；
@@ -261,12 +265,14 @@ src/agents/tools/web_tools.py:131-141。
 
 | 节点 | 消费字段 | 生产字段 |
 |---|---|---|
-| `agent` | `messages`, `_history`, `kb_id` | `messages`（LLM 输出含 tool_calls）, `_agent_iterations` |
-| `tools` | `messages`（末条 tool_calls） | `messages`（ToolMessage 追加） |
+| `agent` | `messages`（非空 = 重生成轮，回写基准）、`_system_messages`（重生成轮复用）、`_history`、`kb_id`、`query`、`deep_thinking` | `messages`（首轮为组装全量、重生成轮为新增段；循环本体在装配产物内，模型输出含 tool_calls）、`_system_messages`、`answer` |
 | `agent_finalize` | `messages` | `answer`, `tool_contexts`, `verify_temporal_years` |
 | `skill_direct`（直出轮） | `direct_skill`, `query`, `messages`（查 verify 引用指引） | `answer`, `tool_contexts`, `verify_temporal_years`, `_needs_regenerate` |
 | `verify` | `answer`, `kb_id`, `tool_contexts`, `verify_temporal_years`, `messages`（查上一轮 search_web 与指引查重） | `answer`, `_needs_regenerate`, `messages`（regen 指引 SystemMessage）, `_verify_regenerations` |
 | `format` | `answer`, `tool_contexts` | `citations` |
+
+> 外层图无独立 `tools` 节点：model↔tools 循环内化在 `agent` 节点调用的装配产物内部，
+> 工具事件仍以 `langgraph_node == "tools"` 到达 SSE 转换层（见 §「SSE 消费侧」）。
 
 图入口经 `route_entry(state)` 条件边分派：`state.direct_skill` 非空 → `skill_direct`
 （`/xxx` 命中 fork skill 的直出轮，主 agent 零 LLM 轮），否则 → `agent`。
@@ -276,7 +282,7 @@ src/agents/tools/web_tools.py:131-141。
 ask_count / verify_ask_count / web_count / 澄清通道 / abort 信号均经 contextvar 传递。
 
 SSE 消费侧按事件类型接线（`agent_service._convert_event`，src/services/agent_service.py:159）：
-`on_chat_model_start`（节点 `agent`）→ "正在思考..."；`on_chat_model_stream`（节点 `agent`）
+`on_chat_model_start`（节点 `model`）→ "正在思考..."；`on_chat_model_stream`（节点 `model`）
 → `token`（chunk 带 reasoning_content 时另发 `reasoning` 增量）；`on_tool_start/end` 按
 工具名映射：`retrieve_kb` → `retrieve` 阶段（"正在检索相关文档.../检索完成..."）、
 `search_web` → `web_search` 阶段（"正在联网搜索.../联网搜索完成..."）、`ask_user` 不发状态
@@ -297,8 +303,9 @@ generation；响应头 / 日志行 / SSE `done` / Langfuse 四处共用同一个
 → trace 根 _run_generation（@observe name=chat_turn）    src/services/agent_service.py
   入参 langfuse_observation_id=<trace_id> → 根 observation id 即 trace id
   → update_current_trace 写 input / session_id / metadata
-→ generation agent_model（@observe name=agent_turn）      src/agents/graph/agent_node.py
-  每轮推理一个 generation（trace 根的子 observation），显式回填 model / input / output / usage
+→ generation agent_turn（命令式 span，middleware 内）    src/agents/graph/middleware.py
+  每轮推理一个 generation（trace 根的子 observation），显式回填 model / input / output / usage；
+  `completion_start_time`（TTFB）在该层不可得，故不设置（见 ADR-0016）
 ```
 
 trace 产出受 `LANGFUSE_ENABLE` 开关治理；开关、flush 与 trace id 校验的唯一入口是

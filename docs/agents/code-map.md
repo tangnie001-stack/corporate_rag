@@ -41,7 +41,7 @@ services/          业务编排：app_service → kb / document / chat(agent)
   agent_service.py 图生命周期 + 一次生成的主循环（_run_generation）
   capability_service.py  能力清单：/api/skills、/api/agents 由 registry 派生（fail-open）
 agents/            LangGraph agent 循环
-  ├─ graph/        workflow(建图) / state / agent_node / message_payload(消息→trace 载荷纯函数) / nodes / verify / skill_direct(命令行直出节点)
+  ├─ graph/        workflow(建图) / state / agent_factory(唯一装配入口 build_agent) / middleware(循环四件套) / agent_node(首轮组装 + 循环包装节点) / message_payload(消息→trace 载荷纯函数) / nodes / verify / skill_direct(命令行直出节点)
   ├─ tools/        retrieve_kb、ask_user、search_web、task、registry( + readonly 声明表)
   ├─ skills/       主从委派运行时：loader/registry/executor/delegate_task/models/invocation/prefix(/xxx 解析与清洗纯函数) + fork 执行层 fork_stream/fork_tools/delegate_run
   └─ presets/      智能体预设：models / loader / registry
@@ -114,8 +114,9 @@ tools/             工具基类（base.py）
   → ChatStreamRequest 校验            src/api/model/request.py
   → AppService → AgentService         src/services/app_service.py、agent_service.py
   → make_initial_state                src/agents/graph/state.py
-  → LangGraph.astream_events          src/agents/graph/workflow.py（agent ↔ tools → finalize → verify → format）
-       ├─ agent_node / agent_finalize  src/agents/graph/agent_node.py、nodes.py
+  → LangGraph.astream_events          src/agents/graph/workflow.py（agent（内化循环）→ agent_finalize → verify → format）
+       ├─ agent 节点：首轮组装 + invoke 装配产物   src/agents/graph/agent_node.py
+       ├─ 循环装配入口 + 四件套 middleware        src/agents/graph/agent_factory.py、middleware.py
        ├─ tools: retrieve_kb 等        src/agents/tools/rag_tools.py、web_tools.py
        └─ delegate_task → fork 子代理  src/agents/skills/delegate_task.py、executor.py
   → SSE 事件转换 + 落缓冲             agent_service.py _convert_event / chat/streaming.py
@@ -214,7 +215,7 @@ Nginx 容器把本目录挂到 `/usr/share/nginx/html` 直接托管，**无 npm 
 | 改一次生成的编排 / 事件转换 | `src/services/agent_service.py`（`_run_generation` / `_convert_event`） |
 | 改工具观测（工具 span 的字段 / 归组 / 过滤） | `src/infra/llm/tool_trace.py`（`ToolTraceCollector`）；消费点在 `src/services/agent_service.py::_run_generation` 的事件循环。口径见 ADR-0015 |
 | 改模型定价 / 让 Langfuse 出成本 | `src/config/settings.py`（`MODEL_*_PRICE_PER_TOKEN`，USD/单 token）+ `src/cli/seed_langfuse_models.py`；操作步骤见 `cookbook.md` |
-| 改 agent 循环 / 提示词 | 文案改 `src/config/prompts/templates/*.yaml`（经 `loader.py` 唯一读取）；规则挂载点改 `src/agents/graph/agent_node.py`、`nodes.py`、`src/rag/prompt.py` |
+| 改 agent 循环 / 提示词 | 文案改 `src/config/prompts/templates/*.yaml`（经 `loader.py` 唯一读取）；循环装配与四件套 middleware 改 `src/agents/graph/agent_factory.py`、`middleware.py`；首轮组装与规则挂载点改 `src/agents/graph/agent_node.py`、`nodes.py`、`src/rag/prompt.py` |
 | 加/改工具 | `src/agents/tools/`（实现 + 在 `rag_tools.py` 注册）；工具描述文案入 `src/config/` |
 | 加/改 skill 机制 | `src/agents/skills/`（loader/registry/executor/delegate_task）；内容放 `skills/<name>/SKILL.md` |
 | 加/改智能体预设 | 内容放 `agents/<name>.md`；机制在 `src/agents/presets/`（loader/registry） |

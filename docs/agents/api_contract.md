@@ -962,31 +962,29 @@ PG 无 collection 概念：无副作用，直接返回 `kb_id`，仅作既有方
 
 ### 5.1 节点定义与输出字段
 
-节点注册名在 `workflow.build_graph` 以字符串给出（agent / tools / agent_finalize / verify / format），
-`LangGraphNode.Format.NAME` 为 format 节点的常量名。
+节点注册名在 `workflow.build_graph` 以字符串给出（agent / agent_finalize / verify / format），
+`LangGraphNode.Format.NAME` 为 format 节点的常量名；`skill_direct` 为 `/xxx` 直出节点。
+外层图**无独立 `tools` 节点**：model↔tools 循环内化在 `agent` 节点调用的装配产物内部。
 
 | 节点 | 节点名 (NAME) | 输出字段 | 说明 |
 |------|--------------|---------|------|
-| **agent** | `"agent"` | `messages`, `_agent_iterations` | 图入口（`entry_point`）。bind_tools 调 LLM，可发起工具调用（retrieve_kb / ask_user / search_web） |
-| **tools** | `"tools"` | `messages`（ToolMessage 追加） | ToolNode 执行工具，错误回喂；工具集：`retrieve_kb`（KB 混合检索）/ `search_web`（Tavily 联网搜索兜底，KB 不达标时补充知识库外事实）/ `ask_user`（澄清追问） |
-| **agent_finalize** | `"agent_finalize"` | `answer`, `tool_contexts` | 循环结束提取末次 AIMessage content → `answer`，读入 `tool_contexts` |
+| **agent** | `"agent"` | `messages`, `_system_messages`, `answer` | 图入口（`entry_point`）。组装首轮消息 → 按类型拆 system / 非 system 两半 → seed 装配产物（`build_agent` 产物）→ `ainvoke` → 按**外层已有条数**回写新增段 |
+| **agent_finalize** | `"agent_finalize"` | `answer`, `tool_contexts`, `verify_temporal_years` | 循环结束提取末次 AIMessage content → `answer`，读入 `tool_contexts` / 年份 |
 | **verify** | `"verify"` | `answer`, `_needs_regenerate` | 验证节点，按会话 KB 绑定分派两态：态 A（未绑定 KB，纯对话）仅走联网引用标注引导；态 B（绑定 KB）走年份完整性 → 缺失按 agent 上轮 `search_web` queries 决策（未调过/带漏 → 注入指引 regen；带全仍缺 → 标注"知识库与网络均未覆盖"直通）→ KB 溯源护栏（有 kb context 无 [n] → 引导补标 regen）；完整性 + 护栏通过即直通 format（在线忠实度 judge 已移除，质量评估转离线另行规划） |
 | **format** | `"format"` | `citations: list[dict]` | 去重引用列表 |
+| **skill_direct** | `"skill_direct"` | `answer`, `tool_contexts`, `verify_temporal_years`, `_needs_regenerate` | `/xxx` 命中 fork skill 的直出轮（主 agent 零 LLM 轮），契约见 §5.5 |
 
-### 5.2 agent 循环（model ↔ tools 条件循环）
+### 5.2 agent 循环（内化于装配产物）
 
-图结构为 `agent → (tools | agent_finalize) → verify → (format | agent)`（无独立路由节点，
-KB 绑定在请求层已定：`kb_id` 非空检索该库，空串 = 未绑定纯对话不检索）：
+外层图结构为 `agent → agent_finalize → verify → (format | agent)`（无独立路由节点，
+KB 绑定在请求层已定：`kb_id` 非空检索该库，空串 = 未绑定纯对话不检索）。model↔tools
+循环本体由 `build_agent` 装配的 `create_agent` 产物承载，对 SSE 转换层不可见：
 
 ```
-agent（LLM + bind_tools）← entry_point
-      │ 有 tool_calls 且未超限
+agent（外层节点：组装首轮 → seed 装配产物 → ainvoke）
       ▼
- tools（ToolNode 执行 retrieve_kb / ask_user / search_web）
-      │ 工具结果回填 messages
-      ▼
-    agent（下一轮 LLM）
-      │ 无 tool_calls / 达迭代上限
+ 装配产物内部：model ←→ tools（ToolNode 执行 retrieve_kb / ask_user / search_web）
+      │ 无 tool_calls / 达回合上限（AgentTurnBudget）
       ▼
  agent_finalize（提取 answer + tool_contexts）
       │ verify：态 A 联网引用引导 / 态 B 完整性+KB 溯源（无在线忠实度 judge）
@@ -995,11 +993,33 @@ agent（LLM + bind_tools）← entry_point
     format（引用去重）
 ```
 
-- 迭代上限 `MAX_AGENT_ITERATIONS`（`src/config/const.py`），超限强制收尾
+- 回合上限 `MAX_AGENT_ITERATIONS`（`src/config/const.py`），经 `build_agent(max_turns=…)`
+  注入 `AgentTurnBudget` middleware；超限时记 `iteration limit` 并强制收尾
 - 工具不能写 state：检索上下文累积到 `RequestContext.tool_contexts`（contextvar），由 `agent_finalize` 读入 `state.tool_contexts`
 - per-request 对象（澄清通道 queue / abort 信号 / ask_count）经 contextvar（`current_request_ctx`）传递，并发 session 天然隔离
-- 终止条件：`route_agent` 判断末条消息无 `tool_calls` 或达迭代上限 → `agent_finalize`
-- **主 agent 采样温度分档（chat-temperature-policy）**：绑定 KB（`kb_id` 非空）不传 `temperature`，沿用模型构造温度 `LLM_TEMPERATURE`（默认 0.1）；未绑定 KB 逐轮直传 settings 档 `NON_KB_MAIN_TEMPERATURE`（默认 0.6，settings 可调）。同请求内各 agent 轮次档位一致；分档仅作用主 agent，fork 子代理采样不受影响
+- 终止条件：装配产物内 model 末条消息无 `tool_calls` 或 `AgentTurnBudget` 判定达回合上限 → 返回外层图交 `agent_finalize`
+- **主 agent 采样温度分档（chat-temperature-policy）**：由 `ModelParamsMiddleware` 施加——绑定 KB（`kb_id` 非空）不传 `temperature`，沿用模型构造温度 `LLM_TEMPERATURE`（默认 0.1）；未绑定 KB 逐轮直传 settings 档 `NON_KB_MAIN_TEMPERATURE`（默认 0.6，settings 可调）。档位判据取**请求级上下文**（ctx 缺失时回退图状态 `kb_id`）。同请求内各 agent 轮次档位一致；分档仅作用主 agent，fork 子代理采样不受影响
+
+#### 装配入口 `build_agent`（`src/agents/graph/agent_factory.py`）
+
+主角色与 fork 子代理共用同一装配入口，是 `src/agents/` 下唯一调用 `create_agent` 的地方
+（由 `tests/agents/graph/test_agent_factory.py` 的静态扫描断言守住）。
+
+| 参数 | 语义 |
+|------|------|
+| `model` | 已解析的 LLM 或模型名 |
+| `tools` | 工具面（主角色=全量；子角色=只读面筛选结果） |
+| `system`（关键字） | system 提供方式——`None`=经运行态携带（主角色，由 `SystemMessagesMiddleware` 施加）；`str`=静态串（子角色，人设 + 执行契约） |
+| `max_turns`（关键字） | 主循环回合上限，**回合上限的唯一来源**；非 `None` 时本函数自行追加为最前一项 `AgentTurnBudget(limit=max_turns)`（已显式传入则不重复追加）；`None`=不装配回合预算 middleware（子角色路径） |
+| `middleware_extra`（关键字） | 额外 middleware 集合；子角色传空列表 |
+
+返回 `create_agent` 的编译产物（可直接 `ainvoke` / 作为子图节点）；不产出 `graph compiled`
+日志（该事件由 `build_graph` 发一次）。装配期校验**唯一顺序硬约束**：若含
+`AgentSpanMiddleware`，它必须是列表最后一项（最内层），否则抛 `ValueError`。
+
+循环四件套 middleware（`src/agents/graph/middleware.py`）：`SystemMessagesMiddleware`
+（施加 system 段）/ `ModelParamsMiddleware`（温度分档 + 思考开关）/
+`AgentTurnBudget`（回合上限，仅主角色）/ `AgentSpanMiddleware`（观测，必须在最内层）。
 
 ### 5.3 AgentState 关键字段
 
@@ -1009,13 +1029,15 @@ agent（LLM + bind_tools）← entry_point
 |------|------|------|
 | `session_id` / `kb_id` / `query` | str | 输入：会话 / 知识库 / 用户问题 |
 | `messages` | `list[BaseMessage]` | 模型可见消息（`add_messages` 追加语义） |
+| `_system_messages` | `list[BaseMessage]` | system 段（来源：agent 节点首轮组装后写入；范围：整轮执行，跨 regen invoke 持久；**不带 reducer**，写入即替换）；由 `SystemMessagesMiddleware` 施加到模型调用 |
 | `tool_contexts` | `list[RAGContext]` | retrieve_kb 累积检索上下文（引用溯源） |
-| `_agent_iterations` | int | agent 主循环迭代计数（护栏，只管 agent↔tools，verify 不复用） |
-| `_max_agent_iterations` | int | 迭代上限（默认 `MAX_AGENT_ITERATIONS`） |
 | `_verify_regenerations` | int | verify 重生成保险丝计数（上限 `MAX_VERIFY_REGENERATIONS`，正常被决策化提前终止） |
 | `answer` | str | LLM 生成的完整回答 |
 | `citations` | list[dict] | 去重引用列表 |
 | `_history` | list[ChatMessage] | 对话历史（初始注入数据源，agent 节点入口截断） |
+
+> 子图状态（`LoopState`，`src/agents/graph/agent_factory.py`）是 `create_agent` 的子图 schema：
+> 默认值**不填充**，消费者依赖的键必须由 `agent` 节点显式 seed。
 
 ### 5.4 `RAGContext` 数据类
 
@@ -1096,7 +1118,7 @@ agent（LLM + bind_tools）← entry_point
 - 命令判定：只在**行首**且 `/` 后形如 ASCII slug 才按命令解析；不以 `/` 开头或 `/` 后不构成命令形态 → 按普通文本。
 - 未注册：`/` 开头且形如命令但未注册 → 返回「skill 不存在 + 可用列表」（**不静默**）；`user-invocable:false` → 提示「只能由模型调用」。
 - **落库与 Redis 历史保留原文**：当前轮 `query` 与历史 user 消息保留 `/name` 原文，仅在**组装 prompt 时**剥离（当前轮与历史都剥）。
-- 踩坑：不要在 `add_message_async` / `save_user_async` 前改写 `query`——清洗只发生在组装 prompt 的 `_initial_messages`，落库必须用原文。
+- 踩坑：不要在 `add_message_async` / `save_user_async` 前改写 `query`——清洗只发生在组装 prompt 的 `_split_initial_messages`，落库必须用原文。
 
 #### `POST /sessions/list` 新增 `agent` 字段
 
