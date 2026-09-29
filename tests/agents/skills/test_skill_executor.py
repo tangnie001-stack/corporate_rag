@@ -658,6 +658,11 @@ async def test_fork_subagent_events_do_not_leak_to_outer_stream():
     finally:
         current_request_ctx.reset(token)
 
+    # 隔离是**单点机制**：var_child_runnable_config.set(None) 切断子代理的回调继承
+    # + 委派事件经显式喂事件走委派域。它**只能在图/路由层验证**——转换器级无法判别：
+    # 只要 fork 的 on_chat_model_stream 真的到达 _convert_event，按当前设计（判据只有
+    # 节点名一维 langgraph_node == "model"，与主循环同名）它就**应该**被转成主 token。
+    # 故本用例（真实图 + 真实 create_agent fork）即该单点机制的守卫。
     full_answer, leaked_tokens = _collect_fork_leak_events(stream_events)
     # 1. 外层事件流不得出现携带 fork 内容的 chat_model_stream token（无泄漏）
     assert leaked_tokens == []

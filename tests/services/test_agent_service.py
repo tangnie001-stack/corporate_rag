@@ -343,9 +343,7 @@ def test_convert_event_content_and_reasoning_both():
 
 def test_convert_event_accepts_model_node_for_token():
     """改名后事件形状：metadata.langgraph_node == "model" → SSETokenEvent。"""
-    item = _chat_model_stream_item("你")
-    item["metadata"] = {"langgraph_node": "model"}
-    assert _convert_event(item) == [SSETokenEvent("你")]
+    assert _convert_event(_chat_model_stream_item("你")) == [SSETokenEvent("你")]
 
 
 def test_convert_event_ignores_legacy_agent_node():
@@ -1133,54 +1131,6 @@ def test_convert_delegate_dict_to_sse_delegate_event():
     )[0]
     assert isinstance(end, SSEDelegateEvent)
     assert end.ok is False and end.reason == "idle"
-
-
-@pytest.mark.asyncio
-async def test_fork_delegate_events_do_not_leak_into_main_token_stream():
-    """fork 委派事件与主循环事件同源混合时，子代理增量不进主 token 流与 full_answer。
-
-    改谓词为 "model" 后，子代理的模型事件（节点名同为 "model"）不再被节点名偶然
-    挡住，主 SSE 与子代理事件的隔离只剩事件路由单点（见 _convert_event docstring）。
-    本用例在 _dual_stream 合并层构造「主循环模型事件 + 委派 dict」同源场景：委派增量
-    只经 delegate 域产出 SSEDelegateEvent，绝不进主 token 流，也不进最终答案累积。
-    """
-    from src.services.agent_service import _dual_stream
-    from src.utils.sse import SSEDelegateEvent
-
-    leak = "子代理分析泄漏标记XYZ"
-
-    async def fake_events():
-        yield _chat_model_start_item()
-        yield _chat_model_stream_item("主答案前段")
-        yield {
-            "type": "delegate",
-            "action": "delta",
-            "delegate_id": "d1",
-            "skill": "analyst",
-            "kind": "content",
-            "delta": leak,
-            "ok": True,
-            "reason": "",
-        }
-        yield _chat_model_stream_item("主答案后段")
-        yield _chat_model_end_item("gpt-4o")
-        yield _finalize_end_item("主答案前段主答案后段", has_contexts=False)
-
-    capture = _StreamCapture()
-    events = []
-    async for event in _dual_stream(
-        fake_events(), asyncio.Queue(), asyncio.Event(), capture
-    ):
-        events.append(event)
-
-    tokens = [e for e in events if isinstance(e, SSETokenEvent)]
-    assert "".join(t.token for t in tokens) == "主答案前段主答案后段"
-    assert all(leak not in t.token for t in tokens)
-    assert capture.final_answer == "主答案前段主答案后段"
-    assert leak not in capture.final_answer
-    delegates = [e for e in events if isinstance(e, SSEDelegateEvent)]
-    assert len(delegates) == 1
-    assert delegates[0].delta == leak
 
 
 def test_convert_event_scope_not_main_ignores_graph_events():
