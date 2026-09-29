@@ -10,6 +10,8 @@ from typing import Any
 from langchain.agents.middleware import AgentMiddleware
 
 from src.agents.graph.agent_factory import LoopState
+from src.config import settings
+from src.infra.llm.request_context import current_request_ctx
 
 logger = logging.getLogger(__name__)
 
@@ -41,3 +43,42 @@ class SystemMessagesMiddleware(AgentMiddleware):
     async def awrap_model_call(self, request: Any, handler: Any) -> Any:
         """异步钩子（生产路径）。"""
         return await handler(self._apply(request))
+
+
+class ModelParamsMiddleware(AgentMiddleware):
+    """施加温度分档与思考开关（承接原 agent_node 调用点的内联参数）。
+
+    档位判据取**请求上下文**的绑定状态；ctx 缺失（如 CLI 评估入口）时回退
+    图状态里的 kb_id（该键由节点 seed）。KB 档用「不带 temperature 键」表达
+    "不传"，沿用模型构造温度。
+
+    ⚠️ per-call extra_body 在 langchain-openai 中**整体覆盖**构造时的 extra_body
+    （_get_request_payload 浅合并），故本模型不宜在 LLM_KWARGS 里配置其他
+    extra_body 参数（会被本处覆盖丢弃）。
+    """
+
+    state_schema = LoopState
+
+    def _settings(self, request: Any) -> dict[str, Any]:
+        """算出本次调用的 model_settings（档位判据见类 docstring）。"""
+        ctx = current_request_ctx.get()
+        if ctx is not None:
+            kb_bound = ctx.kb_bound
+        else:
+            kb_bound = bool(request.state.get("kb_id"))
+        deep_thinking = bool(request.state.get("deep_thinking"))
+        extra_body = {"enable_thinking": deep_thinking}
+        if kb_bound:
+            return {"extra_body": extra_body}
+        return {
+            "extra_body": extra_body,
+            "temperature": settings.NON_KB_MAIN_TEMPERATURE,
+        }
+
+    def wrap_model_call(self, request: Any, handler: Any) -> Any:
+        """同步钩子（脚本/测试路径）。"""
+        return handler(request.override(model_settings=self._settings(request)))
+
+    async def awrap_model_call(self, request: Any, handler: Any) -> Any:
+        """异步钩子（生产路径）。"""
+        return await handler(request.override(model_settings=self._settings(request)))
