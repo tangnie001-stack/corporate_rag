@@ -11,6 +11,7 @@ from langchain_core.tools import tool
 
 from src.agents.graph.agent_factory import build_agent
 from src.agents.graph.middleware import (
+    AgentSpanMiddleware,
     AgentTurnBudget,
     ModelParamsMiddleware,
     SystemMessagesMiddleware,
@@ -291,3 +292,88 @@ async def test_build_agent_max_turns_alone_enforces_budget():
     out = await agent.ainvoke({"messages": [HumanMessage(content="hi")], "query": "q"})
     assert _LoopingModel.calls == 3
     assert out["_turn_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_iteration_done_counts_full_messages_including_system(monkeypatch):
+    """msgs 计的仍是含 system 段的完整条数 = len(request.messages) + 1。"""
+    events = _capture_events(monkeypatch)
+    _RecordingModel.seen_kwargs = []
+    model = _RecordingModel(messages=iter([AIMessage(content="ok")]))
+    agent = build_agent(
+        model,
+        tools=[],
+        system=None,
+        middleware_extra=[SystemMessagesMiddleware(), AgentSpanMiddleware()],
+    )
+    await agent.ainvoke(
+        {
+            "messages": [HumanMessage(content="hi")],
+            "_system_messages": _sysmsgs("S1", "S2"),
+        }
+    )
+    done = [c for c in events if c["event"] is Event.ITERATION_DONE]
+    assert done and done[0]["iteration"] == 1
+    assert done[0]["msgs"] == 3  # S1(system_message) + S2 + user
+
+
+@pytest.mark.asyncio
+async def test_model_turn_reports_effective_temperature(monkeypatch):
+    """温度上报取实际施加的档位（最内层能看到 model_settings）。"""
+    events = _capture_events(monkeypatch)
+    model = _RecordingModel(messages=iter([AIMessage(content="ok")]))
+    agent = build_agent(
+        model,
+        tools=[],
+        system="S",
+        middleware_extra=[ModelParamsMiddleware(), AgentSpanMiddleware()],
+    )
+    await agent.ainvoke({"messages": [HumanMessage(content="hi")], "kb_id": ""})
+    turn = [c for c in events if c["event"] is Event.MODEL_TURN]
+    assert turn and turn[0]["temp_source"] == "explicit"
+    assert turn[0]["temperature"] == settings.NON_KB_MAIN_TEMPERATURE
+
+
+@pytest.mark.asyncio
+async def test_agent_turn_writes_imperative_generation(monkeypatch):
+    """观测走命令式 generation span（不改写 chat_turn observation）。
+
+    实证：middleware 里 `get_current_observation_id()` 指向外层 chat_turn span，
+    `update_current_observation` 会改写它而非新建 generation 观察，故回退命令式。
+    """
+    recorded: list[tuple[str, dict]] = []
+
+    class _FakeGeneration:
+        def end(self, **kwargs):
+            recorded.append(("end", kwargs))
+
+    class _FakeClient:
+        def generation(self, **kwargs):
+            recorded.append(("generation", kwargs))
+            return _FakeGeneration()
+
+    class _FakeCtx:
+        client_instance = _FakeClient()
+
+        @staticmethod
+        def get_current_trace_id():
+            return "trace-x"
+
+        @staticmethod
+        def get_current_observation_id():
+            return "obs-parent"
+
+    monkeypatch.setattr(settings, "LANGFUSE_ENABLE", True)
+    monkeypatch.setattr("src.agents.graph.middleware.langfuse_context", _FakeCtx)
+    model = _RecordingModel(messages=iter([AIMessage(content="ok")]))
+    agent = build_agent(
+        model, tools=[], system="S", middleware_extra=[AgentSpanMiddleware()]
+    )
+    await agent.ainvoke({"messages": [HumanMessage(content="hi")], "kb_id": "kb-1"})
+    generation = [c for c in recorded if c[0] == "generation"]
+    assert len(generation) == 1
+    _, kwargs = generation[0]
+    assert kwargs["name"] == "agent_turn"
+    assert kwargs["trace_id"] == "trace-x"
+    assert kwargs["parent_observation_id"] == "obs-parent"
+    assert kwargs["usage"]["input"] >= 1

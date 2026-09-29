@@ -5,16 +5,27 @@
 """
 
 import logging
+import time
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from langchain.agents.middleware import AgentMiddleware, hook_config
+from langchain_core.messages import AIMessage
+from langfuse.decorators import langfuse_context
+from langfuse.model import ModelUsage
 
 from src.agents.graph.agent_factory import LoopState
+from src.agents.graph.message_payload import (
+    _extract_text,
+    _messages_payload,
+    _observation_output,
+)
 from src.config import settings
 from src.config.const import MAX_DELEGATE_BONUS
 from src.core import logging as core_logging
 from src.core.log_events import Event
 from src.infra.llm.request_context import current_request_ctx
+from src.infra.llm.token_usage import estimate_usage
 
 logger = logging.getLogger(__name__)
 
@@ -142,3 +153,181 @@ class AgentTurnBudget(AgentMiddleware):
     async def aafter_model(self, state: Any, runtime: Any) -> dict[str, Any]:
         """异步 after_model 钩子（生产路径）。"""
         return self._after_model(state)
+
+
+def _extract_ai_message(response: Any) -> AIMessage | None:
+    """从 ModelResponse 拆出本轮的 AIMessage。
+
+    Args:
+        response: wrap_model_call 的 handler 返回的 ModelResponse
+
+    Returns:
+        结果里第一个 AIMessage；没有则退回首条消息；结果为空返回 None
+    """
+    for message in response.result:
+        if isinstance(message, AIMessage):
+            return message
+    if response.result:
+        return response.result[0]
+    return None
+
+
+class AgentSpanMiddleware(AgentMiddleware):
+    """主循环观测（模型轮次日志 + Langfuse generation span）。
+
+    必须在 middleware 列表**最内层**：这样它看到的 request 已被前序
+    middleware 施加过 system 与 model_settings，温度上报才与实际生效档位一致。
+    观测故障必须吞异常降级，不得影响对话。
+
+    计数口径：`iteration = state.get("_turn_count", 0) + 1`（本次调用序号；
+    AgentTurnBudget 的自增在 after_model，晚于本 middleware，直接取值会少 1）。
+    """
+
+    state_schema = LoopState
+
+    async def awrap_model_call(self, request: Any, handler: Any) -> Any:
+        """异步钩子（生产路径）：入口记 iteration done，出口记 model turn 与观测。"""
+        iteration = request.state.get("_turn_count", 0) + 1
+        msgs = (
+            len(request.messages) + 1
+        )  # 最内层：request.messages 已含前插的其余 system
+        core_logging.log_event(Event.ITERATION_DONE, iteration=iteration, msgs=msgs)
+        turn_start = time.monotonic()
+        settings_map = request.model_settings or {}
+        if "temperature" in settings_map:
+            temperature = settings_map["temperature"]
+            temp_source = "explicit"
+        else:
+            temperature = settings.LLM_TEMPERATURE
+            temp_source = "default"
+        response = await handler(request)
+        self._record_turn(
+            request,
+            response,
+            iteration,
+            temperature,
+            temp_source,
+            int((time.monotonic() - turn_start) * 1000),
+        )
+        return response
+
+    def wrap_model_call(self, request: Any, handler: Any) -> Any:
+        """同步钩子（脚本/测试路径）。"""
+        iteration = request.state.get("_turn_count", 0) + 1
+        msgs = len(request.messages) + 1
+        core_logging.log_event(Event.ITERATION_DONE, iteration=iteration, msgs=msgs)
+        return handler(request)
+
+    def _record_turn(
+        self,
+        request: Any,
+        response: Any,
+        iteration: int,
+        temperature: Any,
+        temp_source: str,
+        latency_ms: int,
+    ) -> None:
+        """出口观测：发 model turn 日志并写 agent_turn generation observation。
+
+        字段口径沿用原 agent_node 调用点：模型名 / usage（缺失走 estimate_usage
+        并标 usage_estimated）/ metadata（iteration / usage_estimated /
+        temperature / temp_source / kb_bound）。kb_bound 与档位判据同源
+        （ctx 优先，缺失回退 state.kb_id）。
+        """
+        result = _extract_ai_message(response)
+        if result is None:
+            return
+        meta = result.usage_metadata
+        if meta and (meta.get("input_tokens") or meta.get("output_tokens")):
+            usage_in = int(meta.get("input_tokens") or 0)
+            usage_out = int(meta.get("output_tokens") or 0)
+            usage_estimated = False
+        else:
+            est = estimate_usage(request.messages, _extract_text(result))
+            usage_in = est.prompt_tokens
+            usage_out = est.completion_tokens
+            usage_estimated = True
+        resp_meta = result.response_metadata
+        if isinstance(resp_meta, dict):
+            model_name = resp_meta.get("model_name", "")
+            if not isinstance(model_name, str):
+                model_name = resp_meta.get("model", "")
+        else:
+            model_name = ""
+        if not isinstance(model_name, str):
+            model_name = ""
+        ctx = current_request_ctx.get()
+        if ctx is not None:
+            kb_bound = ctx.kb_bound
+        else:
+            kb_bound = bool(request.state.get("kb_id"))
+        core_logging.log_event(
+            Event.MODEL_TURN,
+            model=model_name,
+            usage_in=usage_in,
+            usage_out=usage_out,
+            usage_estimated=usage_estimated,
+            fallback=False,
+            latency_ms=latency_ms,
+            iteration=iteration,
+            temperature=temperature,
+            temp_source=temp_source,
+            kb_bound=kb_bound,
+        )
+        metadata = {
+            "iteration": iteration,
+            "usage_estimated": usage_estimated,
+            "temperature": temperature,
+            "temp_source": temp_source,
+            "kb_bound": kb_bound,
+        }
+        self._write_observation(
+            request, result, model_name, usage_in, usage_out, metadata, latency_ms
+        )
+
+    def _write_observation(
+        self,
+        request: Any,
+        result: AIMessage,
+        model_name: str,
+        usage_in: int,
+        usage_out: int,
+        metadata: dict[str, Any],
+        latency_ms: int,
+    ) -> None:
+        """写 agent_turn generation observation（命令式 span；失败吞异常降级）。
+
+        为什么不用 `langfuse_context.update_current_observation`：middleware 里
+        `get_current_observation_id()` 指向外层 `chat_turn` span（实测），
+        update_current_observation 会改写该 span 而非新建 generation 观察，
+        且 generation 专属字段（model/usage）在 span 上被静默忽略 ⇒ 回退命令式。
+        起止时刻由本次调用耗时反推，使 generation 时长与今天 @observe 包节点一致；
+        `completion_start_time` 在 middleware 内不可观测（无 chunk 可见性），
+        故不设置。
+        """
+        if not settings.LANGFUSE_ENABLE:
+            return
+        try:
+            client = langfuse_context.client_instance
+            now = datetime.now(UTC)
+            start_time = now - timedelta(milliseconds=latency_ms)
+            generation = client.generation(
+                trace_id=langfuse_context.get_current_trace_id(),
+                parent_observation_id=langfuse_context.get_current_observation_id(),
+                name="agent_turn",
+                start_time=start_time,
+                model=model_name,
+                input=_messages_payload(request.messages),
+                output=_observation_output(result),
+                # ModelUsage 是 TypedDict 且字段声明为 Optional（键仍算必填），
+                # pyright 误判部分键构造非法；运行时 TypedDict 调用即普通 dict，SDK 接受
+                usage=ModelUsage(  # type: ignore[reportCallIssue]
+                    input=usage_in,
+                    output=usage_out,
+                    total=usage_in + usage_out,
+                ),
+                metadata=metadata,
+            )
+            generation.end(end_time=now)
+        except Exception:  # 观测失败不得影响对话
+            logger.warning("[agent] agent_turn observation failed", exc_info=True)
