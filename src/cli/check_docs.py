@@ -25,6 +25,10 @@ grep 的代码符号，只能靠词表拦。叙述语义（流程对错）不在
     python -m src.cli.check_docs --verbose          # 显示 warn 档
     python -m src.cli.check_docs --list-routes      # 列出文档已声明但代码缺失的路由
 
+`--doc` 是**强制检查**：它绕过 `exclude_docs`，故默认全量运行看不到的
+`requirements_pool.md` / `reference-projects.md` 存量问题会在这里暴露。`--doc` 不绕过
+`banned_term_exempt_docs`（那是"该篇就该记旧技术"的语义判断，不是范围问题）。
+
 退出码：0 = 无 error 档；1 = 存在 error 档（供 pre-commit / CI 判失败）。
 warn 档仅提示需人工 triage，不影响退出码。
 
