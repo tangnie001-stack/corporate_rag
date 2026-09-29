@@ -166,6 +166,44 @@
 
 **验证**：下结论前复述一次"我这个结论依赖的是全量还是片段"，并给出取总数的命令。
 
+## 验收（E2E）
+
+### 让主 agent 自主委派子代理的固定用例（验 fork 委派链路）
+
+**场景**：改动了 fork 委派链路上的东西（装配入口 / `executor` 的子代理构建 / 委派预算 / 委派 SSE 折叠区 / 事件路由隔离）后，要跑通「主 agent 自主调用 `delegate_task` → 生成 fork 子代理」这条链路。
+
+**步骤**：
+
+1. 登录并取 kb_id（凭据取 `.env` 的 `TEST_ACCOUNT` / `TEST_PASSWORD`，勿写进任何会提交的文档）：KB 名 `test`，内含 `tencent_2024_annual.pdf`。
+   ```bash
+   curl -s -c cj.txt -X POST http://localhost/api/auth/login \
+     -H 'Content-Type: application/json' \
+     -d "{\"account\":\"$TEST_ACCOUNT\",\"password\":\"$TEST_PASSWORD\"}"
+   curl -s -b cj.txt -X POST http://localhost/api/kbs/list -H 'Content-Type: application/json' -d '{}'
+   ```
+2. 发这句固定问题（换用 `sess_<时间戳>_<后缀>` 作新 session_id）：
+   > 请对腾讯控股2024年年报做一次杜邦分析，评估其盈利质量与财务健康状况
+
+   ```bash
+   curl -sN -b cj.txt -X POST http://localhost/api/chat/stream \
+     -H 'Content-Type: application/json' \
+     -d "{\"session_id\":\"<新 sid>\",\"kb_id\":\"<kb_id>\",\"query\":\"请对腾讯控股2024年年报做一次杜邦分析，评估其盈利质量与财务健康状况\",\"deep_thinking\":false}"
+   ```
+3. 用 `done` 事件里的 `trace_id` 查日志，确认委派确实发生。
+
+**验证**：2026-09-29 实测（trace `5528fa17-f0de-…`，KB `test`，全程约 77s）：
+
+- 日志链：`iteration=1` → 4 条 `retrieve done` → `iteration=3` → `delegate start skill=financial-statement-analyzer thinking=false task_len=1405` → `delegate model turn latency_ms=29549` → `delegate end ok=true reason=normal elapsed_ms=29667 result_len=1024` → `iteration=4/5` → `format done citations=6`
+- SSE 帧：`event: delegate` **244** 条（前端折叠区）、`token` 1609 条、`citation` 6 条、`done` 1 条
+
+**注意事项**：
+
+- **会话必须绑定知识库**。目标 skill 未声明 `allowed-tools`（零工具 fork skill），材料只能由主 agent **先检索**再随 task 传入；不绑 KB 时子代理拿不到任何材料。
+- **触发靠模型裁量**：`delegate_task` 的 schema 里带 skill 的 `description`，问题须命中其中的关键词（该 skill 的描述列了「杜邦分析 / 盈利质量检查 / 资产负债表分析 / 现金流分析 / Z值评分 / M值评分 / 营运资本分析」）。没命中就不委派——这是用例的固有波动，不是缺陷。
+- **只要链路通不通、不验裁量时，用斜杠直出更稳**：`/financial-statement-analyzer 对腾讯2024年报做杜邦分析`。它走 `skill_direct`（必中），**不经** `delegate_task`，因此测的不是同一段代码。
+- 该项目 3 个 skill（`financial-statement-analyzer` / `competitive-landscape` / `market-sizing-analysis`）**都没写 `context:`**，是靠正文超 `INLINE_PROMPT_MAX_CHARS`（500）在加载期**自动改 fork** 承载的（启动日志 `context_source=auto_oversize`）。若把正文精简到 500 字符内，它会退回 inline、**不再走子代理**。
+- 子代理的轮次上限由 fork 消费侧判定、不在图内；委派期间主 SSE 不应出现子代理 token（隔离由事件路由承担，见 `defensive-patterns.md`）。
+
 ## 来源等级（source-tier-labeling）
 
 ### 候选规则审核
