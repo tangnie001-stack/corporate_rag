@@ -9,7 +9,7 @@
 |---|---|
 | `[retrieval]` | 检索层（rag_tools / web_tools / retrieval.py） |
 | `[verify]` | 验证节点（verify 包） |
-| `[agent]` | agent 主循环（agent_node / workflow） |
+| `[agent]` | agent 主循环（agent_node / middleware / workflow） |
 | `[session]` | 会话管理（chat manager / persistence） |
 | `[db]` | DB 层（repo / engine） |
 | `[llm]` | LLM 调用层 |
@@ -98,6 +98,11 @@
 
 **不再扩 `iteration done`**：其「消息数拆分」意图已由 `prompt messages` 在组装点承载，
 不重复记录同一事实（避免后人再提）。
+
+**三条循环日志的产点已迁至 middleware**（`src/agents/graph/middleware.py`）：`iteration done`
+（`AgentSpanMiddleware` 入口）/ `model turn`（`AgentSpanMiddleware` 出口）/
+`iteration limit`（`AgentTurnBudget` 的 `after_model`）。**事件名与字段集不变**；
+`prompt messages` 仍由 `agent_node` 的首轮组装点发出（见上）。
 
 ## 症状指标口径（度量层，非日志事件）
 

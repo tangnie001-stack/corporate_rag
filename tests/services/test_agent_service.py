@@ -37,31 +37,31 @@ from src.utils.sse import (
 
 
 def _chat_model_start_item() -> dict:
-    """构造 agent 节点 on_chat_model_start 事件。"""
+    """构造模型节点 on_chat_model_start 事件。"""
     return {
         LangGraphKey.EVENT: LangGraphEvent.CHAT_MODEL_START,
         LangGraphKey.NAME: "ChatOpenAI",
-        "metadata": {"langgraph_node": "agent"},
+        "metadata": {"langgraph_node": "model"},
         LangGraphKey.DATA: {},
     }
 
 
 def _chat_model_stream_item(content: str) -> dict:
-    """构造 agent 节点 on_chat_model_stream 事件。"""
+    """构造模型节点 on_chat_model_stream 事件。"""
     return {
         LangGraphKey.EVENT: LangGraphEvent.CHAT_MODEL_STREAM,
         LangGraphKey.NAME: "ChatOpenAI",
-        "metadata": {"langgraph_node": "agent"},
+        "metadata": {"langgraph_node": "model"},
         LangGraphKey.DATA: {LangGraphKey.CHUNK: AIMessageChunk(content=content)},
     }
 
 
 def _chat_model_end_item(model: str) -> dict:
-    """构造 agent 节点 on_chat_model_end 事件（output 携带 response_metadata.model_name）。"""
+    """构造模型节点 on_chat_model_end 事件（output 携带 response_metadata.model_name）。"""
     return {
         LangGraphKey.EVENT: LangGraphEvent.CHAT_MODEL_END,
         LangGraphKey.NAME: "ChatOpenAI",
-        "metadata": {"langgraph_node": "agent"},
+        "metadata": {"langgraph_node": "model"},
         LangGraphKey.DATA: {
             LangGraphKey.OUTPUT: AIMessage(
                 content="", response_metadata={"model_name": model}
@@ -128,7 +128,6 @@ def _make_service() -> tuple[AgentService, AsyncMock]:
     chat_manager.add_message_async = AsyncMock()
     service._chat_manager = chat_manager
     service._prompt_manager = Mock()
-    service._tracer = Mock()
     service._preset_registry = None
     service._skill_registry = None
     return service, chat_manager
@@ -310,7 +309,7 @@ def test_convert_event_extracts_reasoning():
     item = {
         "event": "on_chat_model_stream",
         "name": "ChatModel",
-        "metadata": {"langgraph_node": "agent"},
+        "metadata": {"langgraph_node": "model"},
         "data": {"chunk": chunk},
     }
     events = _convert_event(item)
@@ -334,12 +333,24 @@ def test_convert_event_content_and_reasoning_both():
     item = {
         "event": "on_chat_model_stream",
         "name": "ChatModel",
-        "metadata": {"langgraph_node": "agent"},
+        "metadata": {"langgraph_node": "model"},
         "data": {"chunk": chunk},
     }
     events = _convert_event(item)
     kinds = {type(e) for e in events}
     assert SSETokenEvent in kinds and SSEReasoningDeltaEvent in kinds
+
+
+def test_convert_event_accepts_model_node_for_token():
+    """改名后事件形状：metadata.langgraph_node == "model" → SSETokenEvent。"""
+    assert _convert_event(_chat_model_stream_item("你")) == [SSETokenEvent("你")]
+
+
+def test_convert_event_ignores_legacy_agent_node():
+    """旧形状（metadata.langgraph_node == "agent"）必须不再匹配主循环 token。"""
+    item = _chat_model_stream_item("你")
+    item["metadata"] = {"langgraph_node": "agent"}
+    assert _convert_event(item) == []
 
 
 @pytest.mark.asyncio
@@ -1128,7 +1139,7 @@ def test_convert_event_scope_not_main_ignores_graph_events():
 
     item = {
         "event": "on_chat_model_stream",
-        "metadata": {"langgraph_node": "agent"},
+        "metadata": {"langgraph_node": "model"},
         "data": {"chunk": type("C", (), {"content": "x", "additional_kwargs": {}})()},
     }
     assert _convert_event(item, scope="delegate") == []

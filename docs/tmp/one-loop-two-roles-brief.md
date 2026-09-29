@@ -505,3 +505,98 @@ tests/infra/llm/      test_tool_trace.py
 `openspec validate` 通过（4/4）；doc 闸门 `0 error, 38 warn`；ADR 闸门 `15 条 0 error`；tasks **88 条**（无重号）。spec 计数：agent-assembly **R=6/S=18**、agent-loop-observability **R=2/S=8**、delegate-progress-observability **R=1/S=5**、answer-verification R=1/S=4、delegate-task R=1/S=4、prompt-composition R=1/S=5。
 
 **仍未验（实现期）**：`@observe` 迁 `awrap_model_call` 的 observation 归属 + `ModelResponse` 拆包；真实模型 E2E（token 内容 / `extra_body` / 绑 KB 轮不带 `temperature`）；`abort` 穿子图的单元覆盖。
+
+## 十九、实施阶段台账（2026-09-29，SDD 子代理驱动执行）
+
+**执行方式**：`superpowers:subagent-driven-development` —— 每个任务派一个**全新的实现者子代理**，完成后派**独立评审子代理**（spec 合规 + 代码质量双裁定），有 finding 就进修复循环（修复轮 + scoped 复审），最后做**全分支评审**。
+
+**规模**：9 个派发（把计划 14 个任务按依赖与同形合并）· **22 个提交** · **27 条裁定**。
+
+**执行顺序**（合并后）：`1 基线 → 2 装配入口 → 3-6 middleware 四件套 → 7+9 节点与图接入 → 8+11 状态清理与工具取数 → 10 SSE 谓词 → 12 子角色接入 → 13 文档与 ADR → 14 验收`
+
+**评审结果**：Task 1 / 2 / 8+11 / 12 / 14 **一次通过**；Task 3~6 / 7+9 / 10 / 13 各经 **1 轮修复 + scoped 复审**后通过；最终全分支评审判 **Needs fixes before merge**（仅 2 处硬规则项）→ 一次修复波 + 复审后关闭。**全程无 Critical 未被处理；无 finding 走到第 5 轮熔断。**
+
+**验收**：`1339+` 测试全绿、`ruff check .` 0 错、`pyright src/` 0 新错、`check_docs` 0 error、`check_adr` 0 error（16 条 ADR）；**结构不变量与改动前基线逐项一致**；触顶 3 次真实复现；真实模型 E2E 四项 + Langfuse `agent_turn` observation 确认。
+
+
+### 我在执行期做的 27 条裁定（按发生顺序；「代价」= 若判断错会付什么）
+
+- **Ruling A**：`AgentState._system_messages` 字段**提前到 Task 2** 与 `LoopState` 同批加；Task 11 只保留三个字段的**删除**与复位清理。
+  - 代价：Task 2 的 diff 多一行字段声明，零风险。
+- **Ruling B**：**Task 7 与 Task 9 合并为一次派发**（"节点 + 图接入"，可含两个提交）。
+  - 代价：单次派发的 diff 变大（约 2 个任务量），评审面变大。
+- **Ruling C**：**Task 8 与 Task 11 合并为一次派发，并排在 Task 7/9 之前**（"状态清理 + 工具取数同步"）。
+  - 代价：该批同时动 state 与两个工具文件，回滚粒度略粗。
+- **Ruling D**：**Task 3~6 合并为一次派发**（"middleware 四件套"，可含四个提交）。
+  - 代价：一次派发量偏大；若某类设计有误，回滚需挑单个提交。
+- **Ruling E**：Task 14 的真实 E2E 需要在**容器能看到本 worktree 代码**的前提下做；计划未写此步。届时的最小做法：`docker compose` 用 override 把 `/app/src` 指向本 worktree（或临时 `docker cp`），验证后还原。本裁定仅登记，到 Task 14 时执行。
+  - 代价：E2E 只能在主工作区代码上做，会验错对象。
+- **Ruling F**：自本次起，所有 subagent 派发**一律显式指定 deepseek 系模型 ID**，不再使用 `default`/省略。
+  - 代价：若某 ID 无效，派发会再次静默失败，浪费一轮派发；此时回退到 `deepseek-v4-flash`。
+- **Ruling G**：首次用 `deepseek-v4-flash-0731`（用户指定）派发 Task 1 作为**有效性探针**；失败则改用 `deepseek-v4-flash` 重派。
+  - 代价：一轮派发的时间。
+- **Ruling H**：`.env` 中**所有 `qwen3.8-flash` 全量替换为 `deepseek-v4-flash-0731`**（用户指定；该 ID 是**阿里云百炼**模型，走同一个 DashScope OpenAI 兼容端点，不是 DeepSeek 直连）。备份在 `/tmp/env.bak*`。
+- **Ruling I**：派 subagent 一律用**已知有效的 agent 侧模型 ID**：本批用 `deepseek-v4-flash`（= `ANTHROPIC_MODEL`）；能力更强的评审/终审用 `deepseek-v4-pro`（= reasoning）。**不用** `deepseek-v4-flash-0731`（那是百炼的应用侧模型，agent 后端不认，派发会静默零产出——已实测两次）。
+  - 代价：若某 ID 在某时段不可用，派发再次静默失败；此时换 `deepseek-v4.1-flash`。
+- **Ruling J**：**Task 14 的比对口径改为「结构不变量」，不比对回答文本**。比对项 = SSE 事件**类型与计数** / 五条日志的**条数与字段集**及关键字段值 / 模型实收 kwargs 的温度分档 / citations 的**结构**；**不比对**回答正文、token 分块数、`answer_len`、`[n]` 标记位置、`usage_in|out` 数值。**不可比对**原因（实测）：LLM 非确定性；且百炼 `deepseek-v4-flash-0731` 流式**不返回 usage** ⇒ `usage_estimated=true`、用量为文本估算。
+  - 代价：漏掉的是**回答文本级**回归；但该级回归在本仓本来不可复现，非本变更特有风险。
+- **Ruling K**：**SSE 只比对事件类型与计数，不比对 `status` 与 `token` 的相对交错顺序**。
+  - 代价：若顺序对前端渲染有语义（如气泡归属），需另设断言；已记入待最终评审 triage。
+- **Ruling L**：`iteration limit` 在固定问题集（刻意不触顶）下的**基准条数为 0**；其字段值来自人为压低上限的**合成探针**，标注为「合成、不参与比对」。
+  - 代价：该日志的字段级回归要靠 Task 14 的真实触顶复现（Step 3）兜住。
+- **Ruling M**：Task 2 的「唯一装配」静态扫描断言改用**显式允许清单** `{"agent_factory.py", "executor.py"}`，并在同处注明「`executor.py` 的调用将在 Task 12（子角色接入）后移除，届时收窄为单元素清单」；Task 12 的验收包含该收窄。
+  - 代价：收窄若被遗漏，守卫会长期停留在两元素清单（Task 12 的验收项会兜住）。
+- **Ruling N**：`LoopState` 必须加 **`@dataclass`** 装饰器（计划给出的代码块漏了）。
+  - 代价：无（加了无副作用）。
+- **Ruling O**：**`max_turns` 成为回合上限的唯一来源**——`build_agent` 在 `max_turns is not None` 时**自行在最前追加** `AgentTurnBudget(limit=max_turns)`（用**函数内延迟 import** 避免 `middleware → agent_factory` 的环）；Task 9 **不再**重复传 `AgentTurnBudget`。
+  - 代价：`agent_factory` 多一个函数内 import；若将来想给子角色装预算，只能经 `max_turns`（正是想要的语义）。
+- **Ruling P（**修正 Ruling O**）**：`build_agent` 的 `max_turns` 追加改为「**已存在同类实例则跳过**」，而非无条件追加。
+  - 代价：仍是"谁能设置上限"只有一个来源（max_turns 或显式 middleware，二者等价），无静默无上限路径。
+- **Ruling Q（修正 brief 的期望字面量，**不改公式**）**：Task 6 的 `msgs` 期望由 4 改 **3**。
+  - 代价：若公式真错，Task 14 的基线比对（`iteration done msgs`）会暴露——基线记的是 2/4，新实现须复现同样的值。
+- **Ruling R（修正 brief 的断言手法）**：三处 `caplog` 断言**不可用**（本仓日志走 **loguru**，`caplog` 恒空 ⇒ 等于"断言什么都不验"），改为 monkeypatch `src.core.logging.log_event` 收事件（本仓既有先例）。
+  - 代价：无（新手法更强：直接断言结构化字段）。
+- **Ruling S（接受观测降级，如实登记）**：`agent_turn` generation observation 走**命令式 span**（`client.generation(name="agent_turn", parent_observation_id=<chat_turn id>)`）；**`completion_start_time`（首 chunk 到达时刻）在该层不可得，故不设置**。
+  - 代价：**Langfuse 失去 TTFB**（今天有 `completion_start_time`，且仓里此前正用它做"长时间静默"取证）。这是**本变更的一处可观测退化**，已如实登记；Task 14 Step 4（真实 Langfuse 核对）须确认 observation 仍出现且其余字段完整；若 TTFB 确需保留，须另开一张（用 callbacks 钩子取首 chunk）。
+- **Ruling T（**本项目硬约束优先于 brief 的示例代码**）**：修 ④（`middleware.py:136` 的三元 ⇒ 完整 `if/else`）与 ⑤（`middleware.py:133` 的 `getattr(last,"tool_calls",None)` ⇒ `isinstance(last, AIMessage)` 显式判断）；顺带把 `middleware.py:400` 的 warning 改为 k=v 形式。
+  - 代价：diff 与 brief 示例不再逐字一致（但与本项目规范一致）。
+- **Ruling U（把"顺序"从字面列表收紧为**可断言的不变量 + 守卫**）**：`build_agent` 增加校验——「若 middleware 列表含 `AgentSpanMiddleware`，它**必须是最后一项**」，否则抛 `ValueError`；并补一条**反向测试**（把 `AgentSpanMiddleware` 放前面 ⇒ 抛错）。计划/spec 里的 `[SystemMessages, ModelParams, AgentTurnBudget, AgentSpan]` 保留为**推荐顺序**，但注明**唯一硬约束是 AgentSpan 最后**（`SystemMessages` 与 `ModelParams` 的相对顺序无行为影响；`AgentTurnBudget` 只实现 `after_model`，位置无影响）。`insert(0)` 因此可保留。
+  - 代价：若将来需要 AgentSpan 之外的观测量在最内层，守卫会挡住；届时按新需求改守卫（这正是显式化的收益）。
+- **Ruling W**：`middleware.py` 的 warning 用 `%s` 而非 `{}`（该模块 logger 是 stdlib `logging`，非 loguru；`{}` 会被 ruff `PLE1205` 拦且运行期不替换）。消息体仍是英文 k=v + `[agent]` 前缀。实现者的判断正确。
+- **Ruling C′（**修正 Ruling C 的顺序**）**：执行顺序由「(8+11) → (7+9)」改为 **「(7+9) → (8+11)」**。
+  - 代价：中间窗口内主循环的 `retrieval_signal` 的 iteration 值为 0（未出货的过渡态，D4 完成后即恢复真实值）。
+- **Ruling X（**裁决该 Important：代码成立，改计划文本**）**：接受 `completion_start_time` 丢失（= 重申并固化 Ruling S）；把计划 Task 7 里「`first_chunk_at` 保留」那句改为"随函数消失、接受退化"；并把该退化写进 **design D8**（原文只写"字段保持"，与实测不符）。
+  - 代价：Langfuse 失去 TTFB（此前用于区分"排队/首字节慢"vs"生成慢"）。已登记待**最终评审 triage**；`AgentSpanMiddleware` 保留了 `turn_start`（整体延迟），故 latency 不丢。
+- **Ruling Z（裁决该 Important）**：**删掉那条转换器级的 leak 用例**，并在 `test_skill_executor.py` 的图级守卫处补注释说明「主 SSE 隔离是**单点机制**，只能在**图/路由层**验证，转换器级无法判别」（同时保留该图级守卫）；实现者须把报告里"判别性佐证"的错误结论一并更正。
+  - 代价：少一条用例；但真守卫（图级）仍在，且新增注释把"为什么这里不能验"写清楚，避免后人再写一条空断言。
+- **Ruling AA**：`requirements_pool.md` 的"已随 X 删除""修复历程 ①…②…"等**变更史叙述**在**该文档体例内可接受**（它本身是**修复台账**，既有条目普遍写"已修（P4 Task 6，8dd145d）"）⇒ 「不写变更史」硬规则适用于**代码注释与机制文档**，不适用于以记录溯源为职责的登记表。**不改**。
+  - 代价：台账里保留过程叙述；若日后要求台账也只写终态，需单开一次体例统一。
+- **Ruling E′（**修正 Ruling E**）**：Task 14 的真实模型 E2E **不需要重建共享容器**——改为**宿主侧**跑（`.venv` + `POSTGRES_HOST=localhost`；Task 1 的基线已证明宿主可访问 pg/redis 与 DashScope）。`src/` 的代码改动对宿主立即生效，而重建 `corporate-rag-app` 会打断并行会话共用的栈。
+  - 代价：宿主与容器环境的差异（如挂载路径、环境变量）会让 E2E 结论不完全覆盖容器部署形态；容器侧的真实验证留待部署时。
+
+### 实施阶段发现并修正的**计划自身缺陷**（值得回看计划质量）
+
+| # | 计划缺陷 | 裁定 |
+|---|---|---|
+| 1 | `LayerState`/`LoopState` 漏 `@dataclass`（子类新字段不被处理） | N |
+| 2 | `_system_messages` 的生产者（Task 11）晚于消费者（Task 7） | A |
+| 3 | Task 8/11 先于 Task 7/9 会把中间态弄破（旧循环仍把 `AgentState` 交给工具） | C → C′ |
+| 4 | Task 7 与 Task 9 不可分割（删 `route_agent` 后 `workflow.py` 立即可引用失效） | B |
+| 5 | 静态扫描断言从 Task 2 起就会红（`executor.py` 那时还在调 `create_agent`） | M |
+| 6 | `max_turns` 是被接受但从不使用的死参数（静默无上限风险） | O → P |
+| 7 | 三处 `caplog` 断言在 loguru 下恒空（= 空断言） | R |
+| 8 | Task 6 的 `msgs` 期望字面量数了两遍第一条 system（4 → 3） | Q |
+| 9 | 「逐字 diff 基线」对本系统不可达（LLM 非确定性 + 该模型流式不返回 usage） | J/K/L |
+| 10 | Task 14 的真 E2E 计划要求重建共享容器（会打断并行会话） | E → E′ |
+
+### 已知并接受的可观测退化（记入 ADR-0016）
+
+- **`completion_start_time`（TTFB）不再设置**：`awrap_model_call` 只能在模型调用**整体结束后**拿到 `ModelResponse`，拿不到首 chunk 时刻（middleware 内 `update_current_observation` 还会改写外层 `chat_turn` span 并静默忽略 generation 专属字段）。`agent_turn` observation 仍出现、其余字段完整，`latency_ms` 不丢。
+
+### 未在本次处理（留后续独立变更）
+
+- `executor.py` **454 行 > 400**（**非本次引入**，基期即超线；diff 仅净增约 5 行）⇒ 建议单开一次拆分。
+- `_dual_stream`（`src/services/agent_service.py`）在 `src/` 内**无调用点**（疑似死代码，仅测试覆盖）。
+- `requirements_pool` **D-11** 的三组既有 `TIMING` 埋点（`tavily_client` / `web_tools` / `agent_service._silence_watchdog`）清理。
+- 「触顶 → 空回答」的**端到端**路径（空答案 → verify 收尾 → 落库 `content=''`）仍无 E2E 证据（单测只覆盖消息级"允许空串"）。
+- 其余 10 条评审 Minor（死写入、防御性守卫、注释措辞、测试类属性全局态等）已随最终评审 triage 判为可延后。

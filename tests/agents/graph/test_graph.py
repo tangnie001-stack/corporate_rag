@@ -5,14 +5,16 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from langchain_core.messages import AIMessage, SystemMessage
 from langchain_core.tools import tool
+from langgraph.graph.state import CompiledStateGraph
 
+from src.agents.graph.agent_factory import build_agent
 from src.agents.graph.nodes import format_node
 from src.agents.graph.state import AgentState
 from src.agents.graph.workflow import build_graph
 from src.config import settings
 from src.config.const import SSEInteractionTexts
 from src.core import logging as core_logging
-from src.core.log_events import Signal
+from src.core.log_events import Event, Signal
 from src.infra.llm.request_context import RequestContext, current_request_ctx
 from src.rag.context import RAGContext
 
@@ -30,7 +32,6 @@ def test_graph_topology():
     node_names = set(nodes) - {"__start__", "__end__"}
     assert node_names == {
         "agent",
-        "tools",
         "agent_finalize",
         "verify",
         "format",
@@ -46,6 +47,32 @@ def test_graph_topology():
         "generate",
     ):
         assert removed not in node_names
+
+
+def test_graph_has_no_outer_tools_node_and_agent_goes_straight_to_finalize():
+    """循环已内化进装配产物：外层无 tools 节点，agent 直连 agent_finalize。"""
+    graph = _build_test_graph(MagicMock())
+    nodes = set(graph.get_graph().nodes)
+    assert "tools" not in nodes, "循环已内化进装配产物，外层不得再有 tools 节点"
+    assert "agent" in nodes and "agent_finalize" in nodes
+    edges = {(e.source, e.target) for e in graph.get_graph().edges}
+    assert ("agent", "agent_finalize") in edges
+
+
+def test_sub_agent_assembly_does_not_emit_graph_compiled(monkeypatch):
+    """委派一次后 graph compiled 计数不变（装配入口不发该事件）。"""
+    calls: list[Event] = []
+
+    def fake_log_event(event, **fields):
+        calls.append(event)
+
+    monkeypatch.setattr("src.core.logging.log_event", fake_log_event)
+    _build_test_graph(MagicMock())  # 图装配层自己发一次
+    assert calls.count(Event.GRAPH_COMPILED) == 1
+
+    calls.clear()
+    build_agent(MagicMock(), tools=[], system="子角色静态串")  # 子角色装配入口
+    assert calls.count(Event.GRAPH_COMPILED) == 0, "装配入口不得发编译日志"
 
 
 def test_format_node_only_keeps_cited_sources():
@@ -213,21 +240,29 @@ def test_format_node_empty_when_abstention():
 
 
 class SequenceChatModel:
-    """极简 fake LLM：按调用顺序消费固定 AIMessage 序列，bind_tools 原样返回自身。"""
+    """极简 fake LLM：按调用顺序消费固定 AIMessage 序列，bind_tools 原样返回自身。
+
+    create_agent 的模型节点经 `bind_tools(tools, tool_choice=…, **model_settings)`
+    绑定后调用 `ainvoke(messages)`；故 fake 需提供这两个面（astream 已不再被走）。
+    """
 
     def __init__(self, responses: list[AIMessage]) -> None:
         """记录固定响应序列。"""
         self.responses = list(responses)
         self.tools = None
 
-    def bind_tools(self, tools):
-        """绑定工具：fake 直接返回自身。"""
+    def bind_tools(self, tools, tool_choice=None, **kwargs):
+        """绑定工具：fake 直接返回自身（接受 create_agent 传入的 tool_choice/model_settings）。"""
         self.tools = tools
         return self
 
-    async def astream(self, messages, **kwargs):
-        """按序 yield 一条固定响应（单块），忽略 extra_body 等额外参数。"""
-        yield self.responses.pop(0)
+    def bind(self, **kwargs):
+        """无工具路径的模型绑定：fake 直接返回自身。"""
+        return self
+
+    async def ainvoke(self, messages, **kwargs):
+        """按序返回一条固定响应（单条 AIMessage），忽略 model_settings 等额外参数。"""
+        return self.responses.pop(0)
 
 
 class StubPromptManager:
@@ -261,7 +296,7 @@ def _search_web_call(queries: list[str] | None = None) -> dict:
     }
 
 
-def _build_test_graph(llm, tools=None) -> object:
+def _build_test_graph(llm, tools=None) -> CompiledStateGraph:
     """编译测试图：默认注入 fake search_web 工具（tools 可传 spy 覆盖），其余依赖全 MagicMock。"""
     if tools is None:
         tools = [fake_search_web]
@@ -358,8 +393,7 @@ async def test_graph_verify_loop_success_terminates_at_format(monkeypatch):
 async def test_graph_verify_loop_terminates_at_regen_fuse(monkeypatch):
     """路径 B：确认联网但 agent 反复带漏 search_web queries → 修订保险丝耗尽 → 标注直通。
 
-    决策化语义：终止不再由 _agent_iterations 上限驱动，改由 _verify_regenerations
-    保险丝（MAX_VERIFY_REGENERATIONS=2）兜底。queries 逐轮带漏缺失年份 → 决策分支
+    决策化语义：终止由 _verify_regenerations 保险丝（MAX_VERIFY_REGENERATIONS=2）兜底。queries 逐轮带漏缺失年份 → 决策分支
     每次仍判定需重生成，计数 0→1→2；第 3 次 verify 达上限标注直通复位，不空转。
     回归 Critical #1 终止路径（标注直通显式复位）与 Important #3（指引只注入一次）。
     """
@@ -563,7 +597,7 @@ def _make_search_web_spy():
     """构造带调用记录的 search_web 测试工具，返回 (tool, calls)。
 
     calls 按调用序记录每次执行的 queries（测试桩不发起真实网络请求）；
-    供 V2 回归用例断言 regen 轮的 search_web 确实被执行（而非被 route_agent 吞掉）。
+    供 V2 回归用例断言 regen 轮的 search_web 确实被执行。
     """
     calls: list[list[str]] = []
 
@@ -580,10 +614,10 @@ def _make_search_web_spy():
 async def test_graph_verify_regen_round_uses_full_iteration_budget(monkeypatch):
     """回归 change 3.5①（V2 bug）：首轮耗尽主循环预算 → regen 轮 search_web 仍完整执行。
 
-    首轮 agent 反复调 search_web（queries 带漏）直到第 5 次迭代被 route_agent 强制收尾，
-    verify 注指引并 regen。regen 返回必须带 _agent_iterations=0 复位主循环预算：否则回
-    agent 后迭代计数续在触顶值上，本轮的 search_web 工具调用会在 route_agent 被上限吞掉
-    （工具不执行、答案空白），verify 会把空答案误判为"网络均未覆盖"标注直通。
+    首轮 agent 反复调 search_web（queries 带漏）直到回合上限强制收尾，
+    verify 注指引并 regen。regen = 重新 invoke 装配产物，主循环计数天然从初值起：
+    本轮的 search_web 工具调用不会因首段触顶被吞掉（工具不执行、答案空白），否则
+    verify 会把空答案误判为"网络均未覆盖"标注直通。
     """
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
     monkeypatch.setattr(
@@ -668,8 +702,8 @@ async def test_graph_verify_regen_round_resets_web_quota(monkeypatch):
     ctx.web_count 是请求级累计计数：第 1 段 4 次 search_web 调用把配额耗尽（预置
     web_count=limit，首次调用即达限被拦）。若 verify regen 不复位配额，回 agent 后
     regen 轮的 search_web 同样达限返回 WEB_SEARCH_LIMIT_TEXT 不执行 → verify 误判
-    "知识库与网络均未覆盖"。regen 决策必须带 ctx.web_count=0（与 _agent_iterations=0
-    同为"每段 regen 轮全新主循环预算"设计）：断言 spy 恰好执行一次（仅 regen 轮）。
+    "知识库与网络均未覆盖"。regen 决策必须带 ctx.web_count=0（每段 regen 轮获得全新
+    联网配额）：断言 spy 恰好执行一次（仅 regen 轮）。
     """
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
     monkeypatch.setattr(

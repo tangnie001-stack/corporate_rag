@@ -91,9 +91,7 @@ def _graph(fake_executor, record, **kwargs):
 
 async def _run_updates(graph, initial_state):
     """以 updates 模式累积节点返回 dict 与节点顺序（跳过 __start__/__end__ 哨兵）。"""
-    # 以初始 state 的迭代计数为基线：agent 从未运行时该字段不会被任何节点返回，
-    # 但终端断言仍需它（主 agent 零 LLM 轮 → 恒为初始值 0）
-    final: dict = {"_agent_iterations": initial_state._agent_iterations}
+    final: dict = {}
     node_order: list[str] = []
     async for update in graph.astream(initial_state, stream_mode="updates"):
         for name, payload in update.items():
@@ -132,7 +130,6 @@ async def test_direct_round_keeps_child_citations_and_zero_agent_rounds():
         current_request_ctx.reset(token)
 
     assert "agent" not in node_order  # 主 agent 一轮都没跑
-    assert final["_agent_iterations"] == 0
     assert [c["index"] for c in final["citations"]] == [1, 2]
     assert final["answer"].startswith("公司 2024 年营收")
     assert final["verify_temporal_years"] == [2024]  # 子 ctx 年份传播进 state

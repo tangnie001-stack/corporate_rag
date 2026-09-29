@@ -15,6 +15,12 @@
 | `output` | **通用输出形态**（格式 / 图片 / URL 保真 / 完成前自检）、引用编码、委派返回内容的引用规则 | YAML `section: output` | 不可替换，**无条件**（委派条为条件） |
 | `skills` | 按需加载的方法论 | **工具描述（目录）+ 消息层（正文两分支）** | **不参与 system prompt 组装**（D6） |
 
+> **system 段的组装与下发分属两处**：段的**组装**（拼接、条件注入）仍在 `build_system_prompt`
+> / `build_prompt`，由 `agent` 节点首轮调用；组装结果的**下发**（把 system 段施加到每次模型
+> 调用）经 `src/agents/graph/middleware.py` 的 `SystemMessagesMiddleware`（读图状态
+> `_system_messages`，首条进 `system_message`、其余前插）。两条 system 消息（主 system +
+> 未绑定提示）的通道不变。
+
 ## 2. 段数的最小性（为什么不合并）
 
 段数不是照搬外部方案，是从"需要几种不同的可变性"推出来的。真正必要的区分只有三类：

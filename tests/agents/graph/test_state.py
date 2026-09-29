@@ -51,12 +51,14 @@ def test_state_has_messages_with_addmessages_reducer():
 
 
 def test_state_has_agent_fields():
-    """新增的 agent 循环护栏字段应存在。"""
+    """材料池与 _system_messages 载体存在；循环计数三字段已删（计数内化进装配产物）。"""
     names = {f.name for f in fields(AgentState)}
     assert "tool_contexts" in names
-    assert "_agent_iterations" in names
-    assert "_max_agent_iterations" in names
+    assert "_system_messages" in names
     assert "_ask_count" in names
+    assert "_agent_iterations" not in names
+    assert "_max_agent_iterations" not in names
+    assert "_delegate_used" not in names
 
 
 def test_classify_fields_removed():

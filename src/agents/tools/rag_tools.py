@@ -93,19 +93,24 @@ def make_rag_tools(
         Args:
             query: 检索查询文本
             top_k: 返回条数上限（默认 TOP_K_RERANK，精排后按此截断）
-            state: LangGraph 注入的执行状态：主图注入 AgentState（读其 kb_id，空 = 未绑定 KB
-                不检索）；fork 子代理图由 create_agent 建图、无此注入，注入的是普通 dict，
-                此时回退 current_request_ctx 的 kb_id
+            state: LangGraph 注入的执行状态：显式形状判定——外层自建图注入 AgentState
+                （读其 kb_id，空 = 未绑定 KB 不检索）；主循环已内化进 create_agent 装配
+                产物，注入的是映射（dict），读装配 seed 的 kb_id（CLI 无 ctx 入口据此
+                仍取到）；两者都取不到时回退 current_request_ctx 的 kb_id
 
         Returns:
             带全局递增引用编号的精排上下文文本，如 "[1] 来源: xxx (第3页)\\n内容: ..."
         """
-        # kb_id 取值：主图注入的 AgentState 优先，ctx 回退（子代理图 dict 无 kb_id）。
+        # kb_id 取值：显式形状判定——外层自建图注入 AgentState（读其 kb_id）；
+        # create_agent 承载注入映射（读装配 seed 的 kb_id，CLI 无 ctx 入口据此仍取到）。
+        # 两者都取不到时回退 current_request_ctx.kb_id（子代理图场景）。
         # ctx 同时供后续检索计数 / temporal / 信号读写，此处一次读取、全程复用
         ctx = current_request_ctx.get()
         kb_id = ""
         if isinstance(state, AgentState):
             kb_id = state.kb_id
+        elif isinstance(state, dict):
+            kb_id = str(state.get("kb_id", ""))
         if not kb_id and ctx is not None:
             kb_id = ctx.kb_id
 
@@ -188,11 +193,15 @@ def make_rag_tools(
             )
         contexts = contexts[:top_k]
 
-        # iteration：主图 AgentState 读其计数；子代理图注入 dict 无该字段，取 0
-        # （iteration 仅入日志/信号，子代理场景不消费主图迭代语义）
-        iteration = 0
+        # iteration：显式形状判定。主循环已内化进装配产物，工具只会拿到映射承载，
+        # 迭代序号读装配 seed 的 _turn_count；AgentState 承载已无循环计数字段，取 0
+        # （iteration 仅入日志/信号，该承载无消费主图迭代语义的字段）
         if isinstance(state, AgentState):
-            iteration = state._agent_iterations
+            iteration = 0
+        elif isinstance(state, dict):
+            iteration = int(state.get("_turn_count", 0))
+        else:
+            iteration = 0
 
         # 检索重放上下文（L1）：query/kb 为重放输入，其余参数为"当时值"供 drift 对照；
         # 态 A（kb_id 空）不检索、不落 replay 行

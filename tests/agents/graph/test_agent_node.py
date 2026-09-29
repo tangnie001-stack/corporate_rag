@@ -1,35 +1,22 @@
-"""测试 agent 循环节点 — model 调用/迭代计数、tools 路由、finalize 收尾提取。
+"""测试 agent 外层节点 — 首轮消息拆分、装配产物 invoke 回写、finalize 收尾提取。
 
-fake LLM（MockChatModel）与 stub PromptManager 均为内存实现，不发真实网络调用。
+fake 装配产物（_RecordingInner）与 stub PromptManager 均为内存实现，不发真实网络调用。
 """
 
+from dataclasses import dataclass
+
 import pytest
-from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from src.agents.graph.agent_node import (
+    _split_initial_messages,
     make_agent_finalize_node,
-    make_agent_model_node,
-    route_agent,
+    make_agent_loop_node,
 )
 from src.agents.graph.state import AgentState
+from src.core.log_events import Event
 from src.infra.llm.request_context import RequestContext, current_request_ctx
 from src.rag.context import RAGContext
-
-
-class MockChatModel:
-    """极简 fake LLM：bind_tools 原样返回，astream 返回固定响应（单块）。"""
-
-    def __init__(self, response):
-        """记录固定响应。"""
-        self.response = response
-
-    def bind_tools(self, tools):
-        """绑定工具：fake 直接返回自身。"""
-        return self
-
-    async def astream(self, messages, **kwargs):
-        """以单块流式序列返回固定响应，忽略 extra_body 等额外参数。"""
-        yield self.response
 
 
 class StubPromptManager:
@@ -40,24 +27,33 @@ class StubPromptManager:
         return f"user template: {query}"
 
 
-def _make_state(query: str, kb_id: str = "", history=None) -> AgentState:
-    """构造最小图初始状态（测试用）。"""
-    if history is None:
-        history = []
-    return AgentState.make_initial_state("s1", kb_id, query, history)
-
-
-def _make_prompt_manager() -> StubPromptManager:
-    """构造最小 PromptManager 替身（测试用）。"""
+@pytest.fixture
+def fake_prompt_manager() -> StubPromptManager:
+    """提供只回显 query 的 PromptManager 替身（首轮组装的最小依赖）。"""
     return StubPromptManager()
 
 
-async def _run_one_turn(kb_id: str) -> dict:
-    """执行一次 model 节点调用（最小依赖替身），返回节点输出。"""
-    llm = MockChatModel(AIMessage(content="ok"))
-    node = make_agent_model_node(llm, [], _make_prompt_manager())
-    state = _make_state(query="q", kb_id=kb_id)
-    return await node(state)
+@dataclass
+class _Bundle:
+    """装配产物束（Task 9 的 build_graph 用同一形状）。"""
+
+    agent: object  # build_agent 的产物（本测试用假实现）
+    prompt_manager: object  # PromptManager 替身
+    tool_names: frozenset  # 本轮注册的工具名
+
+
+class _RecordingInner:
+    """记录子图输入的假装配产物。"""
+
+    def __init__(self, produced: list[BaseMessage]) -> None:
+        """记录固定新增段。"""
+        self.inputs: list[dict] = []
+        self._produced = produced
+
+    async def ainvoke(self, payload: dict) -> dict:
+        """记录输入并把新增段拼在输入消息之后返回。"""
+        self.inputs.append(payload)
+        return {"messages": [*payload["messages"], *self._produced]}
 
 
 @pytest.mark.asyncio
@@ -109,145 +105,73 @@ async def test_finalize_no_messages_returns_empty_answer():
     assert out["tool_contexts"] == []
 
 
-def test_route_agent():
-    """有 tool_calls → tools；无 → agent_finalize；超限 → agent_finalize。"""
-    state = AgentState.make_initial_state("s1", "kb1", "q", [])
-    state.messages = [
-        AIMessage(
-            content="",
-            tool_calls=[
-                {"name": "retrieve_kb", "args": {}, "id": "c1", "type": "tool_call"}
-            ],
+def test_prompt_messages_counts_system_before_split(monkeypatch, fake_prompt_manager):
+    """system_msgs 必须在拆分前算出，否则拆分后 system 段被移出列表恒为 0。"""
+    calls: list[dict] = []
+
+    def fake_log_event(event, **fields):
+        calls.append({"event": event, **fields})
+
+    monkeypatch.setattr(
+        "src.agents.graph.agent_node.core_logging.log_event", fake_log_event
+    )
+    state = AgentState.make_initial_state(
+        session_id="s", kb_id="", query="q", history=[]
+    )
+    system_half, rest_half = _split_initial_messages(
+        state, fake_prompt_manager, frozenset()
+    )
+    payload = next(c for c in calls if c["event"] is Event.PROMPT_MESSAGES)
+    assert payload["system_msgs"] >= 1, "拆分后 system 段被移出列表 ⇒ 计数不得为 0"
+    assert all(isinstance(m, SystemMessage) for m in system_half)
+    assert not any(isinstance(m, SystemMessage) for m in rest_half)
+
+
+@pytest.mark.asyncio
+async def test_first_turn_writes_back_whole_assembled_list(fake_prompt_manager):
+    """首轮外层 messages 为空 ⇒ 回写整份（组装段 + 新增段）。"""
+    inner = _RecordingInner([AIMessage(content="A1")])
+    node = make_agent_loop_node(
+        _Bundle(agent=inner, prompt_manager=fake_prompt_manager, tool_names=frozenset())
+    )
+    state = AgentState.make_initial_state(
+        session_id="s", kb_id="", query="q", history=[]
+    )
+    out = await node(state)
+    seed_len = len(inner.inputs[0]["messages"])
+    assert seed_len > 0, "首轮必须组装出非 system 段作为子图输入"
+    assert len(out["messages"]) == seed_len + 1, "首轮须回写整份组装段 + 新增段"
+    assert isinstance(out["messages"][-1], AIMessage)
+    assert out["_system_messages"], "system 半段必须落回外层（跨 invoke 载体）"
+
+
+@pytest.mark.asyncio
+async def test_regen_round_model_request_contains_query_and_history(
+    fake_prompt_manager,
+):
+    """重生成轮的模型请求必须含原始 query 与历史（回写基准取外层条数）。"""
+    inner = _RecordingInner([AIMessage(content="A2")])
+    node = make_agent_loop_node(
+        _Bundle(agent=inner, prompt_manager=fake_prompt_manager, tool_names=frozenset())
+    )
+    first = await node(
+        AgentState.make_initial_state(
+            session_id="s", kb_id="", query="原始问题", history=[]
         )
-    ]
-    assert route_agent(state) == "tools"
-    state.messages = [AIMessage(content="直接回答")]
-    assert route_agent(state) == "agent_finalize"
-    state._agent_iterations = 99
-    assert route_agent(state) == "agent_finalize"  # 超限强制收尾
-
-
-def test_route_agent_non_ai_message_finalizes():
-    """末条消息非 AIMessage（无 tool_calls 属性）时安全收尾。"""
-    state = AgentState.make_initial_state("s1", "kb1", "q", [])
-    state.messages = [HumanMessage(content="q")]
-    assert route_agent(state) == "agent_finalize"
-
-
-@pytest.mark.asyncio
-async def test_agent_model_increments_iterations():
-    """model 节点后续轮次应自增迭代计数并仅追加模型输出消息。"""
-    fake_response = AIMessage(content="模型回答")
-    llm = MockChatModel(fake_response)
-    node = make_agent_model_node(llm, [], StubPromptManager())
-
-    state = AgentState.make_initial_state("s1", "kb1", "q", [])
-    state.messages = [HumanMessage(content="q")]  # 已有消息，模拟后续轮次
+    )
+    state = AgentState.make_initial_state(
+        session_id="s", kb_id="", query="原始问题", history=[]
+    )
+    state.messages = [*first["messages"], SystemMessage(content="VERIFY-GUIDANCE")]
+    state._system_messages = first["_system_messages"]
     out = await node(state)
-
-    assert out["_agent_iterations"] == state._agent_iterations + 1
-    assert len(out["messages"]) == 1
-    assert out["messages"][0] == fake_response
-
-
-@pytest.mark.asyncio
-async def test_agent_model_first_round_persists_initial_messages():
-    """首轮 messages 为空时，返回应持久化初始消息（system + 原始 query）及模型输出。"""
-    fake_response = AIMessage(content="模型回答")
-    llm = MockChatModel(fake_response)
-    node = make_agent_model_node(llm, [], StubPromptManager())
-
-    state = AgentState.make_initial_state("s1", "kb1", "q", [])
-    out = await node(state)
-
-    msgs = out["messages"]
-    assert len(msgs) == 3  # system + user(query) + 模型 AIMessage
-    assert msgs[0].type == "system"
-    assert isinstance(msgs[1], HumanMessage)
-    assert "q" in msgs[1].content
-    assert msgs[2] == fake_response
-
-
-@pytest.mark.asyncio
-async def test_agent_model_injects_initial_messages():
-    """messages 为空时首轮注入 system + 历史 + query 后调用模型。"""
-    captured = {}
-
-    class CapturingChatModel(MockChatModel):
-        """记录 astream 收到的 messages。"""
-
-        async def astream(self, messages, **kwargs):
-            captured["messages"] = messages
-            yield self.response
-
-    llm = CapturingChatModel(AIMessage(content="ok"))
-    node = make_agent_model_node(llm, [], StubPromptManager())
-
-    state = AgentState.make_initial_state("s1", "kb1", "q", [])
-    await node(state)
-
-    msgs = captured["messages"]
-    assert len(msgs) == 2  # system + user（无历史时）
-    assert msgs[0].type == "system"
-    assert "q" in msgs[-1].content
-
-
-@pytest.mark.asyncio
-async def test_agent_model_astream_merges_chunks():
-    """astream 多块经 += 聚合：content 拼接且 tool_call_chunks 合并为 tool_calls。"""
-    chunks = [
-        AIMessageChunk(content="需要"),
-        AIMessageChunk(
-            content="",
-            tool_call_chunks=[
-                {
-                    "name": "retrieve_kb",
-                    "args": '{"query": "营收"}',
-                    "id": "c1",
-                    "index": 0,
-                    "type": "tool_call_chunk",
-                }
-            ],
-        ),
-    ]
-
-    class MultiChunkModel(MockChatModel):
-        """astream 返回多个 chunk 的 fake。"""
-
-        async def astream(self, messages, **kwargs):
-            for chunk in self.response:
-                yield chunk
-
-    llm = MultiChunkModel(chunks)
-    node = make_agent_model_node(llm, [], StubPromptManager())
-
-    state = AgentState.make_initial_state("s1", "kb1", "q", [])
-    out = await node(state)
-
-    result = out["messages"][-1]  # 首轮注入 system+user，模型输出在末尾
-    assert result.content == "需要"
-    assert result.tool_calls and result.tool_calls[0]["name"] == "retrieve_kb"
-
-
-@pytest.mark.asyncio
-async def test_agent_model_passes_enable_thinking():
-    """model 节点应按 state.deep_thinking 向 astream 传 extra_body.enable_thinking。"""
-    captured = {}
-
-    class CapturingThinkingModel(MockChatModel):
-        """记录 astream 收到的 kwargs。"""
-
-        async def astream(self, messages, **kwargs):
-            captured["extra_body"] = kwargs.get("extra_body")
-            yield self.response
-
-    llm = CapturingThinkingModel(AIMessage(content="ok"))
-    node = make_agent_model_node(llm, [], StubPromptManager())
-
-    state = AgentState.make_initial_state("s1", "kb1", "q", [], deep_thinking=True)
-    await node(state)
-
-    assert captured["extra_body"] == {"enable_thinking": True}
+    sent = inner.inputs[-1]["messages"]
+    assert any("原始问题" in str(m.content) for m in sent), "regen 轮丢了原始问题"
+    assert any(
+        isinstance(m, SystemMessage) and "VERIFY-GUIDANCE" in str(m.content)
+        for m in sent
+    )
+    assert len(out["messages"]) == 1, "regen 轮只回写新增段"
 
 
 def test_make_initial_state_deep_thinking_default_false():
@@ -260,207 +184,3 @@ def test_make_initial_state_deep_thinking_true():
     """传 deep_thinking=True 时状态字段为 True。"""
     state = AgentState.make_initial_state("s1", "kb1", "q", [], deep_thinking=True)
     assert state.deep_thinking is True
-
-
-def test_route_agent_delegate_budget_relaxed():
-    """delegate 轮后：迭代上限 +2（整合余量），未 delegate 行为不变。"""
-    from src.agents.graph.agent_node import route_agent
-    from src.agents.graph.state import AgentState
-    from src.config.const import MAX_AGENT_ITERATIONS, MAX_DELEGATE_BONUS
-
-    # 未 delegate：达上限直接收尾
-    s = AgentState()
-    s._agent_iterations = MAX_AGENT_ITERATIONS
-    s._delegate_used = False
-    s.messages = [AIMessage(content="final")]
-    assert route_agent(s) == "agent_finalize"
-
-    # 已 delegate：达原上限仍给 +2 余量（有 tool_calls 走 tools）
-    s2 = AgentState()
-    s2._agent_iterations = MAX_AGENT_ITERATIONS
-    s2._delegate_used = True
-    tool_call_msg = AIMessage(
-        content="",
-        tool_calls=[
-            {
-                "name": "retrieve_kb",
-                "args": {"query": "x"},
-                "id": "1",
-                "type": "tool_call",
-            }
-        ],
-    )
-    s2.messages = [tool_call_msg]
-    assert route_agent(s2) == "tools"
-
-    # 超过放宽后上限：收尾
-    s3 = AgentState()
-    s3._agent_iterations = MAX_AGENT_ITERATIONS + MAX_DELEGATE_BONUS
-    s3._delegate_used = True
-    s3.messages = [AIMessage(content="final")]
-    assert route_agent(s3) == "agent_finalize"
-
-
-@pytest.mark.asyncio
-async def test_agent_model_sets_delegate_used_flag():
-    """agent 输出含 delegate_task tool_call → state._delegate_used 置位。"""
-    fake_response = AIMessage(
-        content="",
-        tool_calls=[
-            {
-                "name": "delegate_task",
-                "args": {"task": "分析", "skill": "x"},
-                "id": "t1",
-                "type": "tool_call",
-            }
-        ],
-    )
-    llm = MockChatModel(fake_response)
-    node = make_agent_model_node(llm, [], StubPromptManager())
-    state = AgentState.make_initial_state("s1", "kb1", "q", [])
-    out = await node(state)
-    assert out["_delegate_used"] is True
-
-
-@pytest.mark.asyncio
-async def test_agent_model_non_delegate_keeps_flag_false():
-    """普通工具轮不置位 _delegate_used（缺省保持 False）。"""
-    fake_response = AIMessage(
-        content="需要检索",
-        tool_calls=[
-            {
-                "name": "retrieve_kb",
-                "args": {"query": "x"},
-                "id": "t1",
-                "type": "tool_call",
-            }
-        ],
-    )
-    llm = MockChatModel(fake_response)
-    node = make_agent_model_node(llm, [], StubPromptManager())
-    state = AgentState.make_initial_state("s1", "kb1", "q", [])
-    out = await node(state)
-    assert out.get("_delegate_used", False) is False
-
-
-@pytest.mark.asyncio
-async def test_agent_model_temperature_binds_kb_uses_construction_value():
-    """绑 KB（kb_id 非空）→ 不传 per-call temperature（沿用构造温度 LLM_TEMPERATURE=0.1）。"""
-    captured = {}
-
-    class CapturingTempModel(MockChatModel):
-        async def astream(self, messages, **kwargs):
-            captured["temperature"] = kwargs.get("temperature")
-            yield self.response
-
-    llm = CapturingTempModel(AIMessage(content="ok"))
-    node = make_agent_model_node(llm, [], StubPromptManager())
-    state = AgentState.make_initial_state("s1", "kb-1", "2024 营收?", [])
-    await node(state)
-    assert captured["temperature"] is None  # 不覆盖构造值（LLM_TEMPERATURE 默认 0.1）
-
-
-@pytest.mark.asyncio
-async def test_agent_model_temperature_non_kb_uses_default():
-    """未绑 KB（kb_id 空）→ 每轮 astream 传 temperature=NON_KB_MAIN_TEMPERATURE。"""
-    captured = {}
-
-    class CapturingTempModel(MockChatModel):
-        async def astream(self, messages, **kwargs):
-            captured["temperature"] = kwargs.get("temperature")
-            yield self.response
-
-    llm = CapturingTempModel(AIMessage(content="ok"))
-    node = make_agent_model_node(llm, [], StubPromptManager())
-    state = AgentState.make_initial_state("s1", "", "聊聊人生", [])
-    await node(state)
-    from src.config import settings
-
-    assert captured["temperature"] == settings.NON_KB_MAIN_TEMPERATURE
-
-
-@pytest.mark.asyncio
-async def test_agent_model_temperature_same_tier_across_turns():
-    """同请求多轮：kb_id 恒定 → 各轮 temperature 一致（档位不随轮次漂移）。"""
-    captured = []
-
-    class MultiTurnModel(MockChatModel):
-        async def astream(self, messages, **kwargs):
-            captured.append(kwargs.get("temperature"))
-            yield self.response
-
-    llm = MultiTurnModel(AIMessage(content="ok"))
-    node = make_agent_model_node(llm, [], StubPromptManager())
-    state = AgentState.make_initial_state("s1", "", "q", [])
-    state.messages = [HumanMessage(content="q")]  # 后续轮
-    await node(state)
-    await node(state)
-    assert captured == [captured[0], captured[0]]
-
-
-@pytest.mark.asyncio
-async def test_model_turn_logs_temperature_and_source(monkeypatch):
-    """未绑 KB → 显式传非 KB 档；绑 KB → 沿用构造默认（design D11 #1）。"""
-    from src.config import settings
-
-    calls: list[dict] = []
-
-    def fake_log_event(event, **fields):
-        calls.append({"event": event, **fields})
-
-    monkeypatch.setattr(
-        "src.agents.graph.agent_node.core_logging.log_event", fake_log_event
-    )
-
-    # 未绑 KB（state.kb_id == ""）
-    await _run_one_turn(kb_id="")
-    model_turn = [c for c in calls if c["event"].value == "model turn"][-1]
-    assert model_turn["temperature"] == settings.NON_KB_MAIN_TEMPERATURE
-    assert model_turn["temp_source"] == "explicit"
-    assert model_turn["kb_bound"] is False
-
-    calls.clear()
-    # 绑 KB
-    await _run_one_turn(kb_id="kb1")
-    model_turn = [c for c in calls if c["event"].value == "model turn"][-1]
-    assert model_turn["temperature"] == settings.LLM_TEMPERATURE
-    assert model_turn["temp_source"] == "default"
-    assert model_turn["kb_bound"] is True
-
-
-def test_prompt_messages_counts_three_segments(monkeypatch):
-    """首轮组装后记录 system / 注入 / 历史三段条数（design D11 #4）。"""
-    from src.agents.graph.agent_node import _initial_messages
-    from src.config.const import SKILL_INJECTION_PREFIX
-    from src.core.log_events import Event
-    from src.infra.llm.chat_message import ChatMessage
-    from src.infra.llm.request_context import RequestContext, current_request_ctx
-
-    calls: list[dict] = []
-
-    def fake_log_event(event, **fields):
-        calls.append({"event": event, **fields})
-
-    monkeypatch.setattr(
-        "src.agents.graph.agent_node.core_logging.log_event", fake_log_event
-    )
-    ctx = RequestContext(session_id="s1")
-    current_request_ctx.set(ctx)
-    try:
-        state = _make_state(
-            query="营收多少",
-            kb_id="",
-            history=[
-                ChatMessage(role="user", content="你好"),
-                ChatMessage(role="assistant", content="你好"),
-                ChatMessage(role="user", content=f"{SKILL_INJECTION_PREFIX}\n方法论"),
-            ],
-        )
-        _initial_messages(state, _make_prompt_manager(), frozenset())
-    finally:
-        current_request_ctx.set(None)
-
-    payload = next(c for c in calls if c["event"] is Event.PROMPT_MESSAGES)
-    assert payload["injected_msgs"] == 1
-    assert payload["history_msgs"] == 2
-    assert payload["system_msgs"] >= 1

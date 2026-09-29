@@ -1,7 +1,7 @@
 """SkillExecutor — inline 指令注入 / fork 子代理执行。
 
 - inline：返回 skill 正文（render 后的方法论），主 agent 自己执行（不产生子代理）。
-- fork：create_agent(model, tools=只读面筛选结果, system_prompt=执行者人设) 生成独立
+- fork：经 build_agent(model, tools=只读面筛选结果, system=执行者人设) 生成独立
   子代理；初始 user message = skill 正文（task 已注入），返回纯文本（不带 [n]）。
   子代理工具面默认继承执行者的只读面（allowed-tools 只作收窄，未声明即不收窄）；
   防递归由禁用集（delegate_task / task_*）硬保证。执行期把 current_request_ctx 切到
@@ -35,9 +35,9 @@ import asyncio
 import warnings
 from collections.abc import Callable
 
-from langchain.agents import create_agent
 from langchain_core.runnables.config import var_child_runnable_config
 
+from src.agents.graph.agent_factory import build_agent
 from src.agents.presets.models import AgentPreset
 from src.agents.presets.registry import AgentPresetRegistry
 from src.agents.skills.delegate_run import DelegateRun
@@ -304,10 +304,15 @@ class SkillExecutor:
         return preset.max_turns
 
     def _build_sub_agent(self, record: SkillRecord | None, preset, via: str):
-        """构建 fork 子代理：system=执行者人设、user=skill 正文、tools=只读面筛选结果。
+        """构建 fork 子代理：走与主 agent 共用的装配入口。
 
         初始 user message（skill 正文 + 任务）由 _run_fork 渲染后经
         consume_fork_events 传入；本方法只负责装配人设、只读面筛选结果与 middleware。
+
+        子角色的 middleware 集合为空——其模型轮次记录由 fork 委派的事件消费侧
+        （fork_stream._record_delegate_model_turn）承担，图内不重复产出主循环口径
+        的轮次日志与观测。轮次上限仍由消费侧判定（见 delegate-execution-controls
+        的「fork turn 上限」），故不传 max_turns。
 
         Args:
             record: fork SkillRecord；None = 通用委派（工具面不收窄、不声明 model）
@@ -315,13 +320,13 @@ class SkillExecutor:
             via: 执行路径（DELEGATE_VIA_DIRECT|DELEGATE_VIA_DELEGATE），决定引用编号指示
 
         Returns:
-            create_agent 编译产物（astream_events 事件源）
+            build_agent 编译产物（astream_events 事件源）
         """
-        return create_agent(
+        return build_agent(
             self._resolve_fork_llm(record),
-            tools=self._fork_tools(record, preset),
-            system_prompt=self._executor_system_prompt(preset, via),
-            middleware=[],
+            self._fork_tools(record, preset),
+            system=self._executor_system_prompt(preset, via),
+            middleware_extra=[],
         )
 
     def _executor_system_prompt(self, preset, via: str) -> str:

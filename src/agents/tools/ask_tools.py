@@ -56,6 +56,37 @@ async def _aggregate_entities(kb_ids):
     return await rag_tools.aggregate_kb_entities(kb_ids)
 
 
+def _read_state_fields(state: AgentState | dict | None) -> tuple[str, int, str]:
+    """从图状态读取 (query_text, iteration, kb_id)，显式形状判定两种承载。
+
+    主循环已内化进 create_agent 装配产物，工具只会拿到映射（dict），键由装配 seed；
+    外层自建图注入 AgentState 实例。AgentState 承载已无循环计数字段，迭代序号取 0
+    （iteration 仅入日志，主循环计数走映射的 _turn_count）。形状无法识别或键缺失时
+    走降级分支并记 warning（含工具名与缺失字段名）。
+
+    Args:
+        state: LangGraph 注入的执行状态（映射或 AgentState 实例，可为 None）
+
+    Returns:
+        (query_text, iteration, kb_id)：缺失项各取兜底值（空串 / 0）
+    """
+    if isinstance(state, AgentState):
+        return state.query, 0, state.kb_id
+    if isinstance(state, dict):
+        missing = [key for key in ("query", "_turn_count", "kb_id") if key not in state]
+        if missing:
+            logger.warning(
+                "tool=ask_user state missing fields fields={}", ",".join(missing)
+            )
+        return (
+            str(state.get("query", "")),
+            int(state.get("_turn_count", 0)),
+            str(state.get("kb_id", "")),
+        )
+    logger.warning("tool=ask_user state missing fields fields=state")
+    return "", 0, ""
+
+
 @tool("ask_user", args_schema=AskUserArgs)
 async def ask_user(
     questions: list[AskQuestion],
@@ -70,7 +101,8 @@ async def ask_user(
 
     Args:
         questions: 需要用户补充的问题列表（含 id/question/dimension/options/multi_select）
-        state: LangGraph 注入的 AgentState，读取 kb_id 确定 KB 候选来源
+        state: LangGraph 注入的图状态（显式形状判定取 query / 迭代序号 / kb_id，
+            映射承载为装配 seed 的键；AgentState 承载读实例字段）
 
     Returns:
         用户答案的 JSON 文本；超限/超时/取消时返回对应错误文本
@@ -78,14 +110,9 @@ async def ask_user(
     ctx = current_request_ctx.get()
     if ctx is None:
         return SSEInteractionTexts.ASK_USER_CTX_UNAVAILABLE
-    # ask_user 恒在 FORK_FORBIDDEN_TOOLS 内、只由主图调用，注入的必是 AgentState；
-    # 若将来把它移出禁用集，须同 retrieve_kb 一样加 isinstance(state, AgentState) 守卫
-    if state is not None:
-        query_text = state.query
-        iteration = state._agent_iterations
-    else:
-        query_text = ""
-        iteration = 0
+    # 显式形状判定取 query / 迭代序号：主循环已内化进装配产物，注入的通常是映射，
+    # 外层自建图给 AgentState 实例；两种承载都由 _read_state_fields 收敛
+    query_text, iteration, _kb_id = _read_state_fields(state)
     if ctx.ask_count >= MAX_ASK_PER_TURN:  # 同步检查+自增，无 await
         logger.warning(
             "ask_user limit reached session_id={} query={}",
@@ -153,20 +180,21 @@ async def ask_user(
 
 
 async def _load_dimension_options(
-    dimension: str, state: AgentState | None
+    dimension: str, state: AgentState | dict | None
 ) -> list[str]:
     """按维度加载问题选项：company/period 优先取 KB 聚合候选，否则兜底静态映射。
 
     Args:
         dimension: 缺失维度（company/period/metric/free）
-        state: AgentState，提供 kb_id 定位 KB 候选来源
+        state: 图状态（显式形状判定取 kb_id，定位 KB 候选来源）
 
     Returns:
         候选选项列表；KB 无候选且 dimension 不在 SUGGESTIONS_MAP 时为空列表
     """
     if dimension in ("company", "period"):
-        if state is not None and state.kb_id:
-            kb_ids = [state.kb_id]
+        _query_text, _iteration, kb_id = _read_state_fields(state)
+        if kb_id:
+            kb_ids = [kb_id]
         else:
             kb_ids = None
         aggregate = await _aggregate_entities(kb_ids)

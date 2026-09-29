@@ -92,6 +92,7 @@
 ### D8 观测：采用对方 D11，不自建
 
 - 决策：Langfuse 侧沿用 `skill-execution-and-delegation` 的 D11（同 trace、委派父 span、`scope=delegate`、`ToolTraceCollector` 参数化按缺省参数行为不变、显式喂事件、`set(None)` 保持不变）；本变更只把主 role 的 `agent_turn` generation span 从节点装饰器迁入 middleware。
+- **已接受的可观测退化（Ruling S/X，实现期实测）**：middleware 内 `get_current_observation_id()` 指向外层 `chat_turn` span，`update_current_observation` 会改写该 span、generation 专属字段被**静默忽略** ⇒ `agent_turn` generation 必须走**命令式 span**（`client.generation(name="agent_turn", parent_observation_id=<chat_turn id>, ...)`）。代价：**`completion_start_time`（首 chunk 到达时刻 / TTFB）不再设置**——`awrap_model_call` 只能拿到模型调用**整体结束后**的 `ModelResponse`，拿不到首 chunk 时刻。本变更**接受**该退化（它是 trace 字段，不在"五条日志"的行为契约内）；Task 14 Step 4 的真实 Langfuse 核对须确认 observation 仍出现且**其余**字段完整。若日后确需恢复 TTFB，须另开一张（用 callbacks 钩子取首 chunk）。
 - 理由：本仓 langfuse 为 **v2 SDK（2.60.10）**，`@observe` **没有** trace_id 参数 ⇒ 独立 trace 只能命令式、成本高一个量级；且 `trace_id` 是对外契约且正是 Langfuse 的 trace 主键 ⇒ 单 trace 嵌套与契约一致。对方的 `ToolTraceCollector` 新接口对缺省参数有回归测试，A 之后主域采集器**零改动**。
 
 ### D9 装配入口的落点与三条硬约束

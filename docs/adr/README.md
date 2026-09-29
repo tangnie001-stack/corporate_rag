@@ -111,6 +111,7 @@ docs/adr/NNNN-<kebab-case-短标题>.md
 | [0013](0013-trace-retention-purge-via-langfuse-sql.md) | trace 保留期清理的后端定为直连 Langfuse PG 的 SQL | Accepted | 为 0012 的 30 天保留期提供可工作的删除机制（不取代） |
 | [0014](0014-candidate-pool-not-rerank-input-bound.md) | 更正 ADR-0001 的两段陈述（候选池非精排输入上界；多库路径死因） | Accepted | 局部更正 0001 的两段陈述（决策不变） |
 | [0015](0015-langfuse-tool-spans-imperative-api.md) | 工具 span 用命令式 Langfuse client 创建（client 实例取 decorators 单例） | Accepted | 为 `llm-tracing` 扩展观测面；与「纯装饰器」并存，不取代任何在先 ADR |
+| [0016](0016-unify-agent-loop-to-create-agent.md) | 统一 agent 循环到 `create_agent`（唯一装配入口 + 四件套 middleware，领域阶段留外层图） | Accepted | 沿用 0015 的命令式 span 接入方式；代价是 `agent_turn` 的 TTFB（`completion_start_time`）不再设置 |
 
 ## 模板
 

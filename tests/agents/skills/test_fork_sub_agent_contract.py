@@ -1,4 +1,4 @@
-"""fork 子代理构造契约：system_prompt=人设、user message=skill 正文、tools=交集、middleware 空。"""
+"""fork 子代理构造契约：system=人设、user message=skill 正文、tools=交集、middleware 集合空。"""
 
 import pytest
 
@@ -19,18 +19,18 @@ class _FakeAgent:
 
 @pytest.mark.asyncio
 async def test_sub_agent_uses_system_prompt_and_user_body(monkeypatch):
-    """_build_sub_agent 走 create_agent：system=人设、tools=交集、middleware=[]。"""
+    """_build_sub_agent 走共用装配入口：system=人设、tools=交集、middleware_extra=[]。"""
     captured = {}
 
-    def _fake_create_agent(
-        model, tools=None, system_prompt=None, middleware=None, **kw
+    def _fake_build_agent(
+        model, tools=None, *, system=None, middleware_extra=None, **kw
     ):
         captured["tools"] = tools
-        captured["system_prompt"] = system_prompt
-        captured["middleware"] = middleware
+        captured["system"] = system
+        captured["middleware_extra"] = middleware_extra
         return _FakeAgent()
 
-    monkeypatch.setattr("src.agents.skills.executor.create_agent", _fake_create_agent)
+    monkeypatch.setattr("src.agents.skills.executor.build_agent", _fake_build_agent)
     executor = SkillExecutor(main_llm=object(), tool_provider=list)
     record = SkillRecord(
         name="finance-analyst",
@@ -41,9 +41,9 @@ async def test_sub_agent_uses_system_prompt_and_user_body(monkeypatch):
     )
     executor._build_sub_agent(record, preset=None, via=DELEGATE_VIA_DELEGATE)
 
-    assert captured["system_prompt"]  # 执行者人设非空（无 preset → 系统默认人设）
+    assert captured["system"]  # 执行者人设非空（无 preset → 系统默认人设）
     assert captured["tools"] == []  # available 为空 → 交集为空
-    assert captured["middleware"] == []
+    assert captured["middleware_extra"] == []
 
 
 @pytest.mark.asyncio
@@ -51,13 +51,13 @@ async def test_sub_agent_system_prompt_carries_via_citation_instruction(monkeypa
     """_build_sub_agent 收到的 via 原样决定子代理 system prompt 的引用编号指示。"""
     captured = {}
 
-    def _fake_create_agent(
-        model, tools=None, system_prompt=None, middleware=None, **kw
+    def _fake_build_agent(
+        model, tools=None, *, system=None, middleware_extra=None, **kw
     ):
-        captured["system_prompt"] = system_prompt
+        captured["system"] = system
         return _FakeAgent()
 
-    monkeypatch.setattr("src.agents.skills.executor.create_agent", _fake_create_agent)
+    monkeypatch.setattr("src.agents.skills.executor.build_agent", _fake_build_agent)
     executor = SkillExecutor(main_llm=object(), tool_provider=list)
     record = SkillRecord(
         name="finance-analyst",
@@ -68,10 +68,10 @@ async def test_sub_agent_system_prompt_carries_via_citation_instruction(monkeypa
     )
 
     executor._build_sub_agent(record, preset=None, via=DELEGATE_VIA_DIRECT)
-    assert captured["system_prompt"].endswith(FORK_DIRECT_CITATION_INSTRUCTION)
+    assert captured["system"].endswith(FORK_DIRECT_CITATION_INSTRUCTION)
 
     executor._build_sub_agent(record, preset=None, via=DELEGATE_VIA_DELEGATE)
-    assert captured["system_prompt"].endswith(FORK_DELEGATE_CITATION_INSTRUCTION)
+    assert captured["system"].endswith(FORK_DELEGATE_CITATION_INSTRUCTION)
 
 
 def test_render_fork_task_replaces_declared_placeholder():

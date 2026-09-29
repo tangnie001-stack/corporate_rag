@@ -120,7 +120,7 @@ FORK_EXCLUSIVE_TOOL_PREFIXES = ("task_",)
 SKILL_INJECTION_PREFIX: str = "[[skill-injection]]"
 """注入型隐藏消息的内容前缀标记。
 
-用途：① `sessions/messages` 据此过滤（前端不展示）；② `agent_node._initial_messages`
+用途：① `sessions/messages` 据此过滤（前端不展示）；② `agent_node._split_initial_messages`
 据此把该行抽成独立 HumanMessage（模型可见）。标记必须是 ASCII 且用户不可能自然打出。
 """
 # 专家分析标记短语：fork 子代理"无源分析观点"由 4.1 引导主 agent 措辞（design D9），

@@ -219,3 +219,41 @@ async def test_ask_user_dual_mode_injects_dimension(monkeypatch):
     finally:
         current_request_ctx.reset(token)
     assert "s1" not in pending_asks
+
+
+def test_read_state_fields_from_mapping():
+    """映射承载（create_agent）下取到真实 query / _turn_count / kb_id，不抛。"""
+    from src.agents.tools import ask_tools
+
+    captured = ask_tools._read_state_fields(
+        {"query": "真实问题", "kb_id": "kb-1", "_turn_count": 2}
+    )
+    assert captured == ("真实问题", 2, "kb-1")
+
+
+def test_read_state_fields_from_agent_state_instance():
+    """AgentState 实例承载下取 query / kb_id；实例已无循环计数字段 → 迭代序号取 0。"""
+    from src.agents.tools import ask_tools
+
+    state = AgentState.make_initial_state("s1", "kb-1", "实例问题", [])
+    captured = ask_tools._read_state_fields(state)
+    assert captured == ("实例问题", 0, "kb-1")
+
+
+def test_read_state_fields_degrades_with_warning():
+    """键缺失走降级分支：返回空值兜底并记 warning（含工具名与缺失字段名）。"""
+    from loguru import logger
+
+    from src.agents.tools import ask_tools
+
+    records: list[str] = []
+    sink_id = logger.add(lambda message: records.append(str(message)), level="WARNING")
+    try:
+        captured = ask_tools._read_state_fields({"kb_id": "kb-1"})
+    finally:
+        logger.remove(sink_id)
+
+    assert captured == ("", 0, "kb-1")  # 缺失键各取兜底值，已存在的 kb_id 仍保留
+    joined = "".join(records)
+    assert "ask_user" in joined  # 工具名
+    assert "query" in joined  # 缺失字段名

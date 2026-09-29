@@ -2,14 +2,14 @@
 
 from unittest.mock import MagicMock
 
-from src.agents.graph.agent_node import _initial_messages
+from src.agents.graph.agent_node import _split_initial_messages
 from src.agents.graph.state import AgentState
 from src.infra.llm.chat_message import ChatMessage
 from src.infra.llm.request_context import RequestContext, current_request_ctx
 
 
 def _call_initial_messages(state: AgentState, known: set[str]):
-    """设置 RequestContext 后调用 _initial_messages，返回组装后的消息列表。"""
+    """设置 RequestContext 后调用 _split_initial_messages，返回非 system 半段。"""
     pm = MagicMock()
     pm.get_user_template.side_effect = lambda context="", query="": f"Q:{query}"
 
@@ -19,7 +19,8 @@ def _call_initial_messages(state: AgentState, known: set[str]):
     ctx.has_skills = False
     token = current_request_ctx.set(ctx)
     try:
-        return _initial_messages(state, pm, frozenset())
+        _system_half, rest_half = _split_initial_messages(state, pm, frozenset())
+        return rest_half
     finally:
         current_request_ctx.reset(token)
 

@@ -84,7 +84,7 @@ def _event(kind, chunk=None, output=None):
     return {
         "event": kind,
         "name": "agent",
-        "metadata": {"langgraph_node": "agent"},
+        "metadata": {"langgraph_node": "model"},
         "data": data,
     }
 
@@ -164,9 +164,7 @@ async def test_fork_auto_registers_execution_and_terminal():
         ctx = RequestContext(session_id="s1")
         token = current_request_ctx.set(ctx)
         try:
-            with patch(
-                "src.agents.skills.executor.create_agent", return_value=fake_sub
-            ):
+            with patch("src.agents.skills.executor.build_agent", return_value=fake_sub):
                 await tool.ainvoke({"task": "分析", "skill": "finance-analyst"})
         finally:
             current_request_ctx.reset(token)
@@ -198,7 +196,7 @@ async def test_fork_hit_pushes_delegate_start_end_with_id():
     ctx = RequestContext(session_id="s1")
     token = current_request_ctx.set(ctx)
     try:
-        with patch("src.agents.skills.executor.create_agent", return_value=fake_sub):
+        with patch("src.agents.skills.executor.build_agent", return_value=fake_sub):
             out = await tool.ainvoke({"task": "分析年报", "skill": "finance-analyst"})
     finally:
         current_request_ctx.reset(token)
@@ -239,7 +237,7 @@ async def test_fork_interrupted_end_carries_reason():
     try:
         with (
             patch(
-                "src.agents.skills.executor.create_agent",
+                "src.agents.skills.executor.build_agent",
                 return_value=MagicMock(astream_events=_slow),
             ),
             patch.object(exec_mod.settings, "DELEGATE_MAX_IDLE_S", 0.1),
@@ -273,7 +271,7 @@ async def test_cancel_during_fork_propagates_cancelled_with_end_reason():
             )
         )
         with (
-            patch("src.agents.skills.executor.create_agent", return_value=fake_sub),
+            patch("src.agents.skills.executor.build_agent", return_value=fake_sub),
             pytest.raises(asyncio.CancelledError),
         ):
             await tool.ainvoke({"task": "t", "skill": "finance-analyst"})
@@ -322,7 +320,7 @@ async def test_cancel_mid_wait_abort_race_during_fork():
     try:
         with (
             patch(
-                "src.agents.skills.executor.create_agent",
+                "src.agents.skills.executor.build_agent",
                 return_value=MagicMock(astream_events=_slow),
             ),
             # 放大空闲阈值，防止 idle 在 abort 前抢先中断（本用例只测 abort 竞速路径）
@@ -531,7 +529,7 @@ async def test_budget_exhausted_returns_readable_reason(monkeypatch):
     token = current_request_ctx.set(ctx)
     try:
         with patch(
-            "src.agents.skills.executor.create_agent",
+            "src.agents.skills.executor.build_agent",
             side_effect=AssertionError("触顶时不得启动子代理"),
         ):
             out = await tool.ainvoke({"task": "分析", "skill": "finance-analyst"})
@@ -590,7 +588,7 @@ async def test_successful_fork_consumes_one_budget():
         assert delegate_budget.used(sid) == 0
         with (
             patch.object(dt_mod, "task_registry", reg),
-            patch("src.agents.skills.executor.create_agent", return_value=fake_sub),
+            patch("src.agents.skills.executor.build_agent", return_value=fake_sub),
         ):
             await tool.ainvoke({"task": "分析", "skill": "finance-analyst"})
         assert delegate_budget.used(sid) == 1
@@ -650,7 +648,7 @@ async def test_generic_delegation_without_skill(monkeypatch):
     try:
         with (
             patch.object(dt_mod, "task_registry", board),
-            patch("src.agents.skills.executor.create_agent", return_value=fake_sub),
+            patch("src.agents.skills.executor.build_agent", return_value=fake_sub),
         ):
             out = await tool.ainvoke({"task": "帮我查一下某公司近三年的营收"})
             items = board.list_session("s1")
@@ -679,8 +677,8 @@ async def test_generic_delegation_inherits_readonly_tools(monkeypatch):
 
     captured: dict = {}
 
-    def _fake_create_agent(*args, **kwargs):
-        captured.update(kwargs)
+    def _fake_build_agent(model, tools, **kwargs):
+        captured["tools"] = tools
         return _fake_sub_agent(
             _event("on_chat_model_end", output=AIMessage(content="ok"))
         )
@@ -694,7 +692,7 @@ async def test_generic_delegation_inherits_readonly_tools(monkeypatch):
     token = current_request_ctx.set(ctx)
     try:
         with patch(
-            "src.agents.skills.executor.create_agent", side_effect=_fake_create_agent
+            "src.agents.skills.executor.build_agent", side_effect=_fake_build_agent
         ):
             await tool.ainvoke({"task": "查营收"})
     finally:
@@ -726,7 +724,7 @@ async def test_generic_delegation_consumes_budget():
         assert delegate_budget.used(sid) == 0
         with (
             patch.object(dt_mod, "task_registry", reg),
-            patch("src.agents.skills.executor.create_agent", return_value=fake_sub),
+            patch("src.agents.skills.executor.build_agent", return_value=fake_sub),
         ):
             await tool.ainvoke({"task": "帮我查营收"})
         assert delegate_budget.used(sid) == 1
@@ -750,7 +748,7 @@ async def test_generic_delegation_rejected_when_budget_exhausted(monkeypatch):
     token = current_request_ctx.set(ctx)
     try:
         with patch(
-            "src.agents.skills.executor.create_agent",
+            "src.agents.skills.executor.build_agent",
             side_effect=AssertionError("触顶时不得启动子代理"),
         ):
             out = await tool.ainvoke({"task": "帮我查营收"})

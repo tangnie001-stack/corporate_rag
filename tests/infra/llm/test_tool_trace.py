@@ -179,7 +179,8 @@ def test_events_outside_tools_node_are_ignored():
     collector = ToolTraceCollector(enabled=True, trace_id="t1", client=client)
 
     item = _item("on_tool_start", name="retrieve_kb", run_id="r1", input={})
-    item["metadata"] = {"langgraph_node": "agent"}
+    # 非 tools 节点（模型节点）的事件不误收：判据只认 "tools"
+    item["metadata"] = {"langgraph_node": "model"}
     collector.consume(item)
 
     assert client.spans == []
