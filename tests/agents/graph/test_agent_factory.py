@@ -73,8 +73,7 @@ def test_build_agent_wires_loop_state_channels():
 
 def test_create_agent_is_only_called_from_agent_factory():
     """「唯一装配」静态扫描断言：src/agents/ 下只有装配入口可以调 create_agent(。"""
-    # executor.py 的 create_agent 调用已随 Task 12（子角色接入共用装配入口）移除，
-    # 故清单只余装配入口本体
+    # src/agents/ 下仅 agent_factory.py 可调用 create_agent(
     ALLOWED = {"agent_factory.py"}
     root = pathlib.Path(__file__).resolve().parents[3] / "src" / "agents"
     offenders = []

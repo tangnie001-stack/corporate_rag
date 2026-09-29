@@ -57,6 +57,41 @@ def _truncate_history(
     return recent
 
 
+def _split_history(
+    history: list[ChatMessage], known: set[str]
+) -> tuple[list[BaseMessage], list[ChatMessage]]:
+    """把截断后的历史拆成「注入消息段」与「清洗后的普通历史段」。
+
+    注入消息段 = 内容带 SKILL_INJECTION_PREFIX 标记的 user 行，抽为独立
+    HumanMessage（既不进人设层/环境约束层，也避免"对话中途插 system 消息"的模型
+    兼容风险）；普通历史段中 user/assistant 剥掉已注册技能前缀（读时清洗，落库
+    保留原文），其他角色原样保留（build_prompt 会跳过，无需清洗）。
+
+    Args:
+        history: 截断后的对话历史
+        known: 已注册技能的可见名集合（clean_prefix 判据）
+
+    Returns:
+        (注入消息列表, 清洗后的普通历史列表)
+    """
+    injected: list[BaseMessage] = []
+    normal: list[ChatMessage] = []
+    for msg in history:
+        if msg.role == "user" and msg.content.startswith(SKILL_INJECTION_PREFIX):
+            injected.append(HumanMessage(content=msg.content))
+        else:
+            normal.append(msg)
+    cleaned_normal: list[ChatMessage] = []
+    for msg in normal:
+        if msg.role in ("user", "assistant"):
+            cleaned_normal.append(
+                ChatMessage(role=msg.role, content=clean_prefix(msg.content, known))
+            )
+        else:
+            cleaned_normal.append(msg)
+    return injected, cleaned_normal
+
+
 def _split_initial_messages(
     state: AgentState, prompt_manager, tool_names: frozenset[str]
 ) -> tuple[list[SystemMessage], list[BaseMessage]]:
@@ -93,23 +128,7 @@ def _split_initial_messages(
         has_skills = False
         kb_domain = "general"
         known = set()
-    injected: list[BaseMessage] = []
-    normal: list[ChatMessage] = []
-    for msg in history:
-        if msg.role == "user" and msg.content.startswith(SKILL_INJECTION_PREFIX):
-            injected.append(HumanMessage(content=msg.content))
-        else:
-            normal.append(msg)
-    # 读时清洗：对 user/assistant 历史剥掉已注册技能前缀（落库保留原文）；
-    # 其他角色原样保留（build_prompt 会跳过，无需清洗）
-    cleaned_normal: list[ChatMessage] = []
-    for msg in normal:
-        if msg.role in ("user", "assistant"):
-            cleaned_normal.append(
-                ChatMessage(role=msg.role, content=clean_prefix(msg.content, known))
-            )
-        else:
-            cleaned_normal.append(msg)
+    injected, cleaned_normal = _split_history(history, known)
     messages = build_prompt(
         clean_prefix(state.query, known),
         "",
@@ -159,8 +178,7 @@ def make_agent_loop_node(bundle) -> Callable:
     组装结果 ⇒ 只回写新增段，模型请求仍含原始 query 与历史（否则 regen 轮模型
     看不到原始问题）。
 
-    每次 invoke 都是全新 run：_turn_count / _delegate_used 一律 seed 字面初值
-    （不从外层读 _agent_iterations 等，那些字段由下一批清理）。
+    每次 invoke 都是全新 run：计数与委派标志一律 seed 字面初值，不跨 invoke 持久。
 
     Args:
         bundle: 装配产物束（agent=build_agent 产物 / prompt_manager / tool_names）
