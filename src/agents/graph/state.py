@@ -27,6 +27,9 @@ class AgentState:
     messages: Annotated[list[BaseMessage], add_messages] = field(
         default_factory=list
     )  # 模型可见消息（来源：agent 循环节点追加；范围：整轮执行；用途：LLM 上下文，add_messages 提供追加语义）
+    _system_messages: list[BaseMessage] = field(
+        default_factory=list
+    )  # system 段（来源：agent 节点首轮组装后写入；范围：整轮执行，跨 regen invoke 持久；用途：模型参数与 system 的施加通道；**不带 reducer**，写入即替换）
     tool_contexts: list[RAGContext] = field(
         default_factory=list
     )  # 本轮材料池（来源：常规轮 agent_finalize 从主 ctx 写入 / 直出轮直出节点从子代理 ctx 写入；范围：整轮执行；用途：引用溯源，verify 引用护栏与 format 判据读此）
