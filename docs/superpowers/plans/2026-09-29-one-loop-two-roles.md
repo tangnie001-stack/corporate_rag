@@ -1062,7 +1062,7 @@ def make_agent_loop_node(bundle) -> Callable:
     return agent_loop
 ```
 
-删除 `make_agent_model_node` / `make_agent_tools_node` / `route_agent`（整段），并删除两处临时取证埋点（`first_chunk_ms` 与 `logger.info("[agent] TIMING …")`；`first_chunk_at` 保留——它是观测的 `completion_start_time`）。
+删除 `make_agent_model_node` / `make_agent_tools_node` / `route_agent`（整段），并删除两处临时取证埋点（`first_chunk_ms` 与 `logger.info("[agent] TIMING …")`）。⚠️ **更正（Ruling S/X）**：该函数内测 TTFB 的 `first_chunk_at` **也随之消失**——`completion_start_time` 在 middleware 层不可得（只能拿到模型调用整体结束后的 `ModelResponse`），本变更**接受这一可观测退化**；不得为它另觅临时载体。
 
 - [ ] **Step 4: 跑测试确认通过**
 
