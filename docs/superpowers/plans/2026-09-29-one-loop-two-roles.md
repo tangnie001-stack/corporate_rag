@@ -880,6 +880,8 @@ class AgentSpanMiddleware(AgentMiddleware):
         return handler(request)
 ```
 
+> **实测结论（Ruling S）**：middleware 内 `get_current_observation_id()` 指向外层 `chat_turn` span，`update_current_observation` 会**改写该 span**、generation 专属字段被静默忽略 ⇒ 必须走**命令式 generation span**（`client.generation(name="agent_turn", parent_observation_id=<chat_turn id>, ...)`）；**`completion_start_time`（首 chunk 时刻）在该层不可得，故不设置**（本变更的一处可观测退化，Task 14 Step 4 须核对 observation 仍出现且其余字段完整）。
+
 `_record_turn` 按**今天 `agent_node.py:249-268` 的口径**实现：从 `ModelResponse` 拆出 `AIMessage`，取 `usage_metadata`（缺失走 `estimate_usage` 并标 `usage_estimated=True`）与 `response_metadata["model_name"]`，发 `model turn` 日志（字段集见 tasks §6.1），并在 `@observe`/命令式 span 下写入 observation；`langfuse_context.update_current_observation` 若在 middleware 中不可用，则**回退为命令式 span**（见 spec OQ）。
 
 - [ ] **Step 4: 跑测试确认通过**
@@ -1271,7 +1273,8 @@ POSTGRES_HOST=localhost .venv/bin/python -m pytest tests/agents/graph/test_graph
         middleware_extra=[
             SystemMessagesMiddleware(),
             ModelParamsMiddleware(),
-            AgentTurnBudget(limit=MAX_AGENT_ITERATIONS),
+            # AgentTurnBudget 由 build_agent 依 max_turns 自行追加（Ruling O/P）；
+            # 这里**不要**再传——create_agent 按 middleware.name 拒绝重复实例
             AgentSpanMiddleware(),
         ],
     )
