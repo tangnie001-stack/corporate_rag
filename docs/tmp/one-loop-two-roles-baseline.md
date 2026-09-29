@@ -189,3 +189,110 @@ final_state = await graph.ainvoke(
 1. 重构后**重跑 `/tmp/baseline_capture.py`**（脚本本身不入库；如需复现，按 3.1 重建）。
 2. 比对**结构不变量**（见 3.8「稳定」清单 + 3.5 稳定不变量），而非逐字回答。
 3. 若某项与基线不符，先排除模型随机性（3.8「不稳定」清单），再判定为行为变更。
+
+## 7. Task 14 验收结论（2026-09-29）
+
+> 本段为 Task 14 验收结论追加，不改上方基线原值。采集时点 2026-09-29 CST，
+> HEAD `69046d3`。方法同 §3.1，脚本为 `/tmp/baseline_capture.py` 的改编版
+> （改动能捕获 bind_tools kwargs 与 max_turns=1 合成探针，详见报告）。
+
+### 7.1 质量门禁（Step 1）
+
+| 门禁 | 命令 | 结果 |
+|---|---|---|
+| pytest | `POSTGRES_HOST=localhost .venv/bin/python -m pytest tests/ -q` | **1339 passed, 61 warnings in 74.65s**（exit 0；基线 1323，多出的 16 条为重构期新增用例） |
+| ruff check | `.venv/bin/ruff check .` | **All checks passed!**（exit 0） |
+| pyright | `.venv/bin/pyright src/` | **0 errors, 0 warnings, 0 informations**（exit 0） |
+| TIMING 埋点 | `grep -rn "TIMING" src/agents/graph/` | **空**（exit 1，埋点已删净） |
+| agent_node.py 行数 | `wc -l src/agents/graph/agent_node.py` | **232 行**（< 400） |
+
+- `ruff format --check .` 报「90 files would be reformatted」——存量状态（本任务未改 `.py`），
+  与基线 89 的差异来自重构期新增文件，非本次引入；按记忆不执行全仓 `ruff format .`。
+
+### 7.2 基线逐字比对（Step 2）——结构不变量逐项
+
+**比对口径**：SSE 事件类型与计数 / 五条日志的条数与字段集及关键字段值 /
+模型实收 kwargs 的温度分档 / citations 结构。不比对回答正文、token 分块数、
+`answer_len`、`[n]` 位置、`usage_in|out`、`status` 与 `token` 交错顺序。
+
+| 比对项 | 基线值 | 现值 | 结论 |
+|---|---|---|---|
+| kb_bound `prompt assembled` | 1 条，`system_msgs=1`、`sources=962`、`tool_count=10` | 逐字一致 | ✅ |
+| kb_bound `prompt messages` | `system_msgs=1 injected_msgs=0 history_msgs=0` | 逐字一致 | ✅ |
+| kb_bound `iteration done` | 2 条 `(1,msgs=2)`、`(2,msgs=4)` | 逐字一致 | ✅ |
+| kb_bound `model turn` | 2 条，`temp=0.1` `temp_source=default` `kb_bound=true` | 逐字一致（iteration 1/2） | ✅ |
+| kb_bound `iteration limit` | 0 条 | 0 条（基准 0、实收 0） | ✅ |
+| kb_unbound `prompt assembled` | `system_msgs=2`、`sources=618` | 逐字一致 | ✅ |
+| kb_unbound `prompt messages` | `system_msgs=2 injected_msgs=0 history_msgs=0` | 逐字一致 | ✅ |
+| kb_unbound `iteration done` | 1 条 `(1,msgs=3)` | 逐字一致 | ✅ |
+| kb_unbound `model turn` | `temp=0.6` `temp_source=explicit` `kb_bound=false` | 逐字一致 | ✅ |
+| kb_unbound `iteration limit` | 0 条 | 0 条（基准 0、实收 0） | ✅ |
+| kb_bound SSE 类型计数 | `status=4 token≈89–110 citation=2–3` | `status=4 token=115 citation=2` | ✅（token/citation 属随模型变） |
+| kb_unbound SSE 类型计数 | `status=1 token≈14–18 citation=0` | `status=1 token=20 citation=0` | ✅（无 citation） |
+| kb_bound citations 结构 | `kind=kb source=neusoft_2025_q1.pdf page∈{0,1,3} tier=0 snippet_len=200` | 同结构（`page∈{1,3}`、2–3 条） | ✅ |
+| kb_unbound citations | 0 条 | 0 条 | ✅ |
+
+**温度分档（模型实收 kwargs 实证）**——这是唯一需要改编脚本才能复现的项：
+重构后温度经 `create_agent` 的 `bind_tools(**model_settings)` 施加，不再经 `astream(...)`，
+故原脚本的 `astream` 代理采到空。改编脚本改记录 `bind_tools`/`bind` kwargs：
+
+| 档位 | 实收 `bind_tools` kwargs | 结论 |
+|---|---|---|
+| 绑 KB | `{"tool_choice": null, "extra_body": {"enable_thinking": false}}` | **不带 `temperature` 键** ✅（与基线 astream 口径一致：绑 KB 不传温度） |
+| 未绑 KB | `{"tool_choice": null, "extra_body": {"enable_thinking": false}, "temperature": 0.6}` | 显式 `temperature=0.6` ✅ |
+
+与 `model turn` 日志的 `temperature`/`temp_source` 一致（default↔0.1 / explicit↔0.6）。
+**唯一口径差异**：温度施加面从 `astream` 迁到 `bind_tools`（重构预期，非缺陷），
+`tool_choice: null` 为 create_agent 新增的透传键（非温度相关）。
+
+**`iteration limit` 字段值（合成探针）**：原探针引用的 `state._max_agent_iterations`
+已被重构删除，改为装配 `build_agent(max_turns=1)` 逼出，实采
+`iteration limit query="东软集团2025年第一季度报告的营业收入和净利润分别是多少？" iteration=1`
+——字段键（`query`/`iteration`）与基线 3.6 逐字一致。✅
+
+### 7.3 触顶复现（Step 3，真实路径）
+
+用宽问题「腾讯这几年的业绩怎么样？请结合年报数据详细分析」在绑 KB 会话跑生产路径
+（`_run_generation`），连跑 3 次均触发：
+
+- `iteration limit` 日志：`query="…" iteration=5`（WARNING 级），字段集与基线一致 ✅
+- 模型调用 5 次（`model turn` iteration 1–5），第 5 轮**正常收尾**（产出正文、未声明工具）
+  仍产出告警 → 命中「上限轮正常收尾也产出告警」场景 ✅
+- 工具执行 4 轮（iteration 1–4，每轮模型并行声明 2 次 `retrieve_kb`），第 5 轮不再执行 ✅
+- **无任何提示性文案**注入：grep `已达|上限|无法回答|抱歉|调用上限` 零命中 ✅
+- verify 照常收尾：`completeness check` → （其中两次触发重生成，regeneration 轮预算独立起算
+  产生完整答案）→ `format done`，无异常 ✅
+- 落库：`conversation_history` 行 `status=complete`、`content`=净化正文（非空，模型实际产出）
+  ✅；落库路径（`src/api/`、`src/chat/`、`src/infra/db/`）经 `git diff cf71e7a..HEAD` 为空，
+  **未被本重构改动**，落库语义与变更前一致 ✅
+
+> 说明：基线冒烟（2026-09-25）观察到「触顶 → 空回答」。本验收 3 次触顶均在第 5 轮
+> 产出正文（模型随机性），未复现「空回答」形态；「末条为含 tool_calls 的 AIMessage 且
+> 允许空串」场景由 Task 5 单元测试 `test_hit_limit_skips_last_tool_and_keeps_tool_call_message`
+> 覆盖（模型调用=上限次、工具执行=上限−1、末条含 tool_calls、允许空串），E2E 侧以
+> 「正常收尾也产出告警」场景佐证。规格不变式「答案允许为空、不被替换为提示性文案或
+> 工具返回内容」两场景均成立。
+
+### 7.4 真实模型 E2E（Step 4）
+
+| 场景 | 结果 |
+|---|---|
+| 绑 KB（kb_bound） | `model turn` `temp_source=default`/`temp=0.1`，`bind_tools` kwargs 无 `temperature` 键 ✅ |
+| 未绑 KB（kb_unbound） | `temp_source=explicit`/`temp=0.6`，`bind_tools` kwargs 显式 `temperature=0.6` ✅ |
+| 深度思考（deep_thinking=true） | `bind_tools` kwargs `extra_body={"enable_thinking": true}`，思考开关随调用链传入 ✅ |
+| `/xxx` 直出（`/financial-statement-analyzer …`） | `direct_skill` 解析成功、`skill_action=fork`，子代理链路跑通：SSE 含 `delegate×507` 折叠事件、`[delegate] delegate model turn delegate_id=…`、产出完整分析 ✅ |
+| 主 agent 委派轮（杜邦分析问题） | 模型自主调用 `delegate_task`：SSE 含 `delegate×274` 折叠事件、`delegate model turn` 2 次（`delegate_id=43b664bb`）、产出 7079 字 ✅ |
+| Langfuse `agent_turn` observation | `observations` 表有 `name='agent_turn'`、`type='GENERATION'`，metadata 含 `iteration/temp_source/temperature/kb_bound/usage_estimated`，`model=deepseek-v4-flash-0731`，`prompt_tokens`/`completion_tokens` 齐全 ✅（`completion_start_time` 不设置，属已接受的 TTFB 退化，见 ADR-0016） |
+
+### 7.5 结论与遗留
+
+- **验收结论：通过**。五条日志的条数与字段集/关键字段值、SSE 事件类型与计数、
+  温度分档、citations 结构、`iteration limit` 字段形状、触顶路径、真实模型 E2E
+  全部与基线/规格一致；唯一「差异」是温度施加面从 `astream` 迁到 `bind_tools`
+  （重构预期，非缺陷）。
+- **遗留（非本次变更引入，照实记录）**：
+  1. `src/services/agent_service.py` 的 `_silence_watchdog` + `src/agents/tools/web_tools.py`、
+     `src/infra/search/tavily_client.py` 的 `[retrieval] TIMING` 埋点为 `c3cb56b`（早于基线
+     `cf71e7a`）遗留的「316s 取证」埋点，仍在 `src/`（`src/agents/graph/` 已删净）。
+    属独立清理项，不在 one-loop-two-roles 范围。
+  2. `agent_node.py:162-163` 注释仍提「那些字段由下一批清理」的过期符号（Task 13 已登记 deferred）。
