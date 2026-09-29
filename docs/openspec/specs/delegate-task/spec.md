@@ -50,8 +50,8 @@ TBD - created by archiving change agent-delegation-skills. Update Purpose after 
 - **AND** 子代理工具面 = **本轮主 agent 启用工具集** − 禁用集（`FORK_FORBIDDEN_TOOLS` + 主 agent 专属工具类）− **非只读工具**（依 `readonly_map()` 判定；表中缺项按非只读处理，不下发）∩（skill 声明 `allowed-tools` 时）allowed-tools ∩（执行者预设声明 `tools` 时）preset.tools
 - **AND** `allowed-tools` 的语义是**收窄项**：不声明即不收窄（但仍受禁用集与只读约束），SHALL NOT 因未声明而退化为零工具；**显式声明可放行非只读工具**（白名单退为例外通道）
 - **AND** 子代理使用独立 RequestContext（独立的 `tool_contexts` / 引用编号；`pending_asks` 为进程级按 session 的单槽、**不随子上下文复制**），不污染主 agent
-- **AND** 子代理最大轮次取执行者预设的 `maxTurns`（未声明则用系统默认上限）
-- **AND** `create_agent` 的 middleware 参数保留装配位但默认传空（v1 不启用）
+- **AND** 子代理最大轮次取执行者预设的 `maxTurns`（未声明则用系统默认上限）——其**取值与归属见 `delegate-execution-controls` 的「fork turn 上限」**；SHALL NOT 由图内回合预算 middleware 强制（见 `agent-assembly` 的「回合上限由装配参数决定并可动态放宽」的适用范围）
+- **AND** 子代理 SHALL 经由与主 agent **共用的装配入口**生成（见 `agent-assembly` 的「主/子角色共用同一装配入口」）；主角色装配 system 施加 / 模型参数 / 回合预算 / 观测四件套，子角色的 **middleware 集合为空**（其模型轮次记录由 fork 委派的事件消费侧承担，图内 SHALL NOT 重复产出主循环口径的轮次日志与模型观测）。原先「`create_agent` 的 middleware 参数保留装配位但默认传空（v1 不启用）」的表述已作废
 
 #### Scenario: 工具面缺省为继承
 

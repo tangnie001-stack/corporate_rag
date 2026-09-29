@@ -63,12 +63,14 @@ TBD - created by archiving change agent-harness-foundation. Update Purpose after
 
 ### Requirement: 修订终止条件
 
-修订终止 SHALL 由**决策化判定**主导，`_verify_regenerations` 独立计数（上限 `MAX_VERIFY_REGENERATIONS`，默认 2）仅作兜底保险丝。verify 决定是否重生成 SHALL 依据 agent 上一轮实际动作：agent 尚未调用 search_web（或确认联网后首次重生成）→ 注入指引重生成；已调用但 queries 未带全缺失年份 → 重生成并强调一次带全；已调用且 queries 带全缺失年份但答案仍缺 → 判定联网无法补充，标注缺失直通，不再重生成。`_agent_iterations` 上限 SHALL 只管 agent→tools 主循环，不再被 verify 复用。
+修订终止 SHALL 由**决策化判定**主导，`_verify_regenerations` 独立计数（上限 `MAX_VERIFY_REGENERATIONS`，默认 2）仅作兜底保险丝。verify 决定是否重生成 SHALL 依据 agent 上一轮实际动作：agent 尚未调用 search_web（或确认联网后首次重生成）→ 注入指引重生成；已调用但 queries 未带全缺失年份 → 重生成并强调一次带全；已调用且 queries 带全缺失年份但答案仍缺 → 判定联网无法补充，标注缺失直通，不再重生成。
+
+重生成 SHALL NOT 受主循环回合上限的影响：重生成轮的主循环预算 SHALL 独立起算，使该轮的 `search_web` 工具调用能完整执行并产出答案。
 
 #### Scenario: 重生成不再受主循环迭代上限吞没
 
 - **WHEN** 首轮 agent 已消耗 4 次主循环迭代，verify 确认联网后触发重生成
-- **THEN** 重生成不受 `_agent_iterations` 上限影响，search_web 工具调用完整执行并产出答案
+- **THEN** 重生成轮的主循环预算独立起算，`search_web` 工具调用完整执行并产出答案
 
 #### Scenario: 联网已尝试且带全缺失年份仍缺则终止
 
