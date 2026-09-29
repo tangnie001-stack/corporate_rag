@@ -1,20 +1,27 @@
 #!/usr/bin/env python3
 """文档防腐检查 CLI — 校验 docs/agents/ 中的"代码锚点"是否与代码现状一致。
 
-背景（知识防腐）：代码重构时常改函数名/删目录/改路由，而 docs/agents/ 下的
-文档引用未同步更新，导致文档描述与代码漂移（腐化）。本脚本机械校验三类可编程锚点：
+背景（知识防腐）：代码重构时常改函数名/删目录/改路由，而文档引用未同步更新，
+导致文档描述与代码漂移（腐化）。本脚本机械校验三类可编程锚点 + 一类"禁用词"：
 
   - T1 路径锚点：文档中 `src/**/*.py` / `src/**/` 引用在代码库是否存在
   - T1 路由锚点：文档声明的 `METHOD /api/...` 是否在 src/api/ 有对应注册
   - T2 符号锚点：文档反引号中的标识符（CamelCase / 下划线命名）在 src/ 是否可检索到
+  - T3 禁用词锚点：受检文档是否出现已退役/改名技术的字样（error 档）
 
-只做"文档声称存在 → 代码必须找得到"的单向校验（文档漏写新代码不算错误），
-把"引用失效"这类机器可判定的腐化从人肉记忆里解放出来。叙述语义（流程对错）
-不在本脚本范围。
+前三类只做"文档声称存在 → 代码必须找得到"的单向校验（文档漏写新代码不算错误），
+把"引用失效"这类机器可判定的腐化从人肉记忆里解放出来；T3 补的是另一类漂移 ——
+"技术栈换了但文档没换"（如关系库换成 PostgreSQL 后文档仍写 MySQL），它没有可
+grep 的代码符号，只能靠词表拦。叙述语义（流程对错）不在本脚本范围。
+
+扫描范围（**对外入口文档也在内**，它们的漂移同样致命）：
+  - `docs/agents/*.md`（非递归，减 exclude_docs）
+  - `extra_docs` 列出的项目内文档（根 README.md / CLAUDE.md、子系统 README 等）
+  - `skills/*/SKILL.md` 的 frontmatter allowed-tools
 
 用法：
-    python -m src.cli.check_docs                    # 检查全部 docs/agents/*.md
-    python -m src.cli.check_docs --doc data-flow    # 只查 data-flow.md（不写 .md 后缀）
+    python -m src.cli.check_docs                    # 检查全部受检文档
+    python -m src.cli.check_docs --doc data-flow    # 只查一篇（docs/agents 名或项目内相对路径）
     python -m src.cli.check_docs --verbose          # 显示 warn 档
     python -m src.cli.check_docs --list-routes      # 列出文档已声明但代码缺失的路由
 
@@ -27,6 +34,9 @@ warn 档仅提示需人工 triage，不影响退出码。
   exclude_routes: 文档中允许声明但代码无注册的路由
   exclude_symbols: 允许出现在文档但无需在代码中存在的标识符
   exclude_skill_tools: skill frontmatter allowed-tools 中允许引用但代码不存在的工具名
+  extra_docs: 除 docs/agents/*.md 外还要校验的项目内文档（相对项目根）
+  banned_terms: T3 禁用词表（大小写不敏感子串），命中即 error
+  banned_term_exempt_docs: 整篇豁免 T3 的文档（台账/术语/事故档案类允许叙述退役史）
 """
 
 import argparse
@@ -70,6 +80,39 @@ _DEFAULT_EXCLUDE_SYMBOLS = {
 }
 # skill allowed-tools 中允许引用但代码不存在的工具名（示例/伪代码）
 _DEFAULT_EXCLUDE_SKILL_TOOLS: set[str] = set()
+# 除 docs/agents/*.md 外还要校验的项目内文档（相对项目根）。这些是对外入口文档，
+# 其漂移与 docs/agents 同样致命，但历史上一直不在扫描范围内（见本模块 docstring）。
+_DEFAULT_EXTRA_DOCS = {
+    "README.md",
+    "CLAUDE.md",
+    "src/api/README.md",
+}
+# T3 禁用词：已退役/改名技术的字样，出现在受检文档即 error。用子串匹配（大小写
+# 不敏感），故 "Chroma" 覆盖 ChromaDB/chromadb、"BM25" 覆盖 rank_bm25/bm25_score。
+# 不列 MCP / LiteLLM / qwen3.7-* 等 —— 它们属现状或"计划中"，需合法出现。
+_DEFAULT_BANNED_TERMS = {
+    "MySQL",
+    "Chroma",
+    "BM25",
+    "financial-qa",
+    "create_react_agent",
+    "sse_utils",
+    "qwen-max",
+    "text-embedding-v3",
+    "gte-rerank",
+}
+# 整篇豁免 T3 的文档：其职责就是记录"曾经用什么"（术语表 / 接口契约的历史踩坑表 /
+# 操作记录 / 缺陷档案），要求它们不出现退役技术名等于删掉溯源。
+_DEFAULT_BANNED_TERM_EXEMPT_DOCS = {
+    "glossary.md",
+    "api_contract.md",
+    "cookbook.md",
+    "defensive-patterns.md",
+}
+# 行内逃生标记：行内含该串则跳过该行的 T3 检查。用于"现行机制文档里偶有一处
+# 历史注记"（如 code-map 里记"原历史包名 mysql_db 的改名已完成"）这种无法回避、
+# 也不该删的溯源，避免为一行说明把整篇文档移出保护范围。
+_BANNED_TERM_ALLOW_MARKER = "doc-anchors-allow"
 
 # ── 正则锚点提取 ──
 _PATH_RE = re.compile(
@@ -94,7 +137,7 @@ class DocFinding:
 
     Attributes:
         severity: 严重级别（error=引用失效需修文档；warn=启发式需人 triage）
-        kind: 锚点类别（path / route / symbol / skill_tool）
+        kind: 锚点类别（path / route / symbol / skill_tool / banned_term）
         doc_file: 来源文档文件名
         doc_line: 锚点在文档中的行号
         anchor: 文档中出现的锚点原文
@@ -109,71 +152,122 @@ class DocFinding:
     message: str
 
 
-def _load_config() -> tuple[set[str], set[str], set[str], set[str], set[str]]:
+@dataclass
+class DocAnchorsConfig:
+    """`[tool.doc_anchors]` 的解析结果（默认表 ∪ pyproject 表）。
+
+    各键语义见模块 docstring「排除规则」。集合类一律取**并集**（pyproject 只能追加，
+    不能把默认项摘掉）—— 默认项是保护网，不提供"静默削弱它"的路径。
+
+    Attributes:
+        exclude_docs: 整篇跳过全部锚点校验的文档名
+        exclude_paths: 允许指向不存在代码的路径前缀
+        exclude_routes: 允许声明但代码无注册的路由
+        exclude_symbols: 允许出现在文档但无需在代码中存在的标识符
+        exclude_skill_tools: 允许 skill frontmatter 引用但代码未注册的工具名
+        extra_docs: 除 docs/agents/*.md 外还要校验的项目内文档（相对项目根）
+        banned_terms: T3 禁用词表
+        banned_term_exempt_docs: 整篇豁免 T3 的文档名
+    """
+
+    exclude_docs: set[str]
+    exclude_paths: set[str]
+    exclude_routes: set[str]
+    exclude_symbols: set[str]
+    exclude_skill_tools: set[str]
+    extra_docs: set[str]
+    banned_terms: set[str]
+    banned_term_exempt_docs: set[str]
+
+
+# 配置键 → DocAnchorsConfig 字段名（两者同名，列出以固定解析顺序与默认值来源）
+_CONFIG_DEFAULTS: dict[str, set[str]] = {
+    "exclude_docs": _DEFAULT_EXCLUDE_DOCS,
+    "exclude_paths": _DEFAULT_EXCLUDE_PATHS,
+    "exclude_routes": _DEFAULT_EXCLUDE_ROUTES,
+    "exclude_symbols": _DEFAULT_EXCLUDE_SYMBOLS,
+    "exclude_skill_tools": _DEFAULT_EXCLUDE_SKILL_TOOLS,
+    "extra_docs": _DEFAULT_EXTRA_DOCS,
+    "banned_terms": _DEFAULT_BANNED_TERMS,
+    "banned_term_exempt_docs": _DEFAULT_BANNED_TERM_EXEMPT_DOCS,
+}
+
+
+def _load_config() -> DocAnchorsConfig:
     """从 pyproject.toml [tool.doc_anchors] 读取排除表（不存在则用默认值）。
 
     直接读文本定位 section，按 key 正则取数组体后用 ast.literal_eval 解析
     TOML list（兼容多行与注释）。
 
     Returns:
-        (exclude_docs, exclude_paths, exclude_routes, exclude_symbols,
-         exclude_skill_tools)
+        DocAnchorsConfig：每个键都是「默认表 ∪ pyproject 表」
     """
-    exclude_docs = set(_DEFAULT_EXCLUDE_DOCS)
-    exclude_paths = set(_DEFAULT_EXCLUDE_PATHS)
-    exclude_routes = set(_DEFAULT_EXCLUDE_ROUTES)
-    exclude_symbols = set(_DEFAULT_EXCLUDE_SYMBOLS)
-    exclude_skill_tools = set(_DEFAULT_EXCLUDE_SKILL_TOOLS)
+    values = {key: set(default) for key, default in _CONFIG_DEFAULTS.items()}
     pyproject = _PROJECT_ROOT / "pyproject.toml"
-    if not pyproject.exists():
-        return (
-            exclude_docs,
-            exclude_paths,
-            exclude_routes,
-            exclude_symbols,
-            exclude_skill_tools,
-        )
-    try:
-        text = pyproject.read_text(encoding="utf-8")
+    section = ""
+    if pyproject.exists():
+        try:
+            text = pyproject.read_text(encoding="utf-8")
+        except OSError:
+            text = ""
         m = re.search(r"\[tool\.doc_anchors\](.*?)(?=\n\[|\Z)", text, re.DOTALL)
-        if not m:
-            return (
-                exclude_docs,
-                exclude_paths,
-                exclude_routes,
-                exclude_symbols,
-                exclude_skill_tools,
-            )
-        for key, dest in (
-            ("exclude_docs", exclude_docs),
-            ("exclude_paths", exclude_paths),
-            ("exclude_routes", exclude_routes),
-            ("exclude_symbols", exclude_symbols),
-            ("exclude_skill_tools", exclude_skill_tools),
-        ):
-            km = re.search(
-                rf"^\s*{key}\s*=\s*\[(.*?)\]", m.group(1), re.DOTALL | re.MULTILINE
-            )
-            if not km:
-                continue
-            try:
-                dest |= set(ast.literal_eval(f"[{km.group(1)}]"))
-            except (ValueError, SyntaxError):
-                continue
-    except OSError:
-        pass
-    return (
-        exclude_docs,
-        exclude_paths,
-        exclude_routes,
-        exclude_symbols,
-        exclude_skill_tools,
-    )
+        if m:
+            section = m.group(1)
+    for key, dest in values.items():
+        km = re.search(rf"^\s*{key}\s*=\s*\[(.*?)\]", section, re.DOTALL | re.MULTILINE)
+        if not km:
+            continue
+        try:
+            dest |= set(ast.literal_eval(f"[{km.group(1)}]"))
+        except (ValueError, SyntaxError):
+            continue
+    return DocAnchorsConfig(**values)
 
 
 def _iter_doc_lines(doc_path: Path):
     """逐行产出 (行号, 内容)；跳过代码块与链接行内锚点噪声。"""
     yield from enumerate(doc_path.read_text(encoding="utf-8").splitlines(), start=1)
+
+
+def _doc_label(doc_path: Path) -> str:
+    """报告里用的文档标识：项目内相对路径，取不到时退回文件名。
+
+    必须带路径而非裸文件名 —— 扫描范围含多个 README.md（根 / `src/api/`），
+    只用 `name` 会让报告无法区分是哪一篇。
+
+    Args:
+        doc_path: 文档路径
+
+    Returns:
+        相对项目根的路径字符串（如 `docs/agents/data-flow.md`）
+    """
+    try:
+        return str(doc_path.relative_to(_PROJECT_ROOT))
+    except ValueError:
+        return doc_path.name
+
+
+def _iter_doc_paths(cfg: DocAnchorsConfig) -> list[Path]:
+    """产出全部受检文档：`docs/agents/*.md`（减 exclude_docs）+ 存在的 `extra_docs`。
+
+    **这是扫描范围的唯一来源** —— CLI 与测试都经它取文档，避免两处各写一套范围
+    （历史上正是这种分叉让根 README / CLAUDE.md 长期无人校验）。
+
+    Args:
+        cfg: 配置（排除表 + 扫描范围）
+
+    Returns:
+        去重后的文档路径列表（按字符串排序，稳定输出）
+    """
+    paths = [
+        p for p in sorted(_DOCS_DIR.glob("*.md")) if p.name not in cfg.exclude_docs
+    ]
+    paths += [
+        p
+        for p in (_PROJECT_ROOT / rel for rel in sorted(cfg.extra_docs))
+        if p.exists() and p.name not in cfg.exclude_docs
+    ]
+    return paths
 
 
 def _check_path_anchors(doc_path: Path, exclude_paths: set[str]) -> list[DocFinding]:
@@ -202,7 +296,7 @@ def _check_path_anchors(doc_path: Path, exclude_paths: set[str]) -> list[DocFind
                     DocFinding(
                         severity="error",
                         kind="path",
-                        doc_file=doc_path.name,
+                        doc_file=_doc_label(doc_path),
                         doc_line=lineno,
                         anchor=ref,
                         message=f"文档引用 {ref} 在代码库不存在（文件/目录已删除或改名？）",
@@ -269,7 +363,7 @@ def _check_route_anchors(
                 DocFinding(
                     severity="error",
                     kind="route",
-                    doc_file=doc_path.name,
+                    doc_file=_doc_label(doc_path),
                     doc_line=lineno,
                     anchor=path,
                     message=f"文档声明路由 {path} 但 src/api/ 无对应 @router 注册（已删除/改名？）",
@@ -310,10 +404,54 @@ def _check_symbol_anchors(
                 DocFinding(
                     severity="warn",
                     kind="symbol",
-                    doc_file=doc_path.name,
+                    doc_file=_doc_label(doc_path),
                     doc_line=lineno,
                     anchor=symbol,
                     message=f"反引号标识符 {bare} 在 src/ 未检索到（改名/删除？或属提示词/伪代码）",
+                )
+            )
+    return findings
+
+
+def _check_banned_terms(doc_path: Path, cfg: DocAnchorsConfig) -> list[DocFinding]:
+    """校验 T3 禁用词：文档是否出现已退役/改名技术的字样。
+
+    补的是"技术栈换了但文档没换"这类漂移 —— 它没有可 grep 的代码符号（`MySQL`
+    在 Python 里当然"不存在"，但那是必然的，不构成信号），只能靠词表拦。根文档与
+    描述**现行机制**的文档不得出现退役技术名；整篇豁免名单（术语表 / 接口契约的
+    历史踩坑表 / 操作记录 / 缺陷档案）与行内标记是两条逃生口，见模块 docstring。
+
+    Args:
+        doc_path: 待校验文档
+        cfg: 配置（禁用词表 + 整篇豁免名单）
+
+    Returns:
+        命中禁用词的 error 档列表
+    """
+    findings: list[DocFinding] = []
+    if doc_path.name in cfg.banned_term_exempt_docs:
+        return findings
+    # 先按长度降序，命中更具体的词优先（如 BM25 优先于 BM25_score 的说明顺序）；
+    # 同长度按字母序，保证输出稳定。
+    terms = sorted(cfg.banned_terms, key=lambda t: (-len(t), t))
+    for lineno, line in _iter_doc_lines(doc_path):
+        if _BANNED_TERM_ALLOW_MARKER in line:
+            continue
+        lowered = line.lower()
+        for term in terms:
+            if term.lower() not in lowered:
+                continue
+            findings.append(
+                DocFinding(
+                    severity="error",
+                    kind="banned_term",
+                    doc_file=_doc_label(doc_path),
+                    doc_line=lineno,
+                    anchor=term,
+                    message=(
+                        f"出现已退役/改名技术的字样 {term}（现行机制文档不得描述旧技术；"
+                        f"确属溯源的注记可加行内标记 {_BANNED_TERM_ALLOW_MARKER}）"
+                    ),
                 )
             )
     return findings
@@ -489,46 +627,46 @@ def _check_skill_tool_anchors(
 
 
 def main() -> None:
-    """CLI 入口 — 解析参数、执行三类锚点校验、汇总打印。"""
+    """CLI 入口 — 解析参数、执行三类锚点 + 禁用词校验、汇总打印。"""
     parser = argparse.ArgumentParser(description="Documentation anti-rot checker")
-    parser.add_argument("--doc", help="只检查指定文档（文件名不带 .md）")
+    parser.add_argument(
+        "--doc",
+        help="只检查指定文档（docs/agents 下的名字，或项目内相对路径，均不带 .md）",
+    )
     parser.add_argument("--verbose", action="store_true", help="同时显示 warn 档")
     parser.add_argument(
         "--list-routes", action="store_true", help="只列出文档已声明但代码缺失的路由"
     )
     args = parser.parse_args()
 
-    (
-        exclude_docs,
-        exclude_paths,
-        exclude_routes,
-        exclude_symbols,
-        exclude_skill_tools,
-    ) = _load_config()
+    cfg = _load_config()
 
     if args.doc:
-        doc_files = [_DOCS_DIR / f"{args.doc}.md"]
-        if not doc_files[0].exists():
-            sys.exit(f"文档不存在: {doc_files[0]}")
+        # 先按 docs/agents 下的名字找，再退回项目内相对路径（根 README / src/api/README 等）
+        candidate = _DOCS_DIR / f"{args.doc}.md"
+        if not candidate.exists():
+            candidate = _PROJECT_ROOT / f"{args.doc}.md"
+        if not candidate.exists():
+            sys.exit(f"文档不存在: {args.doc}")
+        doc_files = [candidate]
     else:
-        doc_files = sorted(
-            p for p in _DOCS_DIR.glob("*.md") if p.name not in exclude_docs
-        )
+        doc_files = _iter_doc_paths(cfg)
 
     code_routes = _collect_code_routes()
     findings: list[DocFinding] = []
 
     for doc in doc_files:
-        findings.extend(_check_path_anchors(doc, exclude_paths))
-        findings.extend(_check_route_anchors(doc, code_routes, exclude_routes))
-        findings.extend(_check_symbol_anchors(doc, exclude_symbols))
+        findings.extend(_check_path_anchors(doc, cfg.exclude_paths))
+        findings.extend(_check_route_anchors(doc, code_routes, cfg.exclude_routes))
+        findings.extend(_check_symbol_anchors(doc, cfg.exclude_symbols))
+        findings.extend(_check_banned_terms(doc, cfg))
 
     # skill 防腐（design D18）：frontmatter allowed-tools vs 实际工具注册
     findings.extend(
         _check_skill_tool_anchors(
             _SKILLS_DIR,
             _collect_known_tool_names(),
-            exclude_skill_tools,
+            cfg.exclude_skill_tools,
         )
     )
 

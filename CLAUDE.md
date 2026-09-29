@@ -11,7 +11,9 @@
 5. **规则对照** — 改代码前先扫描 claude.md 的「代码注释标准」和「规则」章节，确保改动符合规范
 
 ## 技术栈
-Python 3.11+ / FastAPI / ChromaDB / LangChain / DashScope / MySQL 8.0 / Redis 7 / Langfuse / Nginx / MCP
+Python 3.11+ / FastAPI / LangChain 1.x + LangGraph / PostgreSQL 15 + pgvector / Redis 7 / MinIO / Langfuse 2.x / Nginx / Docker Compose（可选 LiteLLM Proxy 网关）
+
+完整技术栈与版本、各服务的容器名与端口见 `README.md`「技术栈」「部署指南」。
 
 ## 文档组织（一事一档）
 每个事实只有一个归属文档，别处一律链接，不复制内容；新增内容先找归属文档，找不到再建新档。
@@ -45,14 +47,14 @@ Python 3.11+ / FastAPI / ChromaDB / LangChain / DashScope / MySQL 8.0 / Redis 7 
 
 速览（改代码前仍须查 code-map.md 定位文件）：
 
-- **后端** `src/`：分层 `api/ → services/ → agents/ + rag/ + chat/ + chunking/ + infra/`；入口 `src/main.py`，模型工厂 `src/models.py`，agent 循环 `src/agents/graph/`，主从委派 `src/agents/skills/`，智能体预设 `src/agents/presets/`
+- **后端** `src/`：分层 `api/ → services/ → agents/ + rag/ + chat/ + chunking/ + infra/`；另有 `parsers/`（文档解析）、`core/`（日志/事件）、`config/`（设置与提示词）、`middleware/`（HTTP 中间件）、`cli/`（命令行工具与防腐闸门）、`utils/`、`tools/`。入口 `src/main.py`，模型工厂 `src/models.py`，agent 装配入口 `src/agents/graph/agent_factory.py`，主从委派 `src/agents/skills/`，智能体预设 `src/agents/presets/`
 - **前端** `deploy/nginx/html/`：`chat.html`（对话页，自包含）/ `index.html`（知识库管理页）/ `login.html`；Nginx 静态托管、无构建步骤，路由见 `deploy/nginx/nginx.conf`
 - **运行时内容库** 顶层 `skills/<name>/SKILL.md`（业务侧管理，compose volume 挂载进容器 `/app/skills`）与 `agents/<name>.md`（智能体预设内容库）；`.claude/skills/` 为开发期工具链 skill（如 openspec），两者语义不同。实现与术语见 glossary.md「技能委派」「智能体预设」
 - **测试** `tests/`：与 `src/` 模块一一对应
 
 ### 层间调用规则
 - ❌ `api/` 不得直接调用 `infra/` 或 `config/`（必须通过 `services/`）
-- ❌ `api/chat.py` 不包含 SSE 格式化函数（在 `api/sse_utils.py`）
+- ❌ `api/chat.py` 不包含 SSE 格式化函数（在 `src/utils/sse.py`）
 - ✅ `services/` 可调用 `infra/`、`rag/`、`chat/`
 
 ### 文件大小红线

@@ -88,11 +88,22 @@ venv = ".venv"
 
 [tool.doc_anchors]
 # 文档防腐检查（src/cli/check_docs.py）排除表。
+# 各键的**默认值在 src/cli/check_docs.py 的 _DEFAULT_* 常量**（与校验逻辑同处，
+# 避免两处各写一份）；本表只能**追加**，不能摘掉默认项（并集语义）。
 # exclude_docs: 整篇跳过校验（意向清单/外部引用）
 # exclude_symbols: 允许出现在文档但不要求代码中存在的标识符
 #   （事故档案中的历史函数名、API 数据枚举值等）
 # exclude_skill_tools: skill frontmatter allowed-tools 中允许引用但代码不存在的工具名
 #   （如文档/示例中的历史工具名）
+# extra_docs: 除 docs/agents/*.md 外还要校验的项目内文档（默认含根 README.md /
+#   CLAUDE.md / src/api/README.md —— 对外入口文档的漂移同样致命）
+# banned_terms: 已退役/改名技术的字样（大小写不敏感子串），命中即 error。
+#   默认含 MySQL / Chroma / BM25 / financial-qa / create_react_agent / sse_utils /
+#   qwen-max / text-embedding-v3 / gte-rerank。新增技术替换时把旧名加进来。
+# banned_term_exempt_docs: 整篇豁免禁用词的文档（其职责就是记录"曾经用什么"：
+#   术语表 / 接口契约的历史踩坑表 / 操作记录 / 缺陷档案）。
+#   现行机制文档里偶有一处必须保留的溯源（如"原历史包名 mysql_db 的改名已完成"），
+#   在该行加行内标记 `<!-- doc-anchors-allow -->` 即可单行豁免，不必整篇移出保护。
 exclude_docs = ["requirements_pool.md", "reference-projects.md"]
 exclude_symbols = [
     "ci_gate",

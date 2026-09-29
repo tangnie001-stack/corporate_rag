@@ -19,7 +19,7 @@
 | `agents/` | **智能体预设内容库**（`<name>.md` 平坦文件，业务侧管理；见下方「三个 `agents` 的区别」） |
 | `docs/` | 文档：`agents/`（本目录，规则/契约/排查）、`design/`（UI 设计规格与 HTML 预览）、`openspec/`（OpenSpec 主目录）、`superpowers/` |
 | `openspec/` | **符号链接 → `docs/openspec`**；OpenSpec changes / specs |
-| `alembic/` + `alembic.ini` | 数据库迁移（唯一链；baseline `alembic/versions/0001_pg_baseline.py` 从零建 8 张表） |
+| `alembic/` + `alembic.ini` | 数据库迁移（唯一链；`0001_pg_baseline` 从零建 8 张表，`0002_kb_domain` 加列） |
 | `scripts/` | 运维脚本（清库、重建 KB 数据、重写 `content_seg`） |
 | `litellm/` | LiteLLM 代理配置（模型网关） |
 | `data/`、`logs/` | 运行期数据与日志挂载点 |
@@ -35,8 +35,21 @@
 main.py            FastAPI 入口：app 工厂 + 异常处理器 + 中间件挂载 + 路由注册
 api/               纯路由层：请求校验 → 调 service → 返回（不写业务逻辑）
   ├─ model/        Pydantic 请求体(request.py) / 响应体(response.py)
-  ├─ sse_utils.py  SSE 格式化（chat.py 不得内联）
-  └─ capabilities.py  /api/skills、/api/agents（能力清单，经 service 派生）
+  ├─ schema.py     路由共用 schema；dependencies.py 依赖注入（服务单例 / 当前用户）
+  ├─ auth.py       `api/auth/login`、`api/auth/verify`、`api/auth/logout`、`api/auth/anonymous`
+  ├─ health.py     `api/health`、`api/config`
+  ├─ knowledge_base.py  KB CRUD：`api/kbs/list`、`api/kbs`、`api/kbs/delete`、`api/kbs/domain`
+  ├─ documents.py  文档上传 / 列表 / 状态 / 分块 / 删除（`api/kbs/documents/*`）
+  ├─ kb_eval.py    最近一次评估报告 `api/kbs/eval/latest`
+  ├─ chat.py       SSE 主入口 `api/chat/stream`
+  ├─ clarify.py    澄清应答 `api/chat/clarify-answer`
+  ├─ sessions.py   会话 list / messages / delete / cancel + 过程事件与任务（`api/sessions/*`）
+  ├─ feedback.py   回答反馈 `api/feedback`
+  ├─ llm_test.py   连通性自检 `api/llm/test`
+  ├─ ragas_generate.py  评估测试集生成 `api/ragas/generate`
+  └─ capabilities.py    能力清单 `api/skills`、`api/agents`（经 service 派生）
+  ⚠ SSE 序列化不在本层：`src/utils/sse.py`（本层只调 `to_sse`，不得内联格式化）
+  ⚠ 路由的权威清单（含方法与请求体）见 `src/api/README.md` 与 `api_contract.md`
 services/          业务编排：app_service → kb / document / chat(agent)
   agent_service.py 图生命周期 + 一次生成的主循环（_run_generation）
   capability_service.py  能力清单：/api/skills、/api/agents 由 registry 派生（fail-open）
@@ -55,7 +68,7 @@ config/            settings(环境变量) / const(常量/文案/枚举) / respon
                    —— 段模板(`kind: section`)与独立任务模板(`kind: task`)同处一包；改 prompt 文案改 YAML，改规则的挂载点改代码
 infra/             基础设施：db(engine/DSN + transaction 事务边界 + models + repos + vector_store + lexical_query) / llm(tracing 为 Langfuse 开关/flush/trace id 校验唯一入口；langfuse_purge 为保留期删除的 SQL 后端) / search(tokenizer 为唯一 jieba 分词入口) / auth / redis_client
 middleware/        auth / trace_id / response_processor（统一响应包装）
-cli/               RAGAS 评估、检索对比、trace 回放、trace 清理等命令行工具
+cli/               RAGAS 评估、检索对比、trace 回放/清理、症状指标、种子与防腐闸门（check_docs / check_adr）等命令行工具
 models.py          LLM / Embedding / Rerank 工厂（get_llm / get_embedding / get_rerank）
 utils/             sse 事件类型 / errors / desensitize / auth_crypto
 tools/             工具基类（base.py）
@@ -80,7 +93,7 @@ tools/             工具基类（base.py）
   `feedback` / `kb` / `user`），声明式基类与通用 Mixin 在 `src/infra/db/base.py`。
 - **Repo 层**：`src/infra/db/repos/`（`chat_repo` / `chunk_repo` / `document_repo` /
   `eval_repo` / `kb_repo` / `user_repo`）。包名 `repos` 与内容一致：均为 PostgreSQL 各表的 SQL 访问层；
-  原历史包名 mysql_db 的改名已完成（P4 收尾），见需求池 F-18（P1 遗留项 L4，已修）。
+  原历史包名 mysql_db 的改名已完成（P4 收尾），见需求池 F-18（P1 遗留项 L4，已修）。<!-- doc-anchors-allow -->
 - **事务边界原语**：`src/infra/db/transaction.py` 的 `session_scope` 是跨表原子提交的唯一入口，
   每个 Repo 以其为基础暴露 `transaction()`。**写路径的事务边界**：跨表原子操作须用
   `session_scope(...)` / `Repo.transaction()` 打开唯一事务，并把 `session=` 传给参与方法
@@ -98,9 +111,10 @@ tools/             工具基类（base.py）
   后者按 `ts_rank` 降序；两者都按 k 上限 `MAX_QUERY_K`（`src/config/const.py`）截断）、`mapping.py`（行↔`ChunkResult`
   映射与 metadata 回填）、`types.py`（`ChunkResult` / `ChunkQueryResult`）。后端为 PostgreSQL +
   pgvector，IO 方法全为 `async`；契约见 `docs/agents/api_contract.md` §4。
-- **迁移唯一链**：根 `alembic/`（`alembic.ini` 的 `script_location` 指向它），当前唯一
-  revision 是 `alembic/versions/0001_pg_baseline.py`，从零建 8 张表 —— 7 张由 ORM metadata
-  生成，`chunks` 为手写增补。
+- **迁移唯一链**：根 `alembic/`（`alembic.ini` 的 `script_location` 指向它），当前两个
+  revision：`alembic/versions/0001_pg_baseline.py`（从零建 8 张表 —— 7 张由 ORM metadata
+  生成，`chunks` 为手写增补）与 `alembic/versions/0002_kb_domain.py`（给 `knowledge_base`
+  加 `domain` 列，不改表数）。
 
 **分层调用规则**（改代码前必守，详见 `CLAUDE.md`）：`api/` 不得直接调 `infra/`、`config/`，
 必须经 `services/`；`api/chat.py` 不含 SSE 格式化函数。前端只经 Nginx `/api/*` 打到后端，
@@ -186,8 +200,11 @@ Nginx 容器把本目录挂到 `/usr/share/nginx/html` 直接托管，**无 npm 
 
 - `skills/<name>/SKILL.md`：声明式能力文件（frontmatter：name / description / context /
   model / allowed-tools / agent / user-invocable / disable-model-invocation）。**业务侧管理，改内容免改代码**；
-  经 compose volume 挂载进容器 `/app/skills`。**`context` 未声明时默认 `fork`**——inline 会把正文写进主 agent
-  的会话历史并长期占用其预算（超限后静默被裁），故想用 inline 必须显式声明 `context: inline`。
+  经 compose volume 挂载进容器 `/app/skills`。**`context` 未声明时默认 `inline`**（与上游一致）；
+  但正文超过 `INLINE_PROMPT_MAX_CHARS`（500 字符）时**自动改用 fork** 承载——inline 会把正文写进
+  主 agent 的会话历史并长期占用其预算（超限后静默被裁），故长文不必手写 `context: fork`。
+  **显式声明永远优先**：显式 `inline` 且超预算只记 warning（由超限守卫测试承担），显式 `fork`
+  与正文长度无关。（`src/agents/skills/loader.py`）
   术语与委派机制见 `docs/agents/glossary.md`「技能委派」。
 - `agents/<name>.md`：智能体预设（frontmatter 驼峰键 display_name / description / tools /
   skills / maxTurns；正文为 system prompt 人设）。术语见 `docs/agents/glossary.md`「智能体预设」。

@@ -1,8 +1,13 @@
-"""测试文档防腐检查（src/cli/check_docs.py）— 防 docs/agents/* 引用漂移。
+"""测试文档防腐检查（src/cli/check_docs.py）— 防受检文档的引用漂移与技术栈漂移。
 
-防腐哲学：文档对代码的"引用必须指向存在物"（单向校验）。本测试断言 error 档
-为空——任何 docs/agents/ 文档引用了已删除/改名的代码路径或路由，pytest 即失败，
-把"文档过时"变成可自动发现的信号（配合 pre-commit always_run hook 在提交前拦截）。
+防腐哲学：文档对代码的"引用必须指向存在物"（单向校验），退役技术名不得出现在
+描述**现行机制**的文档里。本测试断言 error 档为空——任何受检文档引用了已删除/
+改名的代码路径或路由、或出现已退役技术的字样，pytest 即失败，把"文档过时"变成
+可自动发现的信号（配合 pre-commit always_run hook 在提交前拦截）。
+
+受检范围含**对外入口文档**（根 `README.md` / `CLAUDE.md` / `src/api/README.md`，
+由 `extra_docs` 声明）—— 这几篇曾长期不在扫描范围内，导致存储栈换了三代而 README
+仍写着旧世界（见 `docs/agents/defensive-patterns.md`「开发期闸门」）。
 """
 
 from pathlib import Path
@@ -19,23 +24,27 @@ from src.cli.check_docs import (
 
 
 def _scan_all_docs():
-    """对全部受检文档跑三类锚点检查，返回 error 档列表。"""
-    exclude_docs, exclude_paths, exclude_routes, _, _ = _load_config()
+    """对全部受检文档跑四类锚点检查，返回 error 档列表。
+
+    取文档口径与 CLI 的 `main()` **完全一致**（都走 `check_docs._iter_doc_paths`）：
+    历史上测试自拼 `_DOCS_DIR.glob(...)`、生产另有范围，两套口径让"测试全绿"与
+    "根文档无人校验"可以同时成立。
+    """
+    cfg = _load_config()
     code_routes = _collect_code_routes()
     errors = []
-    for doc in check_docs._DOCS_DIR.glob("*.md"):
-        if doc.name in exclude_docs:
-            continue
-        errors.extend(_check_path_anchors(doc, exclude_paths))
-        errors.extend(_check_route_anchors(doc, code_routes, exclude_routes))
+    for doc in check_docs._iter_doc_paths(cfg):
+        errors.extend(_check_path_anchors(doc, cfg.exclude_paths))
+        errors.extend(_check_route_anchors(doc, code_routes, cfg.exclude_routes))
+        errors.extend(check_docs._check_banned_terms(doc, cfg))
     return errors
 
 
 def test_no_dangling_code_paths_in_docs():
-    """docs/agents/*.md 引用的 src 路径必须存在（error 档为空）。"""
+    """受检文档引用的 src 路径必须存在（error 档为空）。"""
     errors = [e for e in _scan_all_docs() if e.kind == "path"]
     assert errors == [], (
-        "文档引用了不存在的代码路径（文档已腐化，需更新 docs/agents/）:\n"
+        "文档引用了不存在的代码路径（文档已腐化，需更新受影响文档）:\n"
         + "\n".join(
             f"  {e.doc_file}:{e.doc_line} {e.anchor} {e.message}" for e in errors
         )
@@ -43,7 +52,7 @@ def test_no_dangling_code_paths_in_docs():
 
 
 def test_doc_routes_registered_in_code():
-    """docs 声明的 /api 路由必须在 src/api/ 有 @router 注册（error 档为空）。"""
+    """文档声明的 /api 路由必须在 src/api/ 有 @router 注册（error 档为空）。"""
     errors = [e for e in _scan_all_docs() if e.kind == "route"]
     assert errors == [], (
         "文档声明了代码中不存在的路由（接口已删/改名，需更新文档）:\n"
@@ -53,12 +62,123 @@ def test_doc_routes_registered_in_code():
     )
 
 
+def test_no_banned_terms_in_checked_docs():
+    """受检文档不得出现已退役/改名技术的字样 —— 本次闸门扩展的成果守卫。
+
+    命中说明"技术栈换了但文档没换"：要么改文档，要么（若确属必须保留的溯源）
+    加行内标记 `doc-anchors-allow`，要么把该篇登记进 `banned_term_exempt_docs`。
+    """
+    errors = [e for e in _scan_all_docs() if e.kind == "banned_term"]
+    assert errors == [], (
+        "受检文档出现已退役/改名技术的字样（改文档，或按机制豁免）:\n"
+        + "\n".join(
+            f"  {e.doc_file}:{e.doc_line} {e.anchor} {e.message}" for e in errors
+        )
+    )
+
+
+def test_root_docs_are_in_scan_scope():
+    """对外入口文档必须在受检范围内（它们曾长期无人校验）。"""
+    cfg = _load_config()
+    labels = {check_docs._doc_label(p) for p in check_docs._iter_doc_paths(cfg)}
+    assert {"README.md", "CLAUDE.md", "src/api/README.md"} <= labels
+    assert not any(lbl.endswith("requirements_pool.md") for lbl in labels)
+
+
 def test_load_config_defaults():
-    """pyproject 排除表应能加载且含核心排除项（意向清单文档不校验）。"""
-    exclude_docs, _ep, _er, _es, _est = _load_config()
-    assert "requirements_pool.md" in exclude_docs  # 意向清单应被排除
-    assert _est == set()  # pyproject 未配置 exclude_skill_tools → 默认空集
+    """pyproject 排除表应能加载，且默认项都在（并集语义：只能追加）。"""
+    cfg = _load_config()
+    assert "requirements_pool.md" in cfg.exclude_docs  # 意向清单应被排除
+    assert cfg.exclude_skill_tools == set()  # pyproject 配了空表 → 并集仍是默认空集
     assert check_docs._DOCS_DIR.exists()
+    # 禁用词与豁免名单来自代码默认值（见 _CONFIG_DEFAULTS）
+    assert {"MySQL", "Chroma", "BM25"} <= cfg.banned_terms
+    assert "glossary.md" in cfg.banned_term_exempt_docs
+    assert {"README.md", "CLAUDE.md"} <= cfg.extra_docs
+
+
+def _cfg(**overrides):
+    """取一份"仅代码默认值"的配置并按需覆盖字段。
+
+    直接由 `_CONFIG_DEFAULTS` 构造而非 `_load_config()`：单测不该受 pyproject
+    当前内容影响。
+    """
+    import dataclasses
+
+    base = check_docs.DocAnchorsConfig(
+        **{k: set(v) for k, v in check_docs._CONFIG_DEFAULTS.items()}
+    )
+    return dataclasses.replace(base, **overrides)
+
+
+def test_banned_term_flags_hit(tmp_path):
+    """禁用词命中 → error 档，带行号与词名。"""
+    doc = tmp_path / "README.md"
+    doc.write_text("本系统的关系库是 MySQL 8.0。\n", encoding="utf-8")
+
+    findings = check_docs._check_banned_terms(doc, _cfg())
+
+    assert [f.kind for f in findings] == ["banned_term"]
+    assert findings[0].severity == "error"
+    assert findings[0].anchor == "MySQL"
+    assert findings[0].doc_line == 1
+    assert findings[0].doc_file == "README.md"
+
+
+def test_banned_term_is_case_insensitive_substring(tmp_path):
+    """大小写不敏感 + 子串匹配：`Chroma` 要同时命中 ChromaDB 与 chromadb。
+
+    报错粒度是「每行 × 每个词」各一条，故同一行里出现两次同词只报一条（避免刷屏）。
+    """
+    doc = tmp_path / "README.md"
+    doc.write_text("第 1 行提到 ChromaDB。\n第 2 行提到 chromadb。\n", encoding="utf-8")
+
+    findings = check_docs._check_banned_terms(doc, _cfg(banned_terms={"Chroma"}))
+
+    assert [f.doc_line for f in findings] == [1, 2]
+    assert {f.anchor for f in findings} == {"Chroma"}
+
+
+def test_banned_term_exempt_doc_not_checked(tmp_path):
+    """台账类文档整篇豁免（其职责就是记"曾经用什么"）。"""
+    doc = tmp_path / "glossary.md"
+    doc.write_text("MySQL：已退役的关系库。\n", encoding="utf-8")
+
+    assert check_docs._check_banned_terms(doc, _cfg()) == []
+
+
+def test_banned_term_allow_marker_skips_only_that_line(tmp_path):
+    """行内标记只豁免该行，不豁免整篇。"""
+    doc = tmp_path / "code-map.md"
+    doc.write_text(
+        "原历史包名 mysql_db 的改名已完成 <!-- doc-anchors-allow -->\n"
+        "这一行没有标记，仍应被拦：MySQL 已退役。\n",
+        encoding="utf-8",
+    )
+
+    findings = check_docs._check_banned_terms(doc, _cfg())
+
+    assert [f.doc_line for f in findings] == [2]
+
+
+def test_iter_doc_paths_shares_scope_with_cli(tmp_path, monkeypatch):
+    """扫描范围只有一处定义：extra_docs 里的新文档必须被 main() 的取文档口径带上。"""
+    root = tmp_path
+    agents = root / "docs" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "a.md").write_text("内容\n", encoding="utf-8")
+    (root / "README.md").write_text("内容\n", encoding="utf-8")
+    monkeypatch.setattr(check_docs, "_DOCS_DIR", agents)
+    monkeypatch.setattr(check_docs, "_PROJECT_ROOT", root)
+
+    labels = {
+        check_docs._doc_label(p)
+        for p in check_docs._iter_doc_paths(
+            _cfg(extra_docs={"README.md"}, exclude_docs=set())
+        )
+    }
+
+    assert labels == {"docs/agents/a.md", "README.md"}
 
 
 def test_skill_tool_anchor_missing_tool(tmp_path):
