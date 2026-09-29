@@ -277,8 +277,8 @@ async def test_verify_node_missing_regen_resets_web_quota(monkeypatch):
 
     ctx.web_count 是请求级累计计数：首段 search_web 已耗尽 WEB_SEARCH_PER_TURN_LIMIT
     配额，若 regen 不复位则回 agent 后工具达限返回 WEB_SEARCH_LIMIT_TEXT 不执行，
-    verify 据此误判"知识库与网络均未覆盖"。regen 轮须同步归零配额（与
-    _agent_iterations=0 同为"每段 regen 轮全新主循环预算"设计）。
+    verify 据此误判"知识库与网络均未覆盖"。regen 轮须同步归零配额（主循环计数随
+    重新 invoke 装配产物天然从初值起，无需复位）。
     """
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
     monkeypatch.setattr(
@@ -297,7 +297,7 @@ async def test_verify_node_missing_regen_resets_web_quota(monkeypatch):
         )
         result = await verify_node(state)
         assert result["_needs_regenerate"] is True
-        assert result["_agent_iterations"] == 0
+        assert "_agent_iterations" not in result  # 循环计数已内化，不再随决策复位
         assert ctx.web_count == 0  # regen 轮获得全新联网配额
     finally:
         current_request_ctx.reset(token)
@@ -343,7 +343,7 @@ async def test_verify_node_web_exhausted_passthrough_keeps_web_quota(monkeypatch
 async def test_verify_node_missing_fuse_exhausted_annotate(monkeypatch):
     """确认联网但修订保险丝已耗尽 → 标注"知识库与网络均未覆盖"直通，不重生成不询问。
 
-    决策化语义：修订计数上限接管原 _agent_iterations 终止条件（防 verify→agent 无限往返）。
+    决策化语义：修订计数上限接管循环终止条件（防 verify→agent 无限往返）。
     """
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
     monkeypatch.setattr(
@@ -436,7 +436,7 @@ async def test_verify_node_already_guided_partial_queries_sends_hint(monkeypatch
         result = await verify_node(state)
         assert result["_needs_regenerate"] is True
         assert result["_verify_regenerations"] == 1
-        assert result["_agent_iterations"] == 0  # regen 轮复位主循环预算（Fix 2）
+        assert "_agent_iterations" not in result  # 循环计数已内化，不再随决策复位
         assert len(result["messages"]) == 1  # 只补发 hint，不重复发完整指引
         hint = result["messages"][0]
         assert isinstance(hint, SystemMessage)
@@ -478,7 +478,7 @@ async def test_verify_node_already_guided_hint_deduped(monkeypatch):
         result = await verify_node(state)
         assert result["_needs_regenerate"] is True
         assert result["_verify_regenerations"] == 1
-        assert result["_agent_iterations"] == 0
+        assert "_agent_iterations" not in result
         assert "messages" not in result  # hint 查重命中，不再重复追加
     finally:
         current_request_ctx.reset(token)
@@ -534,7 +534,7 @@ async def test_verify_node_unbound_web_no_citation_guides(monkeypatch):
         assert len(result["messages"]) == 1
         assert isinstance(result["messages"][0], SystemMessage)
         assert "请为联网引用标注来源编号" in result["messages"][0].content
-        assert result["_agent_iterations"] == 0  # 态 A regen 轮同样复位主循环预算
+        assert "_agent_iterations" not in result  # 态 A 同样不随决策复位循环计数
     finally:
         current_request_ctx.reset(token)
 
@@ -562,7 +562,7 @@ async def test_verify_node_unbound_web_with_citation_passthrough(monkeypatch):
 async def test_verify_node_unbound_web_fuse_exhausted_passthrough(monkeypatch):
     """未绑定 KB + 回答无引用但修订保险丝已耗尽 → 直通不注入（防死循环）。
 
-    语义随态 A 保险丝换源：上限判断由 _agent_iterations 改为 _verify_regenerations。
+    语义随态 A 保险丝换源：上限判断由 _verify_regenerations 承担。
     """
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
     _ctx, token = _make_ctx()
@@ -640,7 +640,7 @@ async def test_web_citation_guard_regen_resets_web_quota():
     decision = await web_citation_guard(state, ctx)
     assert decision is not None
     assert decision["_needs_regenerate"] is True
-    assert decision["_agent_iterations"] == 0  # regen 轮复位主循环预算
+    assert "_agent_iterations" not in decision  # 循环计数已内化，不再随决策复位
     assert ctx.web_count == 0  # regen 轮复位联网配额
 
 
@@ -692,7 +692,7 @@ async def test_kb_guardrail_guides_when_no_citation():
     assert decision is not None
     assert decision["_needs_regenerate"] is True
     assert VERIFY_KB_CITATION_MARKER in decision["messages"][0].content
-    assert decision["_agent_iterations"] == 0  # regen 轮复位主循环预算
+    assert "_agent_iterations" not in decision  # 循环计数已内化，不再随决策复位
     assert "_verify_regenerations" not in decision  # 不占完整性决策轮保险丝
 
 
@@ -720,23 +720,22 @@ async def test_kb_guardrail_passes_when_cited():
     assert await kb_citation_guardrail(state) is None
 
 
-# ── kb_citation_guardrail delegate 语义（regen 复位 + 专家分析豁免，M7）──
+# ── kb_citation_guardrail 决策语义（不再复位循环预算 + 专家分析豁免，M7）──
 
 
 @pytest.mark.asyncio
-async def test_kb_guardrail_regen_resets_delegate_used():
-    """kb_citation_guardrail regen dict 复位 _delegate_used（防 regen 预算被 +2 放大）。"""
+async def test_kb_guardrail_regen_no_longer_resets_loop_budget():
+    """kb_citation_guardrail regen dict 不再含循环预算复位键（计数内化进装配产物）。"""
     from src.agents.graph.verify.guardrails import kb_citation_guardrail
 
     state = AgentState(
         answer="腾讯2024年营收3943亿",
         tool_contexts=_make_kb_ctx_contexts(),
     )
-    state._delegate_used = True  # 模拟 delegate 已发生
     decision = await kb_citation_guardrail(state)
     assert decision is not None
-    assert decision["_delegate_used"] is False  # regen=全新 5 轮预算
-    assert decision["_agent_iterations"] == 0
+    assert "_delegate_used" not in decision
+    assert "_agent_iterations" not in decision
 
 
 @pytest.mark.asyncio

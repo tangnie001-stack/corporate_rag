@@ -4,7 +4,6 @@ from typing import Annotated, Literal
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 
-from src.config.const import MAX_AGENT_ITERATIONS
 from src.infra.llm.chat_message import ChatMessage
 from src.infra.llm.trace_context import current_trace_id
 from src.rag.context import RAGContext
@@ -36,11 +35,6 @@ class AgentState:
     verify_temporal_years: list[int] = field(
         default_factory=list
     )  # verify 判据材料：本轮要求覆盖年份（来源：常规轮 agent_finalize 从主 ctx 写入 / 直出轮直出节点从子 ctx 写入；范围：整轮执行；用途：年份完整性比对；空=不校验）
-    _agent_iterations: int = (
-        0  # 循环迭代计数（来源：agent 节点自增；范围：单轮执行；用途：调试与护栏判断）
-    )
-    _max_agent_iterations: int = MAX_AGENT_ITERATIONS  # 迭代上限（来源：src/config/const.py；用途：超限强制收尾）
-    _delegate_used: bool = False  # 本轮是否已调用过 delegate_task（来源：agent 节点在 LLM 输出含 delegate tool_call 时置位；范围：单轮执行；用途：route_agent 放宽迭代上限 +2 整合余量）
     _ask_count: int = 0  # 本 turn ask_user 调用次数（来源：ask_user 节点自增；范围：单 turn；用途：日志/兜底，实际检查走 contextvar）
     # ── 输出 ──
     answer: str = ""  # LLM 生成的完整回答

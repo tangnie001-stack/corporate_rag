@@ -5,7 +5,7 @@
 已注册则经 ask_confirm 询问用户是否联网（本轮已确认则跳过；拒绝/超时/槽被占 → 标注直通）；
 随后看 agent 上一轮 search_web 的 queries 是否带全缺失年份：带全仍缺 → 网络已穷尽标注
 直通；带漏 → 完整指引按 VERIFY_GUIDANCE_MARKER 查重注入 + 独立 hint 按 VERIFY_HINT_MARKER
-至多补发一次，regen 轮复位主循环预算（_agent_iterations=0）。保险丝
+至多补发一次，regen 轮同步归零 search_web 请求级配额（web_count）。保险丝
 （_verify_regenerations >= MAX_VERIFY_REGENERATIONS）兜底防 verify→agent 无限往返。
 """
 
@@ -139,9 +139,8 @@ async def decide_missing_web(
     # SystemMessage：agent 上一轮 search_web queries 带漏缺失年份时，即使完整指引
     # 已注入过也须补发（"还缺哪些年 + 一次带全再查一次"是新信息，不能静默重申），
     # 按 VERIFY_HINT_MARKER 短语查重至多发一次。计数随返回 dict 持久化；regen 轮
-    # 带 _agent_iterations=0 复位主循环预算、ctx.web_count=0 复位 search_web 配额
-    # （见下），route_agent 不因首轮迭代触顶而吞掉本轮 search_web 工具调用
-    # （regen 总轮数由保险丝 + web-exhausted 语义封顶）。
+    # 同步归零 search_web 请求级配额（ctx.web_count=0，见下），使本轮 search_web
+    # 工具调用不因首段配额耗尽而被拦（regen 总轮数由保险丝 + web-exhausted 语义封顶）。
     already_guided = _marker_message_sent(state, VERIFY_GUIDANCE_MARKER)
     hint_already_sent = _marker_message_sent(state, VERIFY_HINT_MARKER)
     regen_messages: list[SystemMessage] = []
@@ -161,18 +160,16 @@ async def decide_missing_web(
                 )
             )
         )
-    # regen 轮 = 一段全新主循环：除 _agent_iterations=0 复位迭代预算外，同步归零
-    # search_web 请求级配额（web_count）。ctx.web_count 跨 verify regen 段累积会让
-    # regen 轮的 search_web 达限返回 WEB_SEARCH_LIMIT_TEXT 而不执行，verify 据此误判
-    # "知识库与网络均未覆盖"——与迭代预算未复位同属"regen 轮预算被首段耗尽"缺陷。
+    # regen 轮 = 一段全新主循环：同步归零 search_web 请求级配额（web_count）。
+    # ctx.web_count 跨 verify regen 段累积会让 regen 轮的 search_web 达限返回
+    # WEB_SEARCH_LIMIT_TEXT 而不执行，verify 据此误判"知识库与网络均未覆盖"。
+    # 主循环迭代预算不在此复位：regen = 重新 invoke 装配产物，计数天然从初值起。
     if ctx is not None:
         ctx.web_count = 0
     result: dict = {
         "answer": answer,
         "_needs_regenerate": True,
         "_verify_regenerations": state._verify_regenerations,
-        "_agent_iterations": 0,
-        "_delegate_used": False,  # regen=全新 5 轮预算，不复位则 delegate 放宽 +2 会放大每段 regen 上限
     }
     if regen_messages:
         result["messages"] = regen_messages

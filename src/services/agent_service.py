@@ -1178,7 +1178,7 @@ class AgentService:
         """把 skill 正文作为一条隐藏消息写入会话上下文（Redis + DB）。
 
         写入的是带 SKILL_INJECTION_PREFIX 标记的 user 消息原文：前端经
-        `sessions/messages` 过滤不展示，模型经 `_initial_messages` 抽成独立
+        `sessions/messages` 过滤不展示，模型经 `_split_initial_messages` 抽成独立
         HumanMessage 可见且随历史持久化跨轮生效。
 
         Args:

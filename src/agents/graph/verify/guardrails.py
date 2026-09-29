@@ -4,8 +4,9 @@
 < MAX_VERIFY_REGENERATIONS），调过 search_web 但答案无 [n] 引用且未达上限时注入一次
 标注指引驱动重生成。
 态 B kb_citation_guardrail：检索到 KB context 但答案无 [n] 且非拒答/知识库未覆盖时注入
-一次 KB 溯源指引驱动重生成。只复位主循环预算（_agent_iterations=0），不占 verify 修订
-保险丝（与完整性决策轮计数独立）；已引导过仍无引用则不强灌第二次。
+一次 KB 溯源指引驱动重生成。不占 verify 修订保险丝（与完整性决策轮计数独立）；已引导过
+仍无引用则不强灌第二次。regen = 重新 invoke 装配产物，主循环计数天然从初值起，不再需要
+显式复位循环预算。
 """
 
 import re
@@ -94,16 +95,15 @@ async def web_citation_guard(
     )
     if ctx is not None:
         # regen 轮同步归零 search_web 请求级配额（web_count）：ctx.web_count 跨 verify
-        # regen 段累积会让 regen 轮的 search_web 达限返回 WEB_SEARCH_LIMIT_TEXT 不执行，
-        # 与 _agent_iterations=0 同属"每段 regen 轮全新主循环预算"设计。
+        # regen 段累积会让 regen 轮的 search_web 达限返回 WEB_SEARCH_LIMIT_TEXT 不执行。
+        # 主循环计数不在此复位：regen = 重新 invoke 装配产物，计数天然从初值起
         ctx.web_count = 0
+    # regen = 重新 invoke 装配产物，主循环计数天然从初值起，无需显式复位
     return {
         "answer": answer,
         "messages": [guidance],
         "_needs_regenerate": True,
         "_verify_regenerations": state._verify_regenerations + 1,
-        "_agent_iterations": 0,  # regen 轮复位主循环预算，route_agent 不吞本轮的 [n] 补标工具调用
-        "_delegate_used": False,  # regen=全新 5 轮预算，不复位则 delegate 放宽 +2 会放大每段 regen 上限
     }
 
 
@@ -149,8 +149,7 @@ async def kb_citation_guardrail(state: AgentState) -> dict | None:
 
     Returns:
         None 通过（无 kb context / 已带引用 / 拒答或未覆盖 / 专家分析观点 / 已引导过）；
-        注入指引的 regen 决策 dict（含 _agent_iterations=0 复位主循环预算、
-        _delegate_used=False 复位 delegate 放宽，防 +2 放大每段 regen 上限）
+        注入指引的 regen 决策 dict
     """
     answer = state.answer or ""
     if (
@@ -173,10 +172,9 @@ async def kb_citation_guardrail(state: AgentState) -> dict | None:
             marker=VERIFY_KB_CITATION_MARKER
         )
     )
+    # regen = 重新 invoke 装配产物，主循环计数天然从初值起，无需显式复位
     return {
         "answer": answer,
         "messages": [guidance],
         "_needs_regenerate": True,
-        "_agent_iterations": 0,  # regen 轮复位主循环预算，route_agent 不吞本轮补标
-        "_delegate_used": False,  # regen=全新 5 轮预算，不复位则 delegate 放宽 +2 会放大每段 regen 上限
     }

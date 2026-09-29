@@ -393,8 +393,7 @@ async def test_graph_verify_loop_success_terminates_at_format(monkeypatch):
 async def test_graph_verify_loop_terminates_at_regen_fuse(monkeypatch):
     """路径 B：确认联网但 agent 反复带漏 search_web queries → 修订保险丝耗尽 → 标注直通。
 
-    决策化语义：终止不再由 _agent_iterations 上限驱动，改由 _verify_regenerations
-    保险丝（MAX_VERIFY_REGENERATIONS=2）兜底。queries 逐轮带漏缺失年份 → 决策分支
+    决策化语义：终止由 _verify_regenerations 保险丝（MAX_VERIFY_REGENERATIONS=2）兜底。queries 逐轮带漏缺失年份 → 决策分支
     每次仍判定需重生成，计数 0→1→2；第 3 次 verify 达上限标注直通复位，不空转。
     回归 Critical #1 终止路径（标注直通显式复位）与 Important #3（指引只注入一次）。
     """
@@ -598,7 +597,7 @@ def _make_search_web_spy():
     """构造带调用记录的 search_web 测试工具，返回 (tool, calls)。
 
     calls 按调用序记录每次执行的 queries（测试桩不发起真实网络请求）；
-    供 V2 回归用例断言 regen 轮的 search_web 确实被执行（而非被 route_agent 吞掉）。
+    供 V2 回归用例断言 regen 轮的 search_web 确实被执行。
     """
     calls: list[list[str]] = []
 
@@ -615,10 +614,10 @@ def _make_search_web_spy():
 async def test_graph_verify_regen_round_uses_full_iteration_budget(monkeypatch):
     """回归 change 3.5①（V2 bug）：首轮耗尽主循环预算 → regen 轮 search_web 仍完整执行。
 
-    首轮 agent 反复调 search_web（queries 带漏）直到第 5 次迭代被 route_agent 强制收尾，
-    verify 注指引并 regen。regen 返回必须带 _agent_iterations=0 复位主循环预算：否则回
-    agent 后迭代计数续在触顶值上，本轮的 search_web 工具调用会在 route_agent 被上限吞掉
-    （工具不执行、答案空白），verify 会把空答案误判为"网络均未覆盖"标注直通。
+    首轮 agent 反复调 search_web（queries 带漏）直到回合上限强制收尾，
+    verify 注指引并 regen。regen = 重新 invoke 装配产物，主循环计数天然从初值起：
+    本轮的 search_web 工具调用不会因首段触顶被吞掉（工具不执行、答案空白），否则
+    verify 会把空答案误判为"网络均未覆盖"标注直通。
     """
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
     monkeypatch.setattr(
@@ -703,8 +702,8 @@ async def test_graph_verify_regen_round_resets_web_quota(monkeypatch):
     ctx.web_count 是请求级累计计数：第 1 段 4 次 search_web 调用把配额耗尽（预置
     web_count=limit，首次调用即达限被拦）。若 verify regen 不复位配额，回 agent 后
     regen 轮的 search_web 同样达限返回 WEB_SEARCH_LIMIT_TEXT 不执行 → verify 误判
-    "知识库与网络均未覆盖"。regen 决策必须带 ctx.web_count=0（与 _agent_iterations=0
-    同为"每段 regen 轮全新主循环预算"设计）：断言 spy 恰好执行一次（仅 regen 轮）。
+    "知识库与网络均未覆盖"。regen 决策必须带 ctx.web_count=0（每段 regen 轮获得全新
+    联网配额）：断言 spy 恰好执行一次（仅 regen 轮）。
     """
     monkeypatch.setattr("src.config.settings.VERIFY_ENABLED", True)
     monkeypatch.setattr(

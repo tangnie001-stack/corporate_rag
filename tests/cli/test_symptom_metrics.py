@@ -11,7 +11,7 @@ from src.cli.symptom_metrics import SymptomStats, collect, format_report
 def _line(trace_id: str, message: str, level: str = "INFO") -> str:
     """构造一行合法日志（四段 + module:func:line - message）。"""
     ts = "2026-09-22 10:00:00.000"
-    return f"{ts}|{level}|{trace_id}|sess-1|agent_node:make_agent_model_node:259 - {message}\n"
+    return f"{ts}|{level}|{trace_id}|sess-1|agent_node:make_agent_loop_node:174 - {message}\n"
 
 
 def test_counts_iteration_limit_per_trace(tmp_path):
