@@ -182,6 +182,39 @@ class _LoopingModel(GenericFakeChatModel):
         return ChatResult(generations=[ChatGeneration(message=msg)])
 
 
+class _ScriptedModel(GenericFakeChatModel):
+    """按轮次脚本产出工具调用；记录调用次数。
+
+    `script` 第 i 项 = 第 i+1 轮的 `(工具名, 实参)`；`None` = 该轮正常收尾。
+    用于构造「只在某一轮声明委派」这类 `_LoopingModel` 表达不了的时间线。
+    """
+
+    script: ClassVar[list] = []
+    calls: int = 0
+
+    def bind_tools(self, tools, **kwargs):
+        return self
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+        _ScriptedModel.calls += 1
+        index = _ScriptedModel.calls - 1
+        if index < len(_ScriptedModel.script):
+            entry = _ScriptedModel.script[index]
+        else:
+            entry = None
+        if entry is None:
+            msg = AIMessage(content="ANSWER")
+        else:
+            name, args = entry
+            msg = AIMessage(
+                content="",
+                tool_calls=[
+                    {"name": name, "args": args, "id": f"c{_ScriptedModel.calls}"}
+                ],
+            )
+        return ChatResult(generations=[ChatGeneration(message=msg)])
+
+
 @pytest.mark.asyncio
 async def test_hit_limit_skips_last_tool_and_keeps_tool_call_message():
     _LoopingModel.calls = 0
@@ -231,11 +264,22 @@ async def test_limit_hit_on_normal_finish_still_logs(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_delegate_bonus_applies_in_the_same_round():
-    """上限同轮声明的委派工具必须被执行（不能被跳过）。"""
-    _LoopingModel.calls = 0
-    _LoopingModel.tool_rounds = 10
-    _LoopingModel.tool_name = "delegate_task"
+async def test_delegate_declared_on_limit_round_is_executed():
+    """上限轮（第 5 轮）**才**声明的委派工具必须被执行，不能被判超限跳过。
+
+    前 4 轮声明普通工具（让循环继续），第 5 轮声明 delegate_task。判别性：
+    若去掉「本轮声明即置位」逻辑（`delegate_used` 只看上一轮状态），第 5 轮
+    `eff=5` 会 `jump_to=end`，委派工具永不执行 ⇒ 本测试失败。
+    """
+    _ScriptedModel.calls = 0
+    _ScriptedModel.script = [
+        ("echo", {"x": "1"}),
+        ("echo", {"x": "1"}),
+        ("echo", {"x": "1"}),
+        ("echo", {"x": "1"}),
+        ("delegate_task", {"skill": "s"}),
+        None,
+    ]
     ran = []
 
     @tool("delegate_task")
@@ -244,16 +288,56 @@ async def test_delegate_bonus_applies_in_the_same_round():
         ran.append(skill)
         return "ok"
 
-    model = _LoopingModel(messages=iter([]))
-    agent = build_agent(
-        model,
-        tools=[_delegate],
-        system="S",
-        max_turns=5,
-        middleware_extra=[AgentTurnBudget(limit=5)],
-    )
+    model = _ScriptedModel(messages=iter([]))
+    agent = build_agent(model, tools=[echo, _delegate], system="S", max_turns=5)
     await agent.ainvoke({"messages": [HumanMessage(content="hi")], "query": "q"})
-    assert ran, "上限轮声明的委派工具必须被执行"
+    assert ran == ["s"], "上限轮（第 5 轮）声明的委派工具必须被执行"
+
+
+@pytest.mark.asyncio
+async def test_delegate_bonus_does_not_fall_back_after_first_declaration():
+    """第 1 轮声明委派、此后不再声明 ⇒ 放宽上限**不回落**（仍为 limit + bonus）。
+
+    判别性：若去掉跨轮持久标志（`delegate_used` 只看本轮声明），第 2 轮
+    `eff=2` 会 `jump_to=end` ⇒ 模型调用次数为 2 而非 4。
+    """
+    _ScriptedModel.calls = 0
+    _ScriptedModel.script = [
+        ("delegate_task", {"skill": "s"}),
+        ("echo", {"x": "1"}),
+        ("echo", {"x": "1"}),
+        ("echo", {"x": "1"}),
+        None,
+    ]
+
+    @tool("delegate_task")
+    def _delegate(skill: str) -> str:
+        """委派。"""
+        return "ok"
+
+    model = _ScriptedModel(messages=iter([]))
+    agent = build_agent(model, tools=[echo, _delegate], system="S", max_turns=2)
+    await agent.ainvoke({"messages": [HumanMessage(content="hi")], "query": "q"})
+    assert _ScriptedModel.calls == 4  # 2（基础）+ 2（委派放宽余量），未回落到 2
+
+
+def test_build_agent_requires_span_middleware_last():
+    """Ruling U：AgentSpanMiddleware 必须在最后（最内层），否则装配期抛 ValueError。"""
+
+    def _build(middleware_extra):
+        return build_agent(
+            _RecordingModel(messages=iter([AIMessage(content="ok")])),
+            tools=[],
+            system="S",
+            max_turns=3,
+            middleware_extra=middleware_extra,
+        )
+
+    # 正例：AgentSpan 在最后 → 可装配
+    _build([SystemMessagesMiddleware(), ModelParamsMiddleware(), AgentSpanMiddleware()])
+    # 反例：AgentSpan 不在最后 → ValueError（错误信息指明原因）
+    with pytest.raises(ValueError, match="AgentSpanMiddleware"):
+        _build([AgentSpanMiddleware(), ModelParamsMiddleware()])
 
 
 @pytest.mark.asyncio

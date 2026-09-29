@@ -130,10 +130,16 @@ class AgentTurnBudget(AgentMiddleware):
         """
         n = state.get("_turn_count", 0) + 1
         last = state["messages"][-1]
-        declared = list(getattr(last, "tool_calls", None) or [])
+        if isinstance(last, AIMessage):
+            declared = list(last.tool_calls or [])
+        else:
+            declared = []
         delegate_now = any(c.get("name") == "delegate_task" for c in declared)
         delegate_used = delegate_now or bool(state.get("_delegate_used"))
-        effective_max = self._limit + self._bonus if delegate_used else self._limit
+        if delegate_used:
+            effective_max = self._limit + self._bonus
+        else:
+            effective_max = self._limit
         update: dict[str, Any] = {"_turn_count": n}
         if delegate_now:
             update["_delegate_used"] = True
@@ -329,5 +335,8 @@ class AgentSpanMiddleware(AgentMiddleware):
                 metadata=metadata,
             )
             generation.end(end_time=now)
-        except Exception:  # 观测失败不得影响对话
-            logger.warning("[agent] agent_turn observation failed", exc_info=True)
+        except Exception as exc:  # 观测失败不得影响对话
+            # 本模块 logger 是 stdlib logging（非 loguru），故用 %s 占位符
+            logger.warning(
+                "[agent] agent_turn observation failed err=%s", exc, exc_info=True
+            )

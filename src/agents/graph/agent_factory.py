@@ -53,19 +53,27 @@ def build_agent(
         tools: 工具面（主角色=全量；子角色=只读面筛选结果）
         system: system 提供方式——None=经运行态携带（主角色，由 prompt middleware
             施加）；str=静态串（子角色，人设 + 执行契约）
-        max_turns: 主循环回合上限，**回合上限的唯一来源**；非 None 时本函数自行在最前
-            追加 `AgentTurnBudget(limit=max_turns)`（已显式传入则不重复追加，避免
-            create_agent 的同名 middleware 校验报错与重复计数）；None=不装配回合预算
-            middleware（子角色路径）
+        max_turns: 主循环回合上限，**回合上限的唯一来源**；非 None 时本函数自行追加为
+            **最前一项** `AgentTurnBudget(limit=max_turns)`（已显式传入则不重复追加，
+            避免 create_agent 的同名 middleware 校验报错与重复计数）；None=不装配回合
+            预算 middleware（子角色路径）
         middleware_extra: 额外 middleware 集合；子角色传空列表
 
     Returns:
         create_agent 的编译产物（可直接 ainvoke / 作为子图节点）
 
+    Raises:
+        ValueError: `middleware_extra` 含 `AgentSpanMiddleware` 但它不在最后一项
+
     Notes:
         本函数**不产出** `graph compiled` 日志——该事件由图装配层
         （build_graph）发一次；子角色每次委派都会调用本函数，若在此发日志
         每次委派都会多一条。
+
+        顺序：唯一硬约束是 `AgentSpanMiddleware` 必须最后（最内层），由
+        `_ensure_span_middleware_last` 在装配期校验。其余 middleware 位置无行为
+        影响（`AgentTurnBudget` 只实现 `after_model`）；推荐顺序
+        `[SystemMessages, ModelParams, AgentTurnBudget, AgentSpan]` 仅为可读性约定。
     """
     middleware: list[AgentMiddleware] = list(middleware_extra or [])
     if max_turns is not None:
@@ -76,6 +84,7 @@ def build_agent(
 
         if not any(isinstance(m, AgentTurnBudget) for m in middleware):
             middleware.insert(0, AgentTurnBudget(limit=max_turns))
+    _ensure_span_middleware_last(middleware)
     return create_agent(
         model,
         tools=tools,
@@ -83,3 +92,28 @@ def build_agent(
         middleware=middleware,
         state_schema=LoopState,
     )
+
+
+def _ensure_span_middleware_last(middleware: list[AgentMiddleware]) -> None:
+    """校验 `AgentSpanMiddleware`（若存在）位于 middleware 列表最后一项。
+
+    这是唯一的顺序硬约束：`AgentSpanMiddleware` 必须在最内层，才能读到前序
+    middleware 已施加的 `system_message` 与 `model_settings`（否则温度档位与
+    system 段的上报/观测失真）。
+
+    Args:
+        middleware: 待装配的 middleware 列表（就地不改动）
+
+    Raises:
+        ValueError: `AgentSpanMiddleware` 存在但不在最后一项
+    """
+    # 函数内延迟 import：避免 middleware → agent_factory 的模块级循环依赖
+    from src.agents.graph.middleware import AgentSpanMiddleware
+
+    for index, item in enumerate(middleware):
+        if isinstance(item, AgentSpanMiddleware) and index != len(middleware) - 1:
+            raise ValueError(
+                "AgentSpanMiddleware 必须是 middleware 列表的最后一项（最内层）："
+                "它要读前序 middleware 已施加的 system_message 与 model_settings，"
+                "位置错则观测到的温度档位与 system 段均失真"
+            )
