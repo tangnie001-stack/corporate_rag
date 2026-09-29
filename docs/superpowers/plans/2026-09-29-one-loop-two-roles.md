@@ -1654,7 +1654,8 @@ POSTGRES_HOST=localhost .venv/bin/python /tmp/baseline_capture.py > /tmp/after.t
 diff docs/tmp/one-loop-two-roles-baseline.md /tmp/after.txt
 ```
 
-期望：五条日志的**条数与字段值**、SSE 事件序列、`[n]` 与 citations **全部一致**。任何差异都要在基线文件里逐条说明原因（不允许"看起来差不多"）。
+期望：**结构不变量**全部一致——SSE 事件的**类型与计数**、五条日志的**条数与字段集**及关键字段值、模型实收 kwargs 的温度分档、citations 的结构。
+⚠️ **不比对**（实测不可复现，见 SDD ledger 的 Ruling J/K/L）：回答正文、token 分块数、`answer_len`、`[n]` 位置、`usage_in|out` 数值（百炼 `deepseek-v4-flash-0731` 流式不返回 usage ⇒ `usage_estimated=true`）；也不比对 `status` 与 `token` 的相对交错顺序。任何差异都要在基线文件里逐条说明原因（不允许"看起来差不多"）。
 
 - [ ] **Step 3: 触顶路径真实复现**
 
