@@ -78,7 +78,8 @@ agent 在循环内判定任务需要领域专家能力（深度分析/专用方�
 ```
 agent 判定需领域专家 → delegate_task(task, skill)
   ├─ inline：skill 方法论注入 agent 上下文 → agent 自己继续走 2a/2b
-  └─ fork：零工具子代理独立分析（材料由 agent 预检索后随 task 一并传入）
+  └─ fork：子代理独立分析（默认继承执行者的只读工具面、可自行检索；材料获取按
+       工具面判定 —— 无检索工具时由 agent 预检索后随 task 一并传入）
        → 纯文本结果回 agent → agent 整合进最终答案 → verify → format
 ```
 
