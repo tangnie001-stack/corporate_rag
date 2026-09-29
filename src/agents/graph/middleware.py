@@ -7,10 +7,13 @@
 import logging
 from typing import Any
 
-from langchain.agents.middleware import AgentMiddleware
+from langchain.agents.middleware import AgentMiddleware, hook_config
 
 from src.agents.graph.agent_factory import LoopState
 from src.config import settings
+from src.config.const import MAX_DELEGATE_BONUS
+from src.core import logging as core_logging
+from src.core.log_events import Event
 from src.infra.llm.request_context import current_request_ctx
 
 logger = logging.getLogger(__name__)
@@ -82,3 +85,60 @@ class ModelParamsMiddleware(AgentMiddleware):
     async def awrap_model_call(self, request: Any, handler: Any) -> Any:
         """异步钩子（生产路径）。"""
         return await handler(request.override(model_settings=self._settings(request)))
+
+
+class AgentTurnBudget(AgentMiddleware):
+    """回合预算（**只装配给主角色**）。
+
+    判定放 after_model 并用 jump_to=end 结束——不注入任何消息。若放
+    before_model 判下轮，会多执行一次工具、末条变 ToolMessage，答案提取就会
+    把工具结果当成答案。
+
+    委派放宽：本轮声明了 delegate_task 时**先置位**再算上限，且标志跨轮保持
+    （= 今天的 `delegate_used or state._delegate_used`）。
+    """
+
+    state_schema = LoopState
+
+    def __init__(self, limit: int, bonus: int = MAX_DELEGATE_BONUS) -> None:
+        """初始化。
+
+        Args:
+            limit: 基础回合上限（模型调用次数）
+            bonus: 委派放宽轮数（本轮或此前声明过 delegate_task 时叠加）
+        """
+        super().__init__()
+        self._limit = limit  # 进程级常量
+        self._bonus = bonus
+
+    def _after_model(self, state: Any) -> dict[str, Any]:
+        """自增回合计数、按有效上限判定，命中时声明 jump_to=end。
+
+        `iteration limit` 日志与 jump 解耦：达上限即记（与该轮是否声明工具调用
+        无关），jump 只在该轮仍声明工具调用时返回（正常收尾本就结束，无需 jump）。
+        """
+        n = state.get("_turn_count", 0) + 1
+        last = state["messages"][-1]
+        declared = list(getattr(last, "tool_calls", None) or [])
+        delegate_now = any(c.get("name") == "delegate_task" for c in declared)
+        delegate_used = delegate_now or bool(state.get("_delegate_used"))
+        effective_max = self._limit + self._bonus if delegate_used else self._limit
+        update: dict[str, Any] = {"_turn_count": n}
+        if delegate_now:
+            update["_delegate_used"] = True
+        if n >= effective_max:
+            core_logging.log_event(
+                Event.ITERATION_LIMIT, query=state.get("query", ""), iteration=n
+            )
+            if declared:
+                update["jump_to"] = "end"
+        return update
+
+    @hook_config(can_jump_to=["end"])
+    def after_model(self, state: Any, runtime: Any) -> dict[str, Any]:
+        """同步 after_model 钩子。"""
+        return self._after_model(state)
+
+    async def aafter_model(self, state: Any, runtime: Any) -> dict[str, Any]:
+        """异步 after_model 钩子（生产路径）。"""
+        return self._after_model(state)

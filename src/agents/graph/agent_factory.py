@@ -53,7 +53,10 @@ def build_agent(
         tools: 工具面（主角色=全量；子角色=只读面筛选结果）
         system: system 提供方式——None=经运行态携带（主角色，由 prompt middleware
             施加）；str=静态串（子角色，人设 + 执行契约）
-        max_turns: 主循环回合上限；None=不装配回合预算 middleware（子角色路径）
+        max_turns: 主循环回合上限，**回合上限的唯一来源**；非 None 时本函数自行在最前
+            追加 `AgentTurnBudget(limit=max_turns)`（已显式传入则不重复追加，避免
+            create_agent 的同名 middleware 校验报错与重复计数）；None=不装配回合预算
+            middleware（子角色路径）
         middleware_extra: 额外 middleware 集合；子角色传空列表
 
     Returns:
@@ -65,6 +68,14 @@ def build_agent(
         每次委派都会多一条。
     """
     middleware: list[AgentMiddleware] = list(middleware_extra or [])
+    if max_turns is not None:
+        # 函数内延迟 import：避免 middleware → agent_factory 的模块级循环依赖。
+        # 已显式传入 AgentTurnBudget 时不再追加：create_agent 按 middleware.name
+        # 校验重复，两个同名预算会直接抛 AssertionError（且会重复计数）。
+        from src.agents.graph.middleware import AgentTurnBudget
+
+        if not any(isinstance(m, AgentTurnBudget) for m in middleware):
+            middleware.insert(0, AgentTurnBudget(limit=max_turns))
     return create_agent(
         model,
         tools=tools,

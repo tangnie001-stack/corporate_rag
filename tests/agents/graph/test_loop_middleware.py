@@ -1,14 +1,33 @@
 """agent 循环四个 middleware 的单元测试（Task 3/4/5/6）。"""
 
+import asyncio
 from typing import ClassVar
 
 import pytest
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.tools import tool
 
 from src.agents.graph.agent_factory import build_agent
-from src.agents.graph.middleware import ModelParamsMiddleware, SystemMessagesMiddleware
+from src.agents.graph.middleware import (
+    AgentTurnBudget,
+    ModelParamsMiddleware,
+    SystemMessagesMiddleware,
+)
 from src.config import settings
+from src.core.log_events import Event
+
+
+def _capture_events(monkeypatch) -> list[dict]:
+    """拦截 log_event 收集事件（日志走 loguru，caplog 抓不到）。"""
+    calls: list[dict] = []
+
+    def fake_log_event(event, **fields):
+        calls.append({"event": event, **fields})
+
+    monkeypatch.setattr("src.core.logging.log_event", fake_log_event)
+    return calls
 
 
 class _RecordingModel(GenericFakeChatModel):
@@ -120,3 +139,155 @@ async def test_deep_thinking_switch_comes_from_seeded_state():
         {"messages": [HumanMessage(content="hi")], "kb_id": "", "deep_thinking": True}
     )
     assert _RecordingModel.seen_kwargs[-1]["extra_body"] == {"enable_thinking": True}
+
+
+@tool
+def echo(x: str) -> str:
+    """echo。"""
+    return x
+
+
+@tool
+def delegate_task(skill: str) -> str:
+    """委派。"""
+    return "delegated"
+
+
+class _LoopingModel(GenericFakeChatModel):
+    """前 tool_rounds 次调用发工具调用，之后正常收尾；记录调用次数。"""
+
+    tool_rounds: int = 0
+    tool_name: str = "echo"
+    calls: int = 0
+
+    def bind_tools(self, tools, **kwargs):
+        return self
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+        _LoopingModel.calls += 1
+        if _LoopingModel.calls <= _LoopingModel.tool_rounds:
+            msg = AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": _LoopingModel.tool_name,
+                        "args": {"x": "1", "skill": "s"},
+                        "id": f"c{_LoopingModel.calls}",
+                    }
+                ],
+            )
+        else:
+            msg = AIMessage(content="ANSWER")
+        return ChatResult(generations=[ChatGeneration(message=msg)])
+
+
+@pytest.mark.asyncio
+async def test_hit_limit_skips_last_tool_and_keeps_tool_call_message():
+    _LoopingModel.calls = 0
+    _LoopingModel.tool_rounds = 10
+    _LoopingModel.tool_name = "echo"
+    executed = []
+
+    @tool("echo")
+    def _echo(x: str) -> str:
+        """echo。"""
+        executed.append(x)
+        return x
+
+    model = _LoopingModel(messages=iter([]))
+    agent = build_agent(
+        model,
+        tools=[_echo],
+        system="S",
+        max_turns=3,
+        middleware_extra=[AgentTurnBudget(limit=3)],
+    )
+    out = await agent.ainvoke({"messages": [HumanMessage(content="hi")], "query": "q"})
+    assert _LoopingModel.calls == 3  # 模型调用 = 上限次
+    assert len(executed) == 2  # 工具执行 = 上限 − 1
+    last = out["messages"][-1]
+    assert isinstance(last, AIMessage) and last.tool_calls  # 末条含 tool_calls
+    assert (last.content or "") == ""  # 允许空串
+
+
+@pytest.mark.asyncio
+async def test_limit_hit_on_normal_finish_still_logs(monkeypatch):
+    """上限轮恰好正常收尾（无 tool_calls）也产出 iteration limit。"""
+    events = _capture_events(monkeypatch)
+    _LoopingModel.calls = 0
+    _LoopingModel.tool_rounds = 1
+    _LoopingModel.tool_name = "echo"
+    model = _LoopingModel(messages=iter([]))
+    agent = build_agent(
+        model,
+        tools=[echo],
+        system="S",
+        max_turns=2,
+        middleware_extra=[AgentTurnBudget(limit=2)],
+    )
+    await agent.ainvoke({"messages": [HumanMessage(content="hi")], "query": "q"})
+    assert any(c["event"] is Event.ITERATION_LIMIT for c in events)
+
+
+@pytest.mark.asyncio
+async def test_delegate_bonus_applies_in_the_same_round():
+    """上限同轮声明的委派工具必须被执行（不能被跳过）。"""
+    _LoopingModel.calls = 0
+    _LoopingModel.tool_rounds = 10
+    _LoopingModel.tool_name = "delegate_task"
+    ran = []
+
+    @tool("delegate_task")
+    def _delegate(skill: str) -> str:
+        """委派。"""
+        ran.append(skill)
+        return "ok"
+
+    model = _LoopingModel(messages=iter([]))
+    agent = build_agent(
+        model,
+        tools=[_delegate],
+        system="S",
+        max_turns=5,
+        middleware_extra=[AgentTurnBudget(limit=5)],
+    )
+    await agent.ainvoke({"messages": [HumanMessage(content="hi")], "query": "q"})
+    assert ran, "上限轮声明的委派工具必须被执行"
+
+
+@pytest.mark.asyncio
+async def test_budget_instance_shared_across_requests_does_not_bleed():
+    """同一个 middleware 实例被两个并发请求使用，计数互不污染。"""
+    mw = AgentTurnBudget(limit=3)
+    _LoopingModel.calls = 0
+    _LoopingModel.tool_rounds = 10
+    _LoopingModel.tool_name = "echo"
+    model = _LoopingModel(messages=iter([]))
+    agent = build_agent(
+        model, tools=[echo], system="S", max_turns=3, middleware_extra=[mw]
+    )
+
+    async def one(i):
+        return await agent.ainvoke(
+            {"messages": [HumanMessage(content=f"q{i}")], "query": f"q{i}"}
+        )
+
+    r1, r2 = await asyncio.gather(one(1), one(2))
+    for r in (r1, r2):
+        assert r["_turn_count"] == 3  # 各自独立从 0 起
+
+
+@pytest.mark.asyncio
+async def test_build_agent_max_turns_alone_enforces_budget():
+    """Ruling O：只传 max_turns（不传预算 middleware）也必须生效。
+
+    否则是「静默无回合上限」——评审实测的失败模式。
+    """
+    _LoopingModel.calls = 0
+    _LoopingModel.tool_rounds = 10
+    _LoopingModel.tool_name = "echo"
+    model = _LoopingModel(messages=iter([]))
+    agent = build_agent(model, tools=[echo], system="S", max_turns=3)
+    out = await agent.ainvoke({"messages": [HumanMessage(content="hi")], "query": "q"})
+    assert _LoopingModel.calls == 3
+    assert out["_turn_count"] == 3
