@@ -143,7 +143,7 @@ async def test_retrieve_kb_fork_dict_state_falls_back_to_ctx(monkeypatch):
     ctx = RequestContext(session_id="s1", kb_id="kb_fork")
     token = current_request_ctx.set(ctx)
     try:
-        # 子代理图注入的是普通 dict（仅 messages），无 kb_id / _agent_iterations 属性
+        # 子代理图注入的是普通 dict（仅 messages），无 kb_id 键
         out = await tool.ainvoke({"query": "腾讯营收", "state": {"messages": []}})
     finally:
         current_request_ctx.reset(token)
@@ -422,6 +422,73 @@ async def test_retrieve_kb_no_signal_unbound(monkeypatch):
         assert "signal" not in captured  # 未产缺陷信号
     finally:
         current_request_ctx.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_retrieve_kb_reads_turn_count_when_state_is_mapping(monkeypatch):
+    """create_agent 承载下（映射状态）迭代序号取 _turn_count，不得恒为 0。"""
+    captured: dict = {}
+
+    def _fake_signal(signal, query, iteration, **fields):
+        """mock retrieval_signal：捕获 iteration 与附带字段。"""
+        captured["iteration"] = iteration
+        captured["fields"] = fields
+
+    monkeypatch.setattr("src.core.logging.retrieval_signal", _fake_signal)
+
+    async def fake_search(query, kb_id, vector_store):
+        """mock search：返回空列表（触发 empty_result 信号，携带 iteration）。"""
+        return []
+
+    monkeypatch.setattr(retrieval, "search", fake_search)
+    monkeypatch.setattr(retrieval, "rerank_results", lambda q, r, rk: [])
+
+    tool = make_rag_tools(
+        vector_store=cast(VectorStore, None),
+        reranker=None,
+        prompt_manager=None,
+    )[0]
+
+    await tool.ainvoke(
+        {"query": "q", "state": {"messages": [], "_turn_count": 3, "kb_id": "kb-1"}}
+    )
+
+    assert captured["iteration"] == 3, "映射承载下迭代序号不得恒为 0"
+    assert captured["fields"]["kb_id"] == "kb-1"
+
+
+@pytest.mark.asyncio
+async def test_retrieve_kb_cli_style_entry_without_request_context(monkeypatch):
+    """CLI 入口只把参数放进图输入、不建 ctx ⇒ 装配 seed 的 kb_id 仍被取到。
+
+    等价于 src/cli/check_abstain.py:127 / eval_ragas.py:129：kb_id 只在图输入里，
+    工具不得依赖 current_request_ctx 取 kb_id（否则退化为空、不检索）。
+    """
+    assert current_request_ctx.get() is None, "本用例刻意不建 ctx"
+    seen: dict = {}
+
+    async def fake_search(query, kb_id, vector_store):
+        """mock search：记录底层检索被以哪个 kb_id 调用。"""
+        seen["kb_id"] = kb_id
+        return []
+
+    monkeypatch.setattr(retrieval, "search", fake_search)
+    monkeypatch.setattr(retrieval, "rerank_results", lambda q, r, rk: [])
+
+    tool = make_rag_tools(
+        vector_store=cast(VectorStore, None),
+        reranker=None,
+        prompt_manager=None,
+    )[0]
+
+    await tool.ainvoke(
+        {
+            "query": "q",
+            "state": {"messages": [], "_turn_count": 0, "kb_id": "kb-from-input"},
+        }
+    )
+
+    assert seen["kb_id"] == "kb-from-input", "无 ctx 入口不得退化为空 kb_id"
 
 
 @pytest.mark.asyncio
