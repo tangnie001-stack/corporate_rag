@@ -51,11 +51,31 @@ def test_build_agent_does_not_emit_graph_compiled(caplog):
     assert "graph compiled" not in caplog.text
 
 
+def test_build_agent_wires_loop_state_channels():
+    """接线断言：build_agent 产物真的把 LoopState 接上了（六键进入图 channels）。
+
+    直接读 LoopState.__dataclass_fields__ 的用例在 build_agent 丢掉
+    state_schema=LoopState 后仍会全绿 ⇒ 核心契约无护栏；本用例改看编译产物的
+    实际 channels，删掉 state_schema 即失败（create_agent 默认 AgentState 只有
+    messages/jump_to/structured_response）。
+    """
+    agent = build_agent(_fake_model(), tools=[_echo], system="sys")
+    channels = set(agent.builder.channels)
+    assert {
+        "_system_messages",
+        "_turn_count",
+        "_delegate_used",
+        "kb_id",
+        "query",
+        "deep_thinking",
+    } <= channels
+
+
 def test_create_agent_is_only_called_from_agent_factory():
     """「唯一装配」静态扫描断言：src/agents/ 下只有装配入口可以调 create_agent(。"""
-    # executor.py 的 create_agent 调用将在 Task 12（子角色接入）后移除，
-    # 届时本清单收窄为 {"agent_factory.py"}
-    ALLOWED = {"agent_factory.py", "executor.py"}
+    # executor.py 的 create_agent 调用已随 Task 12（子角色接入共用装配入口）移除，
+    # 故清单只余装配入口本体
+    ALLOWED = {"agent_factory.py"}
     root = pathlib.Path(__file__).resolve().parents[3] / "src" / "agents"
     offenders = []
     for path in root.rglob("*.py"):
