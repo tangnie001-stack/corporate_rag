@@ -977,8 +977,10 @@ PG 无 collection 概念：无副作用，直接返回 `kb_id`，仅作既有方
 ### 5.2 agent 循环（内化于装配产物）
 
 外层图结构为 `agent → agent_finalize → verify → (format | agent)`（无独立路由节点，
-KB 绑定在请求层已定：`kb_id` 非空检索该库，空串 = 未绑定纯对话不检索）。model↔tools
-循环本体由 `build_agent` 装配的 `create_agent` 产物承载，对 SSE 转换层不可见：
+KB 绑定在请求层已定：`kb_id` 非空检索该库，空串 = 未绑定纯对话不检索）。`build_graph`
+**参数面不变**（签名见 `workflow.py:46-55`），仅内部结构变——model↔tools 循环本体由
+`build_agent` 装配的 `create_agent` 产物承载；循环内的模型 / 工具事件仍以
+`langgraph_node == "model"` / `"tools"` 到达 SSE 转换层（外层图不再暴露 `tools` 节点与回边）：
 
 ```
 agent（外层节点：组装首轮 → seed 装配产物 → ainvoke）

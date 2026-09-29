@@ -41,7 +41,7 @@ RAG 检索 + 验证）** 与 **链路 2b（未绑 KB 纯对话链，联网兜底
 `chat_stream` 透传给 `agent_service.stream_chat`，后者写 `ctx.kb_bound = bool(kb_id)`
 （src/api/chat.py:401、src/services/agent_service.py:592）。分裂并非两条独立图，而是同一
 StateGraph 拓扑（`agent（内化循环）→ agent_finalize → verify → format → END`，
-workflow.py:78-152）上的四处分叉：
+workflow.py:46-156）上的四处分叉：
 
 1. **prompt**：未绑 KB 时在系统指令后追加未绑定提示（`src/config/prompts/templates/sources.yaml`
    的 `sources-kb-unbound`；联网句 `sources-kb-unbound-web` 仅在 `search_web` 已注册时追加），
@@ -63,7 +63,7 @@ verify 直通（settings.py:68-72）；`WEB_SEARCH_ENABLED=false` → 无联网�
 
 ```
 agent（外层节点：组装首轮 → invoke 装配产物；model↔tools 循环内化在产物内部）
-  │ 外层图不再有 tools 节点与回边，循环本体对 SSE 转换层不可见
+  │ 外层图不再暴露 tools 节点与回边；循环内的模型/工具事件仍以 langgraph_node=="model" / "tools" 到达 SSE 转换层
   ▼
 agent_finalize → verify ─(通过)→ format → END
                   └(_needs_regenerate)→ agent（重生成：外层 messages 非空，只回写新增段）
