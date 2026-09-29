@@ -4,14 +4,14 @@ from unittest.mock import MagicMock
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from src.agents.graph.agent_node import _initial_messages
+from src.agents.graph.agent_node import _split_initial_messages
 from src.agents.graph.state import AgentState
 from src.config.const import SKILL_INJECTION_PREFIX
 from src.infra.llm.chat_message import ChatMessage
 from src.infra.llm.request_context import RequestContext, current_request_ctx
 
 
-def test_injected_history_becomes_separate_human_message(monkeypatch):
+def test_injected_history_becomes_separate_human_message():
     """注入行抽成独立 HumanMessage 且排在普通历史之前；普通历史不受影响。"""
     pm = MagicMock()
     pm.get_user_template.return_value = "用户模板"
@@ -32,26 +32,27 @@ def test_injected_history_becomes_separate_human_message(monkeypatch):
     ctx.has_skills = False
     token = current_request_ctx.set(ctx)
     try:
-        messages = _initial_messages(state, pm, frozenset())
+        system_half, rest_half = _split_initial_messages(state, pm, frozenset())
     finally:
         current_request_ctx.reset(token)
 
-    types = [type(m) for m in messages]
-    assert types.index(SystemMessage) == 0
+    # system 段全部拆进 system_half，其余进 rest_half
+    assert system_half and all(isinstance(m, SystemMessage) for m in system_half)
+    assert not any(isinstance(m, SystemMessage) for m in rest_half)
     injected_idx = next(
         i
-        for i, m in enumerate(messages)
+        for i, m in enumerate(rest_half)
         if isinstance(m, HumanMessage) and SKILL_INJECTION_PREFIX in m.content
     )
     prev_user_idx = next(
         i
-        for i, m in enumerate(messages)
+        for i, m in enumerate(rest_half)
         if isinstance(m, HumanMessage) and m.content == "上一轮问题"
     )
     assert injected_idx < prev_user_idx  # 注入在普通历史之前
-    injected_msg = messages[injected_idx]
+    injected_msg = rest_half[injected_idx]
     assert isinstance(injected_msg, HumanMessage)
     assert isinstance(injected_msg.content, str)
     assert injected_msg.content.startswith(SKILL_INJECTION_PREFIX)
     # 普通历史保持原样（AI 回复映射为 AIMessage）
-    assert any(isinstance(m, AIMessage) for m in messages)
+    assert any(isinstance(m, AIMessage) for m in rest_half)
