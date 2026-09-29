@@ -136,6 +136,12 @@
 
 **规则**：middleware 实例只保存**进程级常量**（上限值、模型名、标志位等）；per-request 数据一律经 `state_schema` 或请求上下文（ContextVar）传递。
 
+### per-call `extra_body` 会整体覆盖构造时的 `extra_body`，别把参数配在 `LLM_KWARGS`
+
+**现象**：langchain-openai 在 `_get_request_payload` 里对 `extra_body` 做**浅合并**——per-call 传入的 `extra_body` 会**整体覆盖**模型构造时配置的那一份。若把某个 `extra_body` 参数配在 `LLM_KWARGS`（构造期），而调用点又按需传了 `extra_body`（例如 `{"enable_thinking": …}`），构造期那份会**静默丢失**：配了没效果，且没有任何告警。
+
+**规则**：`extra_body` 只允许**在一个地方**给全——或构造期、或 per-call，不要两处各配一半。调用点/中间件需要 per-call 传 `extra_body` 时，MUST 在原位保留这条约束的注释（该注释的承载代码可能随重构迁移，注释必须跟着走）。判定档位（如按会话是否绑 KB）时，判据 MUST 取**请求级上下文**而非图状态——图状态里的同类值可能未随调用链传入而**静默为空**，导致档位反判（`one-loop-two-roles` D15 即此坑）。
+
 ## 接口契约
 
 ### 前端消费的响应形状必须以契约文档为准，且形状漂移只能降级不能抛错

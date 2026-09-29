@@ -20,6 +20,12 @@ system 段的**组装**结果送入模型请求时 SHALL 逐字不变——包�
 - **WHEN** 一次生成内主循环发生多轮模型调用
 - **THEN** system 段组装 SHALL 只发生一次，其组装事实日志（`prompt assembled` 语义的事件）SHALL 每次生成只产出一次
 
+#### Scenario: 消息构成计数逐字不变
+
+- **WHEN** 一次生成产出消息构成日志（`prompt messages` 语义的事件）
+- **THEN** 其 `system_msgs` / `injected_msgs` / `history_msgs` 三个计数 SHALL 与变更前逐字一致
+- **AND** `system_msgs` SHALL NOT 因 system 段被从消息列表中拆出（改由施加通道单独下发）而变为 0
+
 #### Scenario: 重生成轮仍带完整 system 段
 
 - **WHEN** 校验节点要求重生成，主循环被再次进入

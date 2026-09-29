@@ -431,3 +431,77 @@ tests/infra/llm/      test_tool_trace.py
 **新发现（合并后才看清的一条）**：`rag_tools.py` 的**迭代序号**守卫是 `isinstance(state, AgentState)` ⇒ 主循环改由 `create_agent` 承载后（dict 状态）**恒取 0**，主循环检索信号会**丢真实轮次**。该值在**请求上下文里没有对应项**，故**必须由装配带入图状态** ⇒ 已写入 `agent-assembly` 的要求、D11、tasks 2.6 与 7.13。
 
 **`delegate-task` delta 已 rebase**：其 `fork 执行` requirement 的工具面口径已被对方同步进主 spec，我方 delta 已重新复制其**落地后全文**、只改 middleware 那一条（原顶部"归档前须 rebase"的提示已兑现）。
+
+## 十七、五轮盘问式深化评审（2026-09-29）
+
+对已 Approve 的提案做**五轮盘问**（每轮把 frontier 上的问题一次问全、逐条给推荐，逐轮复核后收口）。**产出 25 项修改**，全部落在工件文本 + 2 处登记文档。其中 **4 项是我先前的错误**，记在这里以免复用：
+
+| 我先前的说法 | 事实 | 处置 |
+|---|---|---|
+| 「`agent-assembly` 六条 requirement 实为五条」 | 实测 **6 条**（我数错） | **未改**；proposal 原文正确 |
+| 「§1 三个 middleware」 | 温度/`extra_body` **无施加者**（今天内联在 `agent_node.py:203-218`） | 新增第 4 件 `ModelParamsMiddleware` |
+| 「观测量测里加一条『trace 不含 system 段』断言」 | 今天的观测 `input` **显式就是完整消息列表（含 system）** | 改为断言「`input`/`output` 仍显式设置 + `capture_input/output=False`」 |
+| 「`query` 与 `kb_id` 同走 `ctx` 回退」 | `RequestContext` **没有 `query` 字段**（grep 为空） | `query` 与迭代序号**必须**由装配带入图状态 |
+
+### 关键实况（盘问期新核实）
+
+| # | 事实 | 影响 |
+|---|---|---|
+| 1 | 子角色 turn 上限**不在图内**——`_build_sub_agent` 传 `middleware=[]`，真判定在 `fork_stream.py:247`（`model_starts > max_turns` → 中断文案 + `fork_stop_reason=TURN`） | 若给子角色装图内预算 ⇒ **中断原因永不触发、委派终态改变** ⇒ 预算 middleware **只给主角色** |
+| 2 | 温度分档判据今天读 **`state.kb_id`**（`agent_node.py:202`），`model turn` 的 `kb_bound` 同源 | 子图里 `kb_id` 可能未 seed ⇒ **绑 KB 轮误走非 KB 档（显式传 0.6）** ⇒ 判据改取 `ctx.kb_bound` |
+| 3 | `iteration done` 的 `msgs` 今天含 system 段（`:139-142` 的 `system_msgs` 正是从它数出来的） | 迁 middleware 后 `msgs` 少 1~2 ⇒ 钉死公式 `len(request.messages) + 1`；且 `prompt messages` 的 `system_msgs` **须在拆分前算**，否则变 0 |
+| 4 | `AgentTurnBudget` 的自增在 `after_model`，而 `model turn`/`iteration done` 产在 `awrap_model_call` | 直接取 `_turn_count` 会**整体少 1** ⇒ 统一为 `_turn_count + 1` |
+| 5 | `AgentState.model_used` / `is_fallback` 同样**零读写**（`agent_service.py:763` 的 `is_fallback` 是硬编码 `False`） | 死字段是 **4 个不是 2 个** ⇒ D-09 修正 + 新增 D-10 |
+| 6 | 外层图有三条结构会失效（`add_node("tools")` / `add_edge("tools","agent")` / `add_conditional_edges("agent", route_agent, …)`） | tasks 2.4 补「删除 + 直连」；并注明 `ToolTraceCollector` 的 `"tools"` 判据**仍有效**（事件来自子图内同名节点） |
+| 7 | `tests/` 有 **6 个文件**用 `{"langgraph_node": "agent"}` 造事件，`test_skill_executor.py:586-620` 另有一份「同口径」谓词副本 | 只改 `src/` ⇒ 副本继续绿却已脱节 ⇒ tasks 3.5 须同步 |
+| 8 | ADR 最大号仍是 **`0015`**——`skill-execution-and-delegation` 已归档却**没占号** | 「其将先占 0016」的表述作废 ⇒ 改为「按 dev-wsl 当时最大号 +1（`0016`），取号前与在途 change 协调」 |
+| 9 | `create_agent(` 在 `src/` **只有 1 处**调用点；`lc_agent_name` **全仓零消费者** | 「唯一装配」可达 ⇒ 加**静态扫描断言**；角色 `name` 本变更**两角色都不传**（传了会加 metadata，属可观测变更） |
+
+### 落盘的 25 项（按文件）
+
+- **`specs/agent-assembly`**：上限条限定**主角色** + 子角色 middleware 为空 + 共用同一 schema + 三条入口同源 scenario + 静态扫描断言 + 工具取数按 `kb_id`/`query` **分两类** + `query` 取真值 scenario + 去掉「角色名」参数
+- **`specs/agent-loop-observability`**：新增「循环域日志的字段值逐字保持」（`msgs` 含 system / `iteration` = 本次调用序号 / 温度上报与生效一致）；上限告警句改为**指向既有**「护栏命中告警」并统一「有效上限」口径
+- **`specs/prompt-composition`**：新增「消息构成计数逐字不变」（`system_msgs` 不得为 0）
+- **`specs/delegate-task`**：子代理上限**仍由消费侧判定**（不由图内预算强制）；主/子 middleware 集合写实（主四件套 / 子为空）
+- **`proposal.md`**：L2 加模型参数 middleware 与「仅主角色」；工具取数按事实分两类；补「外层图结构收缩」；`AgentState` 补新增字段；明确不做补 4 项（四死字段 / 子角色上限 / 三组埋点）；六条（核对无误）；rebase 表述；ADR 编号
+- **`design.md`**：D1 补外层图三条结构 + 三条入口；D2 实测依据改准 + 载体/seed 权威关系 + `system_msgs` 须拆分前算；D3 补「只给主角色」及后果；D9 四件套；D10 编号；D11 加**通道分类表**；**新增 D13（中间件组成/顺序/取值口径）、D14（子角色装配面与上限归属）、D15（温度判据取 ctx）、D16（死字段四 + 埋点处置）**；Risks 补 7 条；Migration 回滚补结构；OQ 删掉错引用的对方 D6
+- **`tasks.md`**：0.6 **基线采集**；§1 四件套 + 顺序 + 公式；§2 `system_msgs`/seed 两类/外层图三结构/埋点删除；§3 谓词副本与夹具；§4 死字段四；§5 只传三样、不传 `max_turns`/`name`；§6 口径；§7 补 7.21 静态扫描 / 7.22 基线逐字比对 / 7.23 子角色观测不重复；§8/§9 登记与验收
+- **`docs/agents/requirements_pool.md`**：D-09 修正为四个 + 新增 **D-10**（`is_fallback` 硬编码失真）/ **D-11**（埋点清理待办）；F-36 补通道分类与 task 号
+- **`docs/agents/defensive-patterns.md`**：新增「per-call `extra_body` 整体覆盖 + 档位判据须取请求级上下文」
+
+**闸门**：`openspec validate` 通过（4/4 工件）；doc 闸门 `0 error, 38 warn`；ADR 闸门 `15 条 0 error`。spec 计数：agent-assembly R=6/S=17、agent-loop-observability R=2/S=7、answer-verification R=1/S=4、delegate-progress-observability R=1/S=4、delegate-task R=1/S=4、prompt-composition R=1/S=5。
+
+**仍未验（实现期，已记 OQ）**：`@observe` 迁 `awrap_model_call` 是否指向正确 observation；真实模型 E2E（token 内容 / `extra_body` / 绑定轮不带 `temperature`）；`abort` 穿「节点内 invoke 子图」的单元覆盖。
+
+## 十八、`architecture-review` 闸门（2026-09-29）：三轮 → **Approve**
+
+五轮盘问收口后按 dev-flow 走 ④ 必配闸门，用**每次都新派一个没写过提案的只读子代理**做独立评审。
+
+| 轮 | 结论 | 关键产出 |
+|---|---|---|
+| 1 | **Request changes**（2 Blocker + 3 Important） | 全部经我**独立复现**为真，其中一条比评审所述更严重 |
+| 2 | **Request changes** | 5 项里 3 项真关闭；**2 项残留 + 1 处新事实错误 + 1 处我亲手引入的矛盾** |
+| 3 | **Approve** | 6 项收口清单逐条实证关闭；另捎带查出我对需求池造成的**编号冲突**（已修） |
+
+### 评审查出的真问题（含我自己的错误）
+
+| # | 问题 | 证据 | 处置 |
+|---|---|---|---|
+| **B1** | `kb_id` 未 seed ⇒ 无 ctx 入口检索恒空 | `check_abstain.py:127` / `eval_ragas.py:129` 只把 `kb_id` 放进**图输入**、两文件 `current_request_ctx` **0 处** | D11 新增「为什么 `kb_id` 也必须 seed」；tasks 2.2 移入必 seed；spec 加「无请求上下文的入口」scenario；新增 7.25 |
+| **B2** | `deep_thinking` 未 seed ⇒ **深度思考对所有请求静默关闭** | 我自跑探针：只传 `messages` 时 middleware 看到的键**只有 `['messages']`**（schema 默认值**不填充**） | D13 钉死来源；tasks 1.2/1.4/2.2/6.5 同步；spec 加 scenario；新增 7.26 |
+| **I1** | 回写基准若取"子图输入长度" ⇒ **regen 轮丢问题与历史** | 今天首轮写的是 `[*messages, result]`（`agent_node.py:305-308`），即外层累积整份组装结果 | D7 重写（基准 = 外层 `len(state.messages)`）+ 标注旧探针证据**不等价**；7.14 扩为"含原始 query 与历史" |
+| **I2** | `_convert_event` 的 `scope` **今天不参与判别**（三处调用均缺省 `main`）⇒ "两维判据"不成立；改谓词后子代理事件失去"偶然被挡住"的第二层 | `grep _convert_event(` 三处无 scope；docstring 自陈 | D4 重写；spec 重写（删"两个既有维度"、加"不泄漏"scenario）；3.4 改写；新增 7.24 |
+| **I3** | 夹具文件数是 **5** 不是 6（我把 `test_fork_stream_trace` 之类算进去了） | 自 grep `tests/` | 3.5 列名；proposal/design 改数 |
+| **新** | **middleware 收到的 state 是映射**（`state.kb_id` 抛 `AttributeError`）⇒ 设计里 `state._turn_count` 式写法**不可运行** | 我自跑探针：`ATTR_KB_ID: AttributeError: 'dict' object has no attribute 'kb_id'` | 全改 `state.get(...)`；D13/1.8 加通例 |
+
+### 我自己的错误（本轮又新增 3 处，一并记下）
+
+1. **`design.md` Risks 里我亲手写进「`kb_id` 不要求 seed」**（与本轮 D11 的修复正好相反）——第 2 轮评审抓出。
+2. **`design.md` 写「全仓无任何地方以 `scope="delegate"` 调 `_convert_event`」是假的**——`tests/services/test_agent_service.py:1134` 就是这么调的（该形参有测试覆盖、只是无生产调用方）。已改为"`src/` 生产调用点无"。
+3. **需求池 `F-35` 被我重复占用**（`git blame` 指向我的提交 `21c349a`）——迭代触顶那条已改 **F-37**，引用同步，并调回编号顺序。
+
+### 落盘规模
+
+`openspec validate` 通过（4/4）；doc 闸门 `0 error, 38 warn`；ADR 闸门 `15 条 0 error`；tasks **88 条**（无重号）。spec 计数：agent-assembly **R=6/S=18**、agent-loop-observability **R=2/S=8**、delegate-progress-observability **R=1/S=5**、answer-verification R=1/S=4、delegate-task R=1/S=4、prompt-composition R=1/S=5。
+
+**仍未验（实现期）**：`@observe` 迁 `awrap_model_call` 的 observation 归属 + `ModelResponse` 拆包；真实模型 E2E（token 内容 / `extra_body` / 绑 KB 轮不带 `temperature`）；`abort` 穿子图的单元覆盖。

@@ -4,7 +4,9 @@
 
 ### Requirement: 循环回合上限命中时的消息状态
 
-回合上限命中时，系统 SHALL 记录 warn 级日志（沿用 `MAX_AGENT_ITERATIONS` 命中语义：含 query 与 iteration），并 SHALL 以如下**确切状态**结束该轮循环：
+回合上限命中时 SHALL 产出 warn 级日志——其事件名与字段集沿用既有「护栏命中告警」要求（`query` 与 `iteration`），本要求**不重复规定日志内容**，只补充两点：日志的产出条件 SHALL 与停止判定**解耦**（见下），且上限口径 SHALL 取**有效上限**（基础上限 + 委派放宽增量；既有要求里 `MAX_AGENT_ITERATIONS` 的表述以本条口径为准）。
+
+该轮循环 SHALL 以如下**确切状态**结束：
 
 - 计数达到有效上限时**即**产出该 warn 日志——产出条件 SHALL NOT 依赖"该轮是否仍声明工具调用"（模型在上限轮恰好正常收尾时，日志同样产出）
 - 模型调用次数 SHALL 恰好等于该轮有效上限（含委派放宽后的值）
@@ -13,7 +15,7 @@
 
 由此，该轮的答案文本 SHALL 允许为空串，且 SHALL NOT 被替换为提示性文案或工具返回内容。
 
-**理由**：这是既有行为的确切语义，也是"触顶后用户看到空回答"这一已知缺陷的载体（见 `requirements_pool` F-35）。上游修复（轮次/时长护栏取值与兜底）由独立变更承担；在此之前本语义 SHALL 保持不变，任何改动都须显式可见。
+**理由**：这是既有行为的确切语义，也是"触顶后用户看到空回答"这一已知缺陷的载体（见 `requirements_pool` F-37）。上游修复（轮次/时长护栏取值与兜底）由独立变更承担；在此之前本语义 SHALL 保持不变，任何改动都须显式可见。
 
 #### Scenario: 上限轮正常收尾也产出告警
 
@@ -36,3 +38,32 @@
 
 - **WHEN** 回合上限命中
 - **THEN** 系统 SHALL NOT 向消息序列注入任何提示性（如"已达调用上限"）消息
+
+### Requirement: 循环域日志的字段值逐字保持
+
+主循环的三条日志（`iteration done` / `iteration limit` / `model turn`）在循环改由装配入口承载后，SHALL 保持**事件名、字段集与字段值**逐字不变：
+
+- `iteration done` 的 `msgs` SHALL 仍计**本轮送入模型的完整消息条数（含 system 段）**——system 段改由 middleware 施加后，SHALL NOT 因消息拆分而少计
+- 三条日志的 `iteration` SHALL 都等于**本次模型调用的序号**（第 k 次调用取 k），SHALL NOT 因计数在钩子中的自增时机而整体偏移
+- `model turn` 的 `temperature` / `temp_source` SHALL 与**实际施加到本次调用**的档位一致（观测 SHALL NOT 与生效参数脱节）
+- 施加到模型的调用参数（温度档位与 `extra_body` 的思考开关）SHALL 与变更前一致：**思考开关的值 SHALL 来自随调用链传入的会话开关**，SHALL NOT 因该值未随图状态传入而静默取默认（那会让深度思考对所有请求关闭）
+
+#### Scenario: msgs 计入 system 段
+
+- **WHEN** 未绑 KB 的一次生成产出 `iteration done` 日志
+- **THEN** 其 `msgs` SHALL 等于含两条 system 消息在内的完整消息条数，SHALL NOT 等于拆分后的非 system 条数
+
+#### Scenario: iteration 为本次调用序号
+
+- **WHEN** 主循环发生第 k 次模型调用
+- **THEN** `iteration done` 与 `model turn` 的 `iteration` SHALL 均为 k（首次调用取 1）
+
+#### Scenario: 温度上报与生效档位一致
+
+- **WHEN** 某次生成绑定了 KB（沿用不传 `temperature` 的档位）
+- **THEN** `model turn` 的 `temperature` / `temp_source` SHALL 反映该档位，且实际施加给模型的参数 SHALL 与之一致
+
+#### Scenario: 思考开关随调用链传入
+
+- **WHEN** 一次生成的会话开关为「开启深度思考」
+- **THEN** 施加给模型的调用参数 SHALL 携带开启的思考开关，SHALL NOT 因该值未随图状态传入而落回关闭态
