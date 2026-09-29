@@ -1,0 +1,231 @@
+# 部署用 compose —— 全部镜像来自阿里云 ACR，目标机不构建、不依赖 Docker Hub
+#
+# 用法（在目标机）：
+#   docker login <ACR>        # 必需：app 镜像在**私有**库（见下）；6 个基镜像在公开库、免登录
+#   docker compose -f docker-compose.image.yml up -d
+#
+# 与 docker-compose.yml（dev）的差异：
+#   1. 所有服务改用 ACR 镜像，**移除 build:**（目标机只 pull，不构建）
+#   2. 第三方镜像地址换成 ACR tag。⚠ 不能沿用上游 digest —— 推 ACR 时多平台 index
+#      被降级为单平台 manifest，digest 已变（例：minio 的 a3c85091… → 94de89f4…）
+#
+# 【镜像来源分两个 repo】按"是否含自有内容"分
+#
+#   公开 repo  deploy_base  —— 6 个第三方/基底镜像，**免登录拉取**。版本台账：
+#     tag                       实测版本
+#     redis-7.4.9-alpine        Redis 7.4.9
+#     pgvector-pg15.19-0.8.6    PostgreSQL 15.19 + pgvector 扩展 0.8.6
+#     minio-2026-09-21          minio RELEASE.2026-09-21T00-15-41Z
+#                               （原始版本串含冒号，Docker tag 不允许，故取日期）
+#     langfuse-2.95.11          （tag 即版本）
+#     nginx-1.31.6-alpine       nginx 1.31.6
+#     python-3.12.14            构建期 builder 基镜像（不在本文件里，见 Dockerfile）
+#     python-3.12.14-slim       构建期 runtime 基镜像（同上）
+#     ⇒ 所有 tag 一律带 patch 号：升级基镜像必须改引用、走评审，
+#       避免"同 tag 覆盖"造成的静默换基（旧浮动 tag 应已从 ACR 删除）
+#
+#   私有 repo  deploy_store_local  —— 自建 app 镜像（含项目源码）
+#     app                       **待云效流水线构建并推送**（tag 由云效侧约定）
+#     ⚠ app 不进公开 repo 的理由：镜像内含 src/ + scripts/（项目源码），放公开库等于公开代码。
+#
+# ⚠ 本文件**只做了镜像替换**，以下仍属另行变更的范围，未在此处理：
+#   - 端口收紧（redis / app / minio 现在发布到 0.0.0.0）
+#   - mem_limit 复核（这里沿用 dev 档位；prod 档位合计 14.25G 在 2C8G 上会 OOM）
+#   - nginx client_max_body_size（默认 1m，会让真实文档上传 413）
+#   - HTTPS（nginx 只有 80）
+#
+# 【目标机必须存在的路径】—— 本文件靠挂载而非打进镜像，缺任一条对应功能静默失效：
+#   .env                              app 的运行配置（含 MINIO_ROOT_USER/PASSWORD）
+#   deploy/nginx/nginx.conf           nginx 路由（缺 → 默认页/404）
+#   deploy/nginx/html/                前端静态文件（缺 → 404）
+#   deploy/postgres/init/             建应用库 + vector 扩展（缺 → 应用库不存在）
+#   skills/  agents/                  技能与智能体预设（缺 → 静默清空，不报错）
+#   alembic/  alembic.ini             迁移脚本（缺 → 容器内跑不了 alembic）
+#   data/ragas/                       RAGAS 评估数据目录
+name: corporate_rag
+services:
+  redis:
+    image: crpi-u3ezxc1o5hirfddw.cn-shanghai.personal.cr.aliyuncs.com/deploy_demo/deploy_base:redis-7.4.9-alpine
+    mem_limit: 128m
+    mem_reservation: 64m
+    container_name: corporate-rag-redis
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-corporate_rag_pass}
+    ports:
+      # ⚠ 暂未收紧：部署时应改为 127.0.0.1:6379:6379 或交由安全组封闭
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --requirepass ${REDIS_PASSWORD:-corporate_rag_pass}
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-corporate_rag_pass}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - app-network
+
+  postgres:
+    image: crpi-u3ezxc1o5hirfddw.cn-shanghai.personal.cr.aliyuncs.com/deploy_demo/deploy_base:pgvector-pg15.19-0.8.6
+    mem_limit: 1g
+    mem_reservation: 256m
+    container_name: corporate-rag-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: langfuse
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: ${LANGFUSE_POSTGRES_PASS:-langfuse_pass}
+      # 应用库的应用账号密码，供 init 脚本使用
+      POSTGRES_APP_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    # 仅回环：宿主侧跑 alembic 需要它；不对外暴露
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./deploy/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+    networks:
+      - app-network
+
+  minio:
+    image: crpi-u3ezxc1o5hirfddw.cn-shanghai.personal.cr.aliyuncs.com/deploy_demo/deploy_base:minio-2026-09-21
+    mem_limit: 256m
+    mem_reservation: 128m
+    container_name: corporate-rag-minio
+    restart: unless-stopped
+    entrypoint: sh
+    command: -c 'minio server --address ":9000" --console-address ":9001" /data'
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-miniosecret}
+    ports:
+      # ⚠ 暂未收紧：部署时应改为 127.0.0.1:9000:9000 或交由安全组封闭
+      - 9090:9000        # S3 API (host:9090 → container:9000, avoid port conflict)
+      - 127.0.0.1:9091:9001
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 3s
+      timeout: 5s
+      retries: 5
+      start_period: 1s
+    networks:
+      - app-network
+
+  langfuse-web:
+    image: crpi-u3ezxc1o5hirfddw.cn-shanghai.personal.cr.aliyuncs.com/deploy_demo/deploy_base:langfuse-2.95.11
+    mem_limit: 256m
+    mem_reservation: 128m
+    container_name: corporate-rag-langfuse-web
+    profiles: ["langfuse"]
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      DATABASE_URL: postgresql://langfuse:${LANGFUSE_POSTGRES_PASS:-langfuse_pass}@postgres:5432/langfuse
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-changeme}
+      SALT: ${LANGFUSE_SALT:-changeme}
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+      TELEMETRY_ENABLED: ${TELEMETRY_ENABLED:-false}
+      # v2 的 Next.js standalone 默认绑回环，且 Docker 会把 HOSTNAME 设为容器 ID
+      # → 必须显式绑 0.0.0.0，否则 app 经 langfuse-web:3000 不可达（静默走本地兜底）
+      HOSTNAME: "0.0.0.0"
+      LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID:-}
+      LANGFUSE_INIT_ORG_NAME: ${LANGFUSE_INIT_ORG_NAME:-}
+      LANGFUSE_INIT_PROJECT_ID: ${LANGFUSE_INIT_PROJECT_ID:-}
+      LANGFUSE_INIT_PROJECT_NAME: ${LANGFUSE_INIT_PROJECT_NAME:-}
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_INIT_PROJECT_PUBLIC_KEY:-}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_INIT_PROJECT_SECRET_KEY:-}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:-}
+      LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME:-}
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-}
+    networks:
+      - app-network
+
+  nginx:
+    # 官方 nginx 基底 + 挂载本项目的 conf 与前端静态文件（**不烤进镜像**）
+    # 收益：前端改动只需改文件 + restart nginx，无需重建/重推镜像
+    # 前置：目标机需存在 deploy/nginx/nginx.conf 与 deploy/nginx/html/
+    # 注：官方 nginx 镜像不含本项目 conf/前端，故此处必须挂载，缺任一条都会 404/默认页
+    image: crpi-u3ezxc1o5hirfddw.cn-shanghai.personal.cr.aliyuncs.com/deploy_demo/deploy_base:nginx-1.31.6-alpine
+    mem_limit: 128m
+    mem_reservation: 64m
+    container_name: corporate-rag-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/conf.d/default.conf
+      - ./deploy/nginx/html:/usr/share/nginx/html
+    depends_on:
+      - app
+    networks:
+      - app-network
+
+  app:
+    # ⚠ 自建镜像**留在私有 repo**：镜像内含 src/ + scripts/（项目源码），放公开库等于公开代码。
+    # 放公开 repo 等于公开代码。若确要公开，改这一行即可（并接受源码可被任何人拉取）。
+    image: crpi-u3ezxc1o5hirfddw.cn-shanghai.personal.cr.aliyuncs.com/deploy_demo/deploy_store_local:app
+    mem_limit: 512m
+    mem_reservation: 256m
+    container_name: corporate-rag-app
+    restart: unless-stopped
+    ports:
+      # ⚠ 暂未收紧：app 可直接绕过 nginx 访问；部署时应改为 127.0.0.1 或移除
+      - "8000:8000"
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --timeout-graceful-shutdown 30
+    env_file:
+      - .env
+    environment:
+      TZ: Asia/Shanghai
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-corporate_rag_pass}
+      POSTGRES_HOST: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_USER: corporate_rag
+      POSTGRES_DATABASE: corporate_rag
+      LOG_DIR: /data/logs
+    volumes:
+      - app_logs:/data/logs
+      - ./data/ragas:/app/data/ragas
+      # 以下四项**靠挂载、不打进镜像**（目标机需存在这些路径，见文件头「目标机必须存在」）
+      - ./skills:/app/skills
+      - ./agents:/app/agents
+      # 迁移：容器内已带正确的 DB 环境变量（POSTGRES_HOST=postgres），故迁移在容器内跑：
+      #   docker compose exec app alembic upgrade head
+      # ⚠ ./alembic.ini 必须真实存在 —— 单文件 bind mount 时宿主缺文件，Docker 会建同名**目录**
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - app-network
+
+volumes:
+  redis_data:
+    name: corporate_rag_redis_data
+  postgres_data:
+    name: corporate_rag_postgres_data
+  minio_data:
+    name: corporate_rag_minio_data
+  app_logs:
+    name: corporate_rag_app_logs
+
+networks:
+  app-network:
+    name: corporate_rag_network

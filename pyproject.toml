@@ -1,15 +1,16 @@
 [build-system]
-requires = ["setuptools>=64.0"]
+# PEP 639 的 license 写法（`license = "MIT"`）需要 setuptools >= 77
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "corporate-rag"
 version = "0.1.0"
-description = "Financial Document QA Assistant - MVP"
+description = "Corporate Agent Harness — 聊天底座 + 可插拔工具/知识库（RAG 为其能力模块之一）"
 authors = [{name = "tangnie"}]
-license = {text = "MIT"}
+license = "MIT"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "numpy<2.0",
     "langchain-openai==1.3.3",
@@ -43,6 +44,8 @@ dependencies = [
     # 密码哈希：src/utils/auth_crypto.py 直接 import bcrypt；此前仅由 chromadb 传递提供，
     # 已随 Chroma 退役一并消失，故显式声明为运行时依赖，不可移除
     "bcrypt==5.0.0",
+    # 迁移：部署时在容器内执行 alembic upgrade head，因此属**运行时依赖**（原先误置于 [dev]）
+    "alembic==1.19.0",
 ]
 
 [project.optional-dependencies]
@@ -56,7 +59,6 @@ dev = [
     "pyright==1.1.411",
     "pre-commit==4.6.1",
     "ruff==0.16.2",
-    "alembic==1.19.0",
 ]
 
 [tool.setuptools.packages.find]
