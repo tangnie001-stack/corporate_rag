@@ -5,14 +5,16 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from langchain_core.messages import AIMessage, SystemMessage
 from langchain_core.tools import tool
+from langgraph.graph.state import CompiledStateGraph
 
+from src.agents.graph.agent_factory import build_agent
 from src.agents.graph.nodes import format_node
 from src.agents.graph.state import AgentState
 from src.agents.graph.workflow import build_graph
 from src.config import settings
 from src.config.const import SSEInteractionTexts
 from src.core import logging as core_logging
-from src.core.log_events import Signal
+from src.core.log_events import Event, Signal
 from src.infra.llm.request_context import RequestContext, current_request_ctx
 from src.rag.context import RAGContext
 
@@ -30,7 +32,6 @@ def test_graph_topology():
     node_names = set(nodes) - {"__start__", "__end__"}
     assert node_names == {
         "agent",
-        "tools",
         "agent_finalize",
         "verify",
         "format",
@@ -46,6 +47,32 @@ def test_graph_topology():
         "generate",
     ):
         assert removed not in node_names
+
+
+def test_graph_has_no_outer_tools_node_and_agent_goes_straight_to_finalize():
+    """循环已内化进装配产物：外层无 tools 节点，agent 直连 agent_finalize。"""
+    graph = _build_test_graph(MagicMock())
+    nodes = set(graph.get_graph().nodes)
+    assert "tools" not in nodes, "循环已内化进装配产物，外层不得再有 tools 节点"
+    assert "agent" in nodes and "agent_finalize" in nodes
+    edges = {(e.source, e.target) for e in graph.get_graph().edges}
+    assert ("agent", "agent_finalize") in edges
+
+
+def test_sub_agent_assembly_does_not_emit_graph_compiled(monkeypatch):
+    """委派一次后 graph compiled 计数不变（装配入口不发该事件）。"""
+    calls: list[Event] = []
+
+    def fake_log_event(event, **fields):
+        calls.append(event)
+
+    monkeypatch.setattr("src.core.logging.log_event", fake_log_event)
+    _build_test_graph(MagicMock())  # 图装配层自己发一次
+    assert calls.count(Event.GRAPH_COMPILED) == 1
+
+    calls.clear()
+    build_agent(MagicMock(), tools=[], system="子角色静态串")  # 子角色装配入口
+    assert calls.count(Event.GRAPH_COMPILED) == 0, "装配入口不得发编译日志"
 
 
 def test_format_node_only_keeps_cited_sources():
@@ -213,21 +240,29 @@ def test_format_node_empty_when_abstention():
 
 
 class SequenceChatModel:
-    """极简 fake LLM：按调用顺序消费固定 AIMessage 序列，bind_tools 原样返回自身。"""
+    """极简 fake LLM：按调用顺序消费固定 AIMessage 序列，bind_tools 原样返回自身。
+
+    create_agent 的模型节点经 `bind_tools(tools, tool_choice=…, **model_settings)`
+    绑定后调用 `ainvoke(messages)`；故 fake 需提供这两个面（astream 已不再被走）。
+    """
 
     def __init__(self, responses: list[AIMessage]) -> None:
         """记录固定响应序列。"""
         self.responses = list(responses)
         self.tools = None
 
-    def bind_tools(self, tools):
-        """绑定工具：fake 直接返回自身。"""
+    def bind_tools(self, tools, tool_choice=None, **kwargs):
+        """绑定工具：fake 直接返回自身（接受 create_agent 传入的 tool_choice/model_settings）。"""
         self.tools = tools
         return self
 
-    async def astream(self, messages, **kwargs):
-        """按序 yield 一条固定响应（单块），忽略 extra_body 等额外参数。"""
-        yield self.responses.pop(0)
+    def bind(self, **kwargs):
+        """无工具路径的模型绑定：fake 直接返回自身。"""
+        return self
+
+    async def ainvoke(self, messages, **kwargs):
+        """按序返回一条固定响应（单条 AIMessage），忽略 model_settings 等额外参数。"""
+        return self.responses.pop(0)
 
 
 class StubPromptManager:
@@ -261,7 +296,7 @@ def _search_web_call(queries: list[str] | None = None) -> dict:
     }
 
 
-def _build_test_graph(llm, tools=None) -> object:
+def _build_test_graph(llm, tools=None) -> CompiledStateGraph:
     """编译测试图：默认注入 fake search_web 工具（tools 可传 spy 覆盖），其余依赖全 MagicMock。"""
     if tools is None:
         tools = [fake_search_web]

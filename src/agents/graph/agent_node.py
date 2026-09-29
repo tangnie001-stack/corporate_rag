@@ -6,6 +6,7 @@ agent 节点只负责：首轮组装消息并拆两半 → seed 子图 → ainvo
 """
 
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
@@ -139,6 +140,15 @@ def _split_initial_messages(
     system_half = [m for m in messages if isinstance(m, SystemMessage)]
     rest_half = [m for m in messages if not isinstance(m, SystemMessage)]
     return system_half, rest_half
+
+
+@dataclass
+class AgentLoopBundle:
+    """外层 agent 节点需要的装配产物与上下文。"""
+
+    agent: object  # build_agent 的产物（可直接 ainvoke 的编译图）
+    prompt_manager: object  # PromptManager，首轮组装用户消息模板
+    tool_names: frozenset[str]  # 本轮实际注册的工具名（段组装条件注入判据）
 
 
 def make_agent_loop_node(bundle) -> Callable:
