@@ -20,11 +20,11 @@ from src.utils.sse import (
 
 
 def _make_token_item(content: str) -> dict:
-    """构造 agent 节点 on_chat_model_stream 事件。"""
+    """构造模型节点 on_chat_model_stream 事件。"""
     return {
         LangGraphKey.EVENT: LangGraphEvent.CHAT_MODEL_STREAM,
         LangGraphKey.NAME: "ChatOpenAI",  # 事件 name 是模型类名，不是节点名
-        "metadata": {"langgraph_node": "agent"},
+        "metadata": {"langgraph_node": "model"},
         LangGraphKey.DATA: {LangGraphKey.CHUNK: AIMessageChunk(content=content)},
     }
 
@@ -250,12 +250,12 @@ class TestConvertEvent:
     """_convert_event 转换规则测试。"""
 
     def test_convert_chat_model_stream_agent_token(self):
-        """agent 节点 on_chat_model_stream → SSETokenEvent。"""
+        """模型节点 on_chat_model_stream → SSETokenEvent。"""
         result = _convert_event(_make_token_item("你好"))
         assert result == [SSETokenEvent("你好")]
 
     def test_convert_chat_model_stream_non_agent_ignored(self):
-        """非 agent 节点（generate）的流式 token 不产出。"""
+        """非模型节点（generate）的流式 token 不产出。"""
         item = {
             LangGraphKey.EVENT: LangGraphEvent.CHAT_MODEL_STREAM,
             LangGraphKey.NAME: "ChatOpenAI",
@@ -265,11 +265,11 @@ class TestConvertEvent:
         assert _convert_event(item) == []
 
     def test_convert_chat_model_stream_empty_content_ignored(self):
-        """agent 节点但 chunk 内容为空的流式事件不产出。"""
+        """模型节点但 chunk 内容为空的流式事件不产出。"""
         item = {
             LangGraphKey.EVENT: LangGraphEvent.CHAT_MODEL_STREAM,
             LangGraphKey.NAME: "ChatOpenAI",
-            "metadata": {"langgraph_node": "agent"},
+            "metadata": {"langgraph_node": "model"},
             LangGraphKey.DATA: {LangGraphKey.CHUNK: AIMessageChunk(content="")},
         }
         assert _convert_event(item) == []
@@ -348,7 +348,6 @@ def _make_service() -> tuple[AgentService, AsyncMock]:
     chat_manager.add_message_async = AsyncMock()
     service._chat_manager = chat_manager
     service._prompt_manager = Mock()
-    service._tracer = Mock()
     service._preset_registry = None
     service._skill_registry = None
     return service, chat_manager

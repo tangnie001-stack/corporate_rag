@@ -84,7 +84,7 @@ def _event(kind, chunk=None, output=None):
     return {
         "event": kind,
         "name": "agent",
-        "metadata": {"langgraph_node": "agent"},
+        "metadata": {"langgraph_node": "model"},
         "data": data,
     }
 

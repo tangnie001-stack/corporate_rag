@@ -183,7 +183,7 @@ def _convert_event(
 
     scope 标识事件归属：main = 主图事件（LangGraph astream_events / 澄清通道），
     delegate = fork 子代理事件（executor/delegate_task 经 clarify_channel 投递，
-    自带 type=delegate 标记）。delegate 转换不依赖 metadata.langgraph_node=="agent"
+    自带 type=delegate 标记）。delegate 转换不依赖 metadata.langgraph_node=="model"
     判定，杜绝子代理事件被误当主 token。scope 供后续调用方显式区分，当前实现
     下 graph 事件仅在 scope=="main" 时转换。
 
@@ -194,11 +194,11 @@ def _convert_event(
       {"type": "delegate", action: start|delta|end, delegate_id, skill, kind, delta,
       ok, reason} → SSEDelegateEvent（fork 过程增量，不进主 token 流/full_answer）
     - LangGraph astream_events 事件 dict（按事件类型接线，不依赖节点名映射）：
-      on_chat_model_start（metadata.langgraph_node == "agent"）→ SSEStatusEvent 思考中
-      on_chat_model_stream（metadata.langgraph_node == "agent" 且 chunk 内容非空）
-      → SSETokenEvent（agent 节点对 LLM 的流式 token）；chunk 带
+      on_chat_model_start（metadata.langgraph_node == "model"）→ SSEStatusEvent 思考中
+      on_chat_model_stream（metadata.langgraph_node == "model" 且 chunk 内容非空）
+      → SSETokenEvent（模型节点对 LLM 的流式 token）；chunk 带
       additional_kwargs.reasoning_content 时 → SSEReasoningDeltaEvent（思考增量）
-      on_chat_model_end（metadata.langgraph_node == "agent"）→ 捕获 model_used 到 capture
+      on_chat_model_end（metadata.langgraph_node == "model"）→ 捕获 model_used 到 capture
       on_tool_start name == "retrieve_kb" → SSEStatusEvent 检索中（detail 携带入参 query 及非默认 top_k）；
       name == "ask_user" → 不发
       on_tool_end name == "retrieve_kb" → SSEStatusEvent 检索完成
@@ -235,6 +235,9 @@ def _convert_event(
             )
         ]
 
+    # 判据实际只有「节点判别键」一维：scope 形参虽在，但生产调用点均用缺省 main。
+    # 主 SSE 与子代理事件的隔离由事件路由承担（var_child_runnable_config.set(None)
+    # 切断回调继承 + 委派事件经显式喂事件走委派域），属**单点机制**。
     if scope != "main":
         return []
 
@@ -247,7 +250,7 @@ def _convert_event(
     metadata = item.get("metadata", {}) or {}
 
     if kind == LangGraphEvent.CHAT_MODEL_STREAM:
-        if metadata.get("langgraph_node") == "agent":
+        if metadata.get("langgraph_node") == "model":
             chunk = item.get(LangGraphKey.DATA, {}).get(LangGraphKey.CHUNK)
             if chunk is not None:
                 content = chunk.content
@@ -264,7 +267,7 @@ def _convert_event(
         return []
 
     if kind == LangGraphEvent.CHAT_MODEL_START:
-        if metadata.get("langgraph_node") == "agent":
+        if metadata.get("langgraph_node") == "model":
             return [
                 SSEStatusEvent(
                     SSEInteractionTexts.STAGE_AGENT,
@@ -274,7 +277,7 @@ def _convert_event(
         return []
 
     if kind == LangGraphEvent.CHAT_MODEL_END:
-        if metadata.get("langgraph_node") == "agent":
+        if metadata.get("langgraph_node") == "model":
             output = item.get(LangGraphKey.DATA, {}).get(LangGraphKey.OUTPUT)
             model = _extract_model_name(output)
             if model and capture is not None:

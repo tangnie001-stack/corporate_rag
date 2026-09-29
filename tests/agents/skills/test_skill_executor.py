@@ -64,7 +64,7 @@ def _event(kind, chunk=None, output=None):
     return {
         "event": kind,
         "name": "agent",
-        "metadata": {"langgraph_node": "agent"},
+        "metadata": {"langgraph_node": "model"},
         "data": data,
     }
 
@@ -583,7 +583,7 @@ def _make_fork_delegate_tool(model: BaseChatModel):
 def _collect_fork_leak_events(stream_events) -> tuple[str, list[str]]:
     """从外层 astream_events 累积 full_answer 并收集带泄漏标记的 token 事件。
 
-    与 agent_service._convert_event 同口径：仅 metadata.langgraph_node == "agent"
+    与 agent_service._convert_event 同口径：仅 metadata.langgraph_node == "model"
     的 on_chat_model_stream 文本进 full_answer（对应外层 SSE token 累积）。
 
     Args:
@@ -603,7 +603,7 @@ def _collect_fork_leak_events(stream_events) -> tuple[str, list[str]]:
         if not content:
             continue
         metadata = event.get("metadata") or {}
-        if metadata.get("langgraph_node") == "agent":
+        if metadata.get("langgraph_node") == "model":
             full_answer += content
         if _LEAK_MARKER in content:
             leaked_tokens.append(content)
@@ -614,11 +614,14 @@ def _collect_fork_leak_events(stream_events) -> tuple[str, list[str]]:
 async def test_fork_subagent_events_do_not_leak_to_outer_stream():
     """fork 子代理 LLM 事件不泄漏进外层流（Critical 回归）。
 
-    真实路径：外层图 agent 节点流式调模型 → ToolNode 执行 delegate_task →
+    真实路径：外层图模型节点流式调模型 → ToolNode 执行 delegate_task →
     SkillExecutor._run_fork → 真实 create_agent 子代理调同一 LLM。修复前
     子代理 on_chat_model_stream 经 var_child_runnable_config 传播到外层
-    astream_events（metadata.langgraph_node == "agent"），token 带 _FORK_ANSWER
-    内容泄漏进 SSE 并污染累积的 full_answer。
+    astream_events，token 带 _FORK_ANSWER 内容泄漏进 SSE 并污染累积的 full_answer。
+
+    谓词改为 "model" 后，主循环模型事件与子代理模型事件的节点名**同为 "model"**，
+    子代理事件不再被节点名偶然挡住 ⇒ 本用例按 "model" 口径累积 full_answer，泄漏
+    一旦发生即污染该累积，成为隔离单点机制（见 _convert_event docstring）的守护。
 
     注入请求上下文后，子代理原文经 ctx.clarify_channel 走 delegate 通道（可观测）
     仍不进入 full_answer：scope=delegate 只投 delta，不回灌主 token/落库内容。
@@ -626,15 +629,15 @@ async def test_fork_subagent_events_do_not_leak_to_outer_stream():
     model = _ScenarioChatModel()
 
     graph = StateGraph(MessagesState)
-    graph.add_node("agent", _make_streaming_agent_node(model))
+    graph.add_node("model", _make_streaming_agent_node(model))
     graph.add_node("tools", ToolNode([_make_fork_delegate_tool(model)]))
-    graph.set_entry_point("agent")
+    graph.set_entry_point("model")
     graph.add_conditional_edges(
-        "agent",
+        "model",
         _route_to_tools_or_end,
         {"tools": "tools", END: END},
     )
-    graph.add_edge("tools", "agent")
+    graph.add_edge("tools", "model")
     compiled = graph.compile()
 
     init_state = cast(
