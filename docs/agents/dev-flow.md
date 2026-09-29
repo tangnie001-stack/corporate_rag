@@ -19,12 +19,12 @@
 | ② 完善需求 | `openspec-explore` | `grilling`；`/grill-with-docs`（边拷问边产 ADR / 术语） | 需求模糊需要逼问；要在拷问同时产出 ADR 或术语时改用后者 |
 | ③ 出方案 | `openspec-propose` | `codebase-design`、`domain-modeling` | 需要定模块边界 / 领域模型时 |
 | ④ 验证可行性 | `architecture-review` | `prototype`（跑起来证伪）；`research` 或 `firecrawl-deep-research`（补外部事实） | **必配**；数值或状态类假设纸上推不准时加 `prototype` |
-| ⑤ 生成文件 | `writing-plans`（落 `docs/superpowers/plans/`）**或** `openspec-propose` 的 tasks | — | **二选一，不可都写**，否则一事两档 |
-| ⑥ 执行 | `executing-plans` 或 `openspec-apply-change` | **worktree 前置**（新开 change 先问，见下节）→ `verification-before-completion` → `requesting-code-review`；收尾 `finishing-a-development-branch` | 两道闸门必走 |
+| ⑤ 生成文件 | `writing-plans`（落 `docs/superpowers/plans/`）**或** `openspec-propose` 的 tasks | **worktree 前置**（进入本环节前先问，见下节） | **二选一，不可都写**，否则一事两档 |
+| ⑥ 执行 | `executing-plans` 或 `openspec-apply-change` | `verification-before-completion` → `requesting-code-review`；收尾 `finishing-a-development-branch`（worktree 已在 ⑤ 前定） | 两道闸门必走 |
 
-## 变更开工前置：先问「要不要建 worktree」
+## ⑤ 开工前置：进入「生成文件」前问「要不要建 worktree」
 
-**规定**：每次**新开一个 change**（`openspec-propose` 产出工件后转入执行、或接手一个在途 change），**先问一句"是否为本次 change 建隔离 worktree"**，不得默认就地开工。判据满足任一即建：
+**规定**：③④ 的产出（`openspec/changes/<name>/` 的 `proposal.md` / `design.md` / `specs/`）一律落在**主工作区（`dev-wsl`）**，并**提交**；**进入 ⑤ 生成文件之前**（写 `docs/superpowers/plans/` 的计划，或写 `openspec-propose` 的 tasks —— **两条路都在此列**），先问一句"是否为本次 change 建隔离 worktree"，不得默认就地开工。判据满足任一即建：
 
 | 判据 | 怎么看 |
 |---|---|
@@ -32,17 +32,21 @@
 | 本 change 会产生多次提交 | 每次提交都要过全量 doc 闸门，窗口长，与并发提交互踩 |
 | 跨会话 / 跨天推进 | 中途会被别的事打断 |
 
+**建 worktree 的顺序：先提交、再建**。worktree 只签出**被 git 跟踪**的文件，未提交的工件与代码在新工作区里**看不到**；先把 `dev-wsl` 提交干净（`git status` 为空）再 `git worktree add`，两个工作区从同一个干净基点出发、不留半成品。
+
 建法与全部坑（`.env` / `.venv` 必须带过去、`openspec` symlink 会失效、Docker 不隔离、未跟踪文件不共享）见 `cookbook.md`「并行会话（worktree）」。
 
-**为什么要成文**：本仓 pre-commit 含全量 doc 闸门，**单次提交窗口实测 2～6 分钟**。这个长窗口里另一个会话提交会撞 `fatal: cannot lock ref 'HEAD'`；若它改了工作区文件，钩子会报 `files were modified by this hook`（**校验本身是过的**，失败只因窗口内并发写入）。2026-09-22 实测一次窗口 **6m27s**，期间 `dev-wsl` 被平行会话推着往前走了两个提交 —— 即该故障不是假设，是常态条件。
+**为什么工件要留在主分支**：change 目录是"给人看、给多会话共享"的产物。写在主分支上，任何从 `dev-wsl` 开出的 worktree 都能直接看到、只需一次正常 merge；若每个 worktree 各写一份，就只能靠 merge 对撞。而真正需要隔离的是**代码提交**，那正好是 ⑤ 之后才发生的事 —— 所以把挂点后移到 ⑤ 是更准的位置，不只是更方便。
 
-**为什么这条挂在「动作」上而不是「状态」上**：本仓 `cookbook.md` 早就有「并行会话（worktree）」的完整操作步骤，但它的触发写在**场景**里 —— "同一台机器上多个会话/任务同时改这个仓库"。那是**状态**，需要人主动判断才能察觉；而"先想起来去判断一下我算不算在并行"这一步，**本身就是遗忘**。所以它长期没起过提示作用。改成挂在**动作**上（"新开 change"这个必然发生、且当场自知的事件）才有可能被触发。
+**提交窗口与并发互踩（已大幅缓解，仍非零）**：本仓 pre-commit 含全量 doc 闸门。`check_docs` 于 2026-09-23（`f802433`）优化后，**主工作区提交窗口实测 ≈6s**（原 4–7 分钟）；窗口内另一会话提交仍会撞 `fatal: cannot lock ref 'HEAD'`，改了工作区文件则会报 `files were modified by this hook`（**校验本身是过的**）。⚠️ **落后于 `f802433` 的 worktree 仍是旧慢版**（判据：`grep -c _src_blob <worktree>/src/cli/check_docs.py`，输出 0 即旧慢版）—— 所以判据里的"多次提交 / 跨天"仍然有效。
+
+**为什么这条挂在「动作」上而不是「状态」上**：本仓 `cookbook.md` 早就有「并行会话（worktree）」的完整操作步骤，但它的触发写在**场景**里 —— "同一台机器上多个会话/任务同时改这个仓库"。那是**状态**，需要人主动判断才能察觉；而"先想起来去判断一下我算不算在并行"这一步，**本身就是遗忘**。所以它长期没起过提示作用。改成挂在**动作**上（"进入 ⑤ 生成文件"这个必然出现、且当场自知的环节边界）才有可能被触发。
 
 > **可复用判据**：写任何"防止忘记"的规定时，检查它的触发条件挂在哪一侧 ——
 
 | | 例子 | 为什么 |
 |---|---|---|
-| ✅ **动作**（必然发生 + 当场自知） | 新开 change / 改 API 响应结构 / 提交前 / 加新能力 | 到点就会碰上，不需要额外判断 |
+| ✅ **动作**（必然发生 + 当场自知） | 进入 ⑤ 生成文件 / 改 API 响应结构 / 提交前 / 加新能力 | 到点就会碰上，不需要额外判断 |
 | ❌ **状态**（需主动判断才察觉） | 是否在并行 / 库里有没有数据 / 有没有别的会话在跑 | "想起来去判断"这一步就是遗忘本身 |
 
 > 一句话：**提示的触发条件必须挂在"动作"上，不能挂在"状态"上。挂在状态上的提示 ≈ 不存在。**
