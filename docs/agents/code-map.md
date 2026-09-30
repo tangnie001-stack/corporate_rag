@@ -20,7 +20,7 @@
 | `docs/` | 文档：`agents/`（本目录，规则/契约/排查）、`design/`（UI 设计规格与 HTML 预览）、`openspec/`（OpenSpec 主目录）、`superpowers/` |
 | `openspec/` | **符号链接 → `docs/openspec`**；OpenSpec changes / specs |
 | `alembic/` + `alembic.ini` | 数据库迁移（唯一链；`0001_pg_baseline` 从零建 8 张表，`0002_kb_domain` 加列） |
-| `scripts/` | 运维脚本（清库、重建 KB 数据、重写 `content_seg`）；`scripts/deploy/deploy.sh` = **目标机部署**（环境判定 → 前置检查 → `git pull` 更新挂载文件 → ACR 登录校验 → 拉镜像 → 起栈 → 迁移 → 健康检查） |
+| `scripts/` | 运维脚本（清库、重建 KB 数据、重写 `content_seg`）；`scripts/deploy/deploy.sh` = **目标机部署**（环境判定 → 依赖安装 → 前置检查 → `git pull` 更新挂载文件 → ACR 登录校验 → 拉镜像 → 起栈 → 迁移 → 健康检查）。标准发布路径 `/opt/wwww/corporate_rag`（脚本内置 `EXPECTED_ROOT`，跑在别处会提醒） |
 | `litellm/` | LiteLLM 代理配置（模型网关） |
 | `data/`、`logs/` | 运行期数据与日志挂载点 |
 | `docker-compose.yml` / `.override.yml` / `.prod.yml` | 编排（redis / postgres / minio / langfuse-web / nginx / litellm-proxy / app 共 7 个服务；prod 无 litellm-proxy）。`langfuse-web` 挂 `profiles: ["langfuse"]`，dev 经 `.env` 的 `COMPOSE_PROFILES=langfuse` 默认启用 |
