@@ -3,11 +3,18 @@
 #   环境判定 → 依赖安装 → 前置检查 → 更新挂载文件 → ACR 登录 → 拉镜像 → 起栈 → 迁移 → 健康检查
 #
 # 用法：
-#   bash scripts/deploy/deploy.sh [--force] [--no-git-pull] [--no-install-deps]
+#   bash scripts/deploy/deploy.sh [--force] [--no-git-pull] [--no-install-deps] [--init-sparse]
 #
 #   --force            跳过「开发机 / 环境未知」的拒绝（仅在你明确知道后果时用）
 #   --no-git-pull      不做 git pull，沿用当前挂载文件
 #   --no-install-deps  缺 git / docker 时不自动安装，直接报错（预装好的机器可用）
+#   --init-sparse      一次性把工作区切成「稀疏检出」，只保留部署所需路径（见 SPARSE_PATHS）：
+#                      src/ tests/ docs/ 等会从工作区移除 —— 代码以镜像为准，部署用不到。
+#                      做完即退出，不继续部署（之后正常 deploy 即可）
+#
+# 关于「更新挂载文件」：git 的更新单位是**整棵树** —— 完整检出时 git pull 会把 src/ 等
+#   一并拉下来（对部署无意义，代码在镜像里）。用 --init-sparse 切换成稀疏检出后，
+#   git pull 只更新 skills/ agents/ alembic/ deploy/ 这些**真正被挂载**的路径。
 #
 # 非交互登录 ACR（可选）：
 #   ACR_USER=xxx ACR_PASSWORD=yyy bash scripts/deploy/deploy.sh
@@ -33,17 +40,35 @@ HEALTH_URL="http://127.0.0.1/api/health"   # 经 nginx:80，与对外路径一�
 RETRIES=40
 INTERVAL=3
 
+# 部署所需路径 = 稀疏检出白名单（由 --init-sparse 写入）
+# 其余路径（src/ tests/ docs/ litellm/ …）会从工作区移除 —— 代码以镜像为准，部署用不到
+SPARSE_PATHS=(
+  /.gitignore
+  /.env.example
+  /docker-compose.image.yml
+  /scripts
+  /skills
+  /agents
+  /alembic
+  /alembic.ini
+  /deploy
+  /docs/agents
+)
+
 FORCE=0
 SKIP_GIT_PULL=0
 INSTALL_DEPS=1
+INIT_SPARSE=0
 
-usage() { sed -n '2,25p' "${BASH_SOURCE[0]}"; }
+# 打印文件头的用法块（首行 shebang 之后的连续 # 注释行）
+usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "${BASH_SOURCE[0]}"; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --force)            FORCE=1 ;;
     --no-git-pull)      SKIP_GIT_PULL=1 ;;
     --no-install-deps)  INSTALL_DEPS=0 ;;
+    --init-sparse)      INIT_SPARSE=1 ;;
     -h|--help)          usage; exit 0 ;;
     *)                  echo "未知参数: $1（-h 看用法）" >&2; exit 2 ;;
   esac
@@ -63,6 +88,7 @@ warn()  { echo "[deploy]   ⚠ $*"; }
 fail()  { echo "[deploy] ✗ $*" >&2; exit 1; }
 step()  { echo; echo "[deploy] === $* ==="; }
 compose() { docker compose -f "$COMPOSE_FILE" "$@"; }
+count_files() { { find "$1" -type f 2>/dev/null || true; } | wc -l; }
 
 NGINX_CONF_CHANGED=0
 APP_CONTENT_CHANGED=0
@@ -115,6 +141,38 @@ case "$ROLE" in
     warn "--force 已指定，继续"
     ;;
 esac
+
+# ---- 一次性动作：把工作区切成「稀疏检出」，做完即退出 ----
+if [ "$INIT_SPARSE" = 1 ]; then
+  step "稀疏检出初始化（一次性）"
+  if [ "$ROLE" = "dev" ]; then
+    fail "--init-sparse 会从工作区移除 src/ 等路径，禁止在开发机上执行"
+  fi
+  command -v git >/dev/null 2>&1 || fail "需要 git（先跑一次不带 --init-sparse 的部署来自动安装，或手动装）"
+  [ -d .git ] || fail "当前目录不是 git 仓库 —— 若是 rsync 过来的副本，请改为 git clone 后再执行"
+
+  if [ "$(git config --bool core.sparseCheckout 2>/dev/null || echo false)" = "true" ]; then
+    info "稀疏检出已启用，当前白名单："
+    git sparse-checkout list | sed 's/^/     /'
+    exit 0
+  fi
+
+  info "将只保留以下路径（其余 src/ tests/ docs/ litellm/ … 会从工作区移除）："
+  printf '     %s\n' "${SPARSE_PATHS[@]}"
+  info "理由：代码以镜像为准（见 Dockerfile），部署机不需要源码；此后 git pull 只更新挂载内容"
+  warn "被移除路径下的本地改动会丢失"
+  if [ -n "$(git status --porcelain | grep -vE '^\?\?' || true)" ]; then
+    fail "工作区有未提交的已跟踪改动 —— 请先提交或 stash 后再执行 --init-sparse"
+  fi
+
+  git sparse-checkout init --no-cone
+  git sparse-checkout set "${SPARSE_PATHS[@]}"
+  info "✓ 完成。当前工作区："
+  ls -A | sed 's/^/     /'
+  echo
+  echo "[deploy] 现在正常部署即可：bash scripts/deploy/deploy.sh"
+  exit 0
+fi
 
 step "2/9 依赖安装（git / docker，走国内源）"
 if [ "$INSTALL_DEPS" != 1 ]; then
@@ -220,20 +278,44 @@ elif ! command -v git >/dev/null 2>&1; then
   warn "未找到 git —— 跳过更新，沿用当前挂载文件"
 elif [ ! -d .git ]; then
   warn "当前目录不是 git 仓库 —— 跳过更新，沿用当前挂载文件"
+  warn "rsync 过来的副本不会自动更新挂载内容；改用 git clone 才能拉取"
 else
+  if [ "$(git config --bool core.sparseCheckout 2>/dev/null || echo false)" = "true" ]; then
+    info "检出模式: 稀疏检出（git pull 只更新部署所需路径）"
+  else
+    info "检出模式: 完整检出"
+    warn "git pull 会把 src/ 等一并拉下来（对部署无意义 —— 代码在镜像里）"
+    warn "想只更新挂载内容：执行一次 bash scripts/deploy/deploy.sh --init-sparse"
+  fi
+
   before=$(git rev-parse HEAD)
   info "当前: $(git rev-parse --short HEAD) @ $(git rev-parse --abbrev-ref HEAD)"
+
   if git pull --ff-only; then
     after=$(git rev-parse HEAD)
     if [ "$before" = "$after" ]; then
       info "✓ 已是最新"
     else
-      info "✓ 已更新 $(git rev-parse --short "$before") → $(git rev-parse --short "$after")，涉及文件："
-      changed=$(git diff --name-only "$before" "$after")
-      echo "$changed" | sed 's/^/     /'
-      echo "$changed" | grep -qx 'deploy/nginx/nginx.conf' && NGINX_CONF_CHANGED=1
-      echo "$changed" | grep -qE '^(skills|agents)/'     && APP_CONTENT_CHANGED=1
-      info "注：src/ 的变更**不会**影响运行中的容器（代码在镜像里，非挂载）"
+      info "✓ 已更新 $(git rev-parse --short "$before") → $(git rev-parse --short "$after")"
+      changed=$(git diff --name-only "$before" "$after" || true)
+      mount_changed=$(printf '%s\n' "$changed" | grep -E '^(skills|agents|alembic)/|^alembic\.ini$|^deploy/' || true)
+      code_changed=$(printf '%s\n' "$changed" | grep -vE '^(skills|agents|alembic)/|^alembic\.ini$|^deploy/' || true)
+
+      if [ -n "$mount_changed" ]; then
+        info "挂载内容变更（本次生效）："
+        printf '%s\n' "$mount_changed" | sed 's/^/     /'
+      else
+        info "挂载内容无变更"
+      fi
+
+      if [ -n "$code_changed" ]; then
+        info "非挂载变更 $(printf '%s\n' "$code_changed" | wc -l) 个文件（不影响本机容器 —— 代码在镜像里）："
+        printf '%s\n' "$code_changed" | head -5 | sed 's/^/     /'
+        info "含 src/ 即表示上游有新代码 —— 请确认要部署的镜像 tag 是否也需更新"
+      fi
+
+      if printf '%s\n' "$changed" | grep -qx 'deploy/nginx/nginx.conf'; then NGINX_CONF_CHANGED=1; fi
+      if printf '%s\n' "$changed" | grep -qE '^(skills|agents)/'; then APP_CONTENT_CHANGED=1; fi
     fi
   else
     warn "git pull 失败（无凭据 / 有本地改动 / 分支分歧）—— 沿用当前文件继续"
@@ -317,9 +399,22 @@ if [ "$ok" != 1 ]; then
   fail "应用未在预期时间内就绪（已打印 app 日志尾部）"
 fi
 
+# 挂载内容版本 —— 便于事后核对"线上跑的是哪一版挂载文件"
+mount_version="非 git 仓库（本次未刷新挂载内容）"
+if [ -d .git ]; then
+  checkout_mode="完整检出"
+  if [ "$(git config --bool core.sparseCheckout 2>/dev/null || echo false)" = "true" ]; then
+    checkout_mode="稀疏检出"
+  fi
+  mount_version="$(git rev-parse --short HEAD) @ $(git rev-parse --abbrev-ref HEAD)（$checkout_mode）"
+fi
+mount_counts="skills($(count_files skills)) agents($(count_files agents)) alembic($(count_files alembic)) nginx-html($(count_files deploy/nginx/html)) pg-init($(count_files deploy/postgres/init))"
+
 echo
 echo "[deploy] ✅ 部署完成，健康检查通过: $HEALTH_URL"
 echo "[deploy]    发布路径: $ROOT"
 echo "[deploy]    镜像: $DEPLOYED_APP_IMAGE"
+echo "[deploy]    挂载内容: $mount_version"
+echo "[deploy]    文件数: $mount_counts"
 echo "[deploy]    手动冒烟：浏览器打开 http://<ECS-IP>/ → 登录 → 上传一份文档 → 等状态 ready → 提问并看引用"
 echo "[deploy]    查看日志：docker compose -f $COMPOSE_FILE logs -f app"
