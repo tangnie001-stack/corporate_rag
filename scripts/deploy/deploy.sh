@@ -2,7 +2,7 @@
 # 目标机部署（demo 单机）：前置检查 → 拉镜像 → 起栈 → 迁移 → 健康检查
 #
 # 用法（任意目录均可，脚本会自行切到仓库根）：
-#   scripts/deploy/deploy.sh
+#   bash scripts/deploy/deploy.sh
 #
 # 前置：目标机已 `docker login <ACR>`（app 镜像在私有库；5 个基镜像在公开库、免登录）
 # 幂等：可重复执行；镜像已是最新则不会重复下载，迁移重复执行无副作用
