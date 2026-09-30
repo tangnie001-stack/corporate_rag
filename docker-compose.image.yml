@@ -25,7 +25,7 @@
 #       避免"同 tag 覆盖"造成的静默换基（旧浮动 tag 应已从 ACR 删除）
 #
 #   私有 repo  deploy_store_local  —— 自建 app 镜像（含项目源码）
-#     app                       **待云效流水线构建并推送**（tag 由云效侧约定）
+#     app                      1（云效流水线的构建号 tag；每次发布递增，需同步改本行的 image:）
 #     ⚠ app 不进公开 repo 的理由：镜像内含 src/ + scripts/（项目源码），放公开库等于公开代码。
 #
 # ⚠ 本文件**只做了镜像替换**，以下仍属另行变更的范围，未在此处理：
@@ -102,8 +102,10 @@ services:
     entrypoint: sh
     command: -c 'minio server --address ":9000" --console-address ":9001" /data'
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-miniosecret}
+      # 服务端凭据与**应用侧同源**（都取 .env 的 MINIO_ACCESS_KEY / MINIO_SECRET_KEY）
+      # —— 结构上杜绝"只改一边 → 应用连不上存储"的静默故障（旧写法用 MINIO_ROOT_*，需人工保持相等）
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-miniosecret}
     ports:
       # ⚠ 暂未收紧：部署时应改为 127.0.0.1:9000:9000 或交由安全组封闭
       - 9090:9000        # S3 API (host:9090 → container:9000, avoid port conflict)
@@ -177,7 +179,7 @@ services:
   app:
     # ⚠ 自建镜像**留在私有 repo**：镜像内含 src/ + scripts/（项目源码），放公开库等于公开代码。
     # 放公开 repo 等于公开代码。若确要公开，改这一行即可（并接受源码可被任何人拉取）。
-    image: crpi-u3ezxc1o5hirfddw.cn-shanghai.personal.cr.aliyuncs.com/deploy_demo/deploy_store_local:app
+    image: crpi-u3ezxc1o5hirfddw.cn-shanghai.personal.cr.aliyuncs.com/deploy_demo/deploy_store_local:1
     mem_limit: 512m
     mem_reservation: 256m
     container_name: corporate-rag-app

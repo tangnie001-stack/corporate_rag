@@ -64,8 +64,10 @@ services:
     entrypoint: sh
     command: -c 'minio server --address ":9000" --console-address ":9001" /data'
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-miniosecret}
+      # 服务端凭据与**应用侧同源**（都取 .env 的 MINIO_ACCESS_KEY / MINIO_SECRET_KEY）
+      # —— 结构上杜绝"只改一边 → 应用连不上存储"的静默故障
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-miniosecret}
     ports:
       - 9090:9000        # S3 API (host:9090 → container:9000, avoid port conflict)
       - 127.0.0.1:9091:9001
