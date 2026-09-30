@@ -24,9 +24,9 @@
 #     ⇒ 所有 tag 一律带 patch 号：升级基镜像必须改引用、走评审，
 #       避免"同 tag 覆盖"造成的静默换基（旧浮动 tag 应已从 ACR 删除）
 #
-#   私有 repo  deploy_store_local  —— 自建 app 镜像（含项目源码）
+#   私有 repo  deploy_store_local  —— 自建 app 镜像
 #     app                      1（云效流水线的构建号 tag；每次发布递增，需同步改本行的 image:）
-#     ⚠ app 不进公开 repo 的理由：镜像内含 src/ + scripts/（项目源码），放公开库等于公开代码。
+#     ⚠ app 不进公开 repo 的理由：镜像内含 src/ scripts/ skills/ agents/ alembic/，放公开库等于公开代码。
 #
 # ⚠ 仍未处理（属另行变更的范围）：
 #   - mem_limit 复核（这里沿用 dev 档位；prod 档位合计 14.25G 在 2C8G 上会 OOM）
@@ -34,14 +34,15 @@
 # 已处理：对外只暴露 nginx:80，其余端口（redis 6379 / app 8000 / minio 9090+9091）一律绑 127.0.0.1；
 #         nginx 上传上限 12m（见 deploy/nginx/nginx.conf）
 #
-# 【目标机必须存在的路径】—— 本文件靠挂载而非打进镜像，缺任一条对应功能静默失效：
+# 【目标机必须存在的路径】—— 挂载来源（缺任一条对应功能失效）：
 #   .env                              app 的运行配置（含 MINIO_ROOT_USER/PASSWORD）
 #   deploy/nginx/nginx.conf           nginx 路由（缺 → 默认页/404）
 #   deploy/nginx/html/                前端静态文件（缺 → 404）
 #   deploy/postgres/init/             建应用库 + vector 扩展（缺 → 应用库不存在）
-#   skills/  agents/                  技能与智能体预设（缺 → 静默清空，不报错）
-#   alembic/  alembic.ini             迁移脚本（缺 → 容器内跑不了 alembic）
-#   data/ragas/                       RAGAS 评估数据目录
+#   data/ragas/                       RAGAS 评估数据目录（运行期数据）
+#
+# 【已打进 app 镜像、宿主无需提供】—— 代码与随版本发布的资源，必须与镜像同源
+#   src/  scripts/  skills/  agents/  alembic/  alembic.ini
 name: corporate_rag
 services:
   redis:
@@ -202,14 +203,10 @@ services:
     volumes:
       - app_logs:/data/logs
       - ./data/ragas:/app/data/ragas
-      # 以下四项**靠挂载、不打进镜像**（目标机需存在这些路径，见文件头「目标机必须存在」）
-      - ./skills:/app/skills
-      - ./agents:/app/agents
-      # 迁移：容器内已带正确的 DB 环境变量（POSTGRES_HOST=postgres），故迁移在容器内跑：
+      # skills/ agents/ alembic/ alembic.ini **不在此挂载**：它们已打进 app 镜像（见 Dockerfile），
+      # 与代码同源；挂了会遮住镜像里的同名内容。
+      # 迁移在容器内跑（容器已带正确的 DB 环境变量 POSTGRES_HOST=postgres）：
       #   docker compose exec app alembic upgrade head
-      # ⚠ ./alembic.ini 必须真实存在 —— 单文件 bind mount 时宿主缺文件，Docker 会建同名**目录**
-      - ./alembic:/app/alembic
-      - ./alembic.ini:/app/alembic.ini
     depends_on:
       redis:
         condition: service_healthy

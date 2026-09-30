@@ -15,7 +15,7 @@
 | `tests/` | 单元测试，与 `src/` 模块一一对应 |
 | `deploy/` | 部署件：`nginx/`（反向代理 + 前端静态文件）、`postgres/init/` 建库脚本、`wait-for-it.sh` |
 | `deploy/nginx/html/` | **前端页面静态文件**（chat.html / index.html / login.html 等） |
-| `skills/` | 运行时 skill 内容库（`<name>/SKILL.md`，业务侧管理，compose volume 挂载进容器 `/app/skills`） |
+| `skills/` | 运行时 skill 内容库（`<name>/SKILL.md`，业务侧管理，**随 app 镜像发布** —— `Dockerfile` COPY 进 `/app/skills`） |
 | `agents/` | **智能体预设内容库**（`<name>.md` 平坦文件，业务侧管理；见下方「三个 `agents` 的区别」） |
 | `docs/` | 文档：`agents/`（本目录，规则/契约/排查）、`design/`（UI 设计规格与 HTML 预览）、`openspec/`（OpenSpec 主目录）、`superpowers/` |
 | `openspec/` | **符号链接 → `docs/openspec`**；OpenSpec changes / specs |
@@ -200,8 +200,8 @@ Nginx 容器把本目录挂到 `/usr/share/nginx/html` 直接托管，**无 npm 
 ## 五、运行时内容库与部署
 
 - `skills/<name>/SKILL.md`：声明式能力文件（frontmatter：name / description / context /
-  model / allowed-tools / agent / user-invocable / disable-model-invocation）。**业务侧管理，改内容免改代码**；
-  经 compose volume 挂载进容器 `/app/skills`。**`context` 未声明时默认 `inline`**（与上游一致）；
+  model / allowed-tools / agent / user-invocable / disable-model-invocation）。**业务侧管理，改内容免改代码**
+  （但需重建镜像 —— 无运行时自定义入口）；由 `Dockerfile` COPY 进容器 `/app/skills`。**`context` 未声明时默认 `inline`**（与上游一致）；
   但正文超过 `INLINE_PROMPT_MAX_CHARS`（500 字符）时**自动改用 fork** 承载——inline 会把正文写进
   主 agent 的会话历史并长期占用其预算（超限后静默被裁），故长文不必手写 `context: fork`。
   **显式声明永远优先**：显式 `inline` 且超预算只记 warning（由超限守卫测试承担），显式 `fork`

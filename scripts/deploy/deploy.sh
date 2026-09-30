@@ -41,16 +41,13 @@ RETRIES=40
 INTERVAL=3
 
 # 部署所需路径 = 稀疏检出白名单（由 --init-sparse 写入）
-# 其余路径（src/ tests/ docs/ litellm/ …）会从工作区移除 —— 代码以镜像为准，部署用不到
+# 只留「宿主必须提供」的东西：compose 文件、部署脚本、归 nginx/postgres 容器消费的 deploy/、文档
+# src/ scripts/ skills/ agents/ alembic/ 都打进 app 镜像，宿主不需要
 SPARSE_PATHS=(
   /.gitignore
   /.env.example
   /docker-compose.image.yml
   /scripts
-  /skills
-  /agents
-  /alembic
-  /alembic.ini
   /deploy
   /docs/agents
 )
@@ -91,7 +88,6 @@ compose() { docker compose -f "$COMPOSE_FILE" "$@"; }
 count_files() { { find "$1" -type f 2>/dev/null || true; } | wc -l; }
 
 NGINX_CONF_CHANGED=0
-APP_CONTENT_CHANGED=0
 DEPLOYED_APP_IMAGE=""
 
 # 阿里云元数据服务可达性（在阿里云 ECS 上必通；开发机 / 自建机不通）
@@ -262,13 +258,15 @@ fi
 # 这些路径靠挂载供容器使用；缺任一条会导致**静默降级**（技能/预设清空、应用库不建、迁移不可用），
 # 所以必须报错，而不是让 Docker 自建空目录
 missing=0
-for d in deploy/nginx/html deploy/postgres/init skills agents alembic; do
+for d in deploy/nginx/html deploy/postgres/init; do
   if [ ! -d "$d" ]; then info "✗ 缺目录: $d"; missing=1; fi
 done
-for f in deploy/nginx/nginx.conf alembic.ini; do
+for f in deploy/nginx/nginx.conf; do
   if [ ! -f "$f" ]; then info "✗ 缺文件: $f"; missing=1; fi
 done
-[ "$missing" = 0 ] || fail "仓库副本不完整 —— 上述路径靠挂载生效，缺失会导致功能静默失效"
+[ "$missing" = 0 ] || fail "仓库副本不完整 —— 上述路径靠挂载供 nginx / postgres 使用，缺失会导致对应功能失效"
+# 注：skills/ agents/ alembic/ 已打进 app 镜像（见 Dockerfile），宿主不再需要、也就不会再出现
+#     「空目录导致技能/预设静默清空」那类故障
 mkdir -p data/ragas   # 运行期目录，Docker 也能自建，这里显式建以固定属主
 
 step "4/9 更新挂载文件（git pull）"
@@ -298,24 +296,25 @@ else
     else
       info "✓ 已更新 $(git rev-parse --short "$before") → $(git rev-parse --short "$after")"
       changed=$(git diff --name-only "$before" "$after" || true)
-      mount_changed=$(printf '%s\n' "$changed" | grep -E '^(skills|agents|alembic)/|^alembic\.ini$|^deploy/' || true)
-      code_changed=$(printf '%s\n' "$changed" | grep -vE '^(skills|agents|alembic)/|^alembic\.ini$|^deploy/' || true)
+      # 现在只有 deploy/ 是宿主挂载来源（供 nginx / postgres 容器）；
+      # src/ scripts/ skills/ agents/ alembic/ 都打进 app 镜像 —— 改这些必须换新镜像才生效
+      mount_changed=$(printf '%s\n' "$changed" | grep -E '^deploy/' || true)
+      image_changed=$(printf '%s\n' "$changed" | grep -vE '^deploy/' || true)
 
       if [ -n "$mount_changed" ]; then
-        info "挂载内容变更（本次生效）："
+        info "挂载内容变更（reload / restart 即生效）："
         printf '%s\n' "$mount_changed" | sed 's/^/     /'
       else
         info "挂载内容无变更"
       fi
 
-      if [ -n "$code_changed" ]; then
-        info "非挂载变更 $(printf '%s\n' "$code_changed" | wc -l) 个文件（不影响本机容器 —— 代码在镜像里）："
-        printf '%s\n' "$code_changed" | head -5 | sed 's/^/     /'
-        info "含 src/ 即表示上游有新代码 —— 请确认要部署的镜像 tag 是否也需更新"
+      if [ -n "$image_changed" ]; then
+        info "需新镜像才生效的变更 $(printf '%s\n' "$image_changed" | wc -l) 个文件（src/ scripts/ skills/ agents/ alembic/ …）："
+        printf '%s\n' "$image_changed" | head -5 | sed 's/^/     /'
+        info "→ 请确认要部署的镜像 tag 是否已包含这些改动"
       fi
 
       if printf '%s\n' "$changed" | grep -qx 'deploy/nginx/nginx.conf'; then NGINX_CONF_CHANGED=1; fi
-      if printf '%s\n' "$changed" | grep -qE '^(skills|agents)/'; then APP_CONTENT_CHANGED=1; fi
     fi
   else
     warn "git pull 失败（无凭据 / 有本地改动 / 分支分歧）—— 沿用当前文件继续"
@@ -353,10 +352,6 @@ compose up -d
 if [ "$NGINX_CONF_CHANGED" = 1 ]; then
   info "nginx.conf 有更新 → 重载 nginx（up -d 不会重建未变更的服务）"
   compose exec -T nginx nginx -s reload || warn "重载失败，旧配置继续生效（检查 nginx.conf 语法）"
-fi
-if [ "$APP_CONTENT_CHANGED" = 1 ]; then
-  info "skills/ 或 agents/ 有更新 → 重启 app 以重新加载"
-  compose restart app >/dev/null
 fi
 
 step "8/9 执行数据库迁移"
@@ -408,7 +403,7 @@ if [ -d .git ]; then
   fi
   mount_version="$(git rev-parse --short HEAD) @ $(git rev-parse --abbrev-ref HEAD)（$checkout_mode）"
 fi
-mount_counts="skills($(count_files skills)) agents($(count_files agents)) alembic($(count_files alembic)) nginx-html($(count_files deploy/nginx/html)) pg-init($(count_files deploy/postgres/init))"
+mount_counts="nginx-conf($(count_files deploy/nginx/nginx.conf)) nginx-html($(count_files deploy/nginx/html)) pg-init($(count_files deploy/postgres/init))"
 
 echo
 echo "[deploy] ✅ 部署完成，健康检查通过: $HEALTH_URL"

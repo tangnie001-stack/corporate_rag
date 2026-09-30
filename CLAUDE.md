@@ -49,7 +49,7 @@ Python 3.11+ / FastAPI / LangChain 1.x + LangGraph / PostgreSQL 15 + pgvector / 
 
 - **后端** `src/`：分层 `api/ → services/ → agents/ + rag/ + chat/ + chunking/ + infra/`；另有 `parsers/`（文档解析）、`core/`（日志/事件）、`config/`（设置与提示词）、`middleware/`（HTTP 中间件）、`cli/`（命令行工具与防腐闸门）、`utils/`、`tools/`。入口 `src/main.py`，模型工厂 `src/models.py`，agent 装配入口 `src/agents/graph/agent_factory.py`，主从委派 `src/agents/skills/`，智能体预设 `src/agents/presets/`
 - **前端** `deploy/nginx/html/`：`chat.html`（对话页，自包含）/ `index.html`（知识库管理页）/ `login.html`；Nginx 静态托管、无构建步骤，路由见 `deploy/nginx/nginx.conf`
-- **运行时内容库** 顶层 `skills/<name>/SKILL.md`（业务侧管理，compose volume 挂载进容器 `/app/skills`）与 `agents/<name>.md`（智能体预设内容库）；`.claude/skills/` 为开发期工具链 skill（如 openspec），两者语义不同。实现与术语见 glossary.md「技能委派」「智能体预设」
+- **运行时内容库** 顶层 `skills/<name>/SKILL.md`（业务侧管理，**随 app 镜像发布** —— `Dockerfile` COPY 进 `/app/skills`）与 `agents/<name>.md`（智能体预设内容库，同样 COPY 进镜像）；`.claude/skills/` 为开发期工具链 skill（如 openspec），两者语义不同。实现与术语见 glossary.md「技能委派」「智能体预设」
 - **测试** `tests/`：与 `src/` 模块一一对应
 
 ### 层间调用规则

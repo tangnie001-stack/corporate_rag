@@ -220,8 +220,8 @@ Nginx 已预配 SSE 支持（`proxy_buffering off` + 300s 读超时），确保�
 ├── tests/                 单元测试（与 src/ 模块一一对应）
 ├── deploy/                nginx 配置与前端静态文件、postgres 初始化脚本
 │   └── nginx/html/        前端页面（chat.html / index.html / login.html，无构建步骤）
-├── skills/                运行时 skill 内容库（<name>/SKILL.md，业务侧管理，挂载进容器）
-├── agents/                智能体预设内容库（<name>.md，业务侧管理，挂载进容器）
+├── skills/                运行时 skill 内容库（<name>/SKILL.md，业务侧管理，随镜像发布）
+├── agents/                智能体预设内容库（<name>.md，业务侧管理，随镜像发布）
 ├── alembic/               数据库迁移（唯一链）
 ├── scripts/               运维脚本（清库、重建 KB 数据、重写 content_seg、本地起服务）
 ├── litellm/               LiteLLM 网关配置（可选）

@@ -31,11 +31,18 @@ WORKDIR /app
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
-# Copy source code
-# 不拷 deploy/：其内容（nginx.conf / html / postgres init）由 compose 从宿主挂载，
-# 容器内无任何消费方（实测 src/ 与 scripts/ 零引用）
+# 代码与随版本发布的资源 —— 必须与镜像同源，否则宿主版本与镜像版本会静默不一致：
+#   src/ scripts/          应用代码
+#   skills/ agents/        技能与智能体预设（无运行时自定义入口，只能随代码发布）
+#   alembic/ alembic.ini   迁移脚本（必须与代码版本对应；alembic CLI 已在镜像内）
+# 不拷 deploy/：其内容（nginx.conf / html / postgres init）归 nginx / postgres 容器消费，
+# 由 compose 从宿主挂载；app 容器内无任何消费方（实测 src/ 与 scripts/ 零引用）
 COPY src/ src/
 COPY scripts/ scripts/
+COPY skills/ skills/
+COPY agents/ agents/
+COPY alembic/ alembic/
+COPY alembic.ini .
 
 # Volume mount points
 VOLUME ["/data/logs"]
