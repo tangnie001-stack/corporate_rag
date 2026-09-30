@@ -1,22 +1,45 @@
 #!/usr/bin/env bash
-# 目标机部署（demo 单机）：前置检查 → 拉镜像 → 起栈 → 迁移 → 健康检查
+# 目标机部署（demo 单机）
+#   环境判定 → 前置检查 → 更新挂载文件 → ACR 登录 → 拉镜像 → 起栈 → 迁移 → 健康检查
 #
 # 用法（任意目录均可，脚本会自行切到仓库根）：
-#   bash scripts/deploy/deploy.sh
+#   bash scripts/deploy/deploy.sh [--force] [--no-git-pull]
 #
-# 前置：目标机已 `docker login <ACR>`（app 镜像在私有库；5 个基镜像在公开库、免登录）
-# 幂等：可重复执行；镜像已是最新则不会重复下载，迁移重复执行无副作用
+#   --force        跳过「开发机 / 环境未知」的拒绝（仅在你明确知道后果时用）
+#   --no-git-pull  不做 git pull，沿用当前挂载文件
 #
-# 注意：本脚本假定目标机上有**完整的仓库副本**（clone 或 rsync）——
-#       部署档 compose 靠挂载取技能/预设/迁移/nginx 配置等，而非打进镜像。
+# 非交互登录 ACR（可选）：
+#   ACR_USER=xxx ACR_PASSWORD=yyy bash scripts/deploy/deploy.sh
+#
+# 两点前提：
+#   1. 目标机需有**完整仓库副本**（clone 或 rsync）—— 部署档 compose 靠挂载取
+#      技能 / 预设 / 迁移 / nginx 配置等，而非打进镜像。
+#   2. 不要在开发机上跑本脚本：部署档与 dev 的 compose project name、容器名完全相同，
+#      起栈会顶掉正在跑的 dev 容器（脚本会主动拦截，除非 --force）。
 
 set -euo pipefail
 
 COMPOSE_FILE="docker-compose.image.yml"
 ACR="crpi-u3ezxc1o5hirfddw.cn-shanghai.personal.cr.aliyuncs.com"
-HEALTH_URL="http://127.0.0.1/api/health"   # 经 nginx（80），与对外路径一致
+ECS_METADATA="http://100.100.100.200/latest/meta-data/instance-id"   # 阿里云 ECS 元数据服务
+HEALTH_URL="http://127.0.0.1/api/health"   # 经 nginx:80，与对外路径一致
 RETRIES=40
 INTERVAL=3
+
+FORCE=0
+SKIP_GIT_PULL=0
+
+usage() { sed -n '2,18p' "${BASH_SOURCE[0]}"; }
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --force)       FORCE=1 ;;
+    --no-git-pull) SKIP_GIT_PULL=1 ;;
+    -h|--help)     usage; exit 0 ;;
+    *)             echo "未知参数: $1（-h 看用法）" >&2; exit 2 ;;
+  esac
+  shift
+done
 
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 ROOT=$(pwd)
@@ -25,16 +48,51 @@ fail() { echo "[deploy] ✗ $*" >&2; exit 1; }
 step() { echo; echo "[deploy] === $* ==="; }
 compose() { docker compose -f "$COMPOSE_FILE" "$@"; }
 
-step "1/5 前置检查"
-echo "[deploy]   仓库根: $ROOT"
+NGINX_CONF_CHANGED=0
+APP_CONTENT_CHANGED=0
+DEPLOYED_APP_IMAGE=""
+
+step "1/8 环境判定与工具检查"
 command -v docker >/dev/null 2>&1 || fail "未找到 docker"
 docker compose version >/dev/null 2>&1 || fail "未找到 docker compose（需 v2 插件）"
-command -v curl >/dev/null 2>&1 || fail "未找到 curl（健康检查需要）"
+command -v curl >/dev/null 2>&1 || fail "未找到 curl（环境判定与健康检查需要）"
+
+# 判据：① 显式 DEPLOY_ROLE > ② WSL（必为开发机）> ③ 阿里云元数据服务（必为云上发布机）
+ROLE="${DEPLOY_ROLE:-}"
+if [ -z "$ROLE" ]; then
+  if [ -n "${WSL_DISTRO_NAME:-}" ] || grep -qi microsoft /proc/version 2>/dev/null; then
+    ROLE="dev"
+  elif curl -fsS --max-time 2 -o /dev/null "$ECS_METADATA" 2>/dev/null; then
+    ROLE="prod"
+  else
+    ROLE="unknown"
+  fi
+fi
+
+case "$ROLE" in
+  prod)
+    iid=$(curl -fsS --max-time 2 "$ECS_METADATA" 2>/dev/null || echo "?")
+    echo "[deploy]   环境: 发布机（阿里云 ECS instance-id=$iid）"
+    ;;
+  dev)
+    echo "[deploy]   环境: 开发机（WSL）"
+    [ "$FORCE" = 1 ] || fail "本脚本用于目标机部署，开发机上运行会顶掉 dev 容器。确要执行请加 --force"
+    echo "[deploy]   ⚠ --force 已指定，继续（后果自负）"
+    ;;
+  *)
+    echo "[deploy]   环境: 未识别（非 WSL，且阿里云元数据服务不可达）"
+    [ "$FORCE" = 1 ] || fail "无法确认这是发布机。若是自建/非阿里云主机，请加 --force 或设 DEPLOY_ROLE=prod"
+    echo "[deploy]   ⚠ --force 已指定，继续"
+    ;;
+esac
+
+step "2/8 前置检查"
+echo "[deploy]   仓库根: $ROOT"
 [ -f "$COMPOSE_FILE" ] || fail "缺少 $COMPOSE_FILE —— 需在完整仓库副本上执行"
 [ -f .env ] || fail "缺少 .env —— 从 .env.example 复制后填真实值（MinIO 两键、PG/Redis 口令等）"
 
 # 这些路径靠挂载供容器使用；缺任一条会导致**静默降级**（技能/预设清空、应用库不建、迁移不可用），
-# 所以必须报错而不是让 Docker 自建空目录
+# 所以必须报错，而不是让 Docker 自建空目录
 missing=0
 for d in deploy/nginx/html deploy/postgres/init skills agents alembic; do
   if [ ! -d "$d" ]; then echo "[deploy]   ✗ 缺目录: $d"; missing=1; fi
@@ -45,23 +103,71 @@ done
 [ "$missing" = 0 ] || fail "仓库副本不完整 —— 上述路径靠挂载生效，缺失会导致功能静默失效"
 mkdir -p data/ragas   # 运行期目录，Docker 也能自建，这里显式建以固定属主
 
-# 仅提示不阻断：公开库的 5 个镜像不需要凭据，pull 失败时再看这里
-cfg="${DOCKER_CONFIG:-$HOME/.docker}/config.json"
-if ! grep -q "$ACR" "$cfg" 2>/dev/null; then
-  echo "[deploy]   ⚠ 未在 $cfg 找到 $ACR 的登录凭据；app 镜像在私有库，pull 会失败"
-  echo "[deploy]     请先执行: docker login $ACR"
+step "3/8 更新挂载文件（git pull）"
+if [ "$SKIP_GIT_PULL" = 1 ]; then
+  echo "[deploy]   跳过（--no-git-pull）"
+elif ! command -v git >/dev/null 2>&1; then
+  echo "[deploy]   ⚠ 未找到 git —— 跳过更新，沿用当前挂载文件"
+elif [ ! -d .git ]; then
+  echo "[deploy]   ⚠ 当前目录不是 git 仓库 —— 跳过更新，沿用当前挂载文件"
+else
+  before=$(git rev-parse HEAD)
+  echo "[deploy]   当前: $(git rev-parse --short HEAD) @ $(git rev-parse --abbrev-ref HEAD)"
+  if git pull --ff-only; then
+    after=$(git rev-parse HEAD)
+    if [ "$before" = "$after" ]; then
+      echo "[deploy]   ✓ 已是最新"
+    else
+      echo "[deploy]   ✓ 已更新 $(git rev-parse --short "$before") → $(git rev-parse --short "$after")，涉及文件："
+      changed=$(git diff --name-only "$before" "$after")
+      echo "$changed" | sed 's/^/     /'
+      echo "$changed" | grep -qx 'deploy/nginx/nginx.conf' && NGINX_CONF_CHANGED=1
+      echo "$changed" | grep -qE '^(skills|agents)/'     && APP_CONTENT_CHANGED=1
+      echo "[deploy]   注：src/ 的变更**不会**影响运行中的容器（代码在镜像里，非挂载）"
+    fi
+  else
+    echo "[deploy]   ⚠ git pull 失败（无凭据 / 有本地改动 / 分支分歧）—— 沿用当前文件继续"
+    echo "[deploy]     要强制以远端为准：git fetch && git reset --hard @{u}（会丢弃本地改动）"
+  fi
 fi
 
-echo "[deploy]   将要部署的 app 镜像:"
-grep -E "deploy_store_local:" "$COMPOSE_FILE" | sed 's/^/     /'
+step "4/8 校验 ACR 登录"
+DEPLOYED_APP_IMAGE=$(sed -n 's/^[[:space:]]*image:[[:space:]]*\(.*deploy_store_local:[^[:space:]]*\).*/\1/p' "$COMPOSE_FILE" | head -1)
+[ -n "$DEPLOYED_APP_IMAGE" ] || fail "无法从 $COMPOSE_FILE 解析出 app 镜像引用"
+echo "[deploy]   app 镜像: $DEPLOYED_APP_IMAGE"
 
-step "2/5 拉取镜像"
+if docker manifest inspect "$DEPLOYED_APP_IMAGE" >/dev/null 2>&1; then
+  echo "[deploy]   ✓ 已登录（app 镜像在私有库，5 个基镜像在公开库）"
+else
+  echo "[deploy]   未登录或镜像不可达，开始登录 $ACR"
+  if [ -n "${ACR_USER:-}" ] && [ -n "${ACR_PASSWORD:-}" ]; then
+    printf '%s' "$ACR_PASSWORD" | docker login -u "$ACR_USER" --password-stdin "$ACR" \
+      || fail "docker login 失败"
+  else
+    [ -t 0 ] || fail "非交互环境无法输入密码 —— 请用 ACR_USER / ACR_PASSWORD 环境变量提供凭据"
+    docker login "$ACR" || fail "docker login 失败"
+  fi
+  docker manifest inspect "$DEPLOYED_APP_IMAGE" >/dev/null 2>&1 \
+    || fail "登录后仍取不到该镜像 —— 多半是 tag 不存在（云效每次构建的 tag 会变，需同步 $COMPOSE_FILE 里的 tag）"
+  echo "[deploy]   ✓ 登录成功"
+fi
+
+step "5/8 拉取镜像"
 compose pull
 
-step "3/5 启动服务"
+step "6/8 启动服务"
 compose up -d
 
-step "4/5 执行数据库迁移"
+if [ "$NGINX_CONF_CHANGED" = 1 ]; then
+  echo "[deploy]   nginx.conf 有更新 → 重载 nginx（up -d 不会重建未变更的服务）"
+  compose exec -T nginx nginx -s reload || echo "[deploy]   ⚠ 重载失败，旧配置继续生效（检查 nginx.conf 语法）"
+fi
+if [ "$APP_CONTENT_CHANGED" = 1 ]; then
+  echo "[deploy]   skills/ 或 agents/ 有更新 → 重启 app 以重新加载"
+  compose restart app >/dev/null
+fi
+
+step "7/8 执行数据库迁移"
 # 先等 PostgreSQL 就绪（迁移经 compose 网络连它）；app 不依赖表即可启动，故先迁移无死锁
 for i in $(seq 1 20); do
   if compose exec -T postgres pg_isready -U langfuse >/dev/null 2>&1; then
@@ -82,9 +188,9 @@ for i in $(seq 1 10); do
   echo "[deploy]   … 第 $i 次失败（app 可能仍在启动），5s 后重试"
   sleep 5
 done
-[ "$migrated" = 1 ] || fail "数据库迁移失败（app 日志见上；可手动重跑: docker compose -f $COMPOSE_FILE logs app）"
+[ "$migrated" = 1 ] || fail "数据库迁移失败（可手动排查: docker compose -f $COMPOSE_FILE logs app）"
 
-step "5/5 健康检查"
+step "8/8 健康检查"
 ok=0
 for i in $(seq 1 "$RETRIES"); do
   if curl -fsS -o /dev/null "$HEALTH_URL" 2>/dev/null; then
@@ -102,5 +208,6 @@ fi
 
 echo
 echo "[deploy] ✅ 部署完成，健康检查通过: $HEALTH_URL"
+echo "[deploy]    镜像: $DEPLOYED_APP_IMAGE"
 echo "[deploy]    手动冒烟：浏览器打开 http://<ECS-IP>/ → 登录 → 上传一份文档 → 等状态 ready → 提问并看引用"
 echo "[deploy]    查看日志：docker compose -f $COMPOSE_FILE logs -f app"
