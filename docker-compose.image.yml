@@ -28,11 +28,11 @@
 #     app                      1（云效流水线的构建号 tag；每次发布递增，需同步改本行的 image:）
 #     ⚠ app 不进公开 repo 的理由：镜像内含 src/ + scripts/（项目源码），放公开库等于公开代码。
 #
-# ⚠ 本文件**只做了镜像替换**，以下仍属另行变更的范围，未在此处理：
-#   - 端口收紧（redis / app / minio 现在发布到 0.0.0.0）
+# ⚠ 仍未处理（属另行变更的范围）：
 #   - mem_limit 复核（这里沿用 dev 档位；prod 档位合计 14.25G 在 2C8G 上会 OOM）
-#   - nginx client_max_body_size（默认 1m，会让真实文档上传 413）
 #   - HTTPS（nginx 只有 80）
+# 已处理：对外只暴露 nginx:80，其余端口（redis 6379 / app 8000 / minio 9090+9091）一律绑 127.0.0.1；
+#         nginx 上传上限 12m（见 deploy/nginx/nginx.conf）
 #
 # 【目标机必须存在的路径】—— 本文件靠挂载而非打进镜像，缺任一条对应功能静默失效：
 #   .env                              app 的运行配置（含 MINIO_ROOT_USER/PASSWORD）
@@ -53,8 +53,8 @@ services:
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:-corporate_rag_pass}
     ports:
-      # ⚠ 暂未收紧：部署时应改为 127.0.0.1:6379:6379 或交由安全组封闭
-      - "6379:6379"
+      # 仅回环：宿主调试用（redis-cli）。应用经 compose 网络直连 redis:6379，无需对外发布
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     command: redis-server --requirepass ${REDIS_PASSWORD:-corporate_rag_pass}
@@ -107,8 +107,8 @@ services:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minio}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-miniosecret}
     ports:
-      # ⚠ 暂未收紧：部署时应改为 127.0.0.1:9000:9000 或交由安全组封闭
-      - 9090:9000        # S3 API (host:9090 → container:9000, avoid port conflict)
+      # 仅回环：宿主调试用（mc / 控制台）。应用经 compose 网络直连 minio:9000，无需对外发布
+      - 127.0.0.1:9090:9000   # S3 API (host:9090 → container:9000, avoid port conflict)
       - 127.0.0.1:9091:9001
     volumes:
       - minio_data:/data
@@ -185,8 +185,8 @@ services:
     container_name: corporate-rag-app
     restart: unless-stopped
     ports:
-      # ⚠ 暂未收紧：app 可直接绕过 nginx 访问；部署时应改为 127.0.0.1 或移除
-      - "8000:8000"
+      # 仅回环：宿主冒烟/调试用（curl localhost:8000/api/health）。对外一律走 nginx:80
+      - "127.0.0.1:8000:8000"
     command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --timeout-graceful-shutdown 30
     env_file:
       - .env

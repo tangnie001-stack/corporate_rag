@@ -20,10 +20,11 @@
 | `docs/` | 文档：`agents/`（本目录，规则/契约/排查）、`design/`（UI 设计规格与 HTML 预览）、`openspec/`（OpenSpec 主目录）、`superpowers/` |
 | `openspec/` | **符号链接 → `docs/openspec`**；OpenSpec changes / specs |
 | `alembic/` + `alembic.ini` | 数据库迁移（唯一链；`0001_pg_baseline` 从零建 8 张表，`0002_kb_domain` 加列） |
-| `scripts/` | 运维脚本（清库、重建 KB 数据、重写 `content_seg`） |
+| `scripts/` | 运维脚本（清库、重建 KB 数据、重写 `content_seg`）；`scripts/deploy/deploy.sh` = **目标机部署**（前置检查 → 拉镜像 → 起栈 → 迁移 → 健康检查） |
 | `litellm/` | LiteLLM 代理配置（模型网关） |
 | `data/`、`logs/` | 运行期数据与日志挂载点 |
 | `docker-compose.yml` / `.override.yml` / `.prod.yml` | 编排（redis / postgres / minio / langfuse-web / nginx / litellm-proxy / app 共 7 个服务；prod 无 litellm-proxy）。`langfuse-web` 挂 `profiles: ["langfuse"]`，dev 经 `.env` 的 `COMPOSE_PROFILES=langfuse` 默认启用 |
+| `docker-compose.image.yml` | **目标机部署档**：镜像全取阿里云 ACR、无 `build:`、对外只暴露 nginx:80（其余端口绑回环）；技能/预设/迁移/nginx 配置靠挂载。配套 `scripts/deploy/deploy.sh` |
 | `Dockerfile`、`pyproject.toml` | 应用镜像与依赖 |
 
 > **三个 `agents` 的区别（勿混淆）**：根 `agents/` = 智能体预设**内容**（`<name>.md` 平坦文件）；
