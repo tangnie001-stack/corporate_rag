@@ -9,7 +9,7 @@ FROM crpi-u3ezxc1o5hirfddw.cn-shanghai.personal.cr.aliyuncs.com/deploy_demo/depl
 #   ✅ 不进最终镜像 —— ARG 只在 builder 阶段声明/使用，推送到 ACR 的是 runtime 阶段，
 #      `docker history --no-trunc <最终镜像>` 里看不到这两个 ARG 的值。
 #   ❌ **会进构建日志**（本地实测确认）—— BuildKit 在 --progress=plain 下回显 RUN 命令时会把
-#      ARG 值代入：日志里直接出现 `#11 [builder 4/5] RUN ... -z "Ri%29z2..."`。这与 set -x **无关**
+#      ARG 值代入：日志里直接出现 `#11 [builder 4/5] RUN ... -z "<PIP_REPO_PASS 明文>"`。这与 set -x **无关**
 #      （去掉 -x 照样回显，-x 只是额外多几行 trace）。云效步骤用 --progress=plain，故日志必然带明文。
 #   ❓ 会进 buildx 命令行 —— 云效步骤会回显 `docker buildx build ... --build-arg PIP_REPO_PASS=...`，
 #      是否打码待第 3 次运行日志确认；若为明文，改用 --secret 方案。
