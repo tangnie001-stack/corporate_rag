@@ -42,6 +42,9 @@ logs/
 .dev-ports
 .dev-uvicorn.pid
 
+# 构建期暂存目录（scripts/ci/pack-deploy-artifact.sh 的产物，供流水线的 ArtifactUpload 取用）
+/pack-staging/
+
 # OS
 .DS_Store
 Thumbs.db

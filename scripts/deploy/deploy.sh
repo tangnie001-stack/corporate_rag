@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # 目标机部署（demo 单机）
-#   环境判定 → 依赖安装 → 前置检查 → 更新挂载文件 → ACR 登录 → 拉镜像 → 起栈 → 迁移 → 健康检查
+#   环境判定 → 依赖安装 → 前置检查 → ACR 登录 → 拉镜像 → 起栈 → 迁移 → 健康检查
 #
 # 用法：
-#   bash scripts/deploy/deploy.sh [--force] [--no-git-pull] [--no-install-deps]
+#   bash scripts/deploy/deploy.sh [--force] [--no-install-deps]
 #
 #   --force            跳过「开发机 / 环境未知」的拒绝（仅在你明确知道后果时用）
-#   --no-git-pull      不做 git pull，沿用当前挂载文件
-#   --no-install-deps  缺 git / docker 时不自动安装，直接报错（预装好的机器可用）
+#   --no-install-deps  缺 docker 时不自动安装，直接报错（预装好的机器可用）
 #
-# 关于「更新挂载文件」：脚本做的是完整 `git pull`。src/ 等对部署无意义的路径也会更新到工作区，
-#   但**对运行中的容器无影响** —— 代码打进镜像（见 Dockerfile），宿主只有 deploy/ 是挂载来源。
-#   （曾评估稀疏检出：git 的传输单位是提交/对象，稀疏只影响工作区落地、并不省下载，不值其复杂度）
+# 文件从哪来：**不走 git**。云效流水线的「主机部署」任务把构建期打好的制品包下发到目标机并解压，
+#   本脚本假定当前目录已是解压后的发布目录（含 docker-compose.image.yml / deploy/ / scripts/deploy/）。
+#   制品由 scripts/ci/pack-deploy-artifact.sh 生成，其白名单与本脚本第 3 步的前置检查是同一份契约，
+#   改一边必须改另一边。
 #
 # 非交互登录 ACR（可选）：
 #   ACR_USER=xxx ACR_PASSWORD=yyy bash scripts/deploy/deploy.sh
@@ -19,12 +19,12 @@
 # 标准发布路径：/opt/wwww/corporate_rag（/opt/wwww 为多站点父目录）
 #   —— 在别处执行会打印提醒；所有文档 / 备份定时任务都引用该路径
 #
-# 三点前提：
-#   1. 目标机需有**完整仓库副本**（clone 或 rsync）—— 部署档 compose 靠挂载取
-#      技能 / 预设 / 迁移 / nginx 配置等，而非打进镜像。（脚本在仓库里，故首次需先 clone）
-#   2. 不要在开发机上跑本脚本：部署档与 dev 的 compose project name、容器名完全相同，
+# 两点前提：
+#   1. 不要在开发机上跑本脚本：部署档与 dev 的 compose project name、容器名完全相同，
 #      起栈会顶掉正在跑的 dev 容器（脚本会主动拦截，除非 --force）。
-#   3. 缺 git / docker 时脚本会用**国内源**自动安装（需 root 或 sudo）。
+#   2. 缺 docker 时脚本会用**国内源**自动安装（需 root 或 sudo）。
+#
+# 镜像必须由本脚本拉：ACR 个人版不支持平台代拉（仅企业版可），故第 5 步 `compose pull` 不可省。
 
 set -euo pipefail
 
@@ -38,7 +38,6 @@ RETRIES=40
 INTERVAL=3
 
 FORCE=0
-SKIP_GIT_PULL=0
 INSTALL_DEPS=1
 
 # 打印文件头的用法块（首行 shebang 之后的连续 # 注释行）
@@ -47,7 +46,6 @@ usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' 
 while [ $# -gt 0 ]; do
   case "$1" in
     --force)            FORCE=1 ;;
-    --no-git-pull)      SKIP_GIT_PULL=1 ;;
     --no-install-deps)  INSTALL_DEPS=0 ;;
     -h|--help)          usage; exit 0 ;;
     *)                  echo "未知参数: $1（-h 看用法）" >&2; exit 2 ;;
@@ -70,7 +68,6 @@ step()  { echo; echo "[deploy] === $* ==="; }
 compose() { docker compose -f "$COMPOSE_FILE" "$@"; }
 count_files() { { find "$1" -type f 2>/dev/null || true; } | wc -l; }
 
-NGINX_CONF_CHANGED=0
 DEPLOYED_APP_IMAGE=""
 
 # 阿里云元数据服务可达性（在阿里云 ECS 上必通；开发机 / 自建机不通）
@@ -88,7 +85,7 @@ metadata_reachable() {
   case "$line" in *" 200 "*) return 0 ;; *) return 1 ;; esac
 }
 
-step "1/9 环境判定"
+step "1/8 环境判定"
 # 判据优先级：① DEPLOY_ROLE 显式值 > ② WSL（必为开发机，零依赖）> ③ 阿里云元数据服务（必为云上发布机）
 ROLE="${DEPLOY_ROLE:-}"
 if [ -z "$ROLE" ]; then
@@ -121,7 +118,7 @@ case "$ROLE" in
     ;;
 esac
 
-step "2/9 依赖安装（git / docker，走国内源）"
+step "2/8 依赖安装（docker，走国内源）"
 if [ "$INSTALL_DEPS" != 1 ]; then
   info "跳过（--no-install-deps）"
 else
@@ -130,24 +127,11 @@ else
   elif command -v dnf >/dev/null 2>&1; then PKG="dnf"
   elif command -v yum >/dev/null 2>&1; then PKG="yum"
   fi
-  [ -n "$PKG" ] || fail "无法识别包管理器（需 apt / dnf / yum）；请手动安装 git 与 docker compose"
+  [ -n "$PKG" ] || fail "无法识别包管理器（需 apt / dnf / yum）；请手动安装 docker 与 compose 插件"
   if [ -z "$SUDO" ] && [ "$(id -u)" != "0" ]; then
     fail "安装依赖需要 root 权限：请用 root 执行，或先装好 sudo"
   fi
   info "包管理器: $PKG${SUDO:+（经 sudo）}"
-
-  # ---- git ----
-  if command -v git >/dev/null 2>&1; then
-    info "git 已安装: $(git --version)"
-  else
-    info "未找到 git → 安装"
-    case "$PKG" in
-      apt)     $SUDO apt-get update -y && $SUDO apt-get install -y git ;;
-      dnf|yum) $SUDO "$PKG" install -y git ;;
-    esac
-    command -v git >/dev/null 2>&1 || fail "git 安装失败"
-    info "git 安装完成: $(git --version)"
-  fi
 
   # ---- docker + compose 插件 ----
   if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
@@ -197,16 +181,30 @@ REPO
   fi
 fi
 
-step "3/9 前置检查"
-info "仓库根: $ROOT"
+step "3/8 前置检查"
+info "发布目录: $ROOT"
 if [ "$ROOT" != "$EXPECTED_ROOT" ]; then
   warn "标准发布路径是 $EXPECTED_ROOT，当前在 $ROOT"
   warn "文档 / 备份定时任务都按标准路径写；非标准路径请自行保持一致"
 fi
-[ -f "$COMPOSE_FILE" ] || fail "缺少 $COMPOSE_FILE —— 需在完整仓库副本上执行"
-[ -f .env ] || fail "缺少 .env —— 从 .env.example 复制后填真实值（MinIO 两键、PG/Redis 口令等）"
+[ -f "$COMPOSE_FILE" ] || fail "缺少 $COMPOSE_FILE —— 当前目录不是解压后的制品（期望发布目录 $EXPECTED_ROOT）"
+[ -f .env ] || fail "缺少 .env —— 制品不含密钥，需人工放置：从团队渠道取 .env.example 填真实值（MinIO 两键、PG/Redis 口令等）"
 
-# 这些路径靠挂载供容器使用；缺任一条会导致**静默降级**（技能/预设清空、应用库不建、迁移不可用），
+# .env 完整性：compose 里被插值的变量必须有非空值。
+# 清单由 compose 自己派生 —— 不像手写清单那样会漂移（compose 少一个变量根本起不来）；
+# 且能堵住 `${VAR:-默认值}` 的静默降级：缺键时 compose 会用兜底弱口令启动而不报错。
+compose_vars=$(grep -oE '\$\{[A-Z_][A-Z0-9_]*' "$COMPOSE_FILE" | sed 's/\${//' | sort -u)
+missing=""
+for v in $compose_vars; do
+  # 兼容 `VAR=` / `export VAR=` / 带引号 / CRLF，剥壳后再判空
+  val=$(sed -n "s/^[[:space:]]*\(export[[:space:]]\+\)\?${v}=//p" .env | tail -1 | tr -d '\r')
+  val=$(printf '%s' "$val" | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/")
+  if [ -z "$val" ]; then missing="${missing:+$missing }$v"; fi
+done
+[ -z "$missing" ] || fail "主机 .env 缺以下键或值为空：${missing}（缺键会让 compose 静默用兜底值启动，如 REDIS_PASSWORD 兜成 corporate_rag_pass）"
+info "✓ .env 完整性通过（compose 插值的 $(echo $compose_vars | wc -w) 个变量均有非空值）"
+
+# 这些路径靠挂载供容器使用；缺任一条会导致**静默降级**（nginx 起不来、应用库不建），
 # 所以必须报错，而不是让 Docker 自建空目录
 missing=0
 for d in deploy/nginx/html deploy/postgres/init; do
@@ -215,57 +213,12 @@ done
 for f in deploy/nginx/nginx.conf; do
   if [ ! -f "$f" ]; then info "✗ 缺文件: $f"; missing=1; fi
 done
-[ "$missing" = 0 ] || fail "仓库副本不完整 —— 上述路径靠挂载供 nginx / postgres 使用，缺失会导致对应功能失效"
-# 注：skills/ agents/ alembic/ 已打进 app 镜像（见 Dockerfile），宿主不再需要、也就不会再出现
+[ "$missing" = 0 ] || fail "制品不完整 —— 上述路径靠挂载供 nginx / postgres 使用，缺失会导致对应功能失效"
+# 注：src/ scripts/ skills/ agents/ alembic/ 已打进 app 镜像（见 Dockerfile），宿主不再需要、也就不会再出现
 #     「空目录导致技能/预设静默清空」那类故障
 mkdir -p data/ragas   # 运行期目录，Docker 也能自建，这里显式建以固定属主
 
-step "4/9 更新挂载文件（git pull）"
-if [ "$SKIP_GIT_PULL" = 1 ]; then
-  info "跳过（--no-git-pull）"
-elif ! command -v git >/dev/null 2>&1; then
-  warn "未找到 git —— 跳过更新，沿用当前挂载文件"
-elif [ ! -d .git ]; then
-  warn "当前目录不是 git 仓库 —— 跳过更新，沿用当前挂载文件"
-  warn "rsync 过来的副本不会自动更新挂载内容；改用 git clone 才能拉取"
-else
-  before=$(git rev-parse HEAD)
-  info "当前: $(git rev-parse --short HEAD) @ $(git rev-parse --abbrev-ref HEAD)"
-
-  if git pull --ff-only; then
-    after=$(git rev-parse HEAD)
-    if [ "$before" = "$after" ]; then
-      info "✓ 已是最新"
-    else
-      info "✓ 已更新 $(git rev-parse --short "$before") → $(git rev-parse --short "$after")"
-      changed=$(git diff --name-only "$before" "$after" || true)
-      # 现在只有 deploy/ 是宿主挂载来源（供 nginx / postgres 容器）；
-      # src/ scripts/ skills/ agents/ alembic/ 都打进 app 镜像 —— 改这些必须换新镜像才生效
-      mount_changed=$(printf '%s\n' "$changed" | grep -E '^deploy/' || true)
-      image_changed=$(printf '%s\n' "$changed" | grep -vE '^deploy/' || true)
-
-      if [ -n "$mount_changed" ]; then
-        info "挂载内容变更（reload / restart 即生效）："
-        printf '%s\n' "$mount_changed" | sed 's/^/     /'
-      else
-        info "挂载内容无变更"
-      fi
-
-      if [ -n "$image_changed" ]; then
-        info "需新镜像才生效的变更 $(printf '%s\n' "$image_changed" | wc -l) 个文件（src/ scripts/ skills/ agents/ alembic/ …）："
-        printf '%s\n' "$image_changed" | head -5 | sed 's/^/     /'
-        info "→ 请确认要部署的镜像 tag 是否已包含这些改动"
-      fi
-
-      if printf '%s\n' "$changed" | grep -qx 'deploy/nginx/nginx.conf'; then NGINX_CONF_CHANGED=1; fi
-    fi
-  else
-    warn "git pull 失败（无凭据 / 有本地改动 / 分支分歧）—— 沿用当前文件继续"
-    warn "要强制以远端为准：git fetch && git reset --hard @{u}（会丢弃本地改动）"
-  fi
-fi
-
-step "5/9 校验 ACR 登录"
+step "4/8 校验 ACR 登录"
 DEPLOYED_APP_IMAGE=$(sed -n 's/^[[:space:]]*image:[[:space:]]*\(.*deploy_store_local:[^[:space:]]*\).*/\1/p' "$COMPOSE_FILE" | head -1)
 [ -n "$DEPLOYED_APP_IMAGE" ] || fail "无法从 $COMPOSE_FILE 解析出 app 镜像引用"
 info "app 镜像: $DEPLOYED_APP_IMAGE"
@@ -282,22 +235,22 @@ else
     docker login "$ACR" || fail "docker login 失败"
   fi
   docker manifest inspect "$DEPLOYED_APP_IMAGE" >/dev/null 2>&1 \
-    || fail "登录后仍取不到该镜像 —— 多半是 tag 不存在（云效每次构建的 tag 会变，需同步 $COMPOSE_FILE 里的 tag）"
+    || fail "登录后仍取不到该镜像 —— tag 由构建阶段注入，取不到说明制品与镜像不配套（检查云效那次构建是否成功推镜像）"
   info "✓ 登录成功"
 fi
 
-step "6/9 拉取镜像"
+step "5/8 拉取镜像（ACR 个人版不支持平台代拉）"
 compose pull
 
-step "7/9 启动服务"
+step "6/8 启动服务"
 compose up -d
 
-if [ "$NGINX_CONF_CHANGED" = 1 ]; then
-  info "nginx.conf 有更新 → 重载 nginx（up -d 不会重建未变更的服务）"
-  compose exec -T nginx nginx -s reload || warn "重载失败，旧配置继续生效（检查 nginx.conf 语法）"
-fi
+# up -d 不会重建未变更的服务，bind mount 的 nginx.conf 改了容器也不会重读 —— 故每次都显式重载。
+# nginx -s reload 对未变更的配置是安全的空操作（新 worker 起来、旧 worker 优雅退出），零停机。
+info "重载 nginx（每次部署都做，避免漏掉 nginx.conf 的变更）"
+compose exec -T nginx nginx -s reload || warn "重载失败，旧配置继续生效（检查 nginx.conf 语法）"
 
-step "8/9 执行数据库迁移"
+step "7/8 执行数据库迁移"
 # 先等 PostgreSQL 就绪（迁移经 compose 网络连它）；app 不依赖表即可启动，故先迁移无死锁
 for i in $(seq 1 20); do
   if compose exec -T postgres pg_isready -U langfuse >/dev/null 2>&1; then
@@ -320,7 +273,7 @@ for i in $(seq 1 10); do
 done
 [ "$migrated" = 1 ] || fail "数据库迁移失败（可手动排查: docker compose -f $COMPOSE_FILE logs app）"
 
-step "9/9 健康检查"
+step "8/8 健康检查"
 ok=0
 command -v curl >/dev/null 2>&1 || fail "未找到 curl（健康检查需要）"
 for i in $(seq 1 "$RETRIES"); do
@@ -337,18 +290,16 @@ if [ "$ok" != 1 ]; then
   fail "应用未在预期时间内就绪（已打印 app 日志尾部）"
 fi
 
-# 挂载内容版本 —— 便于事后核对"线上跑的是哪一版挂载文件"
-mount_version="非 git 仓库（本次未刷新挂载内容）"
-if [ -d .git ]; then
-  mount_version="$(git rev-parse --short HEAD) @ $(git rev-parse --abbrev-ref HEAD)"
-fi
+# 制品版本标识 —— 不走 git 后不再有 commit 可报，以 compose 文件时间戳 + 镜像 tag（上面那行）作为版本标识。
+# 两者都随本次制品走，足以回答"线上跑的是哪一版"。
+mount_version="compose 时间戳 $(date -r "$COMPOSE_FILE" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "?")"
 mount_counts="nginx-conf($(count_files deploy/nginx/nginx.conf)) nginx-html($(count_files deploy/nginx/html)) pg-init($(count_files deploy/postgres/init))"
 
 echo
 echo "[deploy] ✅ 部署完成，健康检查通过: $HEALTH_URL"
 echo "[deploy]    发布路径: $ROOT"
 echo "[deploy]    镜像: $DEPLOYED_APP_IMAGE"
-echo "[deploy]    挂载内容: $mount_version"
-echo "[deploy]    文件数: $mount_counts"
+echo "[deploy]    制品: $mount_version"
+echo "[deploy]    挂载文件数: $mount_counts"
 echo "[deploy]    手动冒烟：浏览器打开 http://<ECS-IP>/ → 登录 → 上传一份文档 → 等状态 ready → 提问并看引用"
 echo "[deploy]    查看日志：docker compose -f $COMPOSE_FILE logs -f app"
