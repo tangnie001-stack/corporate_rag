@@ -3,7 +3,14 @@
 #   环境判定 → 依赖安装 → 前置检查 → ACR 登录 → 拉镜像 → 起栈 → 迁移 → 健康检查
 #
 # 用法：
-#   bash scripts/deploy/deploy.sh [--force] [--no-install-deps]
+#   bash scripts/deploy/deploy.sh [mode] [--force] [--no-install-deps]
+#
+#   mode 省略即 deploy（完整发布）。可选：
+#     deploy | start   完整发布：环境判定 → 依赖 → 前置检查 → ACR 登录 → 拉镜像 → 起栈 → 迁移 → 健康检查
+#     preflight        只校验制品（存在 + gzip 完整），**不停服**；供流水线「停止」槽位调用
+#     health_check     只做健康探测（经 nginx:80 探 /api/health），失败非零退出
+#     stop             优雅停 app+nginx（**人工运维用**，勿接进流水线「停止」槽位 —— 否则部署中途失败会把服务停在下线）
+#     clean            清理旧 app 镜像（保留最近 2 个）+ 悬空镜像 + 残留包
 #
 #   --force            跳过「开发机 / 环境未知」的拒绝（仅在你明确知道后果时用）
 #   --no-install-deps  缺 docker 时不自动安装，直接报错（预装好的机器可用）
@@ -37,11 +44,24 @@ HEALTH_URL="http://127.0.0.1/api/health"   # 经 nginx:80，与对外路径一�
 RETRIES=40
 INTERVAL=3
 
+ARTIFACT="${ARTIFACT:-/home/admin/app/package.tgz}"   # 云效主机部署下发的制品包（preflight / clean 用）
+KEEP_N=2                                              # clean：保留最近 N 个 app 镜像（含当前在用）
+
 FORCE=0
 INSTALL_DEPS=1
 
 # 打印文件头的用法块（首行 shebang 之后的连续 # 注释行）
 usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "${BASH_SOURCE[0]}"; }
+
+# 首个非选项参数 = 模式；缺省 deploy
+MODE="deploy"
+if [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; then
+  MODE="$1"; shift
+fi
+case "$MODE" in
+  deploy|start|preflight|stop|health_check|clean) ;;
+  *) echo "未知模式: $MODE（-h 看用法）" >&2; exit 2 ;;
+esac
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -67,6 +87,106 @@ fail()  { echo "[deploy] ✗ $*" >&2; exit 1; }
 step()  { echo; echo "[deploy] === $* ==="; }
 compose() { docker compose -f "$COMPOSE_FILE" "$@"; }
 count_files() { { find "$1" -type f 2>/dev/null || true; } | wc -l; }
+
+# 开发机（WSL）护栏：stop / clean 会操作本机 docker，在开发机上会误伤 dev 容器 / 镜像。
+# 与 deploy 的 dev 拦截同一判据；--force 可放行。
+wsl_guard() {
+  if [ -n "${WSL_DISTRO_NAME:-}" ] || grep -qi microsoft /proc/version 2>/dev/null; then
+    [ "$FORCE" = 1 ] || fail "本模式会操作本机 docker（开发机上会误伤 dev 容器 / 镜像）。确要执行请加 --force"
+    warn "--force 已指定，继续（后果自负）"
+  fi
+}
+
+# ── 健康探测（deploy 第 8 步与 health_check 模式共用）──
+wait_healthy() {
+  local i
+  for i in $(seq 1 "$RETRIES"); do
+    if curl -fsS -o /dev/null "$HEALTH_URL" 2>/dev/null; then
+      info "✓ 第 $i 次探测通过"
+      return 0
+    fi
+    info "… 第 $i/$RETRIES 次未就绪，${INTERVAL}s 后重试"
+    sleep "$INTERVAL"
+  done
+  return 1
+}
+
+# ── preflight：只校验制品，不停任何服务（供流水线「停止」槽位调用）──
+# 设计要点：破坏性动作一律不在此发生 —— 制品坏就中止，旧版本保持在线；
+# 停旧起新由 start 阶段的 `compose up -d` 一次完成。
+do_preflight() {
+  step "预检（只校验制品，不停止服务）"
+  [ -f "$ARTIFACT" ] || fail "制品不存在: $ARTIFACT（下载失败？中止，旧版本保持在线）"
+  if ! gzip -t "$ARTIFACT" 2>/dev/null; then
+    echo "[deploy] ✗ 制品不是有效 gzip（大小 $(stat -c%s "$ARTIFACT" 2>/dev/null) 字节），前 200 字节："
+    head -c 200 "$ARTIFACT" 2>/dev/null; echo
+    fail "制品损坏 —— 中止，旧版本保持在线"
+  fi
+  info "✓ 制品有效（$(stat -c%s "$ARTIFACT") 字节）"
+}
+
+# ── stop：优雅停 app+nginx（人工运维用）──
+do_stop() {
+  step "停止服务（人工运维）"
+  wsl_guard
+  if [ ! -f "$COMPOSE_FILE" ]; then
+    info "$COMPOSE_FILE 不存在（首次部署？），无需停止"
+    return 0
+  fi
+  # 只停 app 与 nginx（每版会替换的两个）；DB / Redis / MinIO / Langfuse 保持在线以缩短停机
+  compose stop -t 30 app nginx 2>/dev/null || true
+  info "app / nginx 已停止（DB、Redis、MinIO、Langfuse 保持运行）"
+}
+
+# ── health_check：只做健康探测 ──
+do_health_check() {
+  step "健康检查"
+  command -v curl >/dev/null 2>&1 || fail "未找到 curl（健康检查需要）"
+  if ! wait_healthy; then
+    compose logs --tail 40 app 2>/dev/null || true
+    fail "应用未在预期时间内就绪: $HEALTH_URL"
+  fi
+}
+
+# ── clean：回收空间，只删"可再生"之物 ──
+do_clean() {
+  step "清理（旧镜像 / 悬空镜像 / 残留包）"
+  wsl_guard
+  # app 镜像 tag 即云效构建号（dockerTag=BUILD_NUMBER，从 1 递增），故旧版本 = 1..(CUR_TAG-KEEP_N)
+  if [ -f "$COMPOSE_FILE" ]; then
+    cur_ref=$(sed -n 's/^[[:space:]]*image:[[:space:]]*\(.*deploy_store_local:[^[:space:]]*\).*/\1/p' "$COMPOSE_FILE" | head -1)
+    cur_tag="${cur_ref##*:}"
+    repo="${cur_ref%:*}"
+    case "$cur_tag" in
+      ''|*[!0-9]*)
+        warn "当前 app tag 非纯数字（${cur_tag:-空}），跳过旧镜像清理" ;;
+      *)
+        limit=$((cur_tag - KEEP_N))
+        info "当前 app tag: $cur_tag，保留最近 $KEEP_N 个（尝试删 1..$limit）"
+        t=1
+        while [ "$t" -le "$limit" ]; do
+          if docker rmi "$repo:$t" >/dev/null 2>&1; then info "已删旧镜像: $repo:$t"; fi
+          t=$((t + 1))
+        done ;;
+    esac
+  fi
+  docker image prune -f >/dev/null 2>&1 || true
+  docker builder prune -f >/dev/null 2>&1 || true
+  rm -f "$ARTIFACT" 2>/dev/null || true
+  rm -rf "$ROOT/pack-staging" 2>/dev/null || true
+  info "清理完成"
+}
+
+# 非发布模式：执行后直接退出（deploy / start 继续走下面的完整流程）
+if [ "$MODE" != "deploy" ] && [ "$MODE" != "start" ]; then
+  case "$MODE" in
+    preflight)    do_preflight ;;
+    stop)         do_stop ;;
+    health_check) do_health_check ;;
+    clean)        do_clean ;;
+  esac
+  exit 0
+fi
 
 DEPLOYED_APP_IMAGE=""
 
@@ -274,18 +394,8 @@ done
 [ "$migrated" = 1 ] || fail "数据库迁移失败（可手动排查: docker compose -f $COMPOSE_FILE logs app）"
 
 step "8/8 健康检查"
-ok=0
 command -v curl >/dev/null 2>&1 || fail "未找到 curl（健康检查需要）"
-for i in $(seq 1 "$RETRIES"); do
-  if curl -fsS -o /dev/null "$HEALTH_URL" 2>/dev/null; then
-    ok=1
-    info "✓ 第 $i 次探测通过"
-    break
-  fi
-  info "… 第 $i/$RETRIES 次未就绪，${INTERVAL}s 后重试"
-  sleep "$INTERVAL"
-done
-if [ "$ok" != 1 ]; then
+if ! wait_healthy; then
   compose logs --tail 40 app || true
   fail "应用未在预期时间内就绪（已打印 app 日志尾部）"
 fi
