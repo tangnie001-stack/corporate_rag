@@ -1,32 +1,33 @@
 ## Why
 
-项目**从未发布过**：代码只在开发机（WSL）上跑，仓库里所有叫"部署"的内容（`README.md` 部署指南、`cookbook.md` 部署节）都是"在本机把栈起起来"，`docker-compose.prod.yml` 自述"本轮 prod 不部署"、从未在目标机验证。因此一批**只在真实交付时才暴露**的缺口长期无人处理，且没有一个环节逼它们被解决：
+项目此前只在开发机（WSL）运行、**从未发布过**。现在**已建成云效 CD 流水线并跑通首次对外 demo 部署**（目标机为阿里云 ECS；交付物 = ACR 镜像 + 部署制品包）。但"发布/部署流程"仍**没有归属文档**：
 
-- `MINIO_ROOT_USER/PASSWORD` 与应用的 `MINIO_ACCESS_KEY/SECRET_KEY` 是两对键，`.env.example` 只列了后者 → prod compose 直接校验失败退出
-- nginx 未设 `client_max_body_size`（默认 1m），而应用允许 10MB → 真实文档上传必 413
-- 应用不自动建表（`create_all` 零命中），且镜像里**没有** `alembic/` 与 `alembic.ini` → 迁移没有执行点
-- prod compose 的 `mem_limit` 合计 **14.25 GB**，在 2C8G 目标机上必被 OOM
+- `README.md` §部署指南 / `docs/agents/cookbook.md` §部署 描述的是**本地起栈**，不是发布流程
+- `docker-compose.prod.yml` 从未在目标机验证，且与目标机实际使用的 `docker-compose.image.yml` 不同源
+- 流水线各段的口径（构建步骤字段、变量与缓存、制品 tag 与镜像 tag 的一致性、主机部署四个槽位命令、安全组）散落在会话与临时脚本里，换个会话就丢
 
-现在目标明确：阿里云 **2C8G 单机**、对外 demo。需要先把"发布/部署流程"写下来作为**唯一归属**，后续配置改动才有依据。
+> 本 change 初稿假设"**不引入 CI/CD、镜像仓库**"（当时未建）。**该假设已被实际实现取代**：现为**一条云效流水线**（构建并推送镜像 → 打包部署制品 → 主机部署）。本 change 据此重写；目标不变 —— 让发布/部署步骤第一次有**唯一归属文档**。
 
 ## What Changes
 
-- **新增归属文档 `docs/agents/deploy-runbook.md`**：单机发布流程的唯一步骤来源，按六段组织 —— 目标形态 / 首次上机 / 数据迁移 / 冒烟 / 日常更新 / 回滚与备份（含安全组与密钥口径）
-- **在文档里固化已实测的口径**（不再散落对话）：
-  - 资源以 **dev 档位**为基准（实测整栈 <1 GB；prod 档位 14.25 GB 不可用于 2C8G）
-  - **内部端口收回回环**（dev 把 redis 6379 / app 8000 / minio 9000 发布到 0.0.0.0）
-  - **MinIO 两对键必须成对相等**；密钥不得依赖 compose 的弱默认值
-  - **迁移的执行位置**（宿主或把 `alembic/` + `alembic.ini` 挂进容器）
-  - **先提交、再发布**（工作区干净才发）
-- **登记本次不做的项**进 `docs/agents/requirements_pool.md`：HTTPS 选型、Langfuse 去留、`docker-compose.prod.yml` 与 dev 档位对齐、CI/CD、托管化（RDS/Redis/OSS/SLB）
+- **新增归属文档 `docs/agents/deploy-runbook.md`**：单机发布流程的唯一步骤来源，七段组织 —— 目标形态 / 发布链路与流水线配置 / 首次上机 / 数据迁移 / 冒烟 / 日常更新 / 回滚与备份
+- **固化已实测的口径**（不再散落会话）：
+  - 运行形态 = `docker-compose.image.yml`（镜像全部来自 ACR，**目标机不构建**）；6 个基镜像在公开库 `deploy_base`（免登录），app 在私有库 `deploy_store_local`
+  - **一条流水线**：构建并推送（`dockerTag=${BUILD_NUMBER}`）→ 打包制品（`pack-deploy-artifact.sh` 用**同一个** `BUILD_NUMBER` 注入 compose 的 `image:`）→ 主机部署（`deploy.sh` 四个模式对应四个槽位）⇒ **制品 tag 与镜像 tag 天然一致**
+  - **变量与缓存**：`PIP_REPO_USER` / `PIP_REPO_PASS` 是**制品仓库（packages / PyPI 代理仓 `repo-okxha`）认证**，配在「变量和缓存」，`PIP_REPO_PASS` 勾私密模式；**不是 ACR 凭据**。构建步骤 `options` 用**不带值**的 `--build-arg PIP_REPO_USER`（从环境变量取），**不写 `${...}`**（该字段不展开，会变字面量）
+  - 资源档位沿用 dev 档位（image compose 合计 ≈2.28 GB）；实测整栈 ≈715 MiB
+  - 对外只暴露 nginx:80；app 8000 与其余端口绑回环 / 由安全组封闭
+  - 迁移在**容器内**执行（`alembic/` + `alembic.ini` 已打进镜像），由 `deploy.sh` 第 7 步自动完成
+- **更正三项"前置必改项"为已完成**（nginx `client_max_body_size`、MinIO 两对键同源、alembic 入镜像）—— 初稿把它们列为"未改、照文档执行会撞缺口"
+- **登记未决项**进 `docs/agents/requirements_pool.md`：HTTPS 选型、Langfuse 去留、`docker-compose.prod.yml` 与目标形态的关系、备份口径、托管化
 - **`CLAUDE.md` 文档组织表登记该归属文档**（一事一档要求）
-- **本 change 只落文档**：不改任何 compose / nginx / `.env`；线性的配置改动另开 change
+- **本 change 仍只落文档**：不改任何 compose / nginx / `.env` / 流水线配置
 
 ## Capabilities
 
 ### New Capabilities
 
-- `deployment-runbook`: 单机对外 demo 的发布/部署流程文档——必须覆盖的环节（目标形态、上机前置、迁移执行位置、冒烟清单、日常更新、回滚、备份、端口与密钥约束），以及文档的唯一归属性
+- `deployment-runbook`: 单机对外 demo 的发布/部署流程文档——必须覆盖的环节（目标形态、发布链路与流水线配置、上机前置、迁移执行位置、冒烟清单、日常更新、回滚、备份、端口与密钥约束），以及文档的唯一归属性
 
 ### Modified Capabilities
 
@@ -35,6 +36,6 @@
 ## Impact
 
 - **新增**：`docs/agents/deploy-runbook.md`（归属文档）
-- **修改**：`CLAUDE.md`（文档组织表加一行）、`docs/agents/requirements_pool.md`（登记本次不做的项）
-- **不改**：任何代码、`docker-compose*.yml`、`deploy/nginx/`、`.env`
+- **修改**：`CLAUDE.md`（文档组织表加一行）、`docs/agents/requirements_pool.md`（登记未决项）
+- **不改**：任何代码、`docker-compose*.yml`、`deploy/nginx/`、`.env`、云效流水线配置
 - **无影响**：API 契约、数据库结构、测试断言、前端取值

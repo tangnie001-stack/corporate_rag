@@ -1,105 +1,110 @@
 ## Context
 
-项目从 2026-08 起只在开发机（WSL / ext4）上运行，**从未发布过**。仓库里叫"部署"的内容有两类，都不是发布流程：
+项目 2026-08 起只在开发机（WSL / ext4）运行；**2026-10 首次完成对外 demo 部署**（阿里云 ECS 单机，云效流水线交付）。仓库里叫"部署"的内容有两类，都不是发布流程：
 
 | 位置 | 实际是什么 |
 |---|---|
 | `README.md` §部署指南 | 本地启动说明（`docker compose up -d --build`） |
 | `docs/agents/cookbook.md` §部署 | 本地容器操作（改 `.py` 后 restart、ALTER TABLE） |
-| `docker-compose.prod.yml` | 一机全栈配置，文件头自述"本轮 prod 不部署"，从未在目标机验证 |
+| `docker-compose.prod.yml` | 一机全栈配置，从未在目标机验证过，且**不是目标机实际使用的那个** |
 
-现状约束（均已实测，不是推测）：
+**目标机实际使用的运行形态 = `docker-compose.image.yml`**（全镜像来自 ACR，目标机不构建）。已实测的环境事实：
 
-- 目标机：阿里云 **2C8G 单机**，对外 demo
-- `docker-compose.prod.yml` 的 `mem_limit` 合计 **14.25 GB**；`docker-compose.yml`（dev）合计 **3.00 GB**（去掉 litellm profile 后 2.25 GB）
-- 实测整栈占用 **≈715 MiB**（app 254 / langfuse-web 212 / minio 144 / postgres 83 / nginx 12 / redis 10），CPU 近 0（推理全在 DashScope 远端）
-- `docker-compose.prod.yml:71-72` 要求 `MINIO_ROOT_USER/PASSWORD`，而 `.env.example` 只列应用的 `MINIO_ACCESS_KEY/SECRET_KEY` → **prod compose 会在校验阶段直接退出**
-- `Dockerfile` 只 `COPY src/ scripts/ deploy/` → 镜像内**没有** `alembic/` 与 `alembic.ini`（但 `alembic` CLI 在 `/usr/local/bin`，因为装了依赖）；应用 `create_all` 零命中，**不自动建表**
-- `deploy/nginx/nginx.conf` 只 `listen 80`，无 `client_max_body_size`（默认 1m，应用侧允许 10MB），无 443 server block，`deploy/nginx/ssl/` 目录不存在
-- `docker-compose.override.yml` 会被 `docker compose` **自动合并**，给 app 挂 `./src`、`./tests`，给 nginx 挂宿主 conf/html
-- 部署纪律为零：`git tag` 0 个、无 `CHANGELOG`、无 CI、`scripts/` 无部署脚本、`pyproject.toml` 版本恒 `0.1.0`
+- 目标机：阿里云 **2C8G 单机**，对外 demo；安全组只放行 22 与 80
+- `docker-compose.image.yml` 的 `mem_limit`：redis 128m / postgres 1g / minio 256m / langfuse-web 256m / nginx 128m / app 512m（**合计 ≈2.28 GB**，即 dev 档位）
+- 实测整栈占用 **≈715 MiB**（app 254 / langfuse-web 212 / minio 144 / postgres 83 / nginx 12 / redis 10），CPU 近 0（推理在远端）
+- 镜像分两库：**公开** `deploy_base`（redis / pgvector / minio / langfuse / nginx / python 基镜像，免登录）+ **私有** `deploy_store_local`（app，含 `src/ scripts/ skills/ agents/ alembic/`，故不进公开库）
+- **发布链路（一条云效流水线）**：Git → 构建并推送 app 镜像（`dockerTag=${BUILD_NUMBER}`）→ 打包部署制品（`pack-deploy-artifact.sh` 用**同一个** `BUILD_NUMBER` 注入 compose 的 `image:`）→ 主机部署（`deploy.sh` 四模式对应四槽位）
+- 目标机 `/opt/wwww/corporate_rag` 上存在：`.env`（人工放置、600）、`docker-compose.image.yml`、`deploy/**`、`scripts/deploy/deploy.sh`、`data/ragas/`
+- 迁移在 **app 容器内**执行（`alembic/` 与 `alembic.ini` 已 `COPY` 进镜像）
+
+**初稿的三条断言已被实现推翻**（本 change 据此更新）：
+
+| 初稿 | 现状（证据） |
+|---|---|
+| nginx 无 `client_max_body_size`（必 413） | **已有** `client_max_body_size 12m`（`deploy/nginx/nginx.conf`） |
+| MinIO 两对键需人工保持相等 | **已同源**（`docker-compose.image.yml` 用 `${MINIO_ACCESS_KEY:-…}` 供 `MINIO_ROOT_*`） |
+| 镜像内无 `alembic/`，容器内跑不了迁移 | **已 COPY 进镜像**（`Dockerfile`），`deploy.sh` 迁移步骤实测跑过 0001→0002 |
+| Non-Goal：不引入 CI/CD、镜像仓库 | **已建成**：构建流水线 → ACR → 主机部署 |
 
 ## Goals / Non-Goals
 
-**Goals:**
+**Goals：**
 
-- 让"发布/部署流程"第一次有**唯一归属文档**，六段齐全：目标形态 / 首次上机 / 数据迁移 / 冒烟 / 日常更新 / 回滚与备份
-- 把已在对话与实测中确认的口径**固化进文档**（资源档位、端口、MinIO 键对、迁移位置、制品形态），不再依赖会话记忆
+- 让"发布/部署流程"第一次有**唯一归属文档**，七段齐全：目标形态 / 发布链路与流水线配置 / 首次上机 / 数据迁移 / 冒烟 / 日常更新 / 回滚与备份
+- 把已在实现与实测中确认的口径**固化进文档**（运行形态、镜像来源、流水线各段配置、变量、端口、迁移位置、制品形态、回滚），不再依赖会话记忆
 - 明确区分"当前采用口径"与"仍待定项"，待定项登记进需求池
 
-**Non-Goals:**
+**Non-Goals：**
 
-- **不改任何 compose / nginx / `.env`**（本 change 只落文档；配置改动另开 change，便于独立评审）
-- 不引入 CI/CD、镜像仓库、监控告警、托管化（RDS/Redis/OSS/SLB）
+- **不改任何 compose / nginx / `.env` / 流水线配置**（本 change 只落文档；配置改动另开 change，便于独立评审）
+- 不引入监控告警、托管化（RDS/Redis/OSS/SLB）
 - 不为 2 机 + SLB 的横向扩展做设计（与"流式状态在进程内、单 worker"的既定形态冲突，属独立问题）
 - 不动 `docker-compose.prod.yml`
 
 ## Decisions
 
-### D1 目标形态 = 单机 2C8G 跑 dev compose，prod compose 不动
+### D1 目标形态 = 单机 2C8G 跑 `docker-compose.image.yml`，目标机不构建
 
-**理由**：dev 的 `mem_limit` 档位是本机 8 GB 上**实测跑过**的（整栈实测 <1 GB），prod 的 14.25 GB 在 2C8G 上必 OOM 且从未验证；两者容器名/卷名/project name 完全相同，改 prod 只会引入需要重新验证的面。用户明确"不用 prod、prod 不动"。
+**理由**：镜像全部来自 ACR（基镜像公开、app 私有），目标机只 `pull`；把最贵的一步（构建）从 2C8G 上移走。`docker-compose.yml`（dev）与 `docker-compose.prod.yml` 都不参与目标机运行 —— 前者面向开发机，后者从未验证且档位（14.25 GB）会 OOM。
 
-**替代方案**：① 把 prod compose 的限额对齐 dev —— 收益小（还是同一个栈）、要重验；② 直接托管化 —— 与"能用托管就用托管"的原则一致，但属另一个数量级的工程，且当前唯一硬需求是"对外 demo 能看"。
-
-**已知代价**：`docker-compose.prod.yml` 会长期处于"不可用且未标注"状态。缓解见 Risks。
+**替代方案**：① 直接把 dev compose 拷到目标机 —— 会把 2C8G 变成构建机，且依赖 Docker Hub；② 对齐 prod compose —— 仍需重验，收益小。
 
 ### D2 本 change 只落文档
 
-**理由**：用户明确"部署的内容，可以先落文档"。文档先行还有一个实际好处——配置改动可以被文档反过来约束（先定口径，再改配置），避免边改边发现口径不一致。配置项（`docker-compose.demo.yml`、nginx 上传上限、MinIO 键对、alembic 挂载）在需求池登记，另开 change。
+**理由**：文档先行可让配置改动被文档反向约束（先定口径，再改配置）。配置项（prod compose 关系、HTTPS、备份口径）在需求池登记，另开 change。
 
-### D3 HTTPS：当前口径 = demo 先纯 HTTP；选型留待定
+### D3 发布链路 = 一条流水线，`BUILD_NUMBER` 同源保证 tag 一致
 
-**理由**：单机 demo 的最短路径；改成 443 需要引入证书来源与续期，属额外决策面。文档写清"非生产口径"，并把 443 段落标为**可选**。
+**理由**：构建推镜像用 `dockerTag=${BUILD_NUMBER}`，打包制品用 `pack-deploy-artifact.sh` 的同一个 `BUILD_NUMBER` 注入 compose 的 `image:`；同一流水线 ⇒ 两者必然配套，**不需要人工同步 tag**。目标机的 ACR 登录（私有库）在部署步骤里完成（ACR 个人版不支持平台代拉）。
 
-**替代方案**：① nginx 直接上 443（自签或 Let's Encrypt）——单机最自洽，但要定证书来源；② SLB 终止 TLS —— 与"单机"取向相左，多一个组件。两者都进 Open Questions。
+### D4 变量与缓存：`PIP_REPO_*` 服务制品仓库，ACR 凭据另配
 
-### D4 Langfuse：当前口径 = 关掉；去留留待定
+**理由**：`PIP_REPO_USER` / `PIP_REPO_PASS` 是**云效制品仓库（packages / PyPI 代理仓）认证**，供构建期的 `pip install` 拉依赖；它**登不了 ACR**（不同服务、不同认证）。ACR 凭据由构建侧 serviceConnection 与目标机 `docker login` 分别承担。
 
-**理由**：两个实测依据 —— ① 它默认绑 `127.0.0.1:3000`，**对外 demo 本来就看不到**；② 内存实测 `211.8 MiB / 256 MiB` = **82.7%**，稍有并发即被 OOM 杀。关掉可省 **1.12 GB 镜像 + 约 0.5 GB 内存**与一整套密钥（H-02/H-03 也随之下线）。
+**已知坑（写进 runbook）**：构建步骤的 `options` 字段**不展开 ` ${...}`**，故必须用**不带值**的 `--build-arg PIP_REPO_USER`（从环境变量取），否则字面量会被当作 pip 用户名，表现为"索引里什么都查不到"。
 
-**若将来保留**：必须把限额提到 512m 并加 nginx server block + 证书。
+### D5 迁移在容器内执行
 
-### D5 迁移的执行位置：宿主或挂载进容器，二选一写进文档
+**理由**：`alembic/` 与 `alembic.ini` 已打进 app 镜像，`deploy.sh` 的迁移步骤即 `docker compose exec app alembic upgrade head`，迁移幂等、自动重试。顺序**先于冒烟**（建表 + 加列）。
 
-**理由**：镜像内无 `alembic/` 与 `alembic.ini`，`docker compose exec app alembic upgrade head` 在现状下**不成立**。两条可行路：① 宿主执行（dev compose 已发布 `127.0.0.1:5432`，本就为此）——需要在目标机有 Python 环境；② 把 `./alembic` 与 `./alembic.ini` 挂进 app 容器——无需宿主环境，且与"配置改动另开 change"相容。文档给两条，标注推荐。
+### D6 制品形态 = 流水线打出的部署包（tgz）+ ACR 镜像
 
-**顺序约束**：迁移必须在冒烟**之前**（`0001_pg_baseline` 建 8 张表，`0002_kb_domain` 加列）。
+**理由**：制品由 `pack-deploy-artifact.sh` 生成（白名单：`docker-compose.image.yml` + `scripts/deploy/deploy.sh` + `deploy/**`），经「主机部署」下发解压到 `/opt/wwww/corporate_rag`。`src/` 等代码随镜像走，宿主不再需要。
 
-### D6 制品形态 = 已提交的 commit（+ 同步 `src/`），镜像低频重建
-
-**理由**：override 把 `./src` 挂进容器，所以日常发布的"制品"实际是 **commit + 文件同步 + `restart app`**；镜像只在 `pyproject.toml` / `Dockerfile` 变动时才需要 `build`。这条把 2C8G 上最贵的一步（构建）降为低频操作。
-
-**代价**：目标机必须存在仓库工作副本（不是"只放镜像"）。对 demo 可接受。
+**代价**：目标机不再是"代码工作副本"，回滚靠镜像 tag 而非 `git checkout`；`.env` 必须人工放置（制品不含密钥）。
 
 ### D7 文档归属 = 新建 `docs/agents/deploy-runbook.md`，并在 `CLAUDE.md` 文档组织表登记
 
-**理由**：`CLAUDE.md` 的「一事一档」要求每条事实只有一个归属文档、新归属文档必须同步登记进表，否则视为未完成。
+**理由**：`CLAUDE.md` 的「一事一档」要求每条事实只有一个归属文档、新归属文档必须同步登记进表。
 
 ### D8 冒烟清单（5 步）作为发布成功判据
 
-健康检查 `/api/health` → 登录 → 上传一份文档 → 等待 `ready` → 提问并看到引用。缺任一步不算发布成功。**理由**：现有验证资产（pytest / ruff / pyright / doc 闸门）覆盖的是开发侧，交付侧一条都没有；这 5 步是能真实暴露"上传被 nginx 挡""表未建""存储凭据不匹配"的最小集合。
+健康检查 `/api/health` → 登录 → 上传一份文档 → 等待 `ready` → 提问并看到引用。缺任一步不算发布成功。**理由**：现有验证资产（pytest / ruff / pyright / doc 闸门）覆盖开发侧，交付侧一条都没有。
+
+### D9 主机部署四槽位：停止槽位只做 preflight，不真停
+
+**理由**：云效按「停止 → 启动 → 健康检查 → 清理」顺序调用；若"停止"槽位真的停服，则后续任一步失败（如制品损坏）会把服务留在**下线**状态。故停止槽位只调 `deploy.sh preflight`（校验制品、不停服），停旧起新交给启动阶段的 `compose up -d`。**原则：破坏性动作必须排在启动之后。**
 
 ## Risks / Trade-offs
 
-- **[文档先行、配置未改 → 照文档执行会撞已知缺口]** → runbook 把这几个缺口标为"**前置必改项**"并给出判据（如 `client_max_body_size`、MinIO 两对键），同时在需求池登记对应 change。读者不会误以为现状可直接发布。
-- **[`docker-compose.prod.yml` 长期是"不可用且未标注"的配置]** → 在需求池显式登记"prod compose 与 dev 档位对齐"为待定项；在本文档说明它不参与本目标形态，避免后来者误用它。
-- **[2C8G 上构建镜像是三峰同时（CPU/磁盘/内存）]** → runbook 要求加 2–4 GB swap；构建后 `docker builder prune -f`；磁盘建议 ≥60 GB（build cache 实测可达 6.9 GB）。
-- **[dev compose 的密钥走 `${X:-弱默认值}`，缺值也能起来]** → runbook 要求显式设值、不得依赖兜底；并把"MinIO 两对键成对相等"单列一条。
+- **[runbook 与流水线配置会各自漂移]** → runbook 明确"流水线配置以本文档为口径来源"；改流水线字段须同 PR 改 runbook。
+- **[`docker-compose.prod.yml` 长期"不可用且未标注"且与目标形态无关]** → 在需求池登记其与目标形态的关系为待定项；runbook 说明它不参与本目标形态。
+- **[2C8G 上构建镜像是三峰同时（CPU/磁盘/内存）]** → 但构建**已移到流水线构建机**，目标机不再构建 —— 风险已消除；runbook 仍要求 swap ≥2 GB、盘 ≥60 GB 以防本地演练。
+- **[制品含 `.env` 的缺失]** → `.env` 人工放置，制品硬禁 `.env*`；runbook 单列"首机第一步放 `.env`"。
 - **[单机是单点：PG 与 MinIO 同机]** → 接受（demo 口径）；用备份缓解，并写明 MinIO 原始文件是**唯一不可再生源**。
-- **[worktree 只隔离 git、不隔离 Docker]** → 与本目标形态无关（不在 worktree 内部署）；仅在生产机单副本上操作。
+- **[新流水线易漏配变量]** → runbook 的「变量与缓存」段把 `PIP_REPO_USER/PASS` 列为**必备**，并给出"构建失败时先核对变量"的排查顺序。
 
 ## Migration Plan
 
 1. 本 change 落文档（`deploy-runbook.md` + `CLAUDE.md` 登记 + 需求池登记）
-2. 按 runbook 执行首次上机（**待**：HTTPS/Langfuse 两个口径定稿 + 前置必改项对应的 change 落地）
+2. 后续按 runbook 执行发布（**待**：HTTPS / 备份口径定稿）
 3. **回滚**：本 change 是纯文档，回滚 = `git revert` 对应提交；无数据面与契约面回滚
 
 ## Open Questions
 
 1. **HTTPS**：纯 HTTP（当前口径）／nginx 443 + 证书（自签 or Let's Encrypt）／SLB 终止 TLS？
-2. **Langfuse**：关掉（当前口径）／保留（则需 nginx 暴露 3000 + 证书 + 限额提到 512m）？
-3. **配置改动落在哪**：新建 `docker-compose.demo.yml` 覆盖，还是直接改 `docker-compose.prod.yml` 对齐 dev 档位？
-4. **域名与证书来源**：有无域名？证书从哪来？
+2. **Langfuse**：当前口径 = **保留在栈内**（`docker-compose.image.yml:125`，绑回环不对外）；是否长期保留、是否要对外看？
+3. **`docker-compose.prod.yml`**：废弃、删除，还是与目标形态对齐？
+4. **备份口径**：频率、保留期、存放位置（是否上 OSS）？
 5. **首次语料导入**：demo 展示哪批文档、由谁导入、走界面上传还是灌库？
-6. **备份口径**：频率、保留期、存放位置（是否上 OSS）？
