@@ -1,6 +1,6 @@
 # 防御性模式
 
-> 真实发生/差点发生的缺陷类别，写成防复发规则。写并发、进程级注册表、SSE 流式、精排、实体、prompt、接口契约、数据库、部署、开发期闸门相关代码前先读。
+> 真实发生/差点发生的缺陷类别，写成防复发规则。写并发、进程级注册表、SSE 流式、精排、实体、prompt、接口契约、前端、数据库、部署、开发期闸门相关代码前先读。
 
 ## 并发
 
@@ -151,6 +151,21 @@
 **规则**：前端读任何接口返回值前，形状以 `docs/agents/api_contract.md` 对应小节为准，**不靠猜字段名**（尤其别把后端局部变量名当 JSON 键）；改动消费同一字段的前端代码后，按 CLAUDE.md「契约同步」同时过 `tests/` 与 `deploy/nginx/html/` 两条消费链。另外对"取到的值再调数值方法"处加类型守卫（`typeof v === 'number' ? v.toFixed(2) : '—'`）—— **形状漂移只该降级成占位符，不该让整个组件不渲染**。
 
 **历史实例**：`deploy/nginx/html/index.html` 的 `showEvalModal` / `showEvalBroken`（提交 `e503375` 引入；修复后同一契约形状见 `api_contract.md` §2.2.1）。
+
+## 前端（浏览器 API）
+
+### 明文 HTTP 部署下不得裸用安全上下文专属 API
+
+**现象**：demo 部署到 `http://8.133.218.201/` 后，登录页点「登录」报 `crypto.randomUUID is not a function`。根因：`crypto.randomUUID` 与 `crypto.subtle` / `navigator.clipboard` / `navigator.serviceWorker` / `navigator.share` / `Notification` / `geolocation` 一样，**只在安全上下文（HTTPS / `http://localhost` / `file://`）暴露**；走公网明文 HTTP 时该属性是 `undefined`，裸调用即 `TypeError`。三处生成 trace id 的代码里，`deploy/nginx/html/login.html` 是唯一没写兜底的（`js/api.js` 的 `generateTraceId`、`chat.html` 都有 `?.` 或三元兜底），于是**只有登录页崩，别处正常**。
+
+**为什么本地恒绿**：本地冒烟一律访问 `http://localhost`，而 **localhost 本身算安全上下文** ⇒ 这一类缺陷在本地永远不复现，只有换成公网 IP 明文访问才现形。
+
+**规则**：
+1. 前端调用安全上下文专属 API 时 MUST 带能力检测 + 兜底，禁止裸调用；同一能力的兜底表达式全站保持一致 —— canonical 实现是 `js/api.js::generateTraceId`，内联处（`chat.html`、`login.html`）照抄其形态。
+2. 目标环境是明文 HTTP 时，冒烟/验收 MUST 走**公网地址**或模拟非安全上下文，不能只测 `localhost`，否则整类缺陷恒绿。
+3. 长期明文 HTTP 部署应评估上 TLS；未上 TLS 前，前端按「永不假设安全上下文」编写。
+
+**历史实例**：2026-10-02 demo 部署（`http://8.133.218.201/`）。`login.html` 的 `X-Trace-ID` 原为 `crypto.randomUUID()` 裸调用；修复为与另两处同形：`'trace_'+(crypto.randomUUID?crypto.randomUUID():Date.now()+'_'+Math.random().toString(36).slice(2,10))`。
 
 ## 数据库
 
