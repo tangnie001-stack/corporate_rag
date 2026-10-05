@@ -9,10 +9,10 @@
 
 ## 2. 发布链路与流水线配置（本次新增的段）
 
-- [x] 2.1 发布链路：流水线三段（Git → 构建并推送镜像(ACR 私有库) → 打包部署制品(tgz) → **生成部署单**）+ **人工在部署页面点「创建部署单」**触发主机部署；写明 `BUILD_NUMBER` 同源 ⇒ **制品里的 tag = 镜像 tag**，无需人工同步
+- [x] 2.1 发布链路：流水线三段（Git → 构建并推送镜像(ACR 私有库) → 打包部署制品(tgz) → **部署**），其中**部署步骤：匹配到发布单 → 直接发布；匹配不到 → 挂起等人工在部署页「创建发布单」**（创建后继续、此后无需人工确认）；写明 `BUILD_NUMBER` 同源 ⇒ **制品里的 tag = 镜像 tag**，无需人工同步
 - [x] 2.2 「变量与缓存」段：`PIP_REPO_USER` / `PIP_REPO_PASS` = **制品仓库（packages / PyPI 代理仓 `repo-okxha`）认证**，配在「变量和缓存」，`PIP_REPO_PASS` 勾**私密模式**，**不是 ACR 凭据**；ACR 凭据走构建侧 serviceConnection / 目标机 `docker login`（`ACR_USER`/`ACR_PASSWORD`）；`LLM_MODEL` 等注入的是**目标机环境变量**，而 app 容器只读 `env_file: .env` ⇒ **改模型要改服务器 `.env`**，流水线变量对 app 无效
 - [x] 2.3 构建步骤字段口径：`dockerfilePath: Dockerfile`、`contextPath` 留空、`dockerTag: ${BUILD_NUMBER}`；`options` 用**不带值**的 `--build-arg PIP_REPO_USER --build-arg PIP_REPO_PASS`（**不写 `${...}`** —— 该字段不展开）
-- [x] 2.4 主机部署四槽位命令（`bash scripts/deploy/deploy.sh {preflight,start,health_check,clean}`）各自作用（**配在部署页面**，由「创建部署单」触发）；写明原则「**破坏性动作必须排在启动之后**」（停止槽位只做 preflight，不真停）
+- [x] 2.4 主机部署四槽位命令（`bash scripts/deploy/deploy.sh {preflight,start,health_check,clean}`）各自作用（**配在部署页面**，由流水线最后一步的「部署」触发）；写明原则「**破坏性动作必须排在启动之后**」（停止槽位只做 preflight，不真停）
 - [x] 2.5 已踩坑清单：① `{{ }}` 会被云效当占位符渲染（禁用）；② `options` 字段不展开 `${...}`；③ Alinux 4 自带 `docker` 与 `docker-ce` 冲突（补 `docker-compose-plugin` 即通）；④ `docker compose restart` 不吃 `.env`，改配置要 `--force-recreate`
 
 ## 3. 首次上机

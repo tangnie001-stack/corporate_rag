@@ -13,7 +13,7 @@
 - **新增归属文档 `docs/agents/deploy-runbook.md`**：单机发布流程的唯一步骤来源，七段组织 —— 目标形态 / 发布链路与流水线配置 / 首次上机 / 数据迁移 / 冒烟 / 日常更新 / 回滚与备份
 - **固化已实测的口径**（不再散落会话）：
   - 运行形态 = `docker-compose.image.yml`（镜像全部来自 ACR，**目标机不构建**）；6 个基镜像在公开库 `deploy_base`（免登录），app 在私有库 `deploy_store_local`
-  - **发布链路**：流水线三段 = 构建并推送（`dockerTag=${BUILD_NUMBER}`）→ 打包制品（`pack-deploy-artifact.sh` 用**同一个** `BUILD_NUMBER` 注入 compose 的 `image:`）→ **生成部署单**；**真正的发布由人工在部署页面点「创建部署单」触发**主机部署（`deploy.sh` 四个模式对应四个槽位）⇒ **制品 tag 与镜像 tag 天然一致**
+  - **发布链路**：流水线三段 = 构建并推送（`dockerTag=${BUILD_NUMBER}`）→ 打包制品（`pack-deploy-artifact.sh` 用**同一个** `BUILD_NUMBER` 注入 compose 的 `image:`）→ **部署**（流水线最后一步：**匹配到发布单就直接发布**；**匹配不到则挂起，等人工在部署页面点「创建发布单」**，创建成功后继续、此后无需人工确认）⇒ **制品 tag 与镜像 tag 天然一致**
   - **变量与缓存**：`PIP_REPO_USER` / `PIP_REPO_PASS` 是**制品仓库（packages / PyPI 代理仓 `repo-okxha`）认证**，配在「变量和缓存」，`PIP_REPO_PASS` 勾私密模式；**不是 ACR 凭据**。构建步骤 `options` 用**不带值**的 `--build-arg PIP_REPO_USER`（从环境变量取），**不写 `${...}`**（该字段不展开，会变字面量）
   - 资源档位沿用 dev 档位（image compose 合计 ≈2.28 GB）；实测整栈 ≈715 MiB
   - 对外只暴露 nginx:80；app 8000 与其余端口绑回环 / 由安全组封闭

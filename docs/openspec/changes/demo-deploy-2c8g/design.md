@@ -14,7 +14,7 @@
 - `docker-compose.image.yml` 的 `mem_limit`：redis 128m / postgres 1g / minio 256m / langfuse-web 256m / nginx 128m / app 512m（**合计 ≈2.28 GB**，即 dev 档位）
 - 实测整栈占用 **≈715 MiB**（app 254 / langfuse-web 212 / minio 144 / postgres 83 / nginx 12 / redis 10），CPU 近 0（推理在远端）
 - 镜像分两库：**公开** `deploy_base`（redis / pgvector / minio / langfuse / nginx / python 基镜像，免登录）+ **私有** `deploy_store_local`（app，含 `src/ scripts/ skills/ agents/ alembic/`，故不进公开库）
-- **发布链路（一条云效流水线 + 人工部署单）**：Git → 构建并推送 app 镜像（`dockerTag=${BUILD_NUMBER}`）→ 打包部署制品（`pack-deploy-artifact.sh` 用**同一个** `BUILD_NUMBER` 注入 compose 的 `image:`）→ **生成部署单**；**真正的发布由人工在部署页面点「创建部署单」触发**（主机部署，`deploy.sh` 四模式对应四槽位）
+- **发布链路（一条云效流水线）**：Git → 构建并推送 app 镜像（`dockerTag=${BUILD_NUMBER}`）→ 打包部署制品（`pack-deploy-artifact.sh` 用**同一个** `BUILD_NUMBER` 注入 compose 的 `image:`）→ **部署**（流水线最后一步：**匹配到发布单就直接发布**；**匹配不到则挂起，等人工在部署页面点「创建发布单」**，创建成功后继续、此后无需人工确认）
 - 目标机 `/opt/wwww/corporate_rag` 上存在：`.env`（人工放置、600）、`docker-compose.image.yml`、`deploy/**`、`scripts/deploy/deploy.sh`、`data/ragas/`
 - 迁移在 **app 容器内**执行（`alembic/` 与 `alembic.ini` 已 `COPY` 进镜像）
 
@@ -54,9 +54,9 @@
 
 **理由**：文档先行可让配置改动被文档反向约束（先定口径，再改配置）。配置项（prod compose 关系、HTTPS、备份口径）在需求池登记，另开 change。
 
-### D3 发布链路 = 流水线产出「部署单」 + 人工在部署页面发布；`BUILD_NUMBER` 同源保证 tag 一致
+### D3 发布链路 = 流水线最后一步「部署」按发布单匹配决定是否挂起；`BUILD_NUMBER` 同源保证 tag 一致
 
-**理由**：构建推镜像用 `dockerTag=${BUILD_NUMBER}`，打包制品用 `pack-deploy-artifact.sh` 的同一个 `BUILD_NUMBER` 注入 compose 的 `image:`；同一流水线 ⇒ 两者必然配套，**不需要人工同步 tag**。流水线的**最后一步是「生成部署单」**（不部署机器），真正的发布由**人工在部署页面点「创建部署单」**触发主机部署 —— 四槽位脚本配在**部署页面**而非流水线里。目标机的 ACR 登录（私有库）在部署执行时完成（ACR 个人版不支持平台代拉）。
+**理由**：构建推镜像用 `dockerTag=${BUILD_NUMBER}`，打包制品用 `pack-deploy-artifact.sh` 的同一个 `BUILD_NUMBER` 注入 compose 的 `image:`；同一流水线 ⇒ 两者必然配套，**不需要人工同步 tag**。流水线的**最后一步是「部署」**：**匹配到发布单就直接发布**；**匹配不到则挂起，等人工在部署页面点「创建发布单」**（创建成功后继续，且**此后再运行无需人工确认**）—— 四槽位脚本配在**部署页面**而非流水线里。目标机的 ACR 登录（私有库）在部署执行时完成（ACR 个人版不支持平台代拉）。
 
 ### D4 变量与缓存：`PIP_REPO_*` 服务制品仓库，ACR 凭据另配
 

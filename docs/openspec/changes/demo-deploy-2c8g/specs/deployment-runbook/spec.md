@@ -25,7 +25,7 @@ runbook SHALL 规定运行形态为 `docker-compose.image.yml`（镜像全部来
 
 ### Requirement: 发布链路与流水线配置有唯一归属
 
-runbook SHALL 描述发布链路：**流水线**三段（构建并推送镜像 → 打包部署制品 → **生成部署单**），以及**人工在部署页面点「创建部署单」**触发的主机部署；并 SHALL 固化：① `BUILD_NUMBER` 同源 ⇒ **制品里的镜像 tag = 实际推送的镜像 tag**；② 「变量和缓存」中 `PIP_REPO_USER` / `PIP_REPO_PASS` 是**制品仓库（packages / PyPI 代理仓）认证**、`PIP_REPO_PASS` 为私密变量，**不是 ACR 凭据**；③ 构建步骤字段口径（`dockerfilePath` / `contextPath` / `dockerTag` / `options` 使用**不带值**的 `--build-arg`）；④ 主机部署**四槽位命令**与其作用（**配在部署页面**，由部署单触发）；⑤ 原则「**破坏性动作必须排在启动之后**」。
+runbook SHALL 描述发布链路：**流水线**三段（构建并推送镜像 → 打包部署制品 → **部署**），其中**部署步骤匹配到发布单则直接发布、匹配不到则挂起等人工在部署页面「创建发布单」**（创建成功后继续，且此后再运行无需人工确认）；并 SHALL 固化：① `BUILD_NUMBER` 同源 ⇒ **制品里的镜像 tag = 实际推送的镜像 tag**；② 「变量和缓存」中 `PIP_REPO_USER` / `PIP_REPO_PASS` 是**制品仓库（packages / PyPI 代理仓）认证**、`PIP_REPO_PASS` 为私密变量，**不是 ACR 凭据**；③ 构建步骤字段口径（`dockerfilePath` / `contextPath` / `dockerTag` / `options` 使用**不带值**的 `--build-arg`）；④ 主机部署**四槽位命令**与其作用（**配在部署页面**）；⑤ 原则「**破坏性动作必须排在启动之后**」。
 
 #### Scenario: 复现一次发布
 
