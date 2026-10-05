@@ -155,15 +155,20 @@ fi
 **启动槽位**：
 ```bash
 set -euo pipefail
-ART=/home/admin/app/package.tgz
 ROOT=/opt/wwww/corporate_rag
+# ★ 必须用「平台为这张部署单下发的制品」—— 回滚时它指向旧版本。
+#   不要自己拼 URL / 写死版本，否则回滚会拉回最新版（回滚失效的典型成因）。
+ART="${package_download_path:-/home/admin/app/package.tgz}"
 [ -f "$ART" ] || { echo "[start] 制品不存在: $ART"; exit 1; }
+gzip -t "$ART" 2>/dev/null || { echo "[start] 制品不是有效 gzip（$(stat -c%s "$ART") 字节）"; exit 1; }
 mkdir -p "$ROOT"
 rm -rf "$ROOT/scripts"; rm -f "$ROOT/docker-compose.image.yml"   # 非挂载路径，可安全清
 tar zxf "$ART" -C "$ROOT"                                        # deploy/ 不动（bind mount）
 cd "$ROOT"
 bash scripts/deploy/deploy.sh start
 ```
+
+> 🔑 **回滚能否生效，取决于这一步"制品从哪来"**：制品里烘着 `deploy_store_local:<构建号>`，用部署单下发的制品 ⇒ tag 与页面（`deploy/nginx/html`）一起退回旧版；自行下载 ⇒ 永远最新版，回滚形同虚设。
 
 **健康检查槽位**：
 ```bash
@@ -245,7 +250,12 @@ cd /opt/wwww/corporate_rag && bash scripts/deploy/deploy.sh clean
 
 ## 7. 回滚与备份
 
-**代码 / 版本回滚**：镜像 tag = 构建号，ACR 里所有 tag 都在。
+**版本回滚（首选，走云效）**：应用版本页 `https://deploytest-cn-shanghai.devops.aliyuncs.com/appstack/app/deploy-app/versions` → 选旧版本 → 回滚 → 平台**按那张部署单的制品**重新下发并执行主机部署。
+
+- 🔑 **前提（否则回滚不生效）**：启动槽位必须**消费部署单下发的制品**（见 §2.4 的 `${package_download_path}`）—— 制品里烘着 `deploy_store_local:<构建号>` 与 `deploy/nginx/html`，二者一起退回旧版；**脚本若自行下载制品，回滚就永远是"最新版"**。
+- 旧镜像需仍在 **ACR**：ACR 的 tag 不受本机 `clean` 影响（`clean` 只删本机镜像），故正常够用。
+
+**兜底（手工）**：
 
 - 首选：重跑一次旧的构建（回到那个构建号对应的代码），产出对应镜像；
 - 应急：临时把 `docker-compose.image.yml` 的 `image:` 改指旧的 `deploy_store_local:<旧tag>`，`docker compose -f docker-compose.image.yml up -d app`。
