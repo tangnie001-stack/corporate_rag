@@ -54,6 +54,32 @@
 
 ## 2. 发布链路与流水线配置（云效）
 
+### 2.0 发布全流程（端到端）
+
+**默认发布分支：`dev-wsl`。** 一次发布按下面顺序走（1–2 在开发机，其余在云效网页）：
+
+| # | 步骤 | 在哪 | 入口 / 命令 |
+|---|---|---|---|
+| 1 | **前置检查**：工作区干净 + 本地 `dev-wsl` 已推送、未落后 | 开发机 | `git fetch && git status -sb`（**说"开始部署"时由助手代查**）|
+| 2 | **推代码** | 开发机 | `git push origin dev-wsl` |
+| 3 | **GitHub → Codeup 同步代码**（当前**手动**）| 云效网页 | `https://deploytest-cn-shanghai.devops.aliyuncs.com/codeup/deploytest/tangnie001-stack/corporate_rag/settings/mirror_sync` |
+| 4 | **流水线自动开始**（Codeup 有提交 → 钩子触发：构建推镜像 → 打包制品 → **生成部署单**）| 云效网页 | `https://deploytest-cn-shanghai.devops.aliyuncs.com/flow/my?page=1` |
+| 5 | **创建部署单**（点「创建部署单」→ 跳部署页）| 云效网页 | 同上（流水线页）|
+| 6 | **主机部署自动执行**（四槽位 `preflight → start → health_check → clean`）| 目标机 | 自动；日志在部署页 |
+| 7 | **冒烟**（见 §5；缺任一步不算成功）| 浏览器 | `http://<ECS-IP>/` |
+| 8 | **查看版本 / 回滚** | 云效网页 | `https://deploytest-cn-shanghai.devops.aliyuncs.com/appstack/app/deploy-app/versions` |
+
+> **第 1 步可以交给助手**：只要说「开始部署」，助手会先 `git fetch` 并比对本地 `dev-wsl` 与 `origin/dev-wsl`，确认没有未推送 / 落后的提交（并检查工作区是否干净）再往下走。
+
+#### 2.0.1 代码从 GitHub 到 Codeup（两条路，只留一条）
+
+流水线**代码源是 Codeup**，而开发机只推 **GitHub** ⇒ 中间必须把提交搬到 Codeup：
+
+1. **手动「镜像同步」（当前口径）**：到 §2.0 第 3 步的同步设置页点「立即同步」。零维护，代价是每次发布多一步人工。
+2. **自动化（未实施）**：在 **GitHub Actions** 里 `git push --mirror` 到 Codeup（GitHub 侧网络好、几秒），Codeup 的 push 事件再触发流水线。
+
+⚠️ **两条路只应保留一条** —— Codeup 的镜像同步是**强制覆盖**；若既手动镜像同步、又让本地/Actions 直推 Codeup，两边会互相打架。直接"一次推两边"（`git remote set-url --add --push`）同理，且 Codeup 需另配凭据，不如走第 2 条。
+
 ### 2.1 发布链路：流水线产出「部署单」，部署页面触发发布
 
 ```
@@ -204,7 +230,7 @@ cd /opt/wwww/corporate_rag && bash scripts/deploy/deploy.sh clean
 
 ## 6. 日常更新
 
-**正常发布流程**：跑一次流水线（构建推镜像 → 打包制品 → **生成部署单**）→ 在**部署页面点「创建部署单」**执行主机部署。之后日常只需：
+**正常发布流程见 §2.0**（推代码 `dev-wsl` → Codeup 镜像同步 → 流水线自动打包并生成部署单 → 部署页创建部署单 → 自动主机部署 → 冒烟）。之后日常只需：
 
 - 改 `LLM_MODEL` 等运行配置 → 改服务器上的 `.env` → 重跑部署（或 `deploy.sh start`）；
 - 单独体检：`bash scripts/deploy/deploy.sh health_check`；
