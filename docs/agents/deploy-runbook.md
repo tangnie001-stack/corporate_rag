@@ -254,6 +254,7 @@ cd /opt/wwww/corporate_rag && bash scripts/deploy/deploy.sh clean
 
 - 🔑 **前提（否则回滚不生效）**：启动槽位必须**消费部署单下发的制品**（见 §2.4 的 `${package_download_path}`）—— 制品里烘着 `deploy_store_local:<构建号>` 与 `deploy/nginx/html`，二者一起退回旧版；**脚本若自行下载制品，回滚就永远是"最新版"**。
 - 旧镜像需仍在 **ACR**：ACR 的 tag 不受本机 `clean` 影响（`clean` 只删本机镜像），故正常够用。
+- ⚠️ **本链路在 demo 上尚未验证通过**：实测回滚后页面版本未退回，2026-10-05 起**搁置待查** —— 排查顺序、已确认机理（ACR 是 Registry v2 不能 `curl` 镜像；tag 跟制品走、不跟环境走）见 `requirements_pool.md` H-11。
 
 **兜底（手工）**：
 

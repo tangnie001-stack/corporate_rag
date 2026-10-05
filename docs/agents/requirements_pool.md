@@ -149,6 +149,7 @@
 | H-08 | **`docker-compose.prod.yml` 与目标形态的关系未定** | 目标机实际运行 `docker-compose.image.yml`；`docker-compose.prod.yml` 从未在目标机验证、档位（合计 14.25 GB）会 OOM。待定：废弃 / 删除 / 与目标形态对齐 | demo-deploy-2c8g 未决项（2026-10-04） | P3 | 低 | 无 |
 | H-09 | **备份口径未定** | MinIO 里的原始上传文件是**唯一不可再生源头**、`postgres_data` 卷承载元数据与向量 —— 二者当前**均无备份**。待定：频率、保留期、存放位置（是否上 OSS）| demo-deploy-2c8g 未决项（2026-10-04） | P1 | 中 | 无 |
 | H-10 | **托管化未定** | 当前为单机自建（PG / Redis / MinIO 与 app 同机，单点）。待定：是否迁 RDS / Redis / OSS / SLB | demo-deploy-2c8g 未决项（2026-10-04） | P3 | 高 | H-09 |
+| H-11 | **版本回滚未生效（demo，2026-10-05 起搁置待查）** | 现象：从版本页回滚到旧版本后，页面 `brand-version` **没退回**（`v0.1.1` 应回 `v0.1.0`）。**已确认的机理（避免下次重走弯路）**：① 回滚 = 用**旧部署单** → 下发**旧制品** → 制品 compose 里烘着**旧 tag**；② `deploy.sh:342` 从**制品里的 compose** 解析 tag（**不从环境读 `BUILD_NUMBER`**）—— 这是正确设计，若改成"从环境读"会让回滚**永久拉最新版**；③ ACR 是 **Docker Registry v2**，镜像**不能 curl**（实测 `https://…/v2/` 返回 `401` + `WWW-Authenticate: Bearer`；`http://` 的 80 口直接超时）—— 曾试图"传镜像下载链接"失败。**待查点（按性价比排序）**：① 部署页「启动槽位」是否真的消费 `${package_download_path}`，是否残留"自己下载 / 写死 `/package.tgz`"；② 对比**首次发布 v0.1.1** 与**回滚**两次执行的日志里下载 URL（`artifactName` / `version`）是否不同 —— 相同 ⇒ 平台没换制品（问题在部署单/回滚配置）；不同 ⇒ 脚本没消费；③ 回滚后目标机上 `deploy/nginx/html/chat.html` 的 `brand-version` 实际值（区分"旧制品没落地" vs "落地了但浏览器/nginx 缓存"）；④ 解压目标路径是否与 `deploy.sh` 的 `ROOT`（`/opt/wwww/corporate_rag`）一致 | demo 部署回滚验证（2026-10-05） | P2 | 中 | 无 |
 
 ## 标签说明
 
