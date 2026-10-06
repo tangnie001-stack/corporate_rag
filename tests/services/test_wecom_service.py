@@ -89,6 +89,8 @@ async def test_mode_long_connection_builds_ws_driver(monkeypatch):
     monkeypatch.setattr(settings, "WECOM_BOT_ID", "BOTID")
     monkeypatch.setattr(settings, "WECOM_BOT_SECRET", "SECRET")
     started: list[str] = []
+    # 记录构造实参，用于断言凭据透传形状
+    captured: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
     class _StubDriver:
         name = "wecom_long_connection"
@@ -99,13 +101,19 @@ async def test_mode_long_connection_builds_ws_driver(monkeypatch):
         async def stop(self) -> None:
             started.append("stop")
 
-    monkeypatch.setattr(
-        wecom_service, "LongConnectionDriver", lambda *a, **k: _StubDriver()
-    )
+    def _factory(*args: object, **kwargs: object) -> _StubDriver:
+        captured.append((args, kwargs))
+        return _StubDriver()
+
+    monkeypatch.setattr(wecom_service, "LongConnectionDriver", _factory)
 
     await wecom_service.start()
     assert wecom_service.get_driver().name == "wecom_long_connection"
     assert started == ["start"]
+    # 实现以位置参数传入 (bot_id, secret, handler)
+    assert len(captured) == 1
+    assert captured[0][0][0] == "BOTID"
+    assert captured[0][0][1] == "SECRET"
 
 
 @pytest.mark.asyncio
@@ -149,3 +157,34 @@ async def test_get_callback_driver_rejects_non_callback_mode(monkeypatch):
     await wecom_service.start()
     with pytest.raises(RuntimeError):
         wecom_service.get_callback_driver()
+
+
+def test_get_callback_driver_rejects_when_not_started(monkeypatch):
+    """callback 模式但未调用 start()，_driver 为 None → RuntimeError。"""
+    monkeypatch.setattr(settings, "WECOM_BOT_MODE", "callback")
+    # 不调用 start()；autouse fixture 已把 _driver 归零
+    with pytest.raises(RuntimeError):
+        wecom_service.get_callback_driver()
+
+
+def test_get_callback_driver_rejects_wrong_driver_type(monkeypatch):
+    """callback 模式但单例里塞的是非 CallbackDriver → RuntimeError。"""
+    monkeypatch.setattr(settings, "WECOM_BOT_MODE", "callback")
+
+    class _WrongDriver:
+        name = "wecom_long_connection"
+
+        async def start(self) -> None:
+            return
+
+        async def stop(self) -> None:
+            return
+
+    # 直接注入类型不符的 stub；测试用匿名 fake，接口与驱动对齐即可
+    wecom_service._driver = _WrongDriver()  # type: ignore[assignment]
+    try:
+        with pytest.raises(RuntimeError):
+            wecom_service.get_callback_driver()
+    finally:
+        # 显式还原为 None（autouse fixture 亦会归零，此处更直观）
+        wecom_service._driver = None
