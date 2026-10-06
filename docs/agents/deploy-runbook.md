@@ -45,7 +45,13 @@
 
 ### 1.4 密钥与挂载路径
 
-- 密钥**只放** `/opt/wwww/corporate_rag/.env`（**人工放置**，`chmod 600`）；**制品不含 `.env`**。
+- 密钥**只放** `/opt/wwww/corporate_rag/.env`；**制品与流水线都不携带 `.env`**（镜像、制品、云效变量都不会把它送上机）。
+- **`.env` 当前由人工从开发机拷到目标机**（尚无自动下发），拷完收紧权限：
+  ```bash
+  scp .env root@<ECS-IP>:/opt/wwww/corporate_rag/.env
+  ssh root@<ECS-IP> 'chmod 600 /opt/wwww/corporate_rag/.env'
+  ```
+  ⇒ **本地新增/修改的键不会自动上机**：凡涉及 `.env` 的改动（如新增 `WECOM_BOT_*`），都要先手工同步到目标机、再重跑部署（或 `deploy.sh start`），否则容器读不到新键、对应功能静默不生效。
 - 不得依赖 compose 的 `${X:-默认值}` 兜底 —— `deploy.sh` 会按 compose 插值变量清单校验非空，缺键即失败。
 - MinIO 两对键**已同源**：`docker-compose.image.yml` 直接用 `.env` 的 `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` 供 `MINIO_ROOT_USER/PASSWORD`。**不要**改回需要人工保持相等的两对。
 - 目标机必须存在的路径（缺任一条对应功能失效）：`.env`、`deploy/nginx/nginx.conf`、`deploy/nginx/html/`、`deploy/postgres/init/`、`data/ragas/`。
@@ -197,7 +203,7 @@ cd /opt/wwww/corporate_rag && bash scripts/deploy/deploy.sh clean
 
 1. **装 Docker + compose 插件**（Alinux 4：`dnf install -y docker-compose-plugin`）。
 2. **ACR 登录**（app 镜像在私有库）：`docker login <ACR>` 一次（凭据落 `/root/.docker/config.json`），或用 `ACR_USER`/`ACR_PASSWORD`。
-3. **放 `.env`**：从团队渠道取键清单，填真实值，`chmod 600 /opt/wwww/corporate_rag/.env`。
+3. **放 `.env`**：从团队渠道取键清单，填真实值，`chmod 600 /opt/wwww/corporate_rag/.env`（**当前为人工拷上机，方式与影响见 §1.4**）。
 4. **安全组**：只放行 22 + 80。
 5. **系统**：swap ≥2 GB、系统盘 ≥60 GB（本地演练构建时 build cache 可达数 GB）。
 6. **拉起服务**（等价于流水线的启动槽位）：
@@ -239,7 +245,7 @@ cd /opt/wwww/corporate_rag && bash scripts/deploy/deploy.sh clean
 
 **正常发布流程见 §2.0**（推代码 `dev-wsl` → Codeup 镜像同步 → 流水线自动跑完并发布；**仅"匹配不到发布单"时**才需人工到部署页创建一次，之后自动）。之后日常只需：
 
-- 改 `LLM_MODEL` 等运行配置 → 改服务器上的 `.env` → 重跑部署（或 `deploy.sh start`）；
+- 改 `LLM_MODEL` 等运行配置、或**新增环境变量** → **同步目标机 `.env`**（当前为人工 `scp`，见 §1.4）→ 重跑部署（或 `deploy.sh start`）；只推代码不改 `.env` 时，新键不会生效；
 - 单独体检：`bash scripts/deploy/deploy.sh health_check`；
 - 临时停服（维护 / 下线）：`bash scripts/deploy/deploy.sh stop`（**人工运维用**，别接进流水线停止槽位）；
 - 回收磁盘：`bash scripts/deploy/deploy.sh clean`（保留最近 2 个 app 镜像 + 清悬空镜像与残留包）。
