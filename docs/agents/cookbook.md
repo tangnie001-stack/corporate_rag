@@ -407,14 +407,18 @@ scripts/dev-worktree.sh down
 - **单价填成「每 1M」会让成本差 1e6 倍**，而"成本 > 0"的检查照样通过 —— 务必按 Step 1 的口径填。
 - Langfuse v2 的 `LANGFUSE_INIT_*` **不能播种模型定价**，只能在库里建（故有这条 CLI）。
 
-## 企微智能机器人回调接入（开发期）
+## 接入通道（channel）
 
+### 企微智能机器人回调接入（开发期）
+
+**场景**：开发期接入企业微信「智能机器人」，让 `/api/wecom/callback` 端点收到群消息并能回包，用于联调 URL 回调链路。
+**步骤**：
 1. 在企微管理后台「安全与管理 → 管理工具 → 智能机器人」创建机器人，选「API 模式创建」。
 2. 生成并记录 `Token` 与 `EncodingAESKey`，两者填入 `.env` 的 `WECOM_BOT_TOKEN` / `WECOM_BOT_ENCODING_AES_KEY`，并设 `WECOM_BOT_ENABLED=true`。
 3. 回调 URL 填 `http(s)://<公网地址>/api/wecom/callback`（Nginx 只转发 `/api/`，故必须挂其下）。
 4. `docker compose up -d --force-recreate app` 使新环境变量生效（改 `.env` 后 restart 不吃）。
-5. 保存时应通过 URL 验证；在群里 @机器人 应收到写死回复，容器日志可见 `[wecom] inbound ...`。
-6. **重复回复属预期**（企微重试 + Nginx `proxy_next_upstream` 叠加），非 bug。
+**验证**：保存配置时应通过 URL 验证；在群里 @机器人 应收到写死回复，容器日志可见 `[wecom] inbound ...`。
+**注意事项**：**重复回复属预期**（企微重试 + Nginx `proxy_next_upstream` 叠加），非 bug。
 
 ## 分区命名
 
