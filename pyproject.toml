@@ -48,6 +48,8 @@ dependencies = [
     "pycryptodome>=3.20,<4.0",
     # 迁移：部署时在容器内执行 alembic upgrade head，因此属**运行时依赖**（原先误置于 [dev]）
     "alembic==1.19.0",
+    # 企微智能机器人长连接：官方客户端 SDK（WebSocket，含认证/心跳/重连/流式/事件分发）
+    "wecom-aibot-python-sdk==1.0.2",
 ]
 
 [project.optional-dependencies]
