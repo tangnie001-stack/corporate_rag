@@ -9,6 +9,7 @@ from src.channels.base import InboundMessage, ReplySink
 from src.channels.wecom.callback import CallbackDriver
 from src.channels.wecom.crypto import WeComCrypto
 from src.config import settings
+from src.config.const import WECOM_REPLY_PLACEHOLDER
 
 # 单例驱动；由 start() 在 enabled 时构造
 _driver: CallbackDriver | None = None
@@ -32,7 +33,7 @@ async def _default_handler(msg: InboundMessage, sink: ReplySink) -> None:
 
     if msg.msgtype == "event":
         return
-    await sink.reply_stream("已收到，稍后接入检索…", finish=True)
+    await sink.reply_stream(WECOM_REPLY_PLACEHOLDER, finish=True)
 
 
 def _validate_credentials() -> None:

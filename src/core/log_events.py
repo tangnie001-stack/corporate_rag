@@ -14,9 +14,20 @@ from enum import Enum
 
 from src.core.log_event_specs import EVENT_SPECS, EventSpec
 
-# 分层前缀允许集（logging-rules.md 前缀主表：6 处理层 + cli + app + delegate）
+# 分层前缀允许集（logging-rules.md 前缀主表：6 处理层 + cli + app + delegate + wecom）
 LOG_PREFIXES: frozenset[str] = frozenset(
-    {"retrieval", "verify", "agent", "session", "db", "llm", "cli", "app", "delegate"}
+    {
+        "retrieval",
+        "verify",
+        "agent",
+        "session",
+        "db",
+        "llm",
+        "cli",
+        "app",
+        "delegate",
+        "wecom",
+    }
 )
 
 # 信号行保留前缀（P1 Change 2 契约，独立于 [层] 前缀的已知例外）

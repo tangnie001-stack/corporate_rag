@@ -436,3 +436,5 @@ def resolve_source_tier(url: str, kind: str) -> int:
 # ── 企业微信智能机器人回调 ──
 # 回调路由（router 相对路径；对外完整地址为 /api + 本值）
 WECOM_CALLBACK_PATH: str = "/wecom/callback"
+# 企微默认 handler 的占位回复文案：尚未接入检索时先行回执，待业务接线后替换
+WECOM_REPLY_PLACEHOLDER: str = "已收到，稍后接入检索…"
