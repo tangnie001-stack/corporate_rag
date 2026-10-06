@@ -16,7 +16,9 @@ _driver: CallbackDriver | None = None
 
 async def _default_handler(msg: InboundMessage, sink: ReplySink) -> None:
     """默认 handler：打结构性日志；消息回写死流式回复，事件不回包。"""
-    text_len = len(msg.text) if msg.text else 0
+    text_len = 0
+    if msg.text:
+        text_len = len(msg.text)
     logger.info(
         "[wecom] inbound msgid={} chattype={} msgtype={} event_type={} text_len={}",
         msg.msgid,
