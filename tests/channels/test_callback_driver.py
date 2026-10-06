@@ -42,6 +42,10 @@ async def _handler_reply(msg: InboundMessage, sink: ReplySink) -> None:
     await sink.reply_stream("已收到", finish=True)
 
 
+async def _handler_raises(msg: InboundMessage, sink: ReplySink) -> None:
+    raise RuntimeError("boom")
+
+
 def test_parse_query_keeps_plus():
     # 裸 '+' 必须保留，不能被当成空格（echostr 是 base64）
     q = _parse_query("echostr=ab+cd%2Bef&timestamp=1")
@@ -125,4 +129,77 @@ async def test_handle_message_bad_json_returns_400():
     c = _crypto()
     driver = CallbackDriver(c, _handler_reply)
     resp = await driver.handle_message(_query("deadbeef", "100", "200"), b"not-json")
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_handle_message_non_string_encrypt_returns_400():
+    # {"encrypt": 123} 无需有效签名即可到达；不得让 signature 抛 TypeError → 500
+    c = _crypto()
+    driver = CallbackDriver(c, _handler_reply)
+    resp = await driver.handle_message(
+        _query("deadbeef", "100", "200"), b'{"encrypt": 123}'
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_handle_message_handler_exception_returns_empty_200():
+    c = _crypto()
+    ts, nonce = "100", "200"
+    payload = {
+        "msgid": "M3",
+        "chattype": "single",
+        "from": {"userid": "U1"},
+        "msgtype": "text",
+        "text": {"content": "hi"},
+    }
+    encrypt = c.encrypt(json.dumps(payload, ensure_ascii=False))
+    body = json.dumps({"encrypt": encrypt}).encode("utf-8")
+    driver = CallbackDriver(c, _handler_raises)
+
+    resp = await driver.handle_message(
+        _query(c.signature(ts, nonce, encrypt), ts, nonce), body
+    )
+    assert resp.status_code == 200
+    assert resp.body == b""
+
+
+@pytest.mark.asyncio
+async def test_handle_message_bad_signature_returns_403():
+    c = _crypto()
+    body = json.dumps({"encrypt": c.encrypt("x")}).encode("utf-8")
+    driver = CallbackDriver(c, _handler_reply)
+
+    resp = await driver.handle_message(_query("deadbeef", "100", "200"), body)
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_handle_message_decrypt_failure_returns_400():
+    c = _crypto()
+    ts, nonce = "100", "200"
+    # 用正确签名签一个非法密文：过验签，解密阶段失败
+    encrypt = "not-valid-base64!!"
+    body = json.dumps({"encrypt": encrypt}).encode("utf-8")
+    driver = CallbackDriver(c, _handler_reply)
+
+    resp = await driver.handle_message(
+        _query(c.signature(ts, nonce, encrypt), ts, nonce), body
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_handle_message_missing_msgid_returns_400():
+    c = _crypto()
+    ts, nonce = "100", "200"
+    # 合法 JSON 明文但缺 msgid：过验签与解密，解析阶段失败
+    encrypt = c.encrypt(json.dumps({"msgtype": "text"}))
+    body = json.dumps({"encrypt": encrypt}).encode("utf-8")
+    driver = CallbackDriver(c, _handler_reply)
+
+    resp = await driver.handle_message(
+        _query(c.signature(ts, nonce, encrypt), ts, nonce), body
+    )
     assert resp.status_code == 400

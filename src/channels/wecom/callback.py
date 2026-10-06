@@ -96,6 +96,10 @@ class CallbackDriver:
         except (ValueError, KeyError, TypeError):
             return PlainTextResponse("bad request", status_code=400)
 
+        # 非字符串 encrypt 无需有效签名即可到达；显式拦截，避免 signature 内 sorted 抛 TypeError → 500
+        if not isinstance(encrypt, str):
+            return PlainTextResponse("bad request", status_code=400)
+
         if self._crypto.signature(timestamp, nonce, encrypt) != q.get(
             "msg_signature", ""
         ):
