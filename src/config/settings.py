@@ -362,3 +362,18 @@ MODEL_OUTPUT_PRICE_PER_TOKEN: float = float(
 # 分块质量评估开关：true 时上传文件后自动跑 3 个质量指标
 # 默认关闭，不影响现有流程
 CHUNK_EVAL_ENABLED: bool = os.getenv("CHUNK_EVAL_ENABLED", "true").lower() == "true"
+
+# ── 企业微信智能机器人（URL 回调）──
+WECOM_BOT_ENABLED: bool = os.getenv("WECOM_BOT_ENABLED", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+WECOM_BOT_TOKEN: str = os.getenv("WECOM_BOT_TOKEN", "")
+WECOM_BOT_ENCODING_AES_KEY: str = os.getenv("WECOM_BOT_ENCODING_AES_KEY", "")
+WECOM_BOT_RECEIVE_ID: str = os.getenv("WECOM_BOT_RECEIVE_ID", "")
+WECOM_BOT_LOG_CONTENT: bool = os.getenv("WECOM_BOT_LOG_CONTENT", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)

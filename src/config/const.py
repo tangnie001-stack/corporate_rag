@@ -431,3 +431,8 @@ def resolve_source_tier(url: str, kind: str) -> int:
         if domain.endswith(suffix):
             return 1
     return SOURCE_TIER_DEFAULT
+
+
+# ── 企业微信智能机器人回调 ──
+# 回调路由（router 相对路径；对外完整地址为 /api + 本值）
+WECOM_CALLBACK_PATH: str = "/wecom/callback"
