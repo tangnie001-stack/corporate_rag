@@ -9,7 +9,7 @@
 
 import base64
 import hashlib
-import random
+import os
 import struct
 
 from Crypto.Cipher import AES
@@ -28,6 +28,8 @@ def _pkcs7_unpad(data: bytes) -> bytes:
     """去掉 PKCS#7 填充。"""
     pad_len = data[-1]
     if pad_len < 1 or pad_len > PKCS7_BLOCK_SIZE:
+        raise ValueError("invalid pkcs7 padding")
+    if data[-pad_len:] != bytes([pad_len]) * pad_len:
         raise ValueError("invalid pkcs7 padding")
     return data[:-pad_len]
 
@@ -65,7 +67,7 @@ class WeComCrypto:
         """加密明文，返回 encrypt 字段（base64）。"""
         raw = msg.encode("utf-8")
         plain = (
-            bytes(random.choices(range(256), k=16))
+            os.urandom(16)
             + struct.pack("!I", len(raw))
             + raw
             + self.receive_id.encode("utf-8")

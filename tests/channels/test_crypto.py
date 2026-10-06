@@ -4,6 +4,11 @@
 "对称性错误"（IV/填充块/base64 处理错）的外部基准，往返自测做不到。
 """
 
+import base64
+
+import pytest
+from Crypto.Cipher import AES
+
 from src.channels.wecom.crypto import PKCS7_BLOCK_SIZE, WeComCrypto
 
 # 官方样例：https://developer.work.weixin.qq.com/document/path/90968 「举例说明」
@@ -51,3 +56,13 @@ def test_roundtrip_with_empty_receive_id():
     # receive_id="" 是智能机器人的场景；往返验证加解密自洽
     c = WeComCrypto("token123", "a" * 43, "")
     assert c.decrypt(c.encrypt("hello 世界")) == "hello 世界"
+
+
+def test_decrypt_rejects_inconsistent_padding():
+    # 构造填充不自洽的密文：末字节 pad_len=2，但倒数第二字节为 0x03
+    c = WeComCrypto("token123", "a" * 43, "")
+    bad_plain = b"\x00" * 30 + b"\x03\x02"
+    cipher = AES.new(c.key, AES.MODE_CBC, c.iv)
+    bad_encrypt = base64.b64encode(cipher.encrypt(bad_plain)).decode("utf-8")
+    with pytest.raises(ValueError):
+        c.decrypt(bad_encrypt)
