@@ -44,6 +44,8 @@ dependencies = [
     # 密码哈希：src/utils/auth_crypto.py 直接 import bcrypt；此前仅由 chromadb 传递提供，
     # 已随 Chroma 退役一并消失，故显式声明为运行时依赖，不可移除
     "bcrypt==5.0.0",
+    # 企微回调加解密：AES-256-CBC + PKCS#7（块 32），官方 WXBizMsgCrypt 亦用 PyCryptodome
+    "pycryptodome>=3.20,<4.0",
     # 迁移：部署时在容器内执行 alembic upgrade head，因此属**运行时依赖**（原先误置于 [dev]）
     "alembic==1.19.0",
 ]
