@@ -73,7 +73,7 @@ cli/               RAGAS 评估、检索对比、trace 回放/清理、症状指
 models.py          LLM / Embedding / Rerank 工厂（get_llm / get_embedding / get_rerank）
 utils/             sse 事件类型 / errors / desensitize / auth_crypto
 tools/             工具基类（base.py）
-channels/          接入通道：base(通用抽象) / wecom(parse 入站解析 / crypto 加解密 / callback 回调驱动)
+channels/          接入通道：base(通用抽象) / wecom(parse 入站解析 / crypto 加解密 / callback 回调驱动 / long_connection(长连接驱动，封装官方 aibot SDK))
 ```
 
 ### prompt 组装与段模板归属

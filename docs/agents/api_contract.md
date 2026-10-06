@@ -790,6 +790,8 @@ Success:
 
 外部平台回调端点，非前端消费；受 `WECOM_BOT_ENABLED` 控制（关闭时 `404`）。
 
+> 该端点仅在 `WECOM_BOT_MODE=callback` 时可用；`long_connection` 模式下返回 `404`（长连接不经 HTTP 回调）。
+
 | 方法 | 入参 | 成功响应 | 失败 |
 |---|---|---|---|
 | `GET` | query `msg_signature`/`timestamp`/`nonce`/`echostr` | `text/plain`：解密后的 echostr 明文（1 秒内） | 验签失败 `403` |

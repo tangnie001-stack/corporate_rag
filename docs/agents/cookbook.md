@@ -420,6 +420,16 @@ scripts/dev-worktree.sh down
 **验证**：保存配置时应通过 URL 验证；在群里 @机器人 应收到写死回复，容器日志可见 `[wecom] inbound ...`。
 **注意事项**：**重复回复属预期**（企微重试 + Nginx `proxy_next_upstream` 叠加），非 bug。
 
+### 企微智能机器人长连接接入（开发期）
+
+**场景**：开发期改用长连接接入企业微信「智能机器人」，由本服务主动连企微 WebSocket（`wss://openws.work.weixin.qq.com`），无需公网回调地址与加解密，用于联调长连接链路。
+**步骤**：
+1. 在企微管理后台把该机器人的连接方式改为「使用长连接」，记录 `BotID` 与长连接专用 `Secret`。
+2. 在 `.env` 置 `WECOM_BOT_MODE=long_connection`、`WECOM_BOT_ID`、`WECOM_BOT_SECRET`，并设 `WECOM_BOT_ENABLED=true`（长连接模式不用回调的 `WECOM_BOT_TOKEN` / `WECOM_BOT_ENCODING_AES_KEY`）。
+3. `docker compose up -d --force-recreate app` 使新环境变量生效（改 `.env` 后 restart 不吃）。
+**验证**：启动日志无 `WECOM_BOT_ID 未配置` / `WECOM_BOT_SECRET 未配置` 报错即完成鉴权接入；在群里 @机器人 应收到写死回复，容器日志可见 `[wecom] inbound ...`。
+**注意事项**：**每机器人同时只允许一条连接，新连接会踢掉旧连接** —— 多实例部署时仅在一台实例开启 `WECOM_BOT_ENABLED=true`，其余置 `false`。
+
 ## 分区命名
 
 按操作主题分区，例如：`## 评估`、`## 分块`、`## 部署`。新主题首次出现时新建分区。

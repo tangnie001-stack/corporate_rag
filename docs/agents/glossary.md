@@ -89,6 +89,7 @@
 
 - **接入通道 / 通道驱动（ChannelDriver）**：屏蔽企业微信「URL 回调」与「长连接」两种接入方式的传输差异的抽象；业务只依赖其入站事件（`InboundMessage`）与回复出口（`ReplySink`）。见 `src/channels/base.py`。
 - **回调驱动（CallbackDriver）**：接入通道的实现之一，负责企微 URL 回调的验签、AES 加解密、入站解析与加密回包；智能机器人场景 `ReceiveId` 为 `""`。见 `src/channels/wecom/callback.py`。
+- **长连接驱动（LongConnectionDriver）**：接入通道的另一种实现，由本服务主动连企微 WebSocket（封装官方 `aibot` SDK），无需公网回调地址与加解密；与回调驱动由 `WECOM_BOT_MODE` 二选一。见 `src/channels/wecom/long_connection.py`。
 
 ## Harness（本项目定位）
 
