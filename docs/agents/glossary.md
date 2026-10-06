@@ -85,6 +85,11 @@
 - **来源等级（source tier）**：引用来源的权威等级，取值 T0（内部文档，KB 固定）/ T1（官方一手）/ T2（权威媒体）/ T3（一般，未命中默认中性档）/ T4（UGC），由 `SOURCE_TIER_RULES` 域名规则表确定性定档（`.gov.cn`/`.edu.cn` 模式升 T1），模型判断不改写已定档位；以徽标形式透明呈现在引用抽屉条目，系统不裁决可信度；字段语义与标签权威见 api_contract.md「citation.tier」
 - **候选规则信号**：种子清单（`SOURCE_TIER_RULES`）的成长机制——离线 SQL 从 `conversation_history.sources` 聚合全部域名引用次数，达阈值者经人工审核（对照规则表与拒绝清单、核对样本引用上下文）后加入规则表，被拒域名记入文档化拒绝清单（negative cache）；不使用 LLM 定档或自动升级；操作步骤见 cookbook.md「候选规则审核」
 
+## 接入通道（channel）
+
+- **接入通道 / 通道驱动（ChannelDriver）**：屏蔽企业微信「URL 回调」与「长连接」两种接入方式的传输差异的抽象；业务只依赖其入站事件（`InboundMessage`）与回复出口（`ReplySink`）。见 `src/channels/base.py`。
+- **回调驱动（CallbackDriver）**：接入通道的实现之一，负责企微 URL 回调的验签、AES 加解密、入站解析与加密回包；智能机器人场景 `ReceiveId` 为 `""`。见 `src/channels/wecom/callback.py`。
+
 ## Harness（本项目定位）
 
 > 行业对本词**无统一口径**（LangChain / HuggingFace / 社区三方分法互不兼容），本节只固化**本项目口径**，供内部文档与命名统一。

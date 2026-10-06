@@ -786,6 +786,17 @@ Success:
 ⚠️ `message_index` 是前端消息数组的序号语义，存到 `feedback` 表原样保留，
 不解析到 `conversation_history` 行。同一 (session_id, message_index) 可重复反馈（追加记录）。
 
+### 2.8 企微智能机器人回调（`/api/wecom/callback`）
+
+外部平台回调端点，非前端消费；受 `WECOM_BOT_ENABLED` 控制（关闭时 `404`）。
+
+| 方法 | 入参 | 成功响应 | 失败 |
+|---|---|---|---|
+| `GET` | query `msg_signature`/`timestamp`/`nonce`/`echostr` | `text/plain`：解密后的 echostr 明文（1 秒内） | 验签失败 `403` |
+| `POST` | query `msg_signature`/`timestamp`/`nonce`；body `{"encrypt":"..."}` | `application/json`：`{"encrypt","msgsignature","timestamp","nonce"}`；**无回包时 0 字节空体 + 200** | 验签失败 `403`；body 非 JSON / 解密或解析失败 `400` |
+
+约定：`msgsignature = sha1(sort(token, 请求timestamp, 请求nonce, 回包encrypt))`；普通消息只支持 `stream`/`template_card` 回复。
+
 ---
 
 ## 3. 接口层：AppService ↔ Repo 层

@@ -22,6 +22,7 @@
 | `llm_test.py` | 连通性自检 `POST /api/llm/test` |
 | `ragas_generate.py` | 评估测试集生成 `POST /api/ragas/generate` |
 | `capabilities.py` | 能力清单 `GET /api/skills`、`GET /api/agents` |
+| `wecom.py` | 企微智能机器人回调 `GET /api/wecom/callback`（URL 验证）、`POST /api/wecom/callback`（收消息/事件）；受 `WECOM_BOT_ENABLED` 控制，关闭时 404 |
 
 ## 数据流
 

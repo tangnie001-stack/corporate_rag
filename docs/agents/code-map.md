@@ -73,6 +73,7 @@ cli/               RAGAS 评估、检索对比、trace 回放/清理、症状指
 models.py          LLM / Embedding / Rerank 工厂（get_llm / get_embedding / get_rerank）
 utils/             sse 事件类型 / errors / desensitize / auth_crypto
 tools/             工具基类（base.py）
+channels/          接入通道：base(通用抽象) / wecom(parse 入站解析 / crypto 加解密 / callback 回调驱动)
 ```
 
 ### prompt 组装与段模板归属
@@ -245,3 +246,4 @@ Nginx 容器把本目录挂到 `/usr/share/nginx/html` 直接托管，**无 npm 
 | 加日志事件 / 前缀 | `src/core/log_events.py`、`log_event_specs.py`；规范见 `docs/agents/logging-rules.md` |
 | 改数据库 schema / 迁移 | `src/infra/db/models/`（ORM）+ `alembic/versions/`（迁移）；见本文「关系型存储（PostgreSQL）」 |
 | 改部署 / 容器 | `docker-compose*.yml`、`Dockerfile`；操作见 `docs/agents/cookbook.md` |
+| **加/改接入通道（企微回调/长连接）** | `src/channels/`（`base.py` 抽象 + `wecom/`）；路由 `src/api/wecom.py`；装配 `src/services/wecom_service.py` |
