@@ -363,12 +363,17 @@ MODEL_OUTPUT_PRICE_PER_TOKEN: float = float(
 # 默认关闭，不影响现有流程
 CHUNK_EVAL_ENABLED: bool = os.getenv("CHUNK_EVAL_ENABLED", "true").lower() == "true"
 
-# ── 企业微信智能机器人（URL 回调）──
+# ── 企业微信智能机器人（URL 回调 / 长连接）──
 WECOM_BOT_ENABLED: bool = os.getenv("WECOM_BOT_ENABLED", "false").lower() in (
     "1",
     "true",
     "yes",
 )
+# 接入模式：callback=URL 回调，long_connection=主动长连接
+WECOM_BOT_MODE: str = os.getenv("WECOM_BOT_MODE", "callback")
+# 长连接模式专用凭证
+WECOM_BOT_ID: str = os.getenv("WECOM_BOT_ID", "")
+WECOM_BOT_SECRET: str = os.getenv("WECOM_BOT_SECRET", "")
 WECOM_BOT_TOKEN: str = os.getenv("WECOM_BOT_TOKEN", "")
 WECOM_BOT_ENCODING_AES_KEY: str = os.getenv("WECOM_BOT_ENCODING_AES_KEY", "")
 WECOM_BOT_RECEIVE_ID: str = os.getenv("WECOM_BOT_RECEIVE_ID", "")

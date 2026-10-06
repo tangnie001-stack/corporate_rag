@@ -75,8 +75,8 @@ class LongConnectionDriver:
         handler = self._make_handler(client)
         for event in _MESSAGE_EVENTS + _EVENT_EVENTS:
             client.on(event, handler)
-        self._client = client
         await client.connect()
+        self._client = client
 
     async def stop(self) -> None:
         """断开长连接。"""

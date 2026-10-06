@@ -80,3 +80,72 @@ async def test_default_handler_silent_for_event(monkeypatch):
     sink = _Sink()
     await wecom_service._default_handler(_msg("event", None, "enter_chat"), sink)
     assert sink.replies == []
+
+
+@pytest.mark.asyncio
+async def test_mode_long_connection_builds_ws_driver(monkeypatch):
+    monkeypatch.setattr(settings, "WECOM_BOT_ENABLED", True)
+    monkeypatch.setattr(settings, "WECOM_BOT_MODE", "long_connection")
+    monkeypatch.setattr(settings, "WECOM_BOT_ID", "BOTID")
+    monkeypatch.setattr(settings, "WECOM_BOT_SECRET", "SECRET")
+    started: list[str] = []
+
+    class _StubDriver:
+        name = "wecom_long_connection"
+
+        async def start(self) -> None:
+            started.append("start")
+
+        async def stop(self) -> None:
+            started.append("stop")
+
+    monkeypatch.setattr(
+        wecom_service, "LongConnectionDriver", lambda *a, **k: _StubDriver()
+    )
+
+    await wecom_service.start()
+    assert wecom_service.get_driver().name == "wecom_long_connection"
+    assert started == ["start"]
+
+
+@pytest.mark.asyncio
+async def test_long_connection_missing_credentials_is_fail_fast(monkeypatch):
+    monkeypatch.setattr(settings, "WECOM_BOT_ENABLED", True)
+    monkeypatch.setattr(settings, "WECOM_BOT_MODE", "long_connection")
+    monkeypatch.setattr(settings, "WECOM_BOT_ID", "")
+    monkeypatch.setattr(settings, "WECOM_BOT_SECRET", "")
+    with pytest.raises(RuntimeError):
+        await wecom_service.start()
+
+
+@pytest.mark.asyncio
+async def test_unknown_mode_is_fail_fast(monkeypatch):
+    monkeypatch.setattr(settings, "WECOM_BOT_ENABLED", True)
+    monkeypatch.setattr(settings, "WECOM_BOT_MODE", "nonsense")
+    with pytest.raises(RuntimeError):
+        await wecom_service.start()
+
+
+@pytest.mark.asyncio
+async def test_get_callback_driver_rejects_non_callback_mode(monkeypatch):
+    monkeypatch.setattr(settings, "WECOM_BOT_ENABLED", True)
+    monkeypatch.setattr(settings, "WECOM_BOT_MODE", "long_connection")
+    monkeypatch.setattr(settings, "WECOM_BOT_ID", "BOTID")
+    monkeypatch.setattr(settings, "WECOM_BOT_SECRET", "SECRET")
+
+    class _AsyncStub:
+        name = "wecom_long_connection"
+
+        async def start(self) -> None:
+            return
+
+        async def stop(self) -> None:
+            return
+
+    monkeypatch.setattr(
+        wecom_service, "LongConnectionDriver", lambda *a, **k: _AsyncStub()
+    )
+
+    await wecom_service.start()
+    with pytest.raises(RuntimeError):
+        wecom_service.get_callback_driver()
