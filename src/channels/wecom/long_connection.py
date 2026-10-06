@@ -67,6 +67,10 @@ class LongConnectionDriver:
 
     async def start(self) -> None:
         """建立长连接并注册事件处理器。"""
+        # 已启动则直接返回：重复构造会覆盖 self._client，旧连接的 WebSocket
+        # 与收帧循环不会 disconnect，仍会向同一 handler 派帧（重复处理 + 资源泄漏）。
+        if self._client is not None:
+            return
         client = WSClient(WSClientOptions(bot_id=self._bot_id, secret=self._secret))
         handler = self._make_handler(client)
         for event in _MESSAGE_EVENTS + _EVENT_EVENTS:

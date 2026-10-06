@@ -142,6 +142,7 @@ GET/POST 均先判：`WECOM_BOT_ENABLED` 为假 **或** `WECOM_BOT_MODE != "call
 | **`run()` 与 FastAPI 事件循环冲突** | 只用 `await connect()` / `disconnect()`，禁用 `run()` |
 | **默认 Logger 输出不受控** | 通过 `WSClientOptions(logger=...)` 注入适配器，或接受其默认（实现时确认） |
 | **事件被误回包** | 复用既有 `_default_handler`（事件不回包） |
+| **connect() 可能阻塞启动**（端点不可达时 SDK 内部退避重试，最多 10 次/数分钟） | 属 SDK 设计行为；部署时保证该实例可访问企微，并接受启动可能变慢（必要时后续用 max_reconnect_attempts 或超时策略收敛） |
 
 ## 8. 未覆盖 / 后续（另行立项）
 

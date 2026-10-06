@@ -132,3 +132,28 @@ async def test_stop_disconnects(monkeypatch):
     await driver.stop()
 
     assert holder["client"].connected is False
+
+
+@pytest.mark.asyncio
+async def test_repeated_start_is_idempotent(monkeypatch):
+    created: list[_FakeClient] = []
+
+    def _factory(options):
+        client = _FakeClient(options)
+        created.append(client)
+        return client
+
+    monkeypatch.setattr(lc, "WSClient", _factory)
+
+    async def _handler(msg: InboundMessage, sink: ReplySink) -> None:
+        return
+
+    driver = lc.LongConnectionDriver("BOTID", "SECRET", _handler)
+    await driver.start()
+    first = driver._client
+    await driver.start()
+
+    # 只构造一个 client，且已启动后重复 start() 不会丢弃旧 client
+    assert len(created) == 1
+    assert driver._client is first
+    assert created[0].connected is True
