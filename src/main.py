@@ -21,6 +21,7 @@ from src.api import (
     sessions_router,
 )
 from src.api import ragas_generate as ragas_generate_routes
+from src.api import wecom as wecom_routes
 from src.config.prompts import validation
 from src.config.response_codes import Code
 from src.core import logging as core_logging
@@ -30,6 +31,7 @@ from src.infra.llm.tracing import configure_tracing, flush_tracing
 from src.middleware.auth import auth_middleware
 from src.middleware.response_processor import response_processor_middleware
 from src.middleware.trace_id import trace_id_middleware
+from src.services import wecom_service
 from src.utils.errors import AppError
 
 
@@ -55,8 +57,10 @@ async def lifespan(app: FastAPI):
     core_logging.log_event(Event.PROMPT_VALIDATED, section_chars=section_chars)
     await _clear_stale_chat_locks()
     configure_tracing()
+    await wecom_service.start()
     yield
     core_logging.log_event(Event.APP_STOPPING)
+    await wecom_service.stop()
     # 关停前上报缓冲事件，否则最后一批 trace 随进程消失
     flush_tracing()
 
@@ -200,3 +204,4 @@ app.include_router(sessions_router, prefix="/api", tags=["sessions"])
 app.include_router(kb_eval_router, prefix="/api", tags=["evaluation"])
 app.include_router(ragas_generate_routes.router, prefix="/api", tags=["ragas"])
 app.include_router(capabilities_routes.router, prefix="/api", tags=["capabilities"])
+app.include_router(wecom_routes.router, prefix="/api", tags=["wecom"])
