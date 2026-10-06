@@ -62,6 +62,31 @@ def test_doc_routes_registered_in_code():
     )
 
 
+def test_code_routes_resolve_constant_path(tmp_path, monkeypatch):
+    """路由路径以常量声明（`@router.get(CONST)`）时也能解析为路由。
+
+    回归：`src/api/wecom.py` 用从 `src.config.const` 引入的 `WECOM_CALLBACK_PATH`
+    声明路径。旧实现只认字符串字面量 → 该路由漏检 → 文档登记后被误报为"路由不存在"。
+    """
+    src = tmp_path / "src"
+    (src / "api").mkdir(parents=True)
+    (src / "config").mkdir(parents=True)
+    (src / "config" / "const.py").write_text(
+        'MY_CALLBACK_PATH: str = "/thing/cb"\n', encoding="utf-8"
+    )
+    (src / "api" / "m.py").write_text(
+        "from src.config.const import MY_CALLBACK_PATH\n\n"
+        "router = APIRouter()\n\n\n"
+        "@router.get(MY_CALLBACK_PATH)\n"
+        "async def h() -> None: ...\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(check_docs, "_API_DIR", src / "api")
+    monkeypatch.setattr(check_docs, "_SRC_DIR", src)
+
+    assert "/api/thing/cb" in _collect_code_routes()
+
+
 def test_no_banned_terms_in_checked_docs():
     """受检文档不得出现已退役/改名技术的字样 —— 本次闸门扩展的成果守卫。
 

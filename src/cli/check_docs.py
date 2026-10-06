@@ -309,8 +309,82 @@ def _check_path_anchors(doc_path: Path, exclude_paths: set[str]) -> list[DocFind
     return findings
 
 
+def _collect_module_str_constants(tree: ast.Module) -> dict[str, str]:
+    """收集模块级 `NAME = "..."` / `NAME: str = "..."` 字符串常量，供路由路径解析。
+
+    Args:
+        tree: 已解析的模块 AST
+
+    Returns:
+        常量名 → 字符串值的映射（仅取模块顶层、值为字符串字面量的赋值，含带注解赋值）
+    """
+    consts: dict[str, str] = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            if not (
+                isinstance(node.value, ast.Constant)
+                and isinstance(node.value.value, str)
+            ):
+                continue
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    consts[target.id] = node.value.value
+        elif isinstance(node, ast.AnnAssign):
+            if not (
+                isinstance(node.target, ast.Name)
+                and isinstance(node.value, ast.Constant)
+                and isinstance(node.value.value, str)
+            ):
+                continue
+            consts[node.target.id] = node.value.value
+    return consts
+
+
+def _resolve_route_path(path_arg: ast.expr, tree: ast.Module) -> str | None:
+    """解析路由装饰器首参为路径字符串。
+
+    支持字符串字面量，以及**常量名**形式（如 `@router.get(WECOM_CALLBACK_PATH)`）——
+    常量可在同模块顶层赋值，或经 `from <module> import <name>` 从项目内其他模块引入
+    （按 `src/` 相对路径定位其文件）。无法解析时返回 None（该装饰器不计入）。
+
+    Args:
+        path_arg: 装饰器首个位置参数节点
+        tree: 该 API 模块的 AST（用于解析同模块常量与 import 来源）
+
+    Returns:
+        路由路径字符串，或 None
+    """
+    if isinstance(path_arg, ast.Constant) and isinstance(path_arg.value, str):
+        return path_arg.value
+    if not isinstance(path_arg, ast.Name):
+        return None
+    local = _collect_module_str_constants(tree)
+    if path_arg.id in local:
+        return local[path_arg.id]
+    for node in tree.body:
+        if not (isinstance(node, ast.ImportFrom) and node.module):
+            continue
+        for alias in node.names:
+            if (alias.asname or alias.name) != path_arg.id:
+                continue
+            mod_rel = node.module.split(".")
+            if mod_rel and mod_rel[0] == "src":
+                mod_rel = mod_rel[1:]
+            mod_file = _SRC_DIR.joinpath(*mod_rel).with_suffix(".py")
+            if not mod_file.exists():
+                return None
+            try:
+                imported = ast.parse(mod_file.read_text(encoding="utf-8"))
+            except (OSError, SyntaxError):
+                return None
+            return _collect_module_str_constants(imported).get(alias.name)
+    return None
+
+
 def _collect_code_routes() -> set[str]:
     """AST 扫描 src/api/*.py 路由装饰器，返回完整路径集合（含 /api 前缀）。
+
+    路径支持字符串字面量与常量名两种写法（后者见 `_resolve_route_path`）。
 
     Returns:
         代码中注册的路由路径集合，如 {"/api/chat/stream", ...}
@@ -337,11 +411,9 @@ def _collect_code_routes() -> set[str]:
                     continue
                 if not deco.args:
                     continue
-                path_arg = deco.args[0]
-                if isinstance(path_arg, ast.Constant) and isinstance(
-                    path_arg.value, str
-                ):
-                    routes.add(prefix + path_arg.value)
+                path = _resolve_route_path(deco.args[0], tree)
+                if path is not None:
+                    routes.add(prefix + path)
     return routes
 
 
