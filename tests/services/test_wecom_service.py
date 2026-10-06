@@ -127,6 +127,34 @@ async def test_long_connection_missing_credentials_is_fail_fast(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_long_connection_start_failure_degrades_not_blocks(monkeypatch):
+    """长连接驱动 start() 抛异常时不阻塞启动，降级置空 _driver。"""
+    monkeypatch.setattr(settings, "WECOM_BOT_ENABLED", True)
+    monkeypatch.setattr(settings, "WECOM_BOT_MODE", "long_connection")
+    monkeypatch.setattr(settings, "WECOM_BOT_ID", "BOTID")
+    monkeypatch.setattr(settings, "WECOM_BOT_SECRET", "SECRET")
+
+    class _FailingDriver:
+        name = "wecom_long_connection"
+
+        async def start(self) -> None:
+            raise RuntimeError("connect failed")
+
+        async def stop(self) -> None:
+            return
+
+    monkeypatch.setattr(
+        wecom_service, "LongConnectionDriver", lambda *a, **k: _FailingDriver()
+    )
+
+    # 连接失败不应向外抛，应用启动得以继续
+    await wecom_service.start()
+    # 已降级置空，取驱动时抛 RuntimeError 而非返回半死的驱动
+    with pytest.raises(RuntimeError):
+        wecom_service.get_driver()
+
+
+@pytest.mark.asyncio
 async def test_unknown_mode_is_fail_fast(monkeypatch):
     monkeypatch.setattr(settings, "WECOM_BOT_ENABLED", True)
     monkeypatch.setattr(settings, "WECOM_BOT_MODE", "nonsense")

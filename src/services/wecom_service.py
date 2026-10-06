@@ -78,7 +78,13 @@ async def start() -> None:
         )
     else:
         raise RuntimeError(f"未知 WECOM_BOT_MODE: {mode}")
-    await _driver.start()
+    try:
+        await _driver.start()
+    except Exception as e:  # noqa: BLE001
+        # 通道是可选能力：连接失败（端点不可达、SDK 重试耗尽等）不应拖垮
+        # 整个应用的启动；降级为通道不可用，其余功能照常。
+        logger.warning("[wecom] channel start failed, degraded err={}", e)
+        _driver = None
 
 
 async def stop() -> None:
