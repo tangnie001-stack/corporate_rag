@@ -31,7 +31,7 @@ def client(monkeypatch):
         await sink.reply_stream("已收到", finish=True)
 
     monkeypatch.setattr(
-        wecom_service, "get_driver", lambda: CallbackDriver(crypto, _handler)
+        wecom_service, "get_callback_driver", lambda: CallbackDriver(crypto, _handler)
     )
     return TestClient(_app()), crypto
 
@@ -86,3 +86,22 @@ def test_receive_bad_signature_403(monkeypatch, client):
         "/api/wecom/callback?msg_signature=x&timestamp=1&nonce=2", json={"encrypt": "y"}
     )
     assert resp.status_code == 403
+
+
+def test_long_connection_mode_returns_404(monkeypatch):
+    monkeypatch.setattr(settings, "WECOM_BOT_ENABLED", True)
+    monkeypatch.setattr(settings, "WECOM_BOT_MODE", "long_connection")
+    client = TestClient(_app())
+    assert (
+        client.get(
+            "/api/wecom/callback?msg_signature=x&timestamp=1&nonce=2&echostr=z"
+        ).status_code
+        == 404
+    )
+    assert (
+        client.post(
+            "/api/wecom/callback?msg_signature=x&timestamp=1&nonce=2",
+            json={"encrypt": "y"},
+        ).status_code
+        == 404
+    )

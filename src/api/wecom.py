@@ -17,16 +17,16 @@ router = APIRouter()
 @router.get(WECOM_CALLBACK_PATH)
 async def wecom_verify(request: Request) -> Response:
     """URL 有效性验证：验签 + 解密 echostr，返回明文。"""
-    if not settings.WECOM_BOT_ENABLED:
+    if not settings.WECOM_BOT_ENABLED or settings.WECOM_BOT_MODE != "callback":
         return Response(status_code=404)
-    return wecom_service.get_driver().verify(request.url.query)
+    return wecom_service.get_callback_driver().verify(request.url.query)
 
 
 @router.post(WECOM_CALLBACK_PATH)
 async def wecom_receive(request: Request) -> Response:
     """接收消息/事件回调。"""
-    if not settings.WECOM_BOT_ENABLED:
+    if not settings.WECOM_BOT_ENABLED or settings.WECOM_BOT_MODE != "callback":
         return Response(status_code=404)
-    return await wecom_service.get_driver().handle_message(
+    return await wecom_service.get_callback_driver().handle_message(
         request.url.query, await request.body()
     )
