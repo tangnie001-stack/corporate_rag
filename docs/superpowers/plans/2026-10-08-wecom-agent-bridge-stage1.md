@@ -16,7 +16,7 @@
 - 单文件 400 行、单函数 80 行红线。
 - **站点外部行为不变**：`POST /api/chat/stream` 的响应码（冲突 409）、SSE 事件名与序列、`/api/sessions/*` resume 行为均不得改变。
 - 测试须带 `POSTGRES_HOST=localhost` 前缀（宿主侧）；容器内不加。
-- 不用三元表达式；类型不确定处显式 `isinstance` / `is not None`。
+- 不用三元表达式；类型不确定处显式 `isinstance` / `is not None`。**例外**：搬移既有代码时**保留其原表达式**（如端点的 `getattr(request.state, "user_id", "")`）——"站点行为不变"优先于风格，本约束针对**新增**代码。
 - worktree 缺 gitignored 夹具 `data/test_docs/*` → 涉及解析器的用例会报 FileNotFoundError，属**环境性**、非本阶段回归。
 - 提交遵守本仓 commit 形状（单命令 / 输出重定向到文件 / 后台跑 / 禁 `| tail`）。
 
@@ -236,6 +236,11 @@ from src.services.chat_lock import release_session_lock
 ```
 
 并把该文件内的 `_release_session_lock(` 调用点改名。
+
+**同步更新受影响的既有测试**（符号已迁走，import 必须改；**断言不变**）：
+
+- `tests/api/test_chat_lock.py:11` 的 `from src.api.chat import _acquire_session_lock, _release_session_lock` 改为
+  `from src.services.chat_lock import acquire_session_lock, release_session_lock`，并改该文件内的调用名（保留文件位置，不强制迁移目录）。
 
 - [ ] **Step 4: 跑测试确认通过**
 
@@ -484,7 +489,7 @@ async def start_turn(
 1. `await svc.set_chat_repo()`
 2. `if streaming_manager.is_running(session_id): raise TurnBusy`
 3. `redis = svc.chat_manager._redis`；`lock_held = False`；若 `redis is not None`：`try: lock_held = await acquire_session_lock(redis, session_id)` `except Exception: logger.warning(...)`（跳过锁），`else:` 若 `not lock_held: raise TurnBusy`
-4. **把 3–8 步包进 `try/except`**，任何异常时先释放已取的锁（`if lock_held: await release_session_lock(redis, session_id)`）再 `raise`（**预留释放**要求，见 design D12）
+4. **预留释放（包裹范围严格限定）**：把**落库前置（步骤 5–6）**包进 `try/except`，异常时先释放已取的锁（`if lock_held: await release_session_lock(redis, session_id)`）再 `raise`（**预留释放**要求，见 design D12）。**注意**：`stream_chat`（步骤 7）**不在该包裹内**——它必须**不抛**（见步骤 7），若整体包裹会让站点从 200+SSE 变 500。
 5. `await svc.save_session_async(session_id, title if title is not None else query[:20], kb_id, user_id)`
 6. `await svc.save_user_async(session_id, kb_id, query)`
 7. `try: subscription, launch_ctx = await svc.agent_service.stream_chat(kb_id, session_id, query, deep_thinking, agent=agent)` `except Exception as e:` → 记 `logger.exception`，释放锁，**返回**一个产 `SSEErrorEvent(str(e))` + `SSEDoneEvent(trace_id=...)` 的轻量 async generator 的 `TurnHandle`（**不抛**，保站点 200+SSE）
@@ -516,7 +521,7 @@ git commit -m "feat(services): 新增 start_turn 单一编排入口（下沉自 
 
 **Files:**
 - Modify: `src/api/chat.py`（删已搬走的编排，改为薄层）
-- Test: `tests/api/test_chat_stream*.py`（既有用例，不改断言）
+- Test: `tests/api/`、`tests/services/` 既有用例 —— **语义断言不变，但须同步更新符号来源**（见 Step 2b）
 
 **Interfaces:**
 - Consumes: `src.services.turn_runner.start_turn` / `TurnBusy`（Task 3）
@@ -572,10 +577,28 @@ async def chat_stream(request: Request, body: ChatStreamRequest, svc: AppService
 
 > ⚠ 若既有用例/前端依赖"请求开始即落 `user` 消息"或 409 的**特定触发顺序**（注册表预检在前、Redis 锁在后），需在 Task 3 的 `start_turn` 内保持同样顺序——本阶段以 Step 1 的基线为准，出现差异即回 Task 3 调整，不得改站点断言。
 
+- [ ] **Step 2b: 同步更新受影响测试的符号来源（断言不变）**
+
+被搬走的符号已不在 `src.api.chat`，下列位置必须改指向 `src.services.turn_runner`（**只改符号来源，不改断言、不改覆盖**）：
+
+| 文件 | 原 | 改 |
+|---|---|---|
+| `tests/api/test_chat.py:43,118,169` | `patch("src.api.chat._run_with_finalize", ...)` | `patch("src.services.turn_runner._run_with_finalize", ...)` |
+| `tests/api/test_chat.py:64` | `patch("src.api.chat._stream_rag_response")` | 该函数已删除——改用 `patch("src.services.turn_runner.start_turn", ...)`，并同步该用例对返回句柄的期望（保持其**原有断言意图**） |
+| `tests/api/test_chat.py:188,205` | `from src.api.chat import _run_with_finalize` | `from src.services.turn_runner import _run_with_finalize` |
+| `tests/api/test_stream_flow.py:38,82,122,164,208,259,309` | `from src.api.chat import _run_with_finalize` | 同上 |
+| `tests/api/test_stream_flow.py:385-427` | `_stream_rag_response(...)` 用例 | 改为对 `start_turn(...)` 的等价用例：断言"cancel 端点置位的 abort_signal 接到 `ctx.abort_signal`"（保留原断言意图；直接构造 `TurnHandle` 的路径可用假 svc） |
+| `tests/services/test_agent_service.py:153` | `from src.api.chat import _run_with_finalize` | `from src.services.turn_runner import _run_with_finalize` |
+| `tests/services/test_dual_stream.py:369` | 同上 | 同上 |
+| `tests/services/test_run_generation_tracing.py:79` | `inspect.getsource(chat._stream_rag_response)` | `inspect.getsource(turn_runner.start_turn)`（承载 `langfuse_observation_id=` 的调用点迁到这里），**断言字符串不变** |
+
+Run: `POSTGRES_HOST=localhost pytest tests/api/ tests/services/ -q`
+Expected: 与 Step 1 基线的**通过/失败集合一致**（更新后不应新增失败）
+
 - [ ] **Step 3: 跑既有用例确认无回归**
 
 Run: `POSTGRES_HOST=localhost pytest tests/api/ -q`
-Expected: 与 Step 1 基线**逐条一致**
+Expected: 与 Step 1 基线的通过/失败集合一致（**符号来源已按要求更新，语义断言未改**）
 
 - [ ] **Step 4: 全量回归**
 
