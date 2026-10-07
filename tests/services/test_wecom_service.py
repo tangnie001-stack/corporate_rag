@@ -7,6 +7,7 @@ from loguru import logger
 
 from src.channels.base import InboundMessage
 from src.config import settings
+from src.config.const import WECOM_REPLY_PLACEHOLDER
 from src.config.wecom_bots import CALLBACK_BOT_KEY
 from src.services import wecom_service
 
@@ -42,6 +43,19 @@ class _StubDriver:
 class _StopFailingDriver(_StubDriver):
     async def stop(self) -> None:
         raise RuntimeError("disconnect failed")
+
+
+class _StopFailingByBotIdDriver(_StubDriver):
+    """stop() 按 bot_id 决定是否抛错：仅指定台失败，其余台正常断开。"""
+
+    def __init__(self, bot_id: str, secret: str, handler: object, *, failing_id: str):
+        super().__init__(bot_id, secret, handler)
+        self._failing_id = failing_id
+
+    async def stop(self) -> None:
+        if self.bot_id == self._failing_id:
+            raise RuntimeError("disconnect failed")
+        self.stopped = True
 
 
 def _install_stub(monkeypatch, *, fail_ids: set[str] | None = None):
@@ -221,6 +235,30 @@ async def test_stop_tolerates_single_failure(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_stop_two_bots_single_failure_keeps_other_disconnected(monkeypatch):
+    """单台断开失败不得拖累其余台：另一台仍被断开，注册表清空。"""
+    monkeypatch.setattr(settings, "WECOM_BOT_ENABLED", True)
+    monkeypatch.setattr(settings, "WECOM_BOT_MODE", "long_connection")
+    _bots_env(monkeypatch, [("dev", "aibA", "s1"), ("support", "aibB", "s2")])
+    created: list[_StubDriver] = []
+
+    def _factory(bot_id, secret, handler):
+        driver = _StopFailingByBotIdDriver(bot_id, secret, handler, failing_id="aibA")
+        created.append(driver)
+        return driver
+
+    monkeypatch.setattr(wecom_service, "LongConnectionDriver", _factory)
+
+    await wecom_service.start()
+    await wecom_service.stop()  # 单台失败不抛
+
+    by_id = {d.bot_id: d for d in created}
+    assert by_id["aibA"].stopped is False
+    assert by_id["aibB"].stopped is True
+    assert wecom_service._drivers == {}
+
+
+@pytest.mark.asyncio
 async def test_get_callback_driver_rejects_non_callback_mode(monkeypatch):
     monkeypatch.setattr(settings, "WECOM_BOT_ENABLED", True)
     monkeypatch.setattr(settings, "WECOM_BOT_MODE", "long_connection")
@@ -296,6 +334,7 @@ async def test_handler_replies_for_known_bot(monkeypatch):
     sink = _RecorderSink()
     await wecom_service._default_handler(_inbound("aibA"), sink)
     assert len(sink.replies) == 1
+    assert sink.replies[0][0] == WECOM_REPLY_PLACEHOLDER
     assert sink.replies[0][1] is True
 
 

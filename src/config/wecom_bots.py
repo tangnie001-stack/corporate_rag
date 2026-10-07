@@ -10,7 +10,7 @@ load_wecom_bots()，由 wecom_service.start() 调用（受 WECOM_BOT_ENABLED 门
 import json
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 # 保留 key：回调 legacy 驱动占用，长连接侧不得使用
 CALLBACK_BOT_KEY: str = "callback"
@@ -25,7 +25,9 @@ class WeComBotConfig:
 
     key: str  # 业务线标识；唯一、匹配 [a-z0-9_-]+、不得为保留字 callback
     bot_id: str  # 智能机器人 BotID（= 入站报文的 aibotid）
-    secret: str  # 长连接专用 Secret
+    secret: str = field(
+        repr=False
+    )  # 长连接专用 Secret；repr=False 防止插入日志/异常回溯时裸泄
 
 
 def load_wecom_bots() -> list[WeComBotConfig]:

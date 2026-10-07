@@ -23,6 +23,8 @@ _MODE_LONG_CONNECTION = "long_connection"
 # 驱动注册表：键 = bot_key（长连接）或保留键 callback（回调 legacy）
 _drivers: dict[str, ChannelDriver] = {}
 # 反查表：aibotid(BotID) → bot_key；由 start() 一次性构建（handler 只读）
+# 语义为「已配置」级：由全部配置的机器人构建，非「已连接」级（_drivers 只含连接成功者）。
+# 不要用它判断驱动是否在线；未连上者不会推消息，故当前无害，但两表语义不同，勿混用。
 _bot_key_by_aibotid: dict[str, str] = {}
 
 
@@ -40,9 +42,7 @@ async def _default_handler(msg: InboundMessage, sink: ReplySink) -> None:
     """默认 handler：按 bot_key 分发；消息回写死流式回复，事件不回包。"""
     bot_key = _resolve_bot_key(msg.aibotid)
     if bot_key is None:
-        logger.warning(
-            "[wecom] inbound from unknown bot aibotid={}", encode_value(msg.aibotid)
-        )
+        logger.warning("[wecom] unknown bot aibotid={}", encode_value(msg.aibotid))
         return
 
     text_len = 0
@@ -108,7 +108,7 @@ async def start() -> None:
         except Exception as e:  # noqa: BLE001
             # 通道可选：单台连接失败不拖垮其余台，也不阻塞应用启动
             logger.warning(
-                "[wecom] bot connect failed, skipped bot_key={} err={}",
+                "[wecom] bot connect failed bot_key={} err={}",
                 encode_value(bot.key),
                 e,
             )
