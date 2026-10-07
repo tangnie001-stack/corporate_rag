@@ -14,8 +14,9 @@
 - [域 2：同领域 RAG（最贴合参考）](#域-2同领域-rag最贴合参考)
 - [域 3：Agent 编排 / harness（找模式）](#域-3agent-编排--harness找模式)
 - [域 4：生产化模板 / 平台（参考思路）](#域-4生产化模板--平台参考思路)
-- [域 5：RAG 引擎（文档处理互补）](#域-5rag-引擎文档处理互补)
-- [域 6：清理候选](#域-6清理候选)
+- [域 5：IM 通道 / 企业微信接入（找模式）](#域-5im-通道--企业微信接入找模式)
+- [域 6：RAG 引擎（文档处理互补）](#域-6rag-引擎文档处理互补)
+- [域 7：清理候选](#域-7清理候选)
 - [附：参考技能（本地已安装）](#附参考技能本地已安装非-github-镜像)
 
 ---
@@ -58,8 +59,8 @@
 ## 域 3：Agent 编排 / harness（找模式）
 
 > 本站"主从委派 + skill 化业务解耦"升级路线的主参考域。
-> **本域按"分工"排序，不是按价值** —— 四者覆盖不同侧面（委派范式 / 机制层 / 预设内容 / 企业级实物），互补而非可选，因此不适用域内的价值权重。
-> 组内分工：claude-code 提供**委派范式**（AgentTool/skill fork）；deepseek-harness 提供**skill/配置机制层**（注册表/scope）；agency-agents 提供**智能体预设内容库**（现成的领域专家人格，可直接转成 `AgentPresetRegistry` 条目，见 change `session-agent-and-skill-invocation`）；WeKnora 提供**企业级机制实物**（skill 沙箱分发 / MCP OAuth / 压缩包 / 审批闸门 / **prompt 九段拼装**；Go 栈且**不含委派**）。
+> **本域按"分工"排序，不是按价值** —— 各项目覆盖不同侧面（委派范式 / 机制层 / 预设内容 / 企业级实物 / 委派落地实物 / 宿主-执行器分层），互补而非可选，因此不适用域内的价值权重。
+> 组内分工：claude-code 提供**委派范式**（AgentTool/skill fork）；deepseek-harness 提供**skill/配置机制层**（注册表/scope）；agency-agents 提供**智能体预设内容库**（现成的领域专家人格，可直接转成 `AgentPresetRegistry` 条目，见 change `session-agent-and-skill-invocation`）；WeKnora 提供**企业级机制实物**（skill 沙箱分发 / MCP OAuth / 压缩包 / 审批闸门 / **prompt 九段拼装**；Go 栈且**不含委派**）；**CowAgent / openakita 提供"主从委派落地实物"**（子代理上下文隔离、单跳工具黑名单、@寻址、跨进程防环）；**LangBot 提供"宿主-执行器分层与配置驱动编排"**（Runner 资源授权、配置化 stage 链、沙箱三层策略）。
 
 **claude-code**
 - Anthropic 终端编码 agent（闭源，~51 万行 TS；2026-03 因 npm source map 误发布泄露，本地为社区还原版 `claude-code-best/claude-code`）。
@@ -99,6 +100,34 @@
 - **与本项目关系**：`AgentPresetRegistry` 的预设内容可直接取自这些 markdown（description 作匹配、正文作 system_prompt）；**change `session-agent-and-skill-invocation` 的首批智能体预设计划取自 finance 域**（需中文化裁剪，仅取 identity / mission / critical rules 三段，避免 prompt 过长）。
 - **何时查阅**：做子代理预设/专家人格库、或给委派方案找现成"首批子代理内容"时（内容搬运为主，不涉及机制）。
 
+**CowAgent**（跨域登记：IM 通道另见域 5）
+- chatgpt-on-wechat（CoW）改名后的形态（`github.com/zhayujie/CowAgent`，47.2k star，MIT，Python）。自我定位 "personal AI assistant & Agent Harness"，横跨 IM 通道（19 个）/多智能体/记忆/技能/自演化，另有 Tauri 桌面壳与 `app.py` 单体入口。
+- **子代理隔离**：`agent/subagent/runner.py` 的 `SubagentSettings`（`max_depth=1`/`max_concurrent=3`/`timeout=300`）；子代理走 `ThreadPoolExecutor` + `copy_context` 继承 ContextVar，运行时 `_private_tools` 浅拷贝工具集，**不继承**父的记忆/人格/历史，父只看到 spawn 调用 + 摘要——"子代理该拿到什么、不该拿到什么"的完整样本。
+- **@name 团队寻址**：`agent/team_addressing.py:60` `addressed_agent_id` 只认**行首** `@name`（名/id 双匹配、长标签优先、句中提及忽略）；名册独立成文件 `<instance root>/agents/team.json`（`agent/team.py:38`），并兼容旧版存在 `config.json` 里的形态（`:50`）——**从大配置里拆出来独立管理**。
+- **跨进程委派防环**：`agent/multiagent/inbound.py:104` 用 trace 链做环检测，`depth = len(trace)-1`（**不信任 payload 里的 depth**），别名折叠；hand-off 有 delegate/speak/clear 三态。
+- **路由 fail-loud**：`agent/routing.py:21` `AgentUnavailableError` + `:37` `_require_enabled`——路由到已停用/不存在的 agent 直接拒答并提示，**不静默回落默认人格**（与本站硬规则同）。
+- **记忆 = 混合检索 + 长期巩固**：`agent/memory/manager.py` 向量+关键词融合、`min_score` 在 rerank 前生效、embedding 失败降级纯关键词；`summarizer.py` 的 `MemoryFlushManager` 做长期巩固。本站已决策不做长期记忆，**此处作对照/反例**。
+- **反面**：`channel/wecom_bot/wecom_bot_channel.py` 单文件 1531 行、同文件塞两套传输（违反本站 400 行红线）；通道 `@singleton` + 工厂 `new_instance` 逃生舱（`channel/channel_factory.py:45`）是"单例面向多租户"的坏味道。
+- **何时查阅**：设计子代理上下文隔离、@ 寻址、跨进程/多 agent 委派防环、IM↔agent 路由 fail-loud 时；复核"长期记忆"取舍时。企微通道另见域 5。
+
+**openakita**（跨域登记：IM 通道另见域 5，生产化另见域 4）
+- Python 3.11 + FastAPI 的多 agent 助手（`github.com/openakita/openakita`，AGPL-3.0，2k star）。核心 `src/openakita/`：`agent/`（Ralph Loop、brain、checkpoint、microcompact）、`agents/`（Orchestrator/Factory/Profiles/TaskQueue）、`prompt/`（compiler/builder）、`memory/`、`skills/`、`channels/`、`core/`（policy_v2、stream_accumulator、sse_throttle）。
+- **Ralph 循环（外层重试 + 状态持久化）**：`agent/ralph.py:137` `RalphLoop` + `:98` `StopHook`，失败带状态重试、进度落 `MEMORY.md`（`:268` 读 / `:283` 写）。⚠ **但其"自适应分析"是 TODO 桩**（`:341-361` `_analyze_and_adapt` 仅 `asyncio.sleep(1)`），且 `_load_progress_sync:274` 读了文件**却没赋值**、内容被丢弃——"永不放弃/每次都带分析重试"名不副实，**引用时只取"外层重试 + 断点"骨架，别信其宣传语义**。
+- **主从委派（单跳，双重强制）**：委派工具 `delegate_to_agent` / `delegate_parallel` / `delegate_to_pool` / `delegate_to_role`；**工具层硬拦**子代理再委派（`tools/handlers/agent.py:64` 查 `_is_sub_agent_call` 直接拒），另有策略表 `DYNAMIC_AGENT_POLICIES`（`max_agents_per_session:5`/`max_delegation_depth:5`/`forbidden_tools:{create_agent}`）。**提示词声明 + 工具层硬拦双保险**是本站可抄的关键点。委派结果经 `to_tool_response()` 回灌（`agents/orchestrator.py:318`）；`AgentOrchestrator:382` + `AgentMailbox:346` + `AgentHealth:268`（成功率/时延）；实例池 `agents/factory.py:623` `AgentInstancePool` 按 `{session_id}::{profile_id}` 复用、30min 空闲回收（`:23` `_IDLE_TIMEOUT_SECONDS`）；`agents/profile.py` 的 role（worker|coordinator）+ skills/tools/mcp 的 all|inclusive|exclusive 三元组做能力裁剪。
+- **Prompt 分层装配 + 段预算**：`core/prompt_assembler.py:18` `PromptAssembler` + `prompt/builder.py`（system→runtime→developer→tool→memory→user，末尾 `apply_budget` 逐段截断），`PromptMode.MINIMAL`（子代理仅 Core+Runtime+Catalogs）、`resolve_tier(context_window)` 按窗口伸缩——**与本站 prompt 分段/P0-P1 同题**。身份四文件 `SOUL/AGENT/USER/MEMORY.md` 由 `prompt/compiler.py` 用 **LLM 编译**成带 token 上限的 core 文件（mtime 缓存 + schema 版本失效）。
+- **技能加载优先序**：`skills/loader.py:85` 注释即顺序（`__builtin__` > `__user_workspace__` > workspace > `.cursor/skills` > `.claude/skills` > `skills/` > 全局 home），`:433` 每个含 `SKILL.md` 的子目录即一技能。
+- **流式零件**：`core/sse_throttle.py`(273) / `core/stream_accumulator.py`(821) / `core/microcompact.py`(164) / `core/checkpoint.py`(266)——SSE 节流、流累积、微压缩、断点，与本站 SSE/压缩直接同域。
+- **何时查阅**：设计主从委派（提示词+工具层双强制）、子代理能力裁剪与实例池、prompt 分层与按窗口伸缩、身份文件 LLM 编译、SSE 节流/流累积/断点时。企微通道另见域 5。
+
+**LangBot**（跨域登记：IM 通道另见域 5，生产化另见域 4）
+- Python 生产级多平台 IM 机器人平台（`github.com/langbot-app/LangBot`，18k star；Quart/Hypercorn + SQLModel；插件/Box 沙箱为独立 SDK 仓 `langbot-plugin-sdk`）。**先读其 `ARCHITECTURE.md`**（高信号，地图式）。
+- **配置驱动 pipeline**：`pkg/pipeline/stage.py:14` `@stage_class(name)` 装饰器写入 `preregistered_stages`（`:11`），`pipelinemgr.py:781` 按 DB `pipeline_entity.stages` 顺序实例化、按 trigger/safety/ai/output 归并，`_execute_from_stage:297` 支持 stage 返回 async generator 的责任链。相对本站"固定编排"多一层"**配置可选 + 热装**"。
+- **Host/Runner 分离**：Host 拥有工具/历史/策略/telemetry，插件 Runner 只执行。`pkg/agent/runner/host_models.py:99` `ResourcePolicy`（allowed_tool_names/mcp/kb/skill **显式授权**）、`:133` `StatePolicy`、`:148` `DeliveryPolicy`；`descriptor.py:14` `RunnerDescriptor`（capabilities/usages）；`orchestrator.py:49` `AgentRunOrchestrator`；`invoker.py:30` `RunnerInvoker` 只做 transport+deadline。与本站"主从委派 + host 持有工具"同构，**可佐证授权模型**。
+- **skill 两段式（省 token）**：`pkg/skill/manager.py:110` `get_skill_index` 常驻 prompt 只给 name/display/description，`:121` 提示模型"匹配时调 `activate` 工具加载全文"；`activation.py:13` 注释明确"文本标记检测已移除，改由 Tool Call(activate) 触发"。
+- **Box 沙箱三层正交策略**：`pkg/box/policy.py` 分 `SandboxPolicy`(在哪跑)/`ToolPolicy`(哪些工具)/`ElevatedPolicy`(单次提权)，规则 **deny>allow、空 allow=全放行、elevated 不能绕过 deny**；`box/admission.py:102` 控制面不可用时 **fail-closed**，云端权益投影成 ≤300s 短租约；`box/runner.py:29` 明确"事件里的 path 只是元数据，不是读宿主 FS 的权限"。
+- **反面**：业务文件裸 `print(traceback.format_exc())`（`wecombot.py:305/730/750`，`line.py` 等共 4 处）、`is_muted` 空实现 `pass`（`wecombot.py:862`、`wecom.py:336`）、`run_async` 用 `while True: sleep(1)` 空转占协程（`wecombot.py:838`、`wecom.py:318`）——本站规范禁止 print/空实现，保活应走事件等待。
+- **何时查阅**：设计 pipeline 阶段注册与配置驱动、宿主/执行器职责切分与资源授权、skill 渐进披露、沙箱策略与 fail-closed 时。企微通道另见域 5。
+
 ---
 
 ## 域 4：生产化模板 / 平台（参考思路）
@@ -122,9 +151,51 @@
 - Dify 官方（LLMOps 平台）。AI 应用编排、工作流引擎、RAG 管道、插件体系。
 - **何时查阅**：做可视化工作流编排、RAG 管道拆解、插件化扩展时（平台型，迁移成本高，参考思路为主）。
 
+**LangBot**（跨域登记：域 3、域 5）
+- **两级并发闸门 + 背压丢弃（本站最可抄的一块）**：`pkg/pipeline/controller.py:24` 全局 `Semaphore(concurrency.pipeline)` + 每会话 `Semaphore(concurrency.session)`（`provider/session/sessionmgr.py:323`）；`controller.py:138` consumer 优先挑"会话信号量未满"的 query，再抢全局槽；`pkg/pipeline/pool.py:186` `_admit_query_locked` 满载时**丢弃最旧排队 query**（默认全局 1000 / 每 workspace 100，`:129`），`QueryPoolCapacityError:39` 显式背压。**SSE 单进程下最值得抄的调度模型**。
+- **跨进程运行时**：Plugin Runtime / Box 沙箱支持 stdio 或 WebSocket 两种控制传输（容器化走 `plugin.runtime_ws_url` + `--standalone-runtime`）。
+- **持久化约定**：SQLite 默认、Postgres 可选；时区无关列存 UTC-naive，边界用 `as_naive_utc` 归一；Alembic 4.x 无旧链。
+- **"agent 面是一等公民"**：`skills/`（单一真源）+ `/mcp` 服务端（**只暴露收敛子集**，`api/mcp/server.py:66` `stateless_http=True` 免粘性）+ `lbctl` + `AGENTS.md`/`ARCHITECTURE.md` 四者同步，明写 "drift is a bug"。
+- **何时查阅**：做并发调度与背压、跨进程插件/沙箱运行时、多平台单进程部署、agent 面（API/MCP/skill/文档）一致性维护时。
+
+**openakita**（跨域登记：域 3、域 5）
+- 生产化零件：`core/checkpoint.py`（断点）、`core/microcompact.py`（微压缩）、`core/sse_throttle.py`（SSE 节流）、`core/conversation_metrics.py`（会话指标）、`core/policy_v2/classifier.py`（工具审批分级，把 `delegate_*` 归 `CONTROL_PLANE`）、`core/tool_interrupt_behavior.py`（打断时各工具 block/allow 策略矩阵）。同一核心多形态：服务走 FastAPI、桌面走 Tauri + React。
+- **反面**：限频只告警不拦截——`channels/adapters/wework_ws.py:221` `_RateLimitTracker.check()` 仅 `logger.warning`，发送路径照发，30 条/24h 实际不拦超发；`response_url` 缓存无 TTL（`:2430` 仅按 200 条数量淘汰）。
+- **何时查阅**：做断点/微压缩/SSE 节流、工具审批分级、打断行为矩阵、多形态发布时。
+
 ---
 
-## 域 5：RAG 引擎（文档处理互补）
+## 域 5：IM 通道 / 企业微信接入（找模式）
+
+> 把外部 IM（重点：**企业微信智能机器人**）接到自有 agent 后端的参考。拆成三件事：**通道抽象**（平台差异挡在适配器内）、**传输**（URL 回调 Webhook vs WebSocket 长连接）、**流式呈现**（把 token 流映射成平台可渲染的帧）。
+> **背景（2026-10 官方能力）**：企业微信"智能机器人"两种 API 模式——URL 回调（`Token`+`EncodingAESKey`，需公网可访问 URL、需加解密）与 WebSocket 长连接（`BotID`+`Secret`，`wss://openws.work.weixin.qq.com`，**免公网、免加解密、官方推荐**）。长连接硬约束：**单机器人单连接**（新连接踢旧连接）、**30s 心跳**、流式**无刷新回调**须服务端主动推（`stream.id`+`finish`）、首帧起 **6 分钟**必须收尾。官方 SDK：Node `WecomTeam/aibot-node-sdk`、Python `wecom-aibot-python-sdk`；协议文档 path/101463（长连接）/ path/100719（回调）。**模式互斥**，切换会使另一种立即失效。
+
+**openakita**（跨域登记：域 3、域 4）
+- **本站接企微智能机器人最该先读的一份**：`docs/WEWORK_WS_IM_NOTES.md`（27KB）把长连接适配器（`src/openakita/channels/adapters/wework_ws.py`，2434 行）的**功能清单 / 帧协议（10 个 cmd） / 9 条必须保持的逻辑约束 / 配置 / 数据流 / 已知限制 / 25 项修改检查清单**全列了出来——**可直接当实现规格搬运**；第三节是"长连接 vs 回调"官方差异对照表。
+- 两套适配器并存：`wework_ws.py`（长连接，`class WeWorkWsAdapter:514`）与 `wework_bot.py`（回调，`BotMsgCrypt:81` AES-256-CBC、`STREAM_TIMEOUT=330:280`、`StreamSession:288`）。
+- 长连接实现要点（行号已核）：`_connection_loop:736`（指数退避 1s→30s）、`_send_auth:843`、`_heartbeat_loop:857`（30s；**发心跳前**查 missed_pong，连续 2 次判死）、`_route_frame:907`、`_handle_msg_callback_safe:962`（`asyncio.wait_for` 超时 + 异常兜底必发 `finish=true`）、`_send_stream_reply:1799`、`_send_reply_with_ack:2066`（同 `req_id` 串行 + 15s 回执）、`_stream_keepalive_loop:1977`（4min 发 `finish=false` 防 6min 超时）、`_ws_upload_media`（init/chunk/finish）。
+- 防御件（可直接抄的模式）：`_seen_msg_ids:586`（OrderedDict，10min TTL + 500 上限双淘汰）、`_peer_locks:604`（按 chat_id 串行）、`_reply_locks:583`、`_pending_replies:607`（断线暂存、重连重试）、`_pending_media_msgs:601`、`MAX_INTERMEDIATE_STREAM_MSGS=85:101`、`_parse_quote_content:250`、`_normalize_think_tags:310`、`_WebhookSender:385`（WS 失败回退）。**被踢正确处置**：`disconnected_event` → `_displaced=True`（`:579`/`:1254`）→ **停止重连**（防被踢后无限重连互踢）。
+- **通道抽象**：`channels/base.py:177` `ChannelAdapter(ABC)` + `capabilities` 声明式能力表（`:195`，默认全 False，`wework_ws` 覆写 `streaming=True`），抽象 `start/stop/send_message/download_media/upload_media` + `on_message/on_event/on_failure` 钩子；平台差异全在适配器内，业务侧只见统一消息。`base.py:43` 另有 `cooperative_shutdown`/`force_close_ws`，注释记录"pre-fix 三 bot 串行 stop 被最慢一个拖到 ~4s"的实测故障。**这套"能力位 + 钩子 + 统一消息 + 有界关闭"可直接对标本站通道层设计**。
+- **何时查阅**：动手接企业微信智能机器人（长连接或回调）前**必读** `WEWORK_WS_IM_NOTES.md`；设计通道抽象、流式呈现（`channels/stream_presenter.py`）、文本切分（`channels/text_splitter.py`）时。
+
+**LangBot**（跨域登记：域 3、域 4）
+- **一个适配器双传输**：`pkg/platform/sources/wecombot.py:308` `WecomBotAdapter`，`:322-346` 按 `enable-webhook` 选 `WecomBotWsClient`（长连接，默认）或 `WecomBotClient`（回调，需 `Token`/`EncodingAESKey`/`Corpid`）——配置项驱动模式切换的骨架。
+- **随仓 vendored 的 Python 企微智能机器人客户端**（`src/langbot/libs/wecom_ai_bot_api/`）：`ws_client.py`（1250 行，长连接）、`api.py`（2230 行，回调）、`WXBizMsgCrypt3.py`（腾讯官方回调加解密）、`wecombotevent.py`。**这是可直接阅读/借鉴的完整 Python 协议实现**（对照官方 SDK）。
+- 长连接机制（`ws_client.py`）：`DEFAULT_WS_URL:40` / `CMD_SUBSCRIBE:43` / `CMD_HEARTBEAT:44`；`_send_auth:782` → `_wait_for_auth:794`（10s）→ `_heartbeat_loop:814`（30s ping，连续 2 次无 pong 判死）；指数退避重连（1s→30s，`max_reconnect_attempts=-1` 无限）；`_dispatch_event:1129` 按 msg_id 去重（`_DEDUP_CACHE_MAX=4096:60` 环形上限）；`_send_reply:1148` 对**同一 req_id** 建串行队列，`_reply_queue_worker:1183` 逐条发 + `_send_and_wait_ack:1218`（5s）；`reply_stream:289` 组 `{id,finish,content,feedback}`，`push_stream_chunk:649` 每次发**累积全量快照**（内容不变即跳过）；`upload_media:514` 三阶段（init→chunk 512KB→finish）。**"无刷新回调、靠服务端主动推全量快照"的硬约束务必写进实现备忘**。
+- 对照：`sources/wecom.py:203` `WecomAdapter` 是**企业微信"应用"**（非智能机器人）纯 HTTP 回调（`unified_mode=True`、`handle_unified_webhook:303`）；适配器侧流式见 `wecombot.py:487` `reply_message_chunk`（WS 走 `push_stream_chunk`，失败 `reply_text` 兜底）、`:570` `_handle_synthetic_chunk`（处理**无 req_id 的合成事件**如按钮点击 resume）、`:869` `_on_card_action`（模板卡片点击合成 query 重新入池）。
+- **何时查阅**：要一份**现成的 Python 长连接/回调客户端**或双模适配器骨架时**优先读它**；对照"企微应用回调 vs 智能机器人长连接"两条通道差异时。
+
+**CowAgent**（跨域登记：域 3）
+- **单通道类双模**：`channel/wecom_bot/wecom_bot_channel.py:38` `WECOM_WS_URL=wss://openws.work.weixin.qq.com`、`:152` `self.mode = "websocket" | "webhook"`（`:167` 从配置 `wecom_bot_mode` 读）；`wecom_bot_crypt.py` 负责回调加解密。⚠ 同文件塞两套传输、**1531 行**，违反本站 400 行红线。
+- 长连接三件套：`_on_open` 订阅 `aibot_subscribe`（`bot_id`+`secret`）/ `_start_heartbeat`（`HEARTBEAT_INTERVAL=30:39`）/ `_on_close` 后 5s 重连（`:240`）。用**同步 `websocket-client` + 线程**（`ping_interval=0, reconnect=0` 自管），非 asyncio——本站是 asyncio/FastAPI，**借鉴协议而非实现**。
+- `req_id` 关联 + 流式：每条命令带 `req_id`，响应按 `req_id` 匹配回 `Event`（`:499`/`:512`）；流式是**同一条 stream 消息**（`stream.id` 稳定、末尾 `finish=true`），状态 `stream.id → {committed,current,finished,images,last_access}`（`:155`）；节流 ≤1 推/100ms 且长度未变即跳过（`:685`）；工具轮次用 `\n\n---\n\n` 分段（`:724`）。
+- **response_url 兜底**：`:156` `_callback_streams=ExpiredDict(600)`（10min），被动轮询窗口关闭/WS 失败时用一次性 `response_url` 主动补发；**判定以 `errcode` 为准而非 HTTP 200**。
+- **反面**：去重仅内存 `ExpiredDict(60*60*7.1)`（`:141`），**不持久、不跨实例**——本站有 Postgres 且会重启，需持久化去重。
+- **何时查阅**：看"单类双传输"与流式 `---` 分段交互时；实现优先参考 openakita / LangBot。
+
+---
+
+## 域 6：RAG 引擎（文档处理互补）
 
 **ragflow-0.26.4**
 - RAGFlow 开源 RAG 引擎。DeepDoc 文档解析、模板化分块、知识编译器、引用溯源、Agent 沙箱。
@@ -132,7 +203,7 @@
 
 ---
 
-## 域 6：清理候选
+## 域 7：清理候选
 
 > 维持原判断（2026-09）：低价值或与现有规则重叠，暂不清理可留作参考。
 
