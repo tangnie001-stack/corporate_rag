@@ -51,7 +51,8 @@
   scp .env root@<ECS-IP>:/opt/wwww/corporate_rag/.env
   ssh root@<ECS-IP> 'chmod 600 /opt/wwww/corporate_rag/.env'
   ```
-  ⇒ **本地新增/修改的键不会自动上机**：凡涉及 `.env` 的改动（如新增 `WECOM_BOT_*`），都要先手工同步到目标机、再重跑部署（或 `deploy.sh start`），否则容器读不到新键、对应功能静默不生效。
+  ⇒ **本地新增/修改的键不会自动上机**：凡涉及 `.env` 的改动（如新增 `WECOM_BOTS`），都要先手工同步到目标机、再重跑部署（或 `deploy.sh start`），否则容器读不到新键、对应功能静默不生效。
+- 企微长连接的多机器人配置写在 `WECOM_BOTS`，值是**一行 JSON**（`[{"key":"dev","bot_id":"<BotID>","secret":"<Secret>"}, {"key":"support","bot_id":"<BotID>","secret":"<Secret>"}]`）：**必须单行** —— 多行会导致 JSON 解析失败、通道启动报错（`WECOM_BOT_MODE=long_connection` 且 `WECOM_BOTS` 为空同样启动报错）。
 - 不得依赖 compose 的 `${X:-默认值}` 兜底 —— `deploy.sh` 会按 compose 插值变量清单校验非空，缺键即失败。
 - MinIO 两对键**已同源**：`docker-compose.image.yml` 直接用 `.env` 的 `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` 供 `MINIO_ROOT_USER/PASSWORD`。**不要**改回需要人工保持相等的两对。
 - 目标机必须存在的路径（缺任一条对应功能失效）：`.env`、`deploy/nginx/nginx.conf`、`deploy/nginx/html/`、`deploy/postgres/init/`、`data/ragas/`。
@@ -196,6 +197,15 @@ cd /opt/wwww/corporate_rag && bash scripts/deploy/deploy.sh clean
 3. **Alinux 4 自带 `docker` 与 `docker-ce` 互斥** —— 只补 `docker-compose-plugin` 即通（别装 `docker-ce` 全家桶）。
 4. **`docker compose restart` 不吃 `.env`** —— 改 `.env` 后要 `docker compose up -d --force-recreate app`。
 5. **制品下载**：用云效内建「下载制品」；若自己 `curl`，务必 `-fL`（`-f` 让 HTTP 错误直接失败，避免把错误响应体当成包）。
+
+### 2.6 新增 pip 依赖的影响（以企微长连接 SDK 为例）
+
+本仓库新增依赖 `wecom-aibot-python-sdk==1.0.2`（导入名 `aibot`；传递依赖 `websockets` / `aiohttp` / `pyee` / `cryptography` / `certifi`）与 `pycryptodome`。新增 / 升级 pip 依赖合并后必须做两件事：
+
+1. **重建 app 镜像**：依赖烘进镜像，`restart` / `up -d` 不吃新依赖，须 `docker compose build --no-cache app`（或走流水线重新构建）。
+2. **预热云效 PyPI 代理仓 `repo-okxha`**：该代理仓是懒加载缓存，若构建机首次要新包而缓存未命中会构建失败 —— 先在代理仓侧触发一次拉取预热，再跑流水线构建。
+
+> 该 SDK 的用法与约束（只调公开接口、禁止 `run()`）见 `docs/agents/code-map.md` 的「官方 aibot SDK 用法与约束」。
 
 ---
 
