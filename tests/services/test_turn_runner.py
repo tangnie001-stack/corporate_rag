@@ -144,3 +144,97 @@ async def test_persist_failure_releases_reservation():
         events.append(type(ev).__name__)
     assert "SSEErrorEvent" in events  # raise_on_stream_chat=True → 终止态
     assert events[-1] == "SSEDoneEvent"
+
+
+def test_stale_done_callback_does_not_clear_later_reservation():
+    """R14：上一轮的 done-callback 不得清掉下一回合的预留（竞态防线）。
+
+    竞态：任务 A 完成后其 done-callback 经 call_soon 要下一轮事件循环才执行；
+    这缝隙里同 session 新回合 B 已 try_reserve 成功。若 A 的回调释放预留，
+    B 的预留被清、is_running 变 False，第三个并发回合 C 也能通过闸门 → 双开。
+    故任务路径回调只释放 Redis 锁，不释放预留。本用例直接调用生产同款回调
+    （_make_release_lock_cb 的返回值，正是 _run_with_finalize.finally 与 task
+    done_callback 所用对象），稳定复现该时序。
+    """
+    from src.services.turn_runner import _make_release_lock_cb
+
+    session_id = "sess-r14-stale-cb"
+    try:
+        cb = _make_release_lock_cb(None, session_id, False)
+        # 新回合 B 已成功预留
+        assert streaming_manager.try_reserve(session_id) is True
+        # A 的陈旧 done-callback 在下一轮触发
+        cb()
+        # B 的预留必须仍在：否则第三个并发回合会通过闸门
+        assert streaming_manager.is_running(session_id) is True
+        assert streaming_manager.try_reserve(session_id) is False
+    finally:
+        streaming_manager.release_reservation(session_id)
+
+
+@pytest.mark.asyncio
+async def test_success_path_never_calls_release_reservation(monkeypatch):
+    """R14：成功路径的预留由 register 替换、unregister_if_current 清理，
+    finally / done-callback 都不得再调用 release_reservation（否则会误清
+    下一回合的预留）。"""
+    from unittest.mock import AsyncMock
+
+    from src.infra.llm.request_context import RequestContext
+    from src.services import turn_runner
+
+    session_id = "sess-r14-success"
+    ctx = RequestContext(session_id=session_id)
+    launch_ctx = {
+        "session_id": session_id,
+        "kb_id": "",
+        "query": "q",
+        "history": [],
+        "deep_thinking": False,
+        "ctx": ctx,
+        "graph": None,
+        "direct_skill": "",
+    }
+
+    async def empty_subscription():
+        return
+        yield  # pragma: no cover  # 生成器：仅供 stream_chat 返回
+
+    svc = _FakeSvc()  # _redis is None → 跳过 Redis 锁，聚焦进程内预留
+    svc.agent_service.stream_chat = AsyncMock(  # type: ignore[method-assign]
+        return_value=(empty_subscription(), launch_ctx)
+    )
+    svc.save_assistant_async = AsyncMock()  # type: ignore[attr-defined]
+    svc.chat_manager.add_message_async = AsyncMock()  # type: ignore[attr-defined]
+
+    async def fake_run_generation(*args, **kwargs):
+        return "完整回答"
+
+    monkeypatch.setattr(turn_runner, "_run_generation", fake_run_generation)
+
+    release_calls: list[str] = []
+    orig_release = streaming_manager.release_reservation
+
+    def spy_release(sid: str) -> None:
+        release_calls.append(sid)
+        orig_release(sid)
+
+    monkeypatch.setattr(streaming_manager, "release_reservation", spy_release)
+
+    try:
+        await turn_runner.start_turn(
+            svc,  # type: ignore[reportArgumentType]
+            session_id=session_id,
+            kb_id="",
+            query="q",
+        )
+        # 等后台任务收尾：is_running 转 False 即 finally/注销已完成，
+        # 再让 done-callback 跑完（release_lock_cb 注册在注销回调之前）
+        for _ in range(50):
+            if not streaming_manager.is_running(session_id):
+                break
+            await asyncio.sleep(0.02)
+        await asyncio.sleep(0)
+        assert release_calls == []
+    finally:
+        streaming_manager.clear_buffer(session_id)
+        streaming_manager.unregister(session_id)

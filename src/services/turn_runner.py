@@ -184,7 +184,9 @@ async def _acquire_gate(svc: AppService, session_id: str) -> tuple[bool, object]
     Returns:
         (lock_held, redis)：lock_held 表示是否取得 Redis 锁；redis 为 ChatManager
         的 Redis 客户端（不可用时为 None，此时 lock_held 恒为 False）。未抛
-        TurnBusy 即已预留，由调用方在早退路径经 release_lock_cb 释放预留。
+        TurnBusy 即已预留；预留的释放在**任务尚未注册**的早退/失败路径由调用方
+        显式调用 streaming_manager.release_reservation()，任务注册后由
+        unregister_if_current 负责（见 _make_release_lock_cb docstring）。
 
     Raises:
         TurnBusy: 预留未获得（已有任务或预留），或 Redis 锁被他人持有
@@ -244,12 +246,19 @@ async def _persist_front(
 def _make_release_lock_cb(
     redis: object, session_id: str, lock_held: bool
 ) -> Callable[[], None]:
-    """构造幂等的同步释放回调：释放进程内预留 + per-session Redis 锁。
+    """构造幂等的同步释放回调：**仅**释放 per-session Redis 锁。
 
-    预留释放同步执行（register 已替换预留时 no-op，本身幂等）；Redis 锁释放
-    异步调度（异常只记日志，锁有 TTL 兜底）。回调由 _run_with_finalize.finally
-    与 task done_callback 双路径调用，nonlocal lock_held 保证 Redis 锁只释放
-    一次。
+    Redis 锁释放异步调度（异常只记日志，锁有 TTL 兜底）。回调由
+    _run_with_finalize.finally 与 task done_callback 双路径调用，nonlocal
+    lock_held 保证 Redis 锁只释放一次。
+
+    **不在此释放进程内预留**：任务注册（register）已把预留换成任务引用，
+    任务生命周期结束由 unregister_if_current 负责清理。而本回调也是任务的
+    done_callback，经 call_soon 要等下一轮事件循环才执行；其间同 session 的
+    新回合可能已 try_reserve 成功，此时释放预留会清掉新回合的预留，令
+    is_running 变 False、后续并发回合通过闸门并双开同一 session（R14）。
+    预留释放只发生在任务尚未注册的早退/失败路径——由调用方在 release_lock_cb()
+    之外显式调用 streaming_manager.release_reservation()。
     """
 
     async def _release_lock_async() -> None:
@@ -260,12 +269,11 @@ def _make_release_lock_cb(
             logger.warning("Session lock release failed: {}", e)
 
     def release_lock_cb() -> None:
-        """同步释放回调：释放预留 + 调度异步释放 Redis 锁（幂等）。
+        """同步释放回调：仅调度异步释放 Redis 锁（幂等）。
 
         锁由后台任务持有到完成——SSE 断连不提前释放（进程内注册表 is_running
         才是并发防护的权威状态）。
         """
-        streaming_manager.release_reservation(session_id)
         nonlocal lock_held
         if not lock_held:
             return
@@ -374,7 +382,8 @@ def _spawn_from_launch_ctx(
         launch_ctx: stream_chat 返回的启动上下文（含 ctx / session_id / kb_id 等）
         abort_signal: 调用方取消信号（None 时内部新建）
         user_id: 用户 ID（生成侧唯一来源）
-        release_lock_cb: 幂等释放回调（预留 + Redis 锁）
+        release_lock_cb: 幂等释放回调（仅 Redis 锁；预留由调用方在早退路径
+            显式经 streaming_manager.release_reservation 释放）
     """
     partial_holder: dict = {"text": "", "sources": []}
     if abort_signal is not None:
@@ -436,9 +445,10 @@ async def _launch_and_register(
             kb_id, session_id, query, deep_thinking, agent=agent
         )
     except Exception as e:  # noqa: BLE001
-        # 任务未启动，无后台任务可释放，本路径直接释放避免挂到 TTL；
+        # 任务未启动，无后台任务可释放，本路径直接释放预留 + 锁避免挂到 TTL；
         # 不抛出——改为 error + done 终止态
         logger.exception("Chat stream setup failed: {}", str(e))
+        streaming_manager.release_reservation(session_id)
         release_lock_cb()
         return TurnHandle(
             session_id=session_id,
@@ -448,8 +458,10 @@ async def _launch_and_register(
     try:
         _spawn_from_launch_ctx(svc, launch_ctx, abort_signal, user_id, release_lock_cb)
     except Exception as e:  # noqa: BLE001
-        # 建任务/注册段失败：释放预留与锁，不抛出——改为 error + done 终止态
+        # 建任务/注册段失败（任务尚未注册）：释放预留 + 锁，不抛出——改为
+        # error + done 终止态
         logger.exception("Chat task spawn failed: {}", str(e))
+        streaming_manager.release_reservation(session_id)
         release_lock_cb()
         return TurnHandle(
             session_id=session_id,
