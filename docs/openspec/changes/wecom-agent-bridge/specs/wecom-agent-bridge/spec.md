@@ -1,18 +1,23 @@
 ## ADDED Requirements
 
-### Requirement: 入站消息推导确定性的会话标识
+### Requirement: 入站消息推导确定性的会话与用户标识
 
-系统 SHALL 由入站消息推导 `session_id`：群聊按 `chatid`（整群共享一段上下文），单聊按 `from_userid`；形如 `wecom:{bot_key}:group:{chatid}` 与 `wecom:{bot_key}:single:{from_userid}`。同一群/同一用户的连续消息 SHALL 映射到同一个 `session_id`。
+系统 SHALL 由入站消息推导 **36 字符**的确定性标识：对规范串 `wecom|{bot_key}|{group|single}|{id}`（群聊 `{id}` 取 `chatid`、单聊取 `from_userid`）做 **UUIDv5** 派生得到 `session_id`；对 `wecom-user|{from_userid}` 做同样派生得到 `user_id`。同一群/同一用户的连续消息 SHALL 映射到同一个 `session_id`。可读的 `bot_key`/`chatid`/`userid` SHALL 记入日志与会话标题，SHALL NOT 作为落库的会话键或用户键。
 
 #### Scenario: 群聊消息
 
 - **WHEN** 收到 `chattype=group` 的入站消息
-- **THEN** `session_id` 为 `wecom:{bot_key}:group:{chatid}`，同群其他成员的消息得到相同 `session_id`
+- **THEN** 由该群 `chatid` 派生出稳定的 36 字符 `session_id`，同群其他成员的消息得到相同值
 
 #### Scenario: 单聊消息
 
 - **WHEN** 收到 `chattype=single` 的入站消息
-- **THEN** `session_id` 为 `wecom:{bot_key}:single:{from_userid}`
+- **THEN** 由 `from_userid` 派生出稳定的 36 字符 `session_id`
+
+#### Scenario: 满足存储列宽
+
+- **WHEN** `session_id` 与 `user_id` 写入会话/消息/反馈表
+- **THEN** 二者长度均不超过 36 字符，落库成功
 
 ### Requirement: 重复入站消息只处理一次
 
@@ -30,7 +35,7 @@
 
 ### Requirement: 每轮生成携带 trace_id 并三路返回
 
-系统 SHALL 在处理入口为每个入站生成 `trace_<uuid>` 形式的 `trace_id`，并 SHALL 将其写入当前追踪上下文（使 Langfuse 与日志携带该值）。系统 SHALL 通过反馈标识与日志锚点两路返回该值。
+系统 SHALL 在处理入口用既有的 trace_id 生成入口为每个入站生成 `trace_<uuid>` 形式的 `trace_id`，并 SHALL 将其写入当前追踪上下文（使 Langfuse 与日志携带该值）。系统 SHALL 通过**三路**返回该值：① 首帧反馈标识、② 日志锚点、③ 终态**可配置**的可见 footer（见投影能力）。当反馈标识承载不可用时，footer SHALL **强制开启**（作为唯一人工可读路径）并在设计中登记。采用反馈标识承载时，回复出口 `ReplySink.reply_stream` SHALL 提供**可选的**反馈参数（不破坏既有驱动实现）。用户提交反馈时，系统 SHALL 处理反馈回执事件并还原出对应的 `trace_id`；该路受 SDK 前置门禁约束（SDK 要求帧含 `msgtype` 才向上分发）：SDK 下发该事件时，驱动 SHALL 保证其到达业务处理（不得因缺少 `msgid` 等必填字段而在解析阶段被静默丢弃）；若 SDK 层即丢弃，则 SHALL 按不可用退化并在设计中登记。
 
 #### Scenario: 日志锚点
 
@@ -40,11 +45,26 @@
 #### Scenario: 反馈标识承载
 
 - **WHEN** 该轮回复的首个流式帧发送
-- **THEN** 该帧携带以 `trace_id` 为值的反馈标识；用户对该回复反馈时，回传事件中可还原出 `trace_id`
+- **THEN** 该帧携带以 `trace_id` 为值的反馈标识
+
+#### Scenario: 反馈回执消费
+
+- **WHEN** 用户对该回复提交反馈，驱动收到反馈回执事件
+- **THEN** 系统从中还原出 `trace_id` 并落日志
+
+#### Scenario: 反馈回执到达业务
+
+- **WHEN** 反馈回执帧由 SDK 下发、但缺少普通消息的必填字段（如 `msgid`）
+- **THEN** 该帧仍能到达业务处理（按事件类型分流或放宽解析），不被静默丢弃
+
+#### Scenario: SDK 层即丢弃
+
+- **WHEN** SDK 因帧缺少 `msgtype` 而在其内部丢弃该反馈回执
+- **THEN** 该路按不可用处理（**footer 强制开启**作为唯一人工可读路），不视为实现缺陷
 
 ### Requirement: 入站消息喂入站点同款 Agent 管线
 
-系统 SHALL 以推导出的 `session_id`、`kb_id`（允许为空）与用户文本调用与站点**同一条** Agent 生成管线；是否检索、是否联网、是否澄清 SHALL 由 Agent 自主决策，通道侧 SHALL NOT 强制或阻止任一工具。
+系统 SHALL 以推导出的 `session_id`、`user_id`、`kb_id`（允许为空）与用户文本调用与站点**同一条** Agent 生成编排入口；是否检索、是否联网、是否澄清 SHALL 由 Agent 自主决策，通道侧 SHALL NOT 强制或阻止任一工具。该入口 SHALL 在同一处内聚：落库前置、并发闸门、生成、终态落库与收尾。闸门 SHALL 为**进程内原子预留**（判定与预留之间无等待点），外部锁仅作跨实例兜底；并发冲突时入口 SHALL 以明确信号拒绝（而非静默双开），由调用方翻译为用户可见结果。入口 SHALL 保留站点的两类失败语义：前置（闸门/落库）失败抛出；**`stream_chat` 调用及其后**失败以事件流上的终止态错误收尾（不抛出）。
 
 #### Scenario: 有知识库
 
@@ -56,14 +76,49 @@
 - **WHEN** `kb_id` 为空且 Agent 未选择检索
 - **THEN** 通道仍正常工作，Agent 走联网/纯生成等其余能力，不因缺库报错
 
+#### Scenario: 并发冲突
+
+- **WHEN** 同一会话已有进行中的生成，新消息到达
+- **THEN** 入口拒绝本次启动（明确信号），不双开同一会话、不覆盖进行中生成的缓冲
+
+#### Scenario: 并发突发不双开
+
+- **WHEN** 同一会话的两条消息几乎同时到达（含外部锁不可用、或首个生成的注册尚未完成时）
+- **THEN** 仅一个启动成功、另一个被拒；进行中生成的缓冲不被覆盖
+
+#### Scenario: 订阅后失败以事件收尾
+
+- **WHEN** 生成编排在 `stream_chat` 调用及其后发生错误
+- **THEN** 入口不抛异常，而在事件流上产出终止态的错误与结束事件（站点与通道以同一方式收尾）
+
+#### Scenario: 前置失败释放预留
+
+- **WHEN** 编排在闸门通过之后、后台任务建立之前失败（如落库前置失败）
+- **THEN** 该会话的预留被释放；后续消息可正常启动，不被永久占用
+
 ### Requirement: 澄清答案回填挂起请求
 
-企微侧 SHALL 支持 `ask_user` 澄清：挂起期间向用户呈现问题；用户的下一条入站文本在该会话存在挂起澄清时 SHALL 作为答案回填，而非开启新回合；无挂起时 SHALL 按普通消息处理。群聊会话中任一成员的回答 SHALL 均可回填。
+企微侧 SHALL 支持 `ask_user` 澄清的文本回填：挂起期间向用户呈现问题。**仅当消息来自触发该澄清的用户**时，该消息 SHALL 作为答案回填挂起请求，而非开启新回合；**其他成员**的消息 SHALL 按普通消息处理（会话正忙时回"正在处理上一条"）。通道 SHALL 自持"会话 → 触发者"映射（带过期与容量上限）以判定来源。一次澄清 SHALL 按一问一答处理：若含多个问题，SHALL 合并为一条编号问题，并将用户回答作为单个自定义答案回填。回填 SHALL 复用与站点**同一**的答案应用路径（该逻辑下沉为服务函数，站点与通道共用，通道 SHALL NOT 各写一份），从而将答案写入对话历史（Redis）与消息表（MySQL）。无挂起澄清时，消息 SHALL 按普通消息开启一轮生成。
 
-#### Scenario: 存在挂起澄清
+#### Scenario: 触发者回填
 
-- **WHEN** 某会话存在挂起的 `ask_user`，用户在该会话发送文本
+- **WHEN** 某会话存在挂起的 `ask_user`，且**触发该澄清的用户**在同一会话发送文本
 - **THEN** 该文本作为澄清答案回填，生成继续而非重开一轮
+
+#### Scenario: 他人消息不误吞
+
+- **WHEN** 挂起期间**其他成员**在同一群会话发送消息
+- **THEN** 该消息不被当作澄清答案；按普通消息处理（会话正忙则回"正在处理上一条"）
+
+#### Scenario: 多问合并为一问
+
+- **WHEN** 挂起的澄清含多个问题
+- **THEN** 合并为一条编号问题呈现，用户整段回答作为单个自定义答案回填
+
+#### Scenario: 答案入历史
+
+- **WHEN** 澄清答案被回填
+- **THEN** 该答案被写入对话历史与消息表，后续轮次的上下文可见
 
 #### Scenario: 无挂起澄清
 
@@ -72,41 +127,52 @@
 
 ### Requirement: 长连接驱动等待认证并暴露失败
 
-驱动 `start()` SHALL 在建立连接后等待认证结果：认证成功 SHALL 才视为该台连接就绪；认证失败 SHALL 产生可见的告警且该台 SHALL 不计入"连接成功"。
+驱动 `start()` SHALL 在建立连接后等待认证结果：认证成功 SHALL 才视为该台连接就绪。认证**失败（凭证类）** SHALL 产生可见的告警、该台 SHALL NOT 计入"连接成功"，且驱动 SHALL 主动断开并 SHALL NOT 据此持续重连（避免错误凭证导致的无限重连）；其判定信号 SHALL 限于 **SDK SUBSCRIBE 响应的 `errcode≠0` 或 SDK 抛出的 `Authentication failed` 错误**——**普通连接失败/接收错误的 `on_error` 不构成凭证类失败**（不得据此断开或停重连）。等待**超时**（首连抖动 / 网络慢）SHALL 只影响"是否计入成功"（按降级处理），SHALL NOT 主动断开、SHALL NOT 停重连（交 SDK 自愈，避免慢启动的机器人永久离线）。**未认证就绪（失败或超时）的驱动 SHALL 仍被纳入可关停集合**（`stop()` 能关闭它），但 SHALL NOT 计入"认证成功台数"。该等待 SHALL 有明确上界（≤5s），且逐台启动 SHALL 并行（不串行阻塞），以免拖垮应用启动。
 
 #### Scenario: 认证成功
 
 - **WHEN** 某台机器人连接且认证返回成功
 - **THEN** 该台计入成功台数，启动锚点日志反映其成功
 
-#### Scenario: 认证失败可见
+#### Scenario: 认证失败可见且不重试
 
-- **WHEN** 某台机器人认证失败
-- **THEN** 记录告警且该台不计入成功；不得静默地"看似已连上"
+- **WHEN** 某台机器人认证返回失败（凭证类）
+- **THEN** 记录告警、该台不计入成功、驱动断开且不因该次失败持续重连
+
+#### Scenario: 等待超时仍自愈
+
+- **WHEN** 某台在等待上界内未收到认证结果（超时）
+- **THEN** 该台按降级处理、不计入成功、**不断开、不停重连**，交 SDK 自动重连恢复
+
+#### Scenario: 未就绪仍可关停
+
+- **WHEN** 某台未认证就绪（失败或超时）
+- **THEN** 其驱动仍在可关停集合内，`stop()` 会关闭它（不因"跳过该台"而泄漏连接）
+
+#### Scenario: 启动不被拖垮
+
+- **WHEN** 某台认证等待超时或失败
+- **THEN** 该台按降级处理，其余台并行启动、不受该台等待拖累
 
 ### Requirement: 被顶号后停止重连
 
-驱动 SHALL 识别"被新连接顶替/被服务端断开"的情形，并在该情形下 SHALL NOT 发起自动重连（避免多方互踢）。
+驱动 SHALL 识别**被新连接顶替**或**凭证类致命断开**（判据以 Spike E4 结论为准），并在该情形下 SHALL NOT 发起自动重连（避免多方互踢）；**普通瞬时断开仍 SHALL 交由 SDK 自动重连**（不得因抖动停止自愈）。
 
 #### Scenario: 被顶号
 
 - **WHEN** 本连接被同机器人的新连接顶替
 - **THEN** 驱动停止重连，不与被顶者互相抢占
 
-### Requirement: 长流保活
+#### Scenario: 普通抖动仍自愈
 
-在流式发送期间，投影层 SHALL 以不超过 4 分钟为间隔发送至少一次非终态帧，以避免首帧起 6 分钟的收尾时限导致连接被断开。
+- **WHEN** 连接因普通瞬时网络问题断开（非顶替、非凭证类致命）
+- **THEN** 驱动不停止重连，由 SDK 自动重连恢复
 
-#### Scenario: 长耗时生成
+### Requirement: 桥接仅用于长连接路径
 
-- **WHEN** 一轮生成耗时接近或超过 6 分钟
-- **THEN** 期间保持发送非终态帧，流不被超时断开
+桥接 handler SHALL 仅用于长连接路径；`WECOM_BOT_MODE=callback` SHALL 保持既有占位 handler，桥接 SHALL NOT 改变回调模式的行为。
 
-### Requirement: 通道声明能力位
+#### Scenario: 回调模式不接入桥接
 
-通道驱动 SHALL 以声明式能力位（如 stream/markdown 等）暴露自身能力，业务侧 SHALL 依据能力位降级，而 SHALL NOT 依赖平台分支判断。
-
-#### Scenario: 查询能力
-
-- **WHEN** 业务侧需要渲染某类内容
-- **THEN** 通过能力位判断该通道是否支持，并按结果选择渲染或降级
+- **WHEN** `WECOM_BOT_MODE=callback` 且收到回调消息
+- **THEN** 仍走占位回复，不触发 Agent 生成（避免回调超时与重试风暴）
