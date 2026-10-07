@@ -2,8 +2,9 @@
 
 > 本地 `../github/` 下镜像的开源参考项目，用于在对应场景下优先参考其实现模式。
 > 按**功能域**分组（要做什么 → 直接进对应域找参考），组内按价值排序。
-> **排序权重（2026-09-18 修订）**：领域契合 > 生产验证 > 可迁移深度 > 当前痛点匹配 > 技术栈契合。
+> **排序权重（2026-10-08 修订）**：**生产验证 > 领域契合 > 可迁移深度 > 当前痛点匹配 > 技术栈契合**。生产验证提为首位——同域同类时，**已上线、在生产规模跑过**的实现优先于"同领域但未经验证"的实现；仅当该域内没有生产样本时，才退而按领域契合度排。
 > **语言/框架不同不构成降级理由**：本项目从参考项目取的是**模式与边界划分**，不是代码。同领域、且已在生产规模上验证过的项目，排在语言相同但未经验证的演示项目之前；仅在"连模式都不适用"时才因技术栈差异后置。
+> **许可证决定"能否取代码"**：权重衡量的是**参考价值**、不含许可证；但真要**借鉴代码**（非仅取模式）前必先看许可证——Apache/MIT 可借（需署名），AGPL/GPL 只能取模式。
 > **同一项目可跨多个域登记**：项目体量大、横跨多个功能域时（如 WeKnora 同属域 2、域 3、域 4），在各域分别登记其**该域相关的那一面**，不压缩成一条。
 > 本清单只承载"项目是什么 + 何时查阅 + 参考价值"；具体架构细节以对应仓库源码为准。
 > **例外**：附录另收本地已安装的技能（`~/.agents/skills/`，非 `../github` 镜像），作为"标准 skill 长什么样"的范例。
@@ -170,28 +171,32 @@
 > 把外部 IM（重点：**企业微信智能机器人**）接到自有 agent 后端的参考。拆成三件事：**通道抽象**（平台差异挡在适配器内）、**传输**（URL 回调 Webhook vs WebSocket 长连接）、**流式呈现**（把 token 流映射成平台可渲染的帧）。
 > **背景（2026-10 官方能力）**：企业微信"智能机器人"两种 API 模式——URL 回调（`Token`+`EncodingAESKey`，需公网可访问 URL、需加解密）与 WebSocket 长连接（`BotID`+`Secret`，`wss://openws.work.weixin.qq.com`，**免公网、免加解密、官方推荐**）。长连接硬约束：**单机器人单连接**（新连接踢旧连接）、**30s 心跳**、流式**无刷新回调**须服务端主动推（`stream.id`+`finish`）、首帧起 **6 分钟**必须收尾。官方 SDK：Node `WecomTeam/aibot-node-sdk`、Python `wecom-aibot-python-sdk`；协议文档 path/101463（长连接）/ path/100719（回调）。**模式互斥**，切换会使另一种立即失效。
 
+**LangBot**（跨域登记：域 3、域 4）
+- Python 生产级多平台 IM 机器人平台（`github.com/langbot-app/LangBot`，**Apache-2.0——代码可借鉴**；18k star）。**本域唯一"生产在跑 + 授权宽松"的智能机器人实现**，其 `wecombot` 适配器近期仍在修生产缺陷（`fix(wecombot): stop empty bubbles and premature stream close on blank final chunks #2561`）。按新权重（生产验证优先）**本域实现首选**。
+- **适配器已拆包（当前实现）**：`pkg/platform/adapters/wecombot/`，7 文件 959 行（`adapter.py` 仅 341 行），带 `manifest.yaml`；**旧实现 `pkg/platform/sources/wecombot.py`（1051 行）并存**，被新适配器以 `LegacyWecomBotAdapter` 复用其静态工具方法（`adapters/wecombot/adapter.py:3`）。**一个适配器双传输**：`adapters/wecombot/adapter.py:56` 按配置 `enable-webhook` 选 `WecomBotWsClient`（长连接，默认，需 `BotId`/`Secret`）或 `WecomBotClient`（回调，需 `Token`/`EncodingAESKey`/`Corpid`）。
+- **随仓 vendored 的 Python 协议客户端**（`src/langbot/libs/wecom_ai_bot_api/`）：`ws_client.py`（1250 行，长连接）、`api.py`（2230 行，回调）、`WXBizMsgCrypt3.py`（278 行，腾讯官方回调加解密）、`wecombotevent.py`。**自研协议、不用官方 SDK**——与本站"用官方 `aibot` SDK"路线不同，可逐帧对照校验。
+- **长连接生产不变量（行号已核，`ws_client.py`）**：`DEFAULT_WS_URL:40` / `CMD_SUBSCRIBE:43` / `CMD_HEARTBEAT:44`；认证走 **`_send_auth:782` → `_wait_for_auth:794`（等 10s 并校验 `errcode==0`）——恰是本站官方 SDK 缺的一环**（SDK 的 `connect()` 不等认证即返回，auth 失败只走 `on_error`）；`_heartbeat_loop:814`（30s ping，连续 2 次无 pong 判死）；指数退避重连（1s→30s，`max_reconnect_attempts=-1` 无限）；**`_dispatch_event:1129` 按 `msg_id` 去重**（`_msg_id_map`，上限 `_DEDUP_CACHE_MAX=4096:60`）；`_send_reply:1148` 对**同一 req_id** 建串行队列（`asyncio.Queue` + worker），`_reply_queue_worker:1183` 逐条发 + `_send_and_wait_ack:1218`（`_reply_ack_timeout=5.0:131`）。
+- **流式硬约束（已实证，非推测）**：`push_stream_chunk:649` 每次发**累积全量快照**——`ws_client.py:718` 注释原文"**WeCom replaces the displayed stream content on each refresh, so every frame must contain the complete snapshot, not only a delta**"；内容上限 `_MAX_STREAM_CONTENT_CHARS=200000:65`（超限**保留尾部**）；内容未变即跳过、空白/ZWS 快照跳过、**空白 final 不关流**（防空气泡 + 答案被甩到另一条消息，即上述 #2561）。**并发/背压上限**：`_MAX_CALLBACK_TASKS=100:66` / `_MAX_REPLY_WORKERS=100:67` / `_MAX_REPLY_QUEUE_SIZE=100:68` / `_MAX_PENDING_ACKS=256:69`（超限丢弃并 warning）。`reply_stream:289` 组 `{id,finish,content,feedback}`；`upload_media:514` 三阶段（init→chunk 512KB→finish）。
+- **模板卡片交互（"澄清卡片"的现成闭环）**：`adapters/wecombot/interaction.py` 把 `select` 字段 / ≤6 个 action 编成 `button_interaction` 卡，按钮 key 编码为 `lbi:{callback_token}:a:{i}`（action，`:39`）/ `lbi:{token}:f:0:{i}`（field 选项，`:53`）；点击后经 `template_card_event` 回推，`parse_callback_key:126` 解回、`interaction_event_from_native:146` 转上层事件；适配器侧 `_register_native_handlers:265` 订阅 `on_message('template_card_event')` → `_handle_interaction_event:274`。卡→点击→回填**全链路可直接对标**；`interaction_delivery_capabilities:13` 声明 `max_fields:1`、`supports_updates:True`。
+- 对照：`sources/wecom.py:203` `WecomAdapter` 是**企业微信"应用"**（非智能机器人）纯 HTTP 回调（`unified_mode=True`、`handle_unified_webhook:303`）；legacy 适配器侧流式见 `sources/wecombot.py:487` `reply_message_chunk`（WS 走 `push_stream_chunk`，失败 `reply_text` 兜底）、`:570` `_handle_synthetic_chunk`（无 req_id 的合成事件如按钮点击 resume）、`:869` `_on_card_action`（模板卡片点击合成 query 重新入池）。
+- **何时查阅**：**本域实现首选**——写企微智能机器人适配器、流式投影、卡片交互、去重与背压时先读它；要一份完整 Python 长连接/回调客户端做对照，或看"双模适配器骨架"时。设计期的规格枚举再配合 openakita 的 `WEWORK_WS_IM_NOTES.md`。
+
+**CowAgent**（跨域登记：域 3）
+- 前身 `chatgpt-on-wechat`（CoW），现 `github.com/zhayujie/CowAgent`（**47.2k star、MIT——代码可借**；Python，750 文件）。**本域排第 2**——生产验证与领域广度都赢过 openakita（唯一输在可迁移深度）：`channel/` 下 13 个通道目录，且**把微信/企微生态 5 种形态都覆盖了**（`wecom_bot` 智能机器人 / `wechatcom` 企业微信应用 / `wechatmp` 公众号 / `wechat_kf` 微信客服 / `weixin` 个人微信）。但**栈与本站不兼容**（线程 + 同步 WS，见下），故按新权重定位为**参照价值高、可照搬度低**：看广度用它，写实现用 LangBot（规格清单用 openakita）。
+- **单通道类双模**：`channel/wecom_bot/wecom_bot_channel.py:38` `WECOM_WS_URL=wss://openws.work.weixin.qq.com`、`:152` `self.mode = "websocket"`、`:167` 从配置 `wecom_bot_mode` 读（默认 websocket）；`wecom_bot_crypt.py` 负责回调加解密。⚠ 同文件塞两套传输、**1531 行**，违反本站 400 行红线。
+- **同步线程模型（决定"只借语义不搬实现"）**：`import threading` + 同步 `websocket-client` + `run_forever`（`:257-265` 起独立线程），`_on_close:240` 固定 **5s** 重连（**非指数退避**）。本站是 asyncio/FastAPI，**借鉴协议而非实现**。
+- `req_id` 关联 + 流式：每条命令带 `req_id`，`_send_and_wait:499`（默认 **15s**）用 `threading.Event` 等匹配响应、`_handle_ws_message:512` 按 `req_id` 回填 `_pending_responses:147`；流式是**同一条 stream 消息**（末尾 `finish=true`），节流 **≤1 推/100ms 且长度未变即跳过**（`_make_stream_callback:666`、判据 `:685`）；工具轮次用 `\n\n---\n\n` 分段（`:727`）；状态 `_stream_states:149`（`req_id → {stream_id, content}`）。
+- **response_url 兜底**：`:156` `_callback_streams=ExpiredDict(60*10)`（10min），被动轮询窗口关闭/WS 失败时用一次性 `response_url` 主动补发；**判定以 `errcode` 为准而非 HTTP 200**。
+- **反面**：① 去重仅内存 `received_msgs=ExpiredDict(60*60*7.1)`（`:141`，7.1h），**不持久、不跨实例**——本站有 Postgres 且会重启，需持久化去重；② **无模板卡片处理**（全文件无 `template_card`/`task_id`/卡点击），澄清卡片能力缺失。
+- **何时查阅**：看"IM 通道广度（尤含企微生态 5 形态）""单类双传输""流式 `---` 分段""response_url 兜底"时；其企微实现**只借协议语义**，不照搬（线程模型 + 1531 行双传输）。子代理隔离另见域 3。
+
 **openakita**（跨域登记：域 3、域 4）
-- **本站接企微智能机器人最该先读的一份**：`docs/WEWORK_WS_IM_NOTES.md`（27KB）把长连接适配器（`src/openakita/channels/adapters/wework_ws.py`，2434 行）的**功能清单 / 帧协议（10 个 cmd） / 9 条必须保持的逻辑约束 / 配置 / 数据流 / 已知限制 / 25 项修改检查清单**全列了出来——**可直接当实现规格搬运**；第三节是"长连接 vs 回调"官方差异对照表。
+- **本域排第 3**——生产验证最弱（2k star；域 3 另记其核心 Ralph 循环是 TODO 桩）、**AGPL-3.0-only 只能取模式不可抄代码**；唯一领先项是**可迁移深度**（asyncio 同栈 + 本域唯一成篇规格）。规格正文：`docs/WEWORK_WS_IM_NOTES.md`（520 行 / 27KB）把长连接适配器（`src/openakita/channels/adapters/wework_ws.py`，2434 行）的**功能清单 / 帧协议（10 个 cmd） / 9 条必须保持的逻辑约束 / 配置 / 数据流 / 已知限制 / 25 项修改检查清单**全列了出来——**可直接当实现规格/清单搬运**；第三节是"长连接 vs 回调"官方差异对照表。
 - 两套适配器并存：`wework_ws.py`（长连接，`class WeWorkWsAdapter:514`）与 `wework_bot.py`（回调，`BotMsgCrypt:81` AES-256-CBC、`STREAM_TIMEOUT=330:280`、`StreamSession:288`）。
 - 长连接实现要点（行号已核）：`_connection_loop:736`（指数退避 1s→30s）、`_send_auth:843`、`_heartbeat_loop:857`（30s；**发心跳前**查 missed_pong，连续 2 次判死）、`_route_frame:907`、`_handle_msg_callback_safe:962`（`asyncio.wait_for` 超时 + 异常兜底必发 `finish=true`）、`_send_stream_reply:1799`、`_send_reply_with_ack:2066`（同 `req_id` 串行 + 15s 回执）、`_stream_keepalive_loop:1977`（4min 发 `finish=false` 防 6min 超时）、`_ws_upload_media`（init/chunk/finish）。
 - 防御件（可直接抄的模式）：`_seen_msg_ids:586`（OrderedDict，10min TTL + 500 上限双淘汰）、`_peer_locks:604`（按 chat_id 串行）、`_reply_locks:583`、`_pending_replies:607`（断线暂存、重连重试）、`_pending_media_msgs:601`、`MAX_INTERMEDIATE_STREAM_MSGS=85:101`、`_parse_quote_content:250`、`_normalize_think_tags:310`、`_WebhookSender:385`（WS 失败回退）。**被踢正确处置**：`disconnected_event` → `_displaced=True`（`:579`/`:1254`）→ **停止重连**（防被踢后无限重连互踢）。
 - **通道抽象**：`channels/base.py:177` `ChannelAdapter(ABC)` + `capabilities` 声明式能力表（`:195`，默认全 False，`wework_ws` 覆写 `streaming=True`），抽象 `start/stop/send_message/download_media/upload_media` + `on_message/on_event/on_failure` 钩子；平台差异全在适配器内，业务侧只见统一消息。`base.py:43` 另有 `cooperative_shutdown`/`force_close_ws`，注释记录"pre-fix 三 bot 串行 stop 被最慢一个拖到 ~4s"的实测故障。**这套"能力位 + 钩子 + 统一消息 + 有界关闭"可直接对标本站通道层设计**。
-- **何时查阅**：动手接企业微信智能机器人（长连接或回调）前**必读** `WEWORK_WS_IM_NOTES.md`；设计通道抽象、流式呈现（`channels/stream_presenter.py`）、文本切分（`channels/text_splitter.py`）时。
-
-**LangBot**（跨域登记：域 3、域 4）
-- **一个适配器双传输**：`pkg/platform/sources/wecombot.py:308` `WecomBotAdapter`，`:322-346` 按 `enable-webhook` 选 `WecomBotWsClient`（长连接，默认）或 `WecomBotClient`（回调，需 `Token`/`EncodingAESKey`/`Corpid`）——配置项驱动模式切换的骨架。
-- **随仓 vendored 的 Python 企微智能机器人客户端**（`src/langbot/libs/wecom_ai_bot_api/`）：`ws_client.py`（1250 行，长连接）、`api.py`（2230 行，回调）、`WXBizMsgCrypt3.py`（腾讯官方回调加解密）、`wecombotevent.py`。**这是可直接阅读/借鉴的完整 Python 协议实现**（对照官方 SDK）。
-- 长连接机制（`ws_client.py`）：`DEFAULT_WS_URL:40` / `CMD_SUBSCRIBE:43` / `CMD_HEARTBEAT:44`；`_send_auth:782` → `_wait_for_auth:794`（10s）→ `_heartbeat_loop:814`（30s ping，连续 2 次无 pong 判死）；指数退避重连（1s→30s，`max_reconnect_attempts=-1` 无限）；`_dispatch_event:1129` 按 msg_id 去重（`_DEDUP_CACHE_MAX=4096:60` 环形上限）；`_send_reply:1148` 对**同一 req_id** 建串行队列，`_reply_queue_worker:1183` 逐条发 + `_send_and_wait_ack:1218`（5s）；`reply_stream:289` 组 `{id,finish,content,feedback}`，`push_stream_chunk:649` 每次发**累积全量快照**（内容不变即跳过）；`upload_media:514` 三阶段（init→chunk 512KB→finish）。**"无刷新回调、靠服务端主动推全量快照"的硬约束务必写进实现备忘**。
-- 对照：`sources/wecom.py:203` `WecomAdapter` 是**企业微信"应用"**（非智能机器人）纯 HTTP 回调（`unified_mode=True`、`handle_unified_webhook:303`）；适配器侧流式见 `wecombot.py:487` `reply_message_chunk`（WS 走 `push_stream_chunk`，失败 `reply_text` 兜底）、`:570` `_handle_synthetic_chunk`（处理**无 req_id 的合成事件**如按钮点击 resume）、`:869` `_on_card_action`（模板卡片点击合成 query 重新入池）。
-- **何时查阅**：要一份**现成的 Python 长连接/回调客户端**或双模适配器骨架时**优先读它**；对照"企微应用回调 vs 智能机器人长连接"两条通道差异时。
-
-**CowAgent**（跨域登记：域 3）
-- **单通道类双模**：`channel/wecom_bot/wecom_bot_channel.py:38` `WECOM_WS_URL=wss://openws.work.weixin.qq.com`、`:152` `self.mode = "websocket" | "webhook"`（`:167` 从配置 `wecom_bot_mode` 读）；`wecom_bot_crypt.py` 负责回调加解密。⚠ 同文件塞两套传输、**1531 行**，违反本站 400 行红线。
-- 长连接三件套：`_on_open` 订阅 `aibot_subscribe`（`bot_id`+`secret`）/ `_start_heartbeat`（`HEARTBEAT_INTERVAL=30:39`）/ `_on_close` 后 5s 重连（`:240`）。用**同步 `websocket-client` + 线程**（`ping_interval=0, reconnect=0` 自管），非 asyncio——本站是 asyncio/FastAPI，**借鉴协议而非实现**。
-- `req_id` 关联 + 流式：每条命令带 `req_id`，响应按 `req_id` 匹配回 `Event`（`:499`/`:512`）；流式是**同一条 stream 消息**（`stream.id` 稳定、末尾 `finish=true`），状态 `stream.id → {committed,current,finished,images,last_access}`（`:155`）；节流 ≤1 推/100ms 且长度未变即跳过（`:685`）；工具轮次用 `\n\n---\n\n` 分段（`:724`）。
-- **response_url 兜底**：`:156` `_callback_streams=ExpiredDict(600)`（10min），被动轮询窗口关闭/WS 失败时用一次性 `response_url` 主动补发；**判定以 `errcode` 为准而非 HTTP 200**。
-- **反面**：去重仅内存 `ExpiredDict(60*60*7.1)`（`:141`），**不持久、不跨实例**——本站有 Postgres 且会重启，需持久化去重。
-- **何时查阅**：看"单类双传输"与流式 `---` 分段交互时；实现优先参考 openakita / LangBot。
+- **何时查阅**：动手接企业微信智能机器人（长连接或回调）前，用它的 `WEWORK_WS_IM_NOTES.md` / 25 项检查表做**规格枚举与遗漏清单**；设计通道抽象、流式呈现（`channels/stream_presenter.py`）、文本切分（`channels/text_splitter.py`）时。
 
 ---
 
