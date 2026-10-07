@@ -528,10 +528,13 @@ async def test_agent_turn_input_includes_system_message(monkeypatch):
 async def test_agent_turn_usage_estimate_includes_system(monkeypatch):
     """用量估算的输入同样含 system 段（漏掉会让每轮估算系统性偏小）。
 
-    口径：`estimate_usage` 把消息 content 以空格连接后交 tiktoken 计数。
-    `"SYS-ONE SYS-TWO hi"` → **7** token；若只算 `request.messages`（丢 system）
-    则为 `"hi"` → 1 —— 该断言正是用来钉住这一点。
+    期望值由 `count_messages_tokens` 按**含 system 的完整消息列表**现算（与
+    `estimate_usage` 同源），故与环境无关：encoder 可用走分词器、不可用走降级，
+    两边一致。钉住的语义：期望按三条消息（含两条 system）算；若实现退化成只算
+    `request.messages`（丢 system），期望仍是三条、实际变成一条的值，断言照样失败。
     """
+    from src.infra.llm.token_count import count_messages_tokens
+
     recorded = _patch_langfuse(monkeypatch)
     model = _RecordingModel(messages=iter([AIMessage(content="ok")]))
     agent = build_agent(
@@ -547,7 +550,14 @@ async def test_agent_turn_usage_estimate_includes_system(monkeypatch):
             "_system_messages": _sysmsgs("SYS-ONE", "SYS-TWO"),
         }
     )
-    assert recorded[0]["usage"]["input"] == 7
+    expected = count_messages_tokens(
+        [
+            SystemMessage(content="SYS-ONE"),
+            SystemMessage(content="SYS-TWO"),
+            HumanMessage(content="hi"),
+        ]
+    )
+    assert recorded[0]["usage"]["input"] == expected
 
 
 @pytest.mark.asyncio

@@ -118,7 +118,7 @@ def _split_initial_messages(
         (system 半段, 非 system 半段)：system 半段全是 SystemMessage，非 system
         半段 = 注入消息 + 历史 + 当前 user
     """
-    # 历史窗口截断（最近 N 轮 + token 双上限）后再组装初始消息；
+    # 历史窗口截断（最近 N 轮 + 绝对 token 预算）后再组装初始消息；
     # kb_bound 由 kb_id 是否非空决定（未绑定 KB → 追加禁止检索指令）
     history = _truncate_history(state._history or [])
     ctx = current_request_ctx.get()

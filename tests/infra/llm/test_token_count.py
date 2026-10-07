@@ -86,9 +86,30 @@ def test_count_tokens_warns_through_registered_event_once(monkeypatch):
     )
     monkeypatch.setattr(token_count, "_encoder", _raise_encoder)
     monkeypatch.setattr(token_count, "_WARNED_UNAVAILABLE", False)
+    # 冷却负缓存须复位：否则跨用例残留的失败时刻会让本用例根本不尝试 encoder
+    monkeypatch.setattr(token_count, "_encoder_failed_at", None)
     assert count_tokens("abcdefghij") == 5
     assert count_tokens("abcdefghij") == 5
     assert events == [token_count.Event.TOKEN_ENCODER_UNAVAILABLE]
+
+
+def test_encoder_failure_is_cooldown_gated(monkeypatch):
+    """失败后冷却窗口内不再重试：连续两次 count_tokens 只尝试一次 encoder。
+
+    判别性：若去掉冷却负缓存，两次计数会各触发一次 `_encoder()`，attempts==2。
+    """
+    attempts: list[int] = []
+
+    def _counting_raise() -> None:
+        attempts.append(1)
+        raise RuntimeError("encoder unavailable")
+
+    monkeypatch.setattr(token_count, "_encoder", _counting_raise)
+    monkeypatch.setattr(token_count, "_WARNED_UNAVAILABLE", True)  # 告警与本用例无关
+    monkeypatch.setattr(token_count, "_encoder_failed_at", None)
+    assert count_tokens("abcdefghij") == 5
+    assert count_tokens("abcdefghij") == 5
+    assert len(attempts) == 1, "冷却窗口内不得重复尝试 encoder"
 
 
 def test_warm_token_encoder_reports_availability(monkeypatch):
