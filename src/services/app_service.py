@@ -363,3 +363,20 @@ class AppService:
             page_size=page_size,
         )
         return result
+
+
+# ── 单例访问器 ────────────────────────────────────────────────
+# 下沉自 api/dependencies.py：channels 不得 import api，故访问器须住在 services。
+_service: AppService | None = None
+
+
+async def get_app_service() -> AppService:
+    """提供 AppService 单例。
+
+    延迟初始化：首次调用时创建实例，后续复用——避免模块导入阶段产生
+    网络或数据库连接。api 层与通道层共用本函数。
+    """
+    global _service
+    if _service is None:
+        _service = AppService()
+    return _service
