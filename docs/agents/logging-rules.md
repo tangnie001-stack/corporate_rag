@@ -16,7 +16,7 @@
 | `[cli]` | 离线工具（cli/） |
 | `[app]` | 应用边界（main.py 生命周期 + 全局异常兜底） |
 | `[delegate]` | fork 子代理委派（skills/delegate_task + executor；事件：delegate start / delegate model turn / delegate end） |
-| `[wecom]` | 企业微信回调通道（services/wecom_service + channels/wecom/callback） |
+| `[wecom]` | 企业微信智能机器人通道（services/wecom_service + channels/wecom/{callback,long_connection}） |
 
 新语义面前缀：先登记 `src/core/log_events.py` 的 `LOG_PREFIXES` + 本表加一行后启用，不预建。
 

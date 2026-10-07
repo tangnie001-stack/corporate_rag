@@ -26,13 +26,31 @@ _drivers: dict[str, ChannelDriver] = {}
 _bot_key_by_aibotid: dict[str, str] = {}
 
 
+def _resolve_bot_key(aibotid: str) -> str | None:
+    """把入站 aibotid 映射到 bot_key；未知返回 None。
+
+    回调 legacy 模式下唯一驱动即回调驱动，固定返回保留键。
+    """
+    if settings.WECOM_BOT_MODE == _MODE_CALLBACK:
+        return CALLBACK_BOT_KEY
+    return _bot_key_by_aibotid.get(aibotid)
+
+
 async def _default_handler(msg: InboundMessage, sink: ReplySink) -> None:
-    """默认 handler：打结构性日志；消息回写死流式回复，事件不回包。"""
+    """默认 handler：按 bot_key 分发；消息回写死流式回复，事件不回包。"""
+    bot_key = _resolve_bot_key(msg.aibotid)
+    if bot_key is None:
+        logger.warning(
+            "[wecom] inbound from unknown bot aibotid={}", encode_value(msg.aibotid)
+        )
+        return
+
     text_len = 0
     if msg.text:
         text_len = len(msg.text)
     logger.info(
-        "[wecom] inbound msgid={} chattype={} msgtype={} event_type={} text_len={}",
+        "[wecom] inbound bot_key={} msgid={} chattype={} msgtype={} event_type={} text_len={}",
+        encode_value(bot_key),
         msg.msgid,
         msg.chattype,
         msg.msgtype,

@@ -5,6 +5,7 @@ import json
 import pytest
 from loguru import logger
 
+from src.channels.base import InboundMessage
 from src.config import settings
 from src.config.wecom_bots import CALLBACK_BOT_KEY
 from src.services import wecom_service
@@ -251,3 +252,68 @@ def test_get_callback_driver_rejects_wrong_driver_type(monkeypatch):
     wecom_service._drivers[CALLBACK_BOT_KEY] = _WrongDriver()
     with pytest.raises(RuntimeError):
         wecom_service.get_callback_driver()
+
+
+class _RecorderSink:
+    def __init__(self) -> None:
+        self.replies: list[tuple[str, bool]] = []
+
+    async def reply_stream(self, content: str, finish: bool) -> None:
+        self.replies.append((content, finish))
+
+
+def _inbound(aibotid: str, msgtype: str = "text") -> InboundMessage:
+    return InboundMessage(
+        msgid="M1",
+        aibotid=aibotid,
+        chatid=None,
+        chattype="single",
+        from_userid="U1",
+        msgtype=msgtype,
+        text="hi",
+        event_type=None,
+        raw={},
+    )
+
+
+def test_resolve_bot_key_callback_mode_returns_reserved_key(monkeypatch):
+    monkeypatch.setattr(settings, "WECOM_BOT_MODE", "callback")
+    assert wecom_service._resolve_bot_key("anything") == CALLBACK_BOT_KEY
+
+
+def test_resolve_bot_key_long_connection_lookup(monkeypatch):
+    monkeypatch.setattr(settings, "WECOM_BOT_MODE", "long_connection")
+    wecom_service._bot_key_by_aibotid = {"aibA": "dev"}
+    assert wecom_service._resolve_bot_key("aibA") == "dev"
+    assert wecom_service._resolve_bot_key("unknown") is None
+
+
+@pytest.mark.asyncio
+async def test_handler_replies_for_known_bot(monkeypatch):
+    monkeypatch.setattr(settings, "WECOM_BOT_MODE", "long_connection")
+    monkeypatch.setattr(settings, "WECOM_BOT_LOG_CONTENT", False)
+    wecom_service._bot_key_by_aibotid = {"aibA": "dev"}
+    sink = _RecorderSink()
+    await wecom_service._default_handler(_inbound("aibA"), sink)
+    assert len(sink.replies) == 1
+    assert sink.replies[0][1] is True
+
+
+@pytest.mark.asyncio
+async def test_handler_silent_for_unknown_bot(monkeypatch):
+    monkeypatch.setattr(settings, "WECOM_BOT_MODE", "long_connection")
+    monkeypatch.setattr(settings, "WECOM_BOT_LOG_CONTENT", False)
+    wecom_service._bot_key_by_aibotid = {"aibA": "dev"}
+    sink = _RecorderSink()
+    await wecom_service._default_handler(_inbound("unknown"), sink)
+    assert sink.replies == []
+
+
+@pytest.mark.asyncio
+async def test_handler_silent_for_event(monkeypatch):
+    monkeypatch.setattr(settings, "WECOM_BOT_MODE", "long_connection")
+    monkeypatch.setattr(settings, "WECOM_BOT_LOG_CONTENT", False)
+    wecom_service._bot_key_by_aibotid = {"aibA": "dev"}
+    sink = _RecorderSink()
+    await wecom_service._default_handler(_inbound("aibA", msgtype="event"), sink)
+    assert sink.replies == []
