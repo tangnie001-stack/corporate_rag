@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 
+from src.infra.llm.token_count import count_messages_tokens, count_tokens
+
 
 @dataclass
 class TokenUsage:
@@ -13,12 +15,9 @@ class TokenUsage:
 
 
 def estimate_usage(messages: list, output: str) -> TokenUsage:
-    """粗略估算 token 用量。"""
-    input_text = " ".join(
-        getattr(m, "content", "") for m in messages if hasattr(m, "content")
-    )
-    prompt_tokens = max(1, len(input_text) // 2)
-    completion_tokens = max(1, len(output) // 2)
+    """估算 token 用量（分词器计数；消息与输出复用同一计数入口）。"""
+    prompt_tokens = max(1, count_messages_tokens(messages))
+    completion_tokens = max(1, count_tokens(output))
     return TokenUsage(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,

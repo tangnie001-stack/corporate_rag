@@ -528,8 +528,8 @@ async def test_agent_turn_input_includes_system_message(monkeypatch):
 async def test_agent_turn_usage_estimate_includes_system(monkeypatch):
     """用量估算的输入同样含 system 段（漏掉会让每轮估算系统性偏小）。
 
-    口径：`estimate_usage` 把消息 content 以空格连接后 `len // 2`。
-    `"SYS-ONE SYS-TWO hi"` → 18 // 2 = **9**；若只算 `request.messages`（丢 system）
+    口径：`estimate_usage` 把消息 content 以空格连接后交 tiktoken 计数。
+    `"SYS-ONE SYS-TWO hi"` → **7** token；若只算 `request.messages`（丢 system）
     则为 `"hi"` → 1 —— 该断言正是用来钉住这一点。
     """
     recorded = _patch_langfuse(monkeypatch)
@@ -547,4 +547,4 @@ async def test_agent_turn_usage_estimate_includes_system(monkeypatch):
             "_system_messages": _sysmsgs("SYS-ONE", "SYS-TWO"),
         }
     )
-    assert recorded[0]["usage"]["input"] == 9
+    assert recorded[0]["usage"]["input"] == 7
