@@ -8,12 +8,13 @@ from collections.abc import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from loguru import logger
 
 from src.api.dependencies import get_app_service
 from src.api.model.request import ChatStreamRequest
 from src.services import turn_runner
 from src.services.app_service import AppService
-from src.utils.sse import to_sse
+from src.utils.sse import SSEDoneEvent, SSEErrorEvent, to_sse
 
 router = APIRouter()
 
@@ -45,6 +46,7 @@ async def chat_stream(
     deep_thinking = body.deep_thinking
     agent = body.agent
     user_id = getattr(request.state, "user_id", "") if request else ""
+    trace_id = getattr(request.state, "trace_id", "") if request else ""
 
     try:
         handle = await turn_runner.start_turn(
@@ -60,8 +62,18 @@ async def chat_stream(
         raise HTTPException(409, "当前会话正在处理中")
 
     async def _frames() -> AsyncGenerator[str, None]:
-        async for event in handle.events:
-            yield to_sse(event)
+        """把结构化事件流帧化为 SSE；订阅迭代异常时补终止态 error+done。
+
+        订阅迭代可能因畸形载荷等在 from_payload 处抛异常，此处兜底为
+        error + done 终止帧，避免连接中断且无终态（保持站点外部行为不变）。
+        """
+        try:
+            async for event in handle.events:
+                yield to_sse(event)
+        except Exception as e:  # noqa: BLE001
+            logger.exception("Chat stream unhandled error: {}", str(e))
+            yield to_sse(SSEErrorEvent(str(e)))
+            yield to_sse(SSEDoneEvent(trace_id=trace_id))
 
     return StreamingResponse(
         _frames(),

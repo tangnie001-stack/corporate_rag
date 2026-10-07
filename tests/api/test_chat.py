@@ -90,6 +90,44 @@ def test_chat_stream_passes_user_id():
         app.dependency_overrides.pop(get_app_service, None)
 
 
+def test_chat_stream_emits_error_and_done_when_subscription_raises():
+    """订阅迭代抛异常时，端点仍产出 error + done 终止帧（连接不中断）。
+
+    回归场景：_frames 订阅 handle.events 时若 from_payload 遇畸形载荷抛异常，
+    旧实现以 except 兜底为 error + done 终止态；若丢失该兜底，客户端只表现为
+    连接中断且无终态（违反站点外部行为不变）。
+    """
+    from src.utils.sse import SSETokenEvent
+
+    mock_svc = AsyncMock()
+    app.dependency_overrides[get_app_service] = lambda: mock_svc
+
+    async def _exploding_events():
+        yield SSETokenEvent("部分")
+        raise RuntimeError("boom")
+
+    try:
+        with patch(
+            "src.services.turn_runner.start_turn", new_callable=AsyncMock
+        ) as mock_start:
+            handle = MagicMock()
+            handle.events = _exploding_events()
+            mock_start.return_value = handle
+            response = client.post(
+                "/api/chat/stream",
+                json={"session_id": "s1", "kb_id": "kb-1", "query": "hi"},
+            )
+        assert response.status_code == 200
+        assert "event: error" in response.text
+        assert "event: done" in response.text
+        assert "boom" in response.text
+        # 终止帧顺序：error 在前、done 在后，且 done 为末帧
+        assert response.text.index("event: error") < response.text.index("event: done")
+        assert response.text.rstrip().endswith("}")
+    finally:
+        app.dependency_overrides.pop(get_app_service, None)
+
+
 def test_chat_stream_passes_deep_thinking():
     """deep_thinking 请求体字段应透传至 agent_service.stream_chat。
 
