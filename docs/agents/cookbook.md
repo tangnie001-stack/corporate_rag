@@ -429,7 +429,7 @@ scripts/dev-worktree.sh down
 3. `docker compose up -d --force-recreate app` 使新环境变量生效（改 `.env` 后 restart 不吃）。
 **验证**：启动日志出现锚点 `[wecom] bots connected n=<ok> total=<all>`（三台全连上时 `n=3 total=3`）即完成鉴权接入；在群里 @机器人 应收到写死回复，容器日志可见 `[wecom] inbound bot_key=<key> ...`。
 **注意事项**：**每机器人同时只允许一条连接，新连接会踢掉旧连接** —— 多实例部署时仅在一台实例开启 `WECOM_BOT_ENABLED=true`，其余置 `false`。
-- **逐台降级**：某台连不上只记 warning（`[wecom] bot connect failed, skipped bot_key=...`），不拖垮其余台、也不阻塞应用启动。
+- **逐台降级**：某台连不上只记 warning（`[wecom] bot connect failed bot_key=... err=...`），不拖垮其余台、也不阻塞应用启动。
 - **锚点日志 `[wecom] bots connected n=<ok> total=<all>` 是分诊依据**：`n=0` 且 `total>0` 指向「端点不可达」；**没有该行 / `total` 与预期台数不符**指向「未切长连接模式」（仍在 callback 模式 → 不解析 `WECOM_BOTS`）。
 - **目标机 `.env` 须人工同步**（见 `deploy-runbook.md` §1.4）：本地新增/修改的键不会自动上机。
 
