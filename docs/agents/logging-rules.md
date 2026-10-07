@@ -96,6 +96,10 @@
 - `delegate skip`（app / warning）——委派未被装配或未发起；`reason` 取 registry_empty
   （skills 目录存在但无任何 skill）/ skills_dir_missing（skills 目录不存在，附 `skills_dir`）/
   budget_exhausted（会话级委派预算触顶，`delegate_task` 拒绝该次委派并返回可读原因）
+- `history budget exceeded`（agent / warning）——历史裁剪后仍超预算（**最近 1 轮保留例外**，
+  不截）；`budget` 为绝对预算、`used` 为裁剪后实际估算 token、`kept` 为保留的历史条数
+- `context budget high`（agent / warning）——单轮内模型调用输入达上限；**仅告警不处置**
+  （不截断、不改写）。`used` 为本轮输入估算 token、`limit` 为当前上限
 
 **不再扩 `iteration done`**：其「消息数拆分」意图已由 `prompt messages` 在组装点承载，
 不重复记录同一事实（避免后人再提）。
