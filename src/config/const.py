@@ -51,6 +51,9 @@ WEB_BODY_LIMIT: int = 2000
 # ── agent 循环护栏常量 ──
 # 来源：agentic 改造需求（2026-08-26 phase1）；用途：agent 循环的迭代/追问/历史注入/并发控制
 MAX_AGENT_ITERATIONS = 5  # agent 循环最大迭代数，超限强制收尾
+# 单轮内累积输入 token 的告警上限。与 MAX_AGENT_ITERATIONS 联动：迭代越多、
+# 工具结果累积越大；本阶段只度量告警，不做任何压缩（压缩属摘要层）。
+TURN_INPUT_TOKEN_LIMIT = 65536
 MAX_ASK_PER_TURN = 2  # 单 turn 内 ask_user 最大调用次数
 MAX_VERIFY_ASK_PER_TURN = (
     1  # verify"是否联网"询问每轮上限（独立计数，不计入 MAX_ASK_PER_TURN）

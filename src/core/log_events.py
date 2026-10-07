@@ -71,6 +71,7 @@ class Event(str, Enum):
     ITERATION_DONE = "iteration done"
     ITERATION_LIMIT = "iteration limit"
     HISTORY_BUDGET_EXCEEDED = "history budget exceeded"
+    CONTEXT_BUDGET_HIGH = "context budget high"
     MODEL_TURN = "model turn"
     GRAPH_COMPILED = "graph compiled"
     FORMAT_DONE = "format done"

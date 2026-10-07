@@ -86,6 +86,9 @@ EVENT_SPECS: dict[str, EventSpec] = {
     "history budget exceeded": EventSpec(
         "history budget exceeded", "agent", "warning", ("budget", "used", "kept")
     ),
+    "context budget high": EventSpec(
+        "context budget high", "agent", "warning", ("used", "limit")
+    ),
     "model turn": EventSpec(
         "model turn",
         "agent",
