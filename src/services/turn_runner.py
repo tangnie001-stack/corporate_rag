@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 
 from loguru import logger
@@ -170,55 +170,27 @@ async def _run_with_finalize(
         manager.unregister_if_current(session_id, task)
 
 
-async def start_turn(
-    svc: AppService,
-    *,
-    session_id: str,
-    kb_id: str,
-    query: str,
-    user_id: str = "",
-    deep_thinking: bool = False,
-    agent: str = "",
-    title: str | None = None,
-    abort_signal: asyncio.Event | None = None,
-) -> TurnHandle:
-    """启动一轮生成，返回事件流句柄（站点与通道共用）。
+async def _acquire_gate(svc: AppService, session_id: str) -> tuple[bool, object]:
+    """原子闸门：进程内注册表预检 + Redis SETNX 锁。
 
-    编排步骤（design D12）：
-    1. 注入 chat_repo（漏则 save_* 静默跳过）
-    2. 原子闸门：进程内注册表 is_running → Redis SETNX 锁（Redis 不可用则跳过）
-    3. 落库前置：session + user 消息（失败先释放已取的锁再抛）
-    4. stream_chat 取订阅与启动上下文；调用本身失败不抛，改为 error + done 终止态
-    5. 起后台任务跑生成 + 收尾落库 + 终态事件 + 释放锁 + 注销
-    6. 返回 TurnHandle，events 为结构化 SSEEvent 流
+    先查进程内注册表（is_running）——它是并发防护的权威状态：Redis 锁 TTL
+    （SESSION_LOCK_TTL）可能短于含 ask_user 的一轮生成，锁过期不代表生成结束。
 
     Args:
-        svc: AppService
+        svc: AppService（自 chat_manager 取 Redis 客户端）
         session_id: 会话 ID
-        kb_id: 知识库 ID（空串表示不检索）
-        query: 用户文本
-        user_id: 用户 ID（企微侧为派生 UUID，站点为登录用户）
-        deep_thinking: 深度思考开关
-        agent: 智能体预设名
-        title: 会话标题（None → query[:20]；仅首次落库生效）
-        abort_signal: 取消信号（None 时内部新建）
 
     Returns:
-        TurnHandle：其 events 为结构化 SSEEvent 流
+        (lock_held, redis)：lock_held 表示是否取得 Redis 锁；redis 为 ChatManager
+        的 Redis 客户端（不可用时为 None，此时 lock_held 恒为 False）
 
     Raises:
-        TurnBusy: 同一会话已有进行中的生成（闸门未获得）
-        Exception: 落库前置失败等编排前置错误（与站点现值一致）
+        TurnBusy: 注册表已有该会话任务，或 Redis 锁被他人持有
     """
-    await svc.set_chat_repo()
-
-    # 并发防护顺序：先查进程内注册表（is_running），再取 Redis 锁。
-    # 注册表是权威状态——Redis 锁 TTL（SESSION_LOCK_TTL）可能短于
-    # 含 ask_user 的一轮生成，锁过期不代表生成结束。
     if streaming_manager.is_running(session_id):
         raise TurnBusy("当前会话正在处理中")
 
-    # per-session 并发锁：Redis 可用时加锁，冲突直接抛 TurnBusy
+    # per-session 并发锁：Redis 可用时加锁，SETNX 明确返回 False 才视为冲突
     lock_held = False
     redis = svc.chat_manager._redis
     if redis is not None:
@@ -228,11 +200,29 @@ async def start_turn(
             # Redis 不可用：跳过锁，不阻塞请求（与 ChatManager 降级策略一致）
             logger.warning("Session lock skipped (Redis unavailable): {}", e)
         else:
-            # 仅当 SETNX 明确返回 False（已有锁）才视为冲突
             if not lock_held:
                 raise TurnBusy("当前会话正在处理中")
+    return lock_held, redis
 
-    # M1：请求开始同步落 user（session 创建幂等，写入成功后才启动生成）
+
+async def _persist_front(
+    svc: AppService,
+    session_id: str,
+    title: str | None,
+    kb_id: str,
+    user_id: str,
+    query: str,
+    redis: object,
+    lock_held: bool,
+) -> None:
+    """落库前置：session（幂等创建）+ user 消息。
+
+    请求开始同步落 user，写入成功后才启动生成；失败时先释放已取的锁再原样抛出
+    （避免 session 锁挂到 TTL）。
+
+    Raises:
+        Exception: 落库失败（编程错误等非吞掉路径），释放锁后原样抛出
+    """
     try:
         await svc.save_session_async(
             session_id,
@@ -242,11 +232,20 @@ async def start_turn(
         )
         await svc.save_user_async(session_id, kb_id, query)
     except Exception:
-        # 落库失败（编程错误等非吞掉路径）：先释放锁，避免 session 锁挂到 TTL
         if lock_held:
             await release_session_lock(redis, session_id)
         raise
     logger.info("user message persisted at request start: session_id={}", session_id)
+
+
+def _make_release_lock_cb(
+    redis: object, session_id: str, lock_held: bool
+) -> Callable[[], None]:
+    """构造幂等的同步锁释放回调（未持有锁时为空操作）。
+
+    回调由 _run_with_finalize.finally 与 task done_callback 双路径调用，
+    nonlocal lock_held 保证只释放一次。
+    """
 
     async def _release_lock_async() -> None:
         """异步释放 per-session 并发锁（异常只记日志，锁有 TTL 兜底）。"""
@@ -258,9 +257,8 @@ async def start_turn(
     def release_lock_cb() -> None:
         """同步释放回调：调度异步释放 Redis 锁（幂等）。
 
-        锁由后台任务持有到完成——SSE 断连不提前释放（进程内注册表
-        is_running 才是并发防护的权威状态）。_run_with_finalize finally 与
-        task done_callback 双路径调用，靠 lock_held 标志保证只释放一次。
+        锁由后台任务持有到完成——SSE 断连不提前释放（进程内注册表 is_running
+        才是并发防护的权威状态）。
         """
         nonlocal lock_held
         if not lock_held:
@@ -268,36 +266,22 @@ async def start_turn(
         lock_held = False
         asyncio.create_task(_release_lock_async())
 
-    try:
-        _subscription, launch_ctx = await svc.agent_service.stream_chat(
-            kb_id, session_id, query, deep_thinking, agent=agent
-        )
-    except Exception as e:  # noqa: BLE001
-        # 任务未启动，锁无后台任务可释放，本路径直接释放避免挂到 TTL；
-        # 不抛出——整体包裹会让站点从 200+SSE 变 500，改为 error + done 终止态
-        logger.exception("Chat stream setup failed: {}", str(e))
-        release_lock_cb()
-        # 提前绑定错误文本：except 退出后 `e` 被删除，延迟执行的生成器读不到它
-        error_text = str(e)
+    return release_lock_cb
 
-        async def _error_events() -> AsyncIterator[SSEEvent]:
-            yield SSEErrorEvent(error_text)
-            yield SSEDoneEvent(trace_id=current_trace_id.get() or "")
 
-        return TurnHandle(session_id=session_id, events=_error_events())
+def _make_answer_builder(
+    launch_ctx: dict,
+    ctx: RequestContext,
+    partial_holder: dict,
+    signal: asyncio.Event,
+    user_id: str,
+) -> Callable[[], Awaitable[str]]:
+    """构造后台任务的生成协程，捕获请求作用域的值（trace_id / user_id）。
 
-    partial_holder: dict = {"text": "", "sources": []}
-    signal = abort_signal if abort_signal is not None else asyncio.Event()
-    ctx = launch_ctx["ctx"]
-    # 将 cancel 端点置位的 abort_signal 接到请求上下文：ask_user 的
-    # wait_with_abort_and_timeout 等待的是 ctx.abort_signal，不接线则取消
-    # 唤不醒澄清等待，会干等 ASK_USER_TIMEOUT 超时
-    ctx.abort_signal = signal
-
-    # trace_id 与 user_id 均在请求作用域内捕获后显式传入生成调用，不依赖后台任务
-    # 通过 contextvar 继承读取：任务的上下文是 create_task 创建时的拷贝，该时点之后写入
-    # 的值到不了任务内，依赖继承只会静默取空。
-    user_id = current_user_id.get()
+    trace_id 与 user_id 均在请求作用域内捕获后显式传入，不依赖后台任务通过
+    contextvar 继承读取：任务的上下文是 create_task 创建时的拷贝，该时点之后
+    写入的值到不了任务内，依赖继承只会静默取空。
+    """
 
     async def answer_builder() -> str:
         # 根 observation 的 id 即 trace id；任务入口已 set 过 current_trace_id，
@@ -320,6 +304,29 @@ async def start_turn(
             langfuse_observation_id=current_trace_id.get() or "",  # type: ignore[reportCallIssue]
         )
 
+    return answer_builder
+
+
+async def _error_events(error_text: str, trace_id: str) -> AsyncIterator[SSEEvent]:
+    """任务未启动时的终止态事件流：error + done（不抛，保调用方 200+流）。"""
+    yield SSEErrorEvent(error_text)
+    yield SSEDoneEvent(trace_id=trace_id)
+
+
+def _spawn_generation_task(
+    svc: AppService,
+    launch_ctx: dict,
+    partial_holder: dict,
+    answer_builder: Callable[[], Awaitable[str]],
+    signal: asyncio.Event,
+    release_lock_cb: Callable[[], None],
+    ctx: RequestContext,
+) -> None:
+    """起后台生成任务，注册进事件缓冲表并挂两条 done 回调。
+
+    两条 done 回调分别释放 per-session 锁与注销注册表（与后台任务 finally
+    双路径，靠回调幂等去重）。trace_id 在 create_task 前显式捕获传入。
+    """
     task = asyncio.create_task(
         _run_with_finalize(
             svc,
@@ -342,7 +349,125 @@ async def start_turn(
         )
     )
 
+
+async def _launch_and_register(
+    svc: AppService,
+    *,
+    session_id: str,
+    kb_id: str,
+    query: str,
+    deep_thinking: bool,
+    agent: str,
+    abort_signal: asyncio.Event | None,
+    redis: object,
+    lock_held: bool,
+) -> TurnHandle:
+    """取订阅与启动上下文，起后台任务并注册，返回事件流句柄。
+
+    stream_chat 调用本身失败不抛：释放锁后返回产出 error + done 的终止态句柄
+    （整体抛出会让站点从 200+SSE 变 500）。
+
+    Args:
+        svc: AppService
+        session_id: 会话 ID
+        kb_id: 知识库 ID
+        query: 用户文本
+        deep_thinking: 深度思考开关
+        agent: 智能体预设名
+        abort_signal: 取消信号（None 时内部新建）
+        redis: ChatManager 的 Redis 客户端（释放锁用）
+        lock_held: 是否已取得 Redis 锁
+
+    Returns:
+        TurnHandle：其 events 为结构化 SSEEvent 流
+    """
+    release_lock_cb = _make_release_lock_cb(redis, session_id, lock_held)
+
+    try:
+        _subscription, launch_ctx = await svc.agent_service.stream_chat(
+            kb_id, session_id, query, deep_thinking, agent=agent
+        )
+    except Exception as e:  # noqa: BLE001
+        # 任务未启动，锁无后台任务可释放，本路径直接释放避免挂到 TTL；
+        # 不抛出——改为 error + done 终止态
+        logger.exception("Chat stream setup failed: {}", str(e))
+        release_lock_cb()
+        return TurnHandle(
+            session_id=session_id,
+            events=_error_events(str(e), current_trace_id.get() or ""),
+        )
+
+    partial_holder: dict = {"text": "", "sources": []}
+    signal = abort_signal if abort_signal is not None else asyncio.Event()
+    ctx = launch_ctx["ctx"]
+    # 将 cancel 端点置位的 abort_signal 接到请求上下文：ask_user 的
+    # wait_with_abort_and_timeout 等待的是 ctx.abort_signal，不接线则取消
+    # 唤不醒澄清等待，会干等 ASK_USER_TIMEOUT 超时
+    ctx.abort_signal = signal
+
+    answer_builder = _make_answer_builder(
+        launch_ctx, ctx, partial_holder, signal, current_user_id.get()
+    )
+    _spawn_generation_task(
+        svc, launch_ctx, partial_holder, answer_builder, signal, release_lock_cb, ctx
+    )
+
     events = _subscribe_events(
         launch_ctx["session_id"], streaming_manager, max_idle=None
     )
     return TurnHandle(session_id=launch_ctx["session_id"], events=events)
+
+
+async def start_turn(
+    svc: AppService,
+    *,
+    session_id: str,
+    kb_id: str,
+    query: str,
+    user_id: str = "",
+    deep_thinking: bool = False,
+    agent: str = "",
+    title: str | None = None,
+    abort_signal: asyncio.Event | None = None,
+) -> TurnHandle:
+    """启动一轮生成，返回事件流句柄（站点与通道共用）。
+
+    编排步骤（design D12）：注入 chat_repo → 原子闸门（注册表预检 + Redis 锁）
+    → 落库前置 → 取订阅起后台任务并注册 → 返回句柄；各步细节见对应私有辅助
+    函数 docstring。
+
+    Args:
+        svc: AppService
+        session_id: 会话 ID
+        kb_id: 知识库 ID（空串表示不检索）
+        query: 用户文本
+        user_id: 用户 ID（企微侧为派生 UUID，站点为登录用户）
+        deep_thinking: 深度思考开关
+        agent: 智能体预设名
+        title: 会话标题（None → query[:20]；仅首次落库生效）
+        abort_signal: 取消信号（None 时内部新建）
+
+    Returns:
+        TurnHandle：其 events 为结构化 SSEEvent 流
+
+    Raises:
+        TurnBusy: 同一会话已有进行中的生成（闸门未获得）
+        Exception: 落库前置失败等编排前置错误（与站点现值一致）
+    """
+    # 注入 chat_repo 必须先于落库前置（漏则 save_* 静默跳过）
+    await svc.set_chat_repo()
+    lock_held, redis = await _acquire_gate(svc, session_id)
+    await _persist_front(
+        svc, session_id, title, kb_id, user_id, query, redis, lock_held
+    )
+    return await _launch_and_register(
+        svc,
+        session_id=session_id,
+        kb_id=kb_id,
+        query=query,
+        deep_thinking=deep_thinking,
+        agent=agent,
+        abort_signal=abort_signal,
+        redis=redis,
+        lock_held=lock_held,
+    )
