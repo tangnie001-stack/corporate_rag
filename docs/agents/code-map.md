@@ -64,7 +64,7 @@ chat/              对话管理：manager(Redis) / persistence(PostgreSQL) / str
 chunking/          分块：router(策略路由) / strategies(4 种) / validator / scorer
 parsers/           文档解析：pdf / docx / txt + base / router
 core/              日志：logging / log_events / log_event_specs
-config/            settings(环境变量) / const(常量/文案/枚举) / response_codes
+config/            settings(环境变量) / const(常量/文案/枚举) / response_codes / wecom_bots(多机器人配置解析/校验)
   └─ prompts/      prompt 模板包：__init__.py(7 条行为键常量 VERIFY_* / FORK_*) / loader.py(唯一读取点) / validation.py(启动期校验) / templates/*.yaml(20 条模板：段模板 + 独立任务模板)
                    —— 段模板(`kind: section`)与独立任务模板(`kind: task`)同处一包；改 prompt 文案改 YAML，改规则的挂载点改代码
 infra/             基础设施：db(engine/DSN + transaction 事务边界 + models + repos + vector_store + lexical_query) / llm(tracing 为 Langfuse 开关/flush/trace id 校验唯一入口；langfuse_purge 为保留期删除的 SQL 后端) / search(tokenizer 为唯一 jieba 分词入口) / auth / redis_client
@@ -75,6 +75,12 @@ utils/             sse 事件类型 / errors / desensitize / auth_crypto
 tools/             工具基类（base.py）
 channels/          接入通道：base(通用抽象) / wecom(parse 入站解析 / crypto 加解密 / callback 回调驱动 / long_connection(长连接驱动，封装官方 aibot SDK))
 ```
+
+> **官方 `aibot` SDK（长连接）用法与约束** —— 依赖 `wecom-aibot-python-sdk`（导入名 `aibot`）。
+> SDK 承担：连接认证（`aibot_subscribe`）、心跳保活、断线重连、事件分发、流式回复、模板卡片、文件解密。
+> 本仓库**只**使用其公开接口：`connect()` / `disconnect()` / `on()` / `reply_stream()`。
+> **禁止调用 `run()`** —— 它自建事件循环，与 FastAPI 冲突（有守卫测试 `tests/channels/test_long_connection_no_run.py`）。
+> 契约：每机器人同时只能一条连接（新连接踢旧连接）。依赖与部署影响见 `deploy-runbook.md`。
 
 ### prompt 组装与段模板归属
 
@@ -246,4 +252,4 @@ Nginx 容器把本目录挂到 `/usr/share/nginx/html` 直接托管，**无 npm 
 | 加日志事件 / 前缀 | `src/core/log_events.py`、`log_event_specs.py`；规范见 `docs/agents/logging-rules.md` |
 | 改数据库 schema / 迁移 | `src/infra/db/models/`（ORM）+ `alembic/versions/`（迁移）；见本文「关系型存储（PostgreSQL）」 |
 | 改部署 / 容器 | `docker-compose*.yml`、`Dockerfile`；操作见 `docs/agents/cookbook.md` |
-| **加/改接入通道（企微回调/长连接）** | `src/channels/`（`base.py` 抽象 + `wecom/`）；路由 `src/api/wecom.py`；装配 `src/services/wecom_service.py` |
+| **加/改接入通道（企微回调/长连接）** | `src/channels/`（`base.py` 抽象 + `wecom/`）；路由 `src/api/wecom.py`；装配 `src/services/wecom_service.py`；配置 `src/config/wecom_bots.py` |

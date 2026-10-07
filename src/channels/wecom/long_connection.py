@@ -11,6 +11,7 @@ from loguru import logger
 
 from src.channels.base import MessageHandler
 from src.channels.wecom.parse import parse_inbound
+from src.core.logging import encode_value
 
 # SDK 事件名：消息与事件共用同一处理器（入站 body 结构与回调一致）
 _MESSAGE_EVENTS: tuple[str, ...] = (
@@ -92,12 +93,21 @@ class LongConnectionDriver:
             try:
                 msg = parse_inbound(frame["body"])
             except Exception as e:  # noqa: BLE001
-                logger.error("[wecom] parse inbound failed err={}", e)
+                logger.error(
+                    "[wecom] parse inbound failed bot_id={} err={}",
+                    encode_value(self._bot_id),
+                    e,
+                )
                 return
             sink = _WsSink(client, frame, generate_req_id("stream"))
             try:
                 await self._handler(msg, sink)
             except Exception as e:  # noqa: BLE001
-                logger.error("[wecom] handler failed msgid={} err={}", msg.msgid, e)
+                logger.error(
+                    "[wecom] handler failed bot_id={} msgid={} err={}",
+                    encode_value(self._bot_id),
+                    msg.msgid,
+                    e,
+                )
 
         return _handle

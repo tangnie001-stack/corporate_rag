@@ -425,10 +425,13 @@ scripts/dev-worktree.sh down
 **场景**：开发期改用长连接接入企业微信「智能机器人」，由本服务主动连企微 WebSocket（`wss://openws.work.weixin.qq.com`），无需公网回调地址与加解密，用于联调长连接链路。
 **步骤**：
 1. 在企微管理后台把该机器人的连接方式改为「使用长连接」，记录 `BotID` 与长连接专用 `Secret`。
-2. 在 `.env` 置 `WECOM_BOT_MODE=long_connection`、`WECOM_BOT_ID`、`WECOM_BOT_SECRET`，并设 `WECOM_BOT_ENABLED=true`（长连接模式不用回调的 `WECOM_BOT_TOKEN` / `WECOM_BOT_ENCODING_AES_KEY`）。
+2. 在 `.env` 置 `WECOM_BOT_MODE=long_connection`、`WECOM_BOTS`（**单行 JSON**，三台 —— 如 `dev` / `support` / `finance`，每台 `{key, bot_id, secret}`），并设 `WECOM_BOT_ENABLED=true`（长连接模式不用回调的 `WECOM_BOT_TOKEN` / `WECOM_BOT_ENCODING_AES_KEY`）。
 3. `docker compose up -d --force-recreate app` 使新环境变量生效（改 `.env` 后 restart 不吃）。
-**验证**：启动日志无 `WECOM_BOT_ID 未配置` / `WECOM_BOT_SECRET 未配置` 报错即完成鉴权接入；在群里 @机器人 应收到写死回复，容器日志可见 `[wecom] inbound ...`。
+**验证**：启动日志出现锚点 `[wecom] bots connected n=<ok> total=<all>`（三台全连上时 `n=3 total=3`）即完成鉴权接入；在群里 @机器人 应收到写死回复，容器日志可见 `[wecom] inbound bot_key=<key> ...`。
 **注意事项**：**每机器人同时只允许一条连接，新连接会踢掉旧连接** —— 多实例部署时仅在一台实例开启 `WECOM_BOT_ENABLED=true`，其余置 `false`。
+- **逐台降级**：某台连不上只记 warning（`[wecom] bot connect failed bot_key=... err=...`），不拖垮其余台、也不阻塞应用启动。
+- **锚点日志 `[wecom] bots connected n=<ok> total=<all>` 是分诊依据**：`n=0` 且 `total>0` 指向「端点不可达」；**没有该行 / `total` 与预期台数不符**指向「未切长连接模式」（仍在 callback 模式 → 不解析 `WECOM_BOTS`）。
+- **目标机 `.env` 须人工同步**（见 `deploy-runbook.md` §1.4）：本地新增/修改的键不会自动上机。
 
 ## 分区命名
 

@@ -47,6 +47,7 @@ def test_disabled_returns_404(monkeypatch):
 def test_verify_ok(monkeypatch, client):
     test_client, crypto = client
     monkeypatch.setattr(settings, "WECOM_BOT_ENABLED", True)
+    monkeypatch.setattr(settings, "WECOM_BOT_MODE", "callback")
     ts, nonce = "100", "200"
     echostr = crypto.encrypt("echo-xyz")
     sig = crypto.signature(ts, nonce, echostr)
@@ -60,6 +61,7 @@ def test_verify_ok(monkeypatch, client):
 def test_receive_message_ok(monkeypatch, client):
     test_client, crypto = client
     monkeypatch.setattr(settings, "WECOM_BOT_ENABLED", True)
+    monkeypatch.setattr(settings, "WECOM_BOT_MODE", "callback")
     ts, nonce = "100", "200"
     payload = {
         "msgid": "M1",
@@ -82,6 +84,7 @@ def test_receive_message_ok(monkeypatch, client):
 def test_receive_bad_signature_403(monkeypatch, client):
     test_client, _ = client
     monkeypatch.setattr(settings, "WECOM_BOT_ENABLED", True)
+    monkeypatch.setattr(settings, "WECOM_BOT_MODE", "callback")
     resp = test_client.post(
         "/api/wecom/callback?msg_signature=x&timestamp=1&nonce=2", json={"encrypt": "y"}
     )
