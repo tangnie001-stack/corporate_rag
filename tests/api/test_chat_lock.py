@@ -1,4 +1,4 @@
-"""per-session 并发锁（_acquire_session_lock / _release_session_lock）单元测试。
+"""per-session 并发锁（acquire_session_lock / release_session_lock）单元测试。
 
 直接 mock redis（AsyncMock），不发真实网络。
 """
@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from src.api.chat import _acquire_session_lock, _release_session_lock
 from src.config.const import SESSION_LOCK_TTL
+from src.services.chat_lock import acquire_session_lock, release_session_lock
 
 
 @pytest.mark.asyncio
@@ -18,7 +18,7 @@ async def test_acquire_success():
     redis = AsyncMock()
     redis.set.return_value = True
 
-    acquired = await _acquire_session_lock(redis, "s1")
+    acquired = await acquire_session_lock(redis, "s1")
 
     assert acquired is True
     redis.set.assert_awaited_once_with(
@@ -32,7 +32,7 @@ async def test_acquire_conflict():
     redis = AsyncMock()
     redis.set.return_value = False
 
-    acquired = await _acquire_session_lock(redis, "s1")
+    acquired = await acquire_session_lock(redis, "s1")
 
     assert acquired is False
 
@@ -42,7 +42,7 @@ async def test_release():
     """释放锁 → 删除对应 Redis key。"""
     redis = AsyncMock()
 
-    await _release_session_lock(redis, "s1")
+    await release_session_lock(redis, "s1")
 
     redis.delete.assert_awaited_once_with("chat_lock:s1")
 

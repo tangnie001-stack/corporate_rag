@@ -11,7 +11,6 @@ from src.api.dependencies import get_app_service
 from src.api.model.request import ChatStreamRequest
 from src.chat.process_log import serialize_process
 from src.chat.streaming import StreamingRunManager, streaming_manager
-from src.config.const import SESSION_LOCK_TTL
 from src.infra.llm.request_context import RequestContext, current_request_ctx
 from src.infra.llm.trace_context import (
     current_session_id,
@@ -20,6 +19,7 @@ from src.infra.llm.trace_context import (
 )
 from src.services.agent_service import _run_generation
 from src.services.app_service import AppService
+from src.services.chat_lock import acquire_session_lock, release_session_lock
 from src.utils.sse import (
     SSEDoneEvent,
     SSEErrorEvent,
@@ -265,33 +265,6 @@ async def _stream_rag_response(
         yield to_sse(SSEDoneEvent(trace_id=current_trace_id.get() or ""))
 
 
-async def _acquire_session_lock(redis, session_id: str) -> bool:
-    """SETNX 获取 per-session 并发锁，返回是否获取成功。
-
-    锁 key 为 chat_lock:{session_id}，带 TTL（SESSION_LOCK_TTL）兜底过期，
-    防止流中断（如客户端断连）后锁永不释放。
-
-    Args:
-        redis: redis.asyncio 客户端（Redis 不可用时为 None，由调用方跳过加锁）
-        session_id: 会话 ID
-
-    Returns:
-        bool: 获取成功返回 True；已有锁（并发冲突）返回 False
-    """
-    key = f"chat_lock:{session_id}"
-    return bool(await redis.set(key, "1", nx=True, ex=SESSION_LOCK_TTL))
-
-
-async def _release_session_lock(redis, session_id: str) -> None:
-    """释放 per-session 并发锁（删除对应 Redis key）。
-
-    Args:
-        redis: redis.asyncio 客户端
-        session_id: 会话 ID
-    """
-    await redis.delete(f"chat_lock:{session_id}")
-
-
 @router.post("/chat/stream")
 async def chat_stream(
     request: Request,
@@ -331,7 +304,7 @@ async def chat_stream(
     redis = svc.chat_manager._redis
     if redis is not None:
         try:
-            lock_held = await _acquire_session_lock(redis, session_id)
+            lock_held = await acquire_session_lock(redis, session_id)
         except Exception as e:  # noqa: BLE001
             # Redis 不可用：跳过锁，不阻塞请求（与 ChatManager 降级策略一致）
             logger.warning("Session lock skipped (Redis unavailable): {}", e)
@@ -348,14 +321,14 @@ async def chat_stream(
     except Exception:
         # 落库失败（编程错误等非吞掉路径）：先释放锁，避免 session 锁挂到 TTL
         if lock_held:
-            await _release_session_lock(redis, session_id)
+            await release_session_lock(redis, session_id)
         raise
     logger.info("user message persisted at request start: session_id={}", session_id)
 
     async def _release_lock_async() -> None:
         """异步释放 per-session 并发锁（异常只记日志，锁有 TTL 兜底）。"""
         try:
-            await _release_session_lock(redis, session_id)
+            await release_session_lock(redis, session_id)
         except Exception as e:  # noqa: BLE001
             logger.warning("Session lock release failed: {}", e)
 
