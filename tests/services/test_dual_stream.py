@@ -366,9 +366,9 @@ def _launch_finalize(launch_ctx: dict, svc=None) -> asyncio.Task:
     Returns:
         已创建并注册的后台任务
     """
-    from src.api.chat import _run_with_finalize
     from src.chat.streaming import streaming_manager
     from src.services.agent_service import _run_generation
+    from src.services.turn_runner import _run_with_finalize
 
     if svc is None:
         svc = Mock()

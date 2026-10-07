@@ -53,6 +53,7 @@ def test_stream_conflict_returns_409():
     from src.main import app
 
     mock_svc = MagicMock()
+    mock_svc.set_chat_repo = AsyncMock()
     redis = AsyncMock()
     redis.set.return_value = False
     mock_svc.chat_manager._redis = redis

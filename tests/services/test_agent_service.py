@@ -150,9 +150,9 @@ async def _collect_events(
         (events, fake_svc)：events 为订阅到的 SSE 事件列表；
         fake_svc 的 save_assistant_async 供断言收尾落库
     """
-    from src.api.chat import _run_with_finalize
     from src.chat.streaming import streaming_manager
     from src.services.agent_service import _run_generation
+    from src.services.turn_runner import _run_with_finalize
 
     agen, launch_ctx = await service.stream_chat(
         kb_id, session_id, query, deep_thinking

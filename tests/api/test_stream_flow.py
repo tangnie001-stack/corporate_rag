@@ -35,9 +35,9 @@ def test_chat_stream_persists_user_before_stream(auth_client, mock_app_service):
 @pytest.mark.asyncio
 async def test_background_task_finalizes_assistant_on_cancel():
     """后台任务收到 abort（task.cancel）后，已产出 token 落 interrupted 并写 done 终态。"""
-    from src.api.chat import _run_with_finalize
     from src.chat.streaming import StreamingRunManager
     from src.infra.llm.request_context import RequestContext
+    from src.services.turn_runner import _run_with_finalize
 
     calls = []
     fake_svc = MagicMock()
@@ -79,9 +79,9 @@ async def test_background_task_finalizes_assistant_on_cancel():
 @pytest.mark.asyncio
 async def test_background_task_finalizes_assistant_on_complete():
     """后台任务正常结束：完整回答落 complete 并写 done 终态。"""
-    from src.api.chat import _run_with_finalize
     from src.chat.streaming import StreamingRunManager
     from src.infra.llm.request_context import RequestContext
+    from src.services.turn_runner import _run_with_finalize
 
     calls = []
     fake_svc = MagicMock()
@@ -119,9 +119,9 @@ async def test_complete_path_writes_assistant_to_redis():
     C1 回归：get_history_async（Redis）供下一轮 prompt 上下文，此前完整回答
     只落 MySQL 未写 Redis，多轮对话退化。中断/异常的部分回答保持仅 MySQL。
     """
-    from src.api.chat import _run_with_finalize
     from src.chat.streaming import StreamingRunManager
     from src.infra.llm.request_context import RequestContext
+    from src.services.turn_runner import _run_with_finalize
 
     redis_calls = []
     fake_svc = MagicMock()
@@ -161,9 +161,9 @@ async def test_cancelled_path_skips_redis_assistant():
 
     C1 回归：中断的部分回答是残片，不进入下一轮 prompt 上下文。
     """
-    from src.api.chat import _run_with_finalize
     from src.chat.streaming import StreamingRunManager
     from src.infra.llm.request_context import RequestContext
+    from src.services.turn_runner import _run_with_finalize
 
     redis_calls = []
     fake_svc = MagicMock()
@@ -205,10 +205,10 @@ async def test_background_task_done_event_carries_explicit_trace_id():
     任务入口 set 到 current_trace_id（跨任务不依赖自动传播），answer_builder 内读取
     到的即为请求 trace_id，done 事件 payload {"trace_id": ...} 与之相等。
     """
-    from src.api.chat import _run_with_finalize
     from src.chat.streaming import StreamingRunManager
     from src.infra.llm.request_context import RequestContext
     from src.infra.llm.trace_context import current_trace_id
+    from src.services.turn_runner import _run_with_finalize
 
     trace_id = "trace_task_4_3"
     fake_svc = MagicMock()
@@ -256,9 +256,9 @@ async def test_background_task_error_event_round_trips_from_payload():
     data: 同构），否则 resume/status 回放路径在 from_payload 处抛
     TypeError: string indices must be integers。
     """
-    from src.api.chat import _run_with_finalize
     from src.chat.streaming import StreamingRunManager
     from src.infra.llm.request_context import RequestContext
+    from src.services.turn_runner import _run_with_finalize
     from src.utils.sse import SSEErrorEvent, from_payload
 
     fake_svc = MagicMock()
@@ -306,9 +306,9 @@ async def test_background_task_done_cancelled_round_trips():
     部分回答落 interrupted → 写 done 终态事件 payload {"cancelled": True} →
     from_payload 还原保留 cancelled 标记 → to_sse 序列化 "cancelled": true。
     """
-    from src.api.chat import _run_with_finalize
     from src.chat.streaming import StreamingRunManager
     from src.infra.llm.request_context import RequestContext
+    from src.services.turn_runner import _run_with_finalize
     from src.utils.sse import SSEDoneEvent, from_payload, to_sse
 
     calls = []
@@ -382,18 +382,17 @@ async def test_chat_stream_conflict_returns_409(mock_app_service):
 
 
 @pytest.mark.asyncio
-async def test_stream_rag_response_wires_ctx_abort_signal(monkeypatch):
-    """_stream_rag_response 把 cancel 端点置位的 abort_signal 接到 ctx.abort_signal。
+async def test_start_turn_wires_ctx_abort_signal(monkeypatch):
+    """start_turn 把调用方持有的 abort_signal 接到 ctx.abort_signal。
 
     C2 回归：ask_user 的 wait_with_abort_and_timeout 等待 ctx.abort_signal，
     若与注册表里的 abort 信号不是同一事件，取消唤不醒澄清等待，会干等
-    ASK_USER_TIMEOUT。断言接线后 ctx.abort_signal 即 cancel 端点 set_abort
-    置位的对象，且 set_abort 能直接置位它。
+    ASK_USER_TIMEOUT。断言接线后 ctx.abort_signal 即调用方传入（cancel 端点
+    经 set_abort 置位）的对象，且 set_abort 能直接置位它。
     """
-    import src.api.chat as chat_module
-    from src.api.chat import _stream_rag_response
     from src.chat.streaming import streaming_manager
     from src.infra.llm.request_context import RequestContext
+    from src.services import turn_runner
     from src.utils.sse import SSEStatusEvent
 
     session_id = "s-abort-wiring"
@@ -406,15 +405,21 @@ async def test_stream_rag_response_wires_ctx_abort_signal(monkeypatch):
         "deep_thinking": False,
         "ctx": ctx,
         "graph": None,
+        "direct_skill": "",
     }
 
     async def fake_subscription():
         yield SSEStatusEvent(stage="agent", message="正在思考...")
 
     fake_svc = MagicMock()
+    fake_svc.set_chat_repo = AsyncMock()
+    fake_svc.save_session_async = AsyncMock()
+    fake_svc.save_user_async = AsyncMock()
     fake_svc.save_assistant_async = AsyncMock()
     fake_svc.chat_manager = MagicMock()
+    fake_svc.chat_manager._redis = None  # 跳过锁，聚焦 abort 接线
     fake_svc.chat_manager.add_message_async = AsyncMock()
+    fake_svc.agent_service = MagicMock()
     fake_svc.agent_service.stream_chat = AsyncMock(
         return_value=(fake_subscription(), launch_ctx)
     )
@@ -422,20 +427,23 @@ async def test_stream_rag_response_wires_ctx_abort_signal(monkeypatch):
     async def fake_run_generation(*args, **kwargs):
         return "完整回答"
 
-    monkeypatch.setattr(chat_module, "_run_generation", fake_run_generation)
+    monkeypatch.setattr(turn_runner, "_run_generation", fake_run_generation)
 
-    gen = _stream_rag_response(fake_svc, "kb1", session_id, "营收多少")
+    abort_signal = asyncio.Event()
+    await turn_runner.start_turn(
+        fake_svc,  # type: ignore[reportArgumentType]
+        session_id=session_id,
+        kb_id="kb1",
+        query="营收多少",
+        abort_signal=abort_signal,
+    )
     try:
-        first_frame = await anext(gen)
-        assert "正在思考" in first_frame
-        registered = streaming_manager.get_abort_signal(session_id)
-        assert registered is not None
-        assert ctx.abort_signal is registered
+        assert streaming_manager.get_abort_signal(session_id) is abort_signal
+        assert ctx.abort_signal is abort_signal
         # cancel 端点经 set_abort 置位的就是 ctx.abort_signal
         streaming_manager.set_abort(session_id)
         assert ctx.abort_signal.is_set()
     finally:
-        await gen.aclose()
         streaming_manager.clear_buffer(session_id)
         # 等待后台任务收尾注销（_run_generation 已 mock，立即完成）
         for _ in range(50):

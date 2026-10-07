@@ -74,9 +74,11 @@ def test_run_generation_is_observed_without_input_capture():
 
 def test_answer_builder_passes_observation_id():
     """调用方必须把当前 trace_id 作为根 observation id 传入。"""
-    from src.api import chat
+    from src.services import turn_runner
 
-    assert "langfuse_observation_id=" in inspect.getsource(chat._stream_rag_response)
+    assert "langfuse_observation_id=" in inspect.getsource(
+        turn_runner._make_answer_builder
+    )
 
 
 async def _fake_astream_with_tool(*args, **kwargs):
