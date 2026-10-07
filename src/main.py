@@ -27,6 +27,7 @@ from src.config.response_codes import Code
 from src.core import logging as core_logging
 from src.core.log_events import Event
 from src.core.logging import setup_logging
+from src.infra.llm.token_count import warm_token_encoder
 from src.infra.llm.tracing import configure_tracing, flush_tracing
 from src.middleware.auth import auth_middleware
 from src.middleware.response_processor import response_processor_middleware
@@ -53,6 +54,9 @@ async def lifespan(app: FastAPI):
     绕过 `settings.LANGFUSE_ENABLE`。
     """
     core_logging.log_event(Event.APP_STARTING)
+    # 预热 token 分词器：首次获取需联网下载词表（实测约 4s），放启动期可避免
+    # 首个用户请求承担该延迟；不可用不影响启动（计数会自行降级）
+    warm_token_encoder()
     section_chars = validation.validate_all()
     core_logging.log_event(Event.PROMPT_VALIDATED, section_chars=section_chars)
     await _clear_stale_chat_locks()
