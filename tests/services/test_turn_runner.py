@@ -78,3 +78,69 @@ async def test_set_chat_repo_called_before_persist():
     # stream_chat 失败 → 不抛，产 error + done 终止态
     assert "SSEErrorEvent" in events
     assert events[-1] == "SSEDoneEvent"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_burst_only_one_starts_without_redis():
+    """Redis 不可用时，同 session 两个 start_turn 并发只有一个通过闸门。
+
+    进程内 try_reserve 是同步原子预留（判定与预留间无 await），第二个请求在
+    第一个仍停留在落库前置的 await 点时应被 TurnBusy 拒绝，不双开。
+    """
+    session_id = "sess-burst-no-redis"
+    entered_persist = asyncio.Event()
+    release_persist = asyncio.Event()
+
+    svc = _FakeSvc(raise_on_stream_chat=True)  # _redis is None：Redis 不可用
+
+    async def blocking_save_session(session_id, title, kb_id, user_id, agent=""):
+        entered_persist.set()
+        await release_persist.wait()
+        await svc.chat_manager.save_session_async(session_id, title, kb_id, user_id)
+
+    svc.save_session_async = blocking_save_session  # type: ignore[method-assign]
+
+    first = asyncio.create_task(
+        start_turn(svc, session_id=session_id, kb_id="", query="第一条")  # type: ignore[reportArgumentType]
+    )
+    await entered_persist.wait()
+    assert streaming_manager.is_running(session_id) is True  # 预留中即视为运行
+
+    with pytest.raises(TurnBusy):
+        await start_turn(svc, session_id=session_id, kb_id="", query="第二条")  # type: ignore[reportArgumentType]
+
+    release_persist.set()
+    handle = await first
+    assert handle.session_id == session_id
+    # 第一个请求 stream_chat 失败 → error + done 终止态（非抛）
+    events = []
+    async for ev in handle.events:
+        events.append(type(ev).__name__)
+    assert "SSEErrorEvent" in events
+    assert events[-1] == "SSEDoneEvent"
+
+
+@pytest.mark.asyncio
+async def test_persist_failure_releases_reservation():
+    """落库前置失败后释放预留，同一 session 可再次启动（不被永久占用）。"""
+    session_id = "sess-persist-fail"
+    svc = _FakeSvc(raise_on_stream_chat=True)
+
+    async def failing_save_session(session_id, title, kb_id, user_id, agent=""):
+        raise RuntimeError("db down")
+
+    svc.save_session_async = failing_save_session  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError):
+        await start_turn(svc, session_id=session_id, kb_id="", query="第一条")  # type: ignore[reportArgumentType]
+
+    assert streaming_manager.is_running(session_id) is False  # 预留已释放
+
+    # 同一 session 可再次启动（换新 svc 但共享模块级 streaming_manager）
+    svc2 = _FakeSvc(raise_on_stream_chat=True)
+    handle = await start_turn(svc2, session_id=session_id, kb_id="", query="第二条")  # type: ignore[reportArgumentType]
+    assert handle.session_id == session_id
+    events = []
+    async for ev in handle.events:
+        events.append(type(ev).__name__)
+    assert "SSEErrorEvent" in events  # raise_on_stream_chat=True → 终止态
+    assert events[-1] == "SSEDoneEvent"

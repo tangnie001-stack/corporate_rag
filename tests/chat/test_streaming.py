@@ -41,6 +41,35 @@ async def test_unregister_if_current_does_not_remove_newer_task(mgr):
     assert mgr.is_running("s1") is False
 
 
+@pytest.mark.asyncio
+async def test_reserve_register_release_coordination(mgr):
+    """预留中的会话视为运行；register 替换预留为任务；release_reservation 幂等。"""
+    assert mgr.try_reserve("s1") is True
+    assert mgr.is_running("s1") is True  # 预留中即视为运行
+    assert mgr.try_reserve("s1") is False  # 已预留，拒绝二次预留
+
+    # register 把预留替换为任务引用，is_running 仍为 True
+    async def noop():
+        await asyncio.sleep(0.01)
+
+    task = asyncio.create_task(noop())
+    mgr.register("s1", task, asyncio.Event())
+    assert mgr.is_running("s1") is True
+    mgr.release_reservation("s1")  # 预留已被替换，no-op，不影响任务
+    assert mgr.is_running("s1") is True
+
+    mgr.unregister_if_current("s1", task)
+    await task
+    assert mgr.is_running("s1") is False
+
+
+def test_release_reservation_is_idempotent(mgr):
+    """release_reservation 无预留时为 no-op；可重复调用。"""
+    mgr.release_reservation("s1")
+    mgr.release_reservation("s1")
+    assert mgr.is_running("s1") is False
+
+
 def test_set_abort_sets_event(mgr):
     signal = asyncio.Event()
     mgr._abort_signals["s1"] = signal
