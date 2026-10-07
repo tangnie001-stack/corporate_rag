@@ -1,5 +1,6 @@
 """统一 token 计数入口的单测（不联网：encoder 已在环境缓存）。"""
 
+import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from src.infra.llm import token_count
@@ -17,7 +18,13 @@ def test_count_tokens_counts_text():
 
 
 def test_count_tokens_exceeds_char_heuristic_on_chinese():
-    """中文语料下分词器计数显著高于旧口径 len//2（钉住"确实换了口径"）。"""
+    """中文语料下分词器计数显著高于旧口径 len//2（钉住"确实换了口径"）。
+
+    encoder 不可用时（无网且无本地词表）计数会降级为 len//2，该差值不成立，
+    故显式跳过——本用例证明的是"分词器路径生效"，不是降级路径。
+    """
+    if token_count._encoder() is None:
+        pytest.skip("tiktoken encoder 不可用，本用例不适用降级口径")
     text = "腾讯控股二零二四年年报营业收入" * 10
     assert count_tokens(text) > len(text) // 2
 
