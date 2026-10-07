@@ -83,6 +83,9 @@ EVENT_SPECS: dict[str, EventSpec] = {
     "iteration limit": EventSpec(
         "iteration limit", "agent", "warning", ("query", "iteration")
     ),
+    "history budget exceeded": EventSpec(
+        "history budget exceeded", "agent", "warning", ("budget", "used", "kept")
+    ),
     "model turn": EventSpec(
         "model turn",
         "agent",

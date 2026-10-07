@@ -15,45 +15,49 @@ from src.agents.graph.state import AgentState
 from src.agents.skills.prefix import clean_prefix
 from src.config.const import (
     HISTORY_MAX_TURNS,
-    HISTORY_TOKEN_RATIO,
+    HISTORY_TOKEN_BUDGET,
     SKILL_INJECTION_PREFIX,
 )
 from src.core import logging as core_logging
 from src.core.log_events import Event
 from src.infra.llm.chat_message import ChatMessage
 from src.infra.llm.request_context import current_request_ctx
+from src.infra.llm.token_count import count_tokens
 from src.rag.prompt import build_prompt
 
 
 def _truncate_history(
     history: list[ChatMessage],
     max_turns: int = HISTORY_MAX_TURNS,
-    token_ratio: float = HISTORY_TOKEN_RATIO,
-    context_window: int = 8000,
+    token_budget: int = HISTORY_TOKEN_BUDGET,
 ) -> list[ChatMessage]:
-    """历史窗口截断：保留最近 N 轮 + token 双上限，最近 1 轮完整保留。
+    """历史窗口截断：保留最近 N 轮 + 绝对 token 预算，最近 1 轮完整保留。
 
     Args:
         history: 完整对话历史（user/assistant 交替排列）
         max_turns: 保留的最近轮数（每轮 user+assistant 两条消息）
-        token_ratio: 历史消息 token 占 context 窗口的上限比例
-        context_window: 模型 context 窗口大小（token）
+        token_budget: 历史消息总 token 上限（绝对值，集中 `const.py`）
 
     Returns:
         截断后的历史列表：先按轮数保留最近 max_turns 轮，总 token 超出预算时
         从最旧逐条弹出直到达标，最近 1 轮（最后 2 条）始终不截。
-        token 粗估为 len(content) // 2，与 estimate_usage 一致。
-        返回新列表，不修改入参。
+        计数走 `count_tokens`（分词器近似）。返回新列表，不修改入参。
     """
     if len(history) > max_turns * 2:
         recent = history[-(max_turns * 2) :]
     else:
         recent = list(history)
-    budget = int(context_window * token_ratio)
-    total = sum(len(m.content) // 2 for m in recent)
-    while total > budget and len(recent) > 2:
+    total = sum(count_tokens(m.content) for m in recent)
+    while total > token_budget and len(recent) > 2:
         dropped = recent.pop(0)
-        total -= len(dropped.content) // 2
+        total -= count_tokens(dropped.content)
+    if total > token_budget:
+        core_logging.log_event(
+            Event.HISTORY_BUDGET_EXCEEDED,
+            budget=token_budget,
+            used=total,
+            kept=len(recent),
+        )
     return recent
 
 

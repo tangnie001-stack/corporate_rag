@@ -86,9 +86,11 @@ PROMPT_TOKENS_PER_CJK_CHAR: float = float(
 # 略高于当前段总量（约 1266 字符）、随后续阶段加内容而生效，仅供参考，
 # 取值可能需要按实测分布校准。
 PROMPT_CONTEXT_SHARE_WARN: float = float(os.getenv("PROMPT_CONTEXT_SHARE_WARN", "0.05"))
-# context window 大小（token）——按当前配置模型 LLM_MODEL（qwen3.7-flash-2026-07-15）
-# 取值。该型号窗口无法在此确证，故取保守偏小值（**假设值**）：使占比告警更早触发；
-# 确证官方窗口后必须更新。
+# context window 大小（token）——**假设值**，仅用于 `src/rag/prompt.py` 的
+# system 段占比告警（`PROMPT_CONTEXT_SHARE_WARN`）的量级换算，**不参与历史预算**
+# （历史预算见 const.py 的 HISTORY_TOKEN_BUDGET，为与窗口解耦的绝对值）。
+# 实测当前运行时模型（qwen3.8-2.4t-a95b）输入上限为 983616；此处仍未按实测更新，
+# 待确证后单独处理（属 Phase B 的窗口注册表范围）。
 MODEL_CONTEXT_WINDOW_TOKENS: int = int(
     os.getenv("MODEL_CONTEXT_WINDOW_TOKENS", "32768")
 )

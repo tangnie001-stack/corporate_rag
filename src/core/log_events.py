@@ -70,6 +70,7 @@ class Event(str, Enum):
     # [agent] agent 循环 / 图 / 编排事件（3.3 批迁移登记）
     ITERATION_DONE = "iteration done"
     ITERATION_LIMIT = "iteration limit"
+    HISTORY_BUDGET_EXCEEDED = "history budget exceeded"
     MODEL_TURN = "model turn"
     GRAPH_COMPILED = "graph compiled"
     FORMAT_DONE = "format done"
