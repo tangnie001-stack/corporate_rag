@@ -360,6 +360,10 @@ EVENT_SPECS: dict[str, EventSpec] = {
         "warning",
         ("est_tokens", "share", "threshold"),
     ),
+    # tiktoken 分词器不可用，token 计数降级为 len//2（环境级问题，仅告警一次）
+    "token encoder unavailable": EventSpec(
+        "token encoder unavailable", "llm", "warning", ("err",)
+    ),
     "prompt messages": EventSpec(
         "prompt messages",
         "agent",

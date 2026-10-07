@@ -11,7 +11,6 @@ encoder 首次获取需联网下载词表（实测容器内约 4s、1.7MB，落 
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Sequence
 from functools import lru_cache
 from typing import Any
@@ -19,7 +18,8 @@ from typing import Any
 import tiktoken
 from langchain_core.messages import BaseMessage
 
-logger = logging.getLogger(__name__)
+from src.core import logging as core_logging
+from src.core.log_events import Event
 
 _ENCODING_NAME = "cl100k_base"
 
@@ -28,18 +28,13 @@ _WARNED_UNAVAILABLE = False
 
 
 @lru_cache(maxsize=1)
-def _encoder() -> Any | None:
-    """返回进程内缓存的 tiktoken encoder；不可用时返回 None（并记一次 warning）。"""
-    global _WARNED_UNAVAILABLE
-    try:
-        return tiktoken.get_encoding(_ENCODING_NAME)
-    except Exception as exc:  # noqa: BLE001
-        if not _WARNED_UNAVAILABLE:
-            _WARNED_UNAVAILABLE = True
-            logger.warning(
-                "[llm] token encoder unavailable, fallback to len//2 err=%s", exc
-            )
-        return None
+def _encoder() -> Any:
+    """返回进程内缓存的 tiktoken encoder。
+
+    失败时向上抛异常：`lru_cache` **不缓存异常**，故调用方下次调用会重试，
+    避免一次失败（如启动期网络未就绪）被永久固化为进程内的静默降级。
+    """
+    return tiktoken.get_encoding(_ENCODING_NAME)
 
 
 def warm_token_encoder() -> bool:
@@ -48,15 +43,24 @@ def warm_token_encoder() -> bool:
     Returns:
         True = encoder 可用；False = 不可用（调用方无需处理，计数会自行降级）
     """
-    return _encoder() is not None
+    try:
+        _encoder()
+    except Exception:  # noqa: BLE001
+        return False
+    return True
 
 
 def count_tokens(text: str) -> int:
     """返回文本的 token 数；encoder 不可用时降级为 `len(text) // 2`。"""
+    global _WARNED_UNAVAILABLE
     if not text:
         return 0
-    encoder = _encoder()
-    if encoder is None:
+    try:
+        encoder = _encoder()
+    except Exception as exc:  # noqa: BLE001
+        if not _WARNED_UNAVAILABLE:
+            _WARNED_UNAVAILABLE = True
+            core_logging.log_event(Event.TOKEN_ENCODER_UNAVAILABLE, err=str(exc))
         return max(1, len(text) // 2)
     return len(encoder.encode(text))
 

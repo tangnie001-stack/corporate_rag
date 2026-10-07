@@ -14,6 +14,10 @@ requires-python = ">=3.12"
 dependencies = [
     "numpy<2.0",
     "langchain-openai==1.3.3",
+    # 统一 token 计数入口（src/infra/llm/token_count.py）顶层直接 import tiktoken；
+    # 此前仅由 langchain-openai 传递提供，故显式声明为运行时依赖。pin 精确版本：
+    # 分词口径随版本漂移会改变上下文预算的估算结果，升级须复核
+    "tiktoken==0.13.0",
     "langchain==1.3.11",
     "langchain-community==0.4.2",
     "langchain-core==1.4.8",

@@ -196,6 +196,8 @@ class Event(str, Enum):
     PROMPT_ASSEMBLED = "prompt assembled"
     # [llm] system 段估算占 context window 比例超阈值（只告警不阻断）
     PROMPT_SECTION_SHARE_HIGH = "prompt section share high"
+    # [llm] tiktoken 分词器不可用，token 计数降级为 len//2
+    TOKEN_ENCODER_UNAVAILABLE = "token encoder unavailable"
     # [agent] 首轮组装的消息构成（system / 注入 / 历史三段条数）
     PROMPT_MESSAGES = "prompt messages"
     # [session] 技能正文成功注入（inline 命令触发 / 首轮预设预加载）
