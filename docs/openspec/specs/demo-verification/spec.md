@@ -53,4 +53,3 @@ Error categories:
 #### Scenario: Empty retrieval shows friendly message
 - **WHEN** user asks a question in a KB with no matching content
 - **THEN** the chat UI SHALL display "未找到相关信息，请尝试换个问法" in a styled warning message
-
