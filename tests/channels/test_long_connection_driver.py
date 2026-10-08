@@ -9,23 +9,40 @@ from src.channels.wecom import long_connection as lc
 
 
 class _FakeClient:
-    """伪 WSClient：记录构造参数、注册的处理器与回复调用。"""
+    """伪 WSClient：记录构造参数、注册的处理器与回复调用。
+
+    默认模拟"健康且已认证"：`connect()` 建立连接后同步 `emit("authenticated")`，
+    以对标真实 SDK 认证成功的默认路径（驱动在 connect() 之前已注册该处理器）。
+    """
 
     def __init__(self, options: Any):
         self.options = options
         self.handlers: dict[str, Any] = {}
         self.connected = False
+        self.disconnect_calls = 0
         self.replies: list[tuple[Any, str, str, bool]] = []
 
     def on(self, event: str, f: Any = None) -> Any:
         self.handlers[event] = f
         return f
 
+    def emit(self, event: str, payload: Any = None) -> None:
+        """同步触发已注册处理器（对标 pyee 的行为）。"""
+        handler = self.handlers.get(event)
+        if handler is None:
+            return
+        if payload is None:
+            handler()
+            return
+        handler(payload)
+
     async def connect(self) -> "_FakeClient":
         self.connected = True
+        self.emit("authenticated")
         return self
 
     def disconnect(self) -> None:
+        self.disconnect_calls += 1
         self.connected = False
 
     async def reply_stream(
@@ -252,11 +269,14 @@ async def test_enter_chat_still_reaches_business_handler(monkeypatch):
 
 
 class _FakeClientWithAuth(_FakeClient):
-    """可手动触发 authenticated / error 的伪 client。"""
+    """薄子类：仅当 `emit_auth=False` 时抑制 connect 时的认证事件。
+
+    其余（emit / disconnect_calls / disconnect）均继承基类；`emit_auth=False`
+    变体供超时与（Task 2）凭证失败用例复用。
+    """
 
     def __init__(self, options: Any, *, emit_auth: bool = True):
         super().__init__(options)
-        self.disconnect_calls = 0
         self._emit_auth = emit_auth
 
     async def connect(self) -> "_FakeClientWithAuth":
@@ -264,20 +284,6 @@ class _FakeClientWithAuth(_FakeClient):
         if self._emit_auth:
             self.emit("authenticated")
         return self
-
-    def emit(self, event: str, payload: Any = None) -> None:
-        """同步触发已注册处理器（对标 pyee 的行为）。"""
-        handler = self.handlers.get(event)
-        if handler is None:
-            return
-        if payload is None:
-            handler()
-            return
-        handler(payload)
-
-    def disconnect(self) -> None:
-        self.disconnect_calls += 1
-        self.connected = False
 
 
 def _auth_patch(monkeypatch, *, emit_auth: bool):
