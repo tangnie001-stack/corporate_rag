@@ -11,14 +11,21 @@ from collections.abc import AsyncIterator, Callable
 
 from src.channels.base import ReplySink
 from src.config.wecom_presenter import (
+    MAX_INTERMEDIATE_FRAMES,
+    MAX_STREAM_CHARS,
     MIN_SEND_INTERVAL_SECONDS,
     WeComPresenterTexts,
 )
 from src.utils.sse import (
+    SSEAgentUsedEvent,
+    SSEDelegateEvent,
     SSEDoneEvent,
     SSEErrorEvent,
     SSEEvent,
+    SSEModelInfoEvent,
+    SSEReasoningDeltaEvent,
     SSEStatusEvent,
+    SSETaskEvent,
     SSETokenEvent,
 )
 
@@ -50,6 +57,8 @@ class WeComPresenter:
         trace_id: str,
         *,
         min_interval_seconds: float = MIN_SEND_INTERVAL_SECONDS,
+        max_frames: int = MAX_INTERMEDIATE_FRAMES,
+        max_chars: int = MAX_STREAM_CHARS,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         """初始化。
@@ -58,11 +67,15 @@ class WeComPresenter:
             sink: 回复出口
             trace_id: 本轮 trace_id（终态 footer 与首帧反馈标识用）
             min_interval_seconds: 发送最小间隔（节流下限）
+            max_frames: 承载正文的中间帧数上限（占位帧不计入）
+            max_chars: 单流累计正文长度上限（超出保留尾部）
             monotonic: 单调时钟（测试注入以稳定断言节流）
         """
         self._sink = sink
         self._trace_id = trace_id
         self._min_interval_seconds = min_interval_seconds
+        self._max_frames = max_frames
+        self._max_chars = max_chars
         self._monotonic = monotonic
 
         self._text: str = ""
@@ -70,6 +83,7 @@ class WeComPresenter:
         self._final: bool = False
         self._last_sent: str | None = None
         self._last_sent_at: float = float("-inf")
+        self._frames_sent: int = 0
 
     async def run(self, events: AsyncIterator[SSEEvent]) -> None:
         """消费上游事件流并完成一轮投影。
@@ -86,15 +100,30 @@ class WeComPresenter:
         await self.finalize()
 
     async def update(self, event: SSEEvent) -> None:
-        """投影单个事件：累积正文 / 记录占位，必要时发送一帧。
+        """投影单个事件：累积正文 / 记录占位；无渲染通道的事件丢弃。
+
+        丢弃类事件（思考过程 / 子代理过程 / 任务看板 / 模型信息 / 会话绑定
+        智能体）在企微无对应渲染，丢弃且不得中断本轮流。
 
         Args:
             event: 单个结构化事件
         """
         if isinstance(event, SSETokenEvent):
             self._text += event.token
-        elif isinstance(event, SSEStatusEvent) and is_blank(self._text):
-            self._placeholder = event.message
+        elif isinstance(event, SSEStatusEvent):
+            if is_blank(self._text):
+                self._placeholder = event.message
+        elif isinstance(
+            event,
+            (
+                SSEReasoningDeltaEvent,
+                SSEDelegateEvent,
+                SSETaskEvent,
+                SSEModelInfoEvent,
+                SSEAgentUsedEvent,
+            ),
+        ):
+            return
         await self._flush()
 
     async def finalize(self) -> None:
@@ -105,7 +134,9 @@ class WeComPresenter:
         await self._send(self._current_content(), finish=True)
 
     def _render_answer(self) -> str:
-        """当前累积正文（本任务未做长度截断，见 Task 3）。"""
+        """当前累积正文；超过长度上限时保留尾部。"""
+        if len(self._text) > self._max_chars:
+            return self._text[-self._max_chars :]
         return self._text
 
     def _has_answer(self) -> bool:
@@ -119,15 +150,20 @@ class WeComPresenter:
         return self._placeholder
 
     async def _flush(self) -> None:
-        """按节流与「内容未变跳过」规则决定是否发送当前快照。"""
+        """按节流与上限规则决定是否发送当前快照。"""
         if self._final:
             return
+        carries_answer = self._has_answer()
         content = self._current_content()
         if content == self._last_sent:
+            return
+        if carries_answer and self._frames_sent >= self._max_frames:
             return
         if self._monotonic() - self._last_sent_at < self._min_interval_seconds:
             return
         await self._send(content, finish=False)
+        if carries_answer:
+            self._frames_sent += 1
 
     async def _send(self, content: str, finish: bool) -> None:
         """发送一帧并记录发送内容与时刻。

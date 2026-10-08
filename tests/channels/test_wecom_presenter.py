@@ -7,10 +7,14 @@ import pytest
 from src.channels.wecom.presenter import WeComPresenter, is_blank
 from src.config.wecom_presenter import WeComPresenterTexts
 from src.utils.sse import (
+    SSEAgentUsedEvent,
+    SSEDelegateEvent,
     SSEDoneEvent,
     SSEEvent,
+    SSEModelInfoEvent,
     SSEReasoningDeltaEvent,
     SSEStatusEvent,
+    SSETaskEvent,
     SSETokenEvent,
 )
 
@@ -149,3 +153,67 @@ async def test_status_event_becomes_placeholder_frame():
     )
 
     assert sink.contents[0] == "正在检索相关文档..."
+
+
+@pytest.mark.asyncio
+async def test_frame_cap_stops_answer_frames_but_finalizes():
+    sink = _RecordingSink()
+    presenter = WeComPresenter(sink, "trace_1", min_interval_seconds=0, max_frames=2)
+
+    await presenter.run(
+        _stream(
+            [
+                SSETokenEvent(token="a"),
+                SSETokenEvent(token="b"),
+                SSETokenEvent(token="c"),
+                SSETokenEvent(token="d"),
+                SSEDoneEvent(trace_id="trace_1"),
+            ]
+        )
+    )
+
+    # 中间帧：前两帧（承载正文）后触顶；终态帧仍发全量
+    assert len(sink.calls) == 3
+    assert sink.contents[:2] == ["a", "ab"]
+    assert sink.contents[-1].startswith("abcd")
+    assert sink.calls[-1][1] is True
+
+
+@pytest.mark.asyncio
+async def test_long_content_keeps_tail():
+    sink = _RecordingSink()
+    presenter = WeComPresenter(sink, "trace_1", min_interval_seconds=0, max_chars=3)
+
+    await presenter.run(
+        _stream(
+            [
+                SSETokenEvent(token="abcdef"),
+                SSEDoneEvent(trace_id="trace_1"),
+            ]
+        )
+    )
+
+    assert sink.contents[0] == "def"
+
+
+@pytest.mark.asyncio
+async def test_unrendered_events_are_dropped_without_interrupt():
+    sink = _RecordingSink()
+    presenter = WeComPresenter(sink, "trace_1", min_interval_seconds=0)
+
+    await presenter.run(
+        _stream(
+            [
+                SSEReasoningDeltaEvent(reasoning_delta="思考"),
+                SSEDelegateEvent(delegate_id="d1", action="start", skill="s"),
+                SSETaskEvent(action="created", task={"type": "skill"}),
+                SSEModelInfoEvent(model="m1", is_fallback=False),
+                SSEAgentUsedEvent(agent="finance"),
+                SSETokenEvent(token="甲"),
+                SSEDoneEvent(trace_id="trace_1"),
+            ]
+        )
+    )
+
+    assert len(sink.calls) == 2
+    assert sink.contents[0] == "甲"
