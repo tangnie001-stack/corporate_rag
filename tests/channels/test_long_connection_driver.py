@@ -382,3 +382,52 @@ async def test_stop_resets_ready(monkeypatch):
     await driver.stop()
 
     assert driver.is_ready is False
+
+
+@pytest.mark.asyncio
+async def test_credential_failure_disconnects_and_never_ready(monkeypatch):
+    """凭证类失败（实测 errcode=853000）：主动断开、永不就绪；SDK 不抛不重连。"""
+    holder = _auth_patch(monkeypatch, emit_auth=False)
+    monkeypatch.setattr(lc, "_AUTH_TIMEOUT_SECONDS", 0.01)
+
+    async def _handler(msg: InboundMessage, sink: ReplySink) -> None:
+        return
+
+    driver = lc.LongConnectionDriver("BOTID", "SECRET", _handler)
+    await driver.start()
+    client = holder["client"]
+
+    client.emit(
+        "error",
+        Exception("Authentication failed: invalid bot_id or secret (code: 853000)"),
+    )
+
+    assert client.disconnect_calls == 1
+    assert driver.is_ready is False
+    assert driver._fatal is True
+
+    # 迟到的 authenticated 不得把它翻回就绪
+    client.emit("authenticated")
+    assert driver.is_ready is False
+
+
+@pytest.mark.asyncio
+async def test_non_credential_error_does_not_disconnect(monkeypatch):
+    """普通连接/接收错误不构成凭证类：不得断开、不得置致命，仍可认证就绪。"""
+    holder = _auth_patch(monkeypatch, emit_auth=False)
+    monkeypatch.setattr(lc, "_AUTH_TIMEOUT_SECONDS", 0.05)
+
+    async def _handler(msg: InboundMessage, sink: ReplySink) -> None:
+        return
+
+    driver = lc.LongConnectionDriver("BOTID", "SECRET", _handler)
+    await driver.start()
+    client = holder["client"]
+
+    client.emit("error", Exception("websocket keepalive timeout"))
+
+    assert client.disconnect_calls == 0
+    assert driver._fatal is False
+
+    client.emit("authenticated")
+    assert driver.is_ready is True

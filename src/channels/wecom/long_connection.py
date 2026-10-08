@@ -38,6 +38,10 @@ _DISPLACED_EVENT: str = "event.disconnected_event"
 # `authenticated` 事件；超时只降级、不断开（交 SDK 自愈），见 design D11。
 _AUTH_TIMEOUT_SECONDS: float = 5.0
 
+# 凭证类失败的判据：SDK 对 SUBSCRIBE 响应 errcode≠0 抛出的错误以本串开头
+# （实测错误凭证为 errcode=853000 / invalid bot_id or secret）。**普通 on_error 不构成凭证类**。
+_AUTH_FAILED_PREFIX: str = "Authentication failed"
+
 
 class _WsSink:
     """ReplySink 实现：把回复转成 SDK 的流式回复调用。"""
@@ -88,6 +92,7 @@ class LongConnectionDriver:
         self._client: WSClient | None = None
         self._displaced: bool = False
         self._ready: bool = False
+        self._fatal: bool = False
 
     @property
     def is_displaced(self) -> bool:
@@ -104,7 +109,7 @@ class LongConnectionDriver:
 
         未认证（等待超时）／凭证类失败／被更新的连接顶替后均为 False。
         """
-        if self._displaced:
+        if self._displaced or self._fatal:
             return False
         return self._ready
 
@@ -135,7 +140,13 @@ class LongConnectionDriver:
         self._ready = False
 
     def _on_authenticated(self, auth_result: asyncio.Future[bool]) -> None:
-        """SDK 认证成功：置就绪并唤醒等待（迟到的认证同样置就绪——状态要如实）。"""
+        """SDK 认证成功：置就绪并唤醒等待。
+
+        迟到的认证同样置就绪（状态要如实）；但对已致命的驱动直接丢弃——凭证类失败
+        后不得被翻回就绪。
+        """
+        if self._fatal:
+            return
         self._ready = True
         logger.info("[wecom] bot authenticated bot_id={}", encode_value(self._bot_id))
         if not auth_result.done():
@@ -144,13 +155,32 @@ class LongConnectionDriver:
     def _on_error(
         self, error: BaseException, auth_result: asyncio.Future[bool], client: WSClient
     ) -> None:
-        """SDK 连接期错误：凭证类失败交 Task 2 处置；其余只记日志。
+        """SDK 连接期错误：凭证类失败 → 主动断开并置致命；其余只记 warning。
 
-        本方法在 Task 2 扩展为"识别 Authentication failed → 断开并置致命"。
+        Args:
+            error: SDK 抛出的异常（凭证类形如 `Authentication failed: … (code: 853000)`）
+            auth_result: 认证等待 future（凭证类失败时以 False 唤醒）
+            client: 本驱动当前使用的客户端（用于主动断开）
         """
+        message = str(error)
+        if not message.startswith(_AUTH_FAILED_PREFIX):
+            logger.warning(
+                "[wecom] connect error bot_id={} err={}",
+                encode_value(self._bot_id),
+                message,
+            )
+            return
+        self._fatal = True
         logger.warning(
-            "[wecom] connect error bot_id={} err={}", encode_value(self._bot_id), error
+            "[wecom] auth failed fatal bot_id={} err={}",
+            encode_value(self._bot_id),
+            message,
         )
+        client.disconnect()
+        if self._client is client:
+            self._client = None
+        if not auth_result.done():
+            auth_result.set_result(False)
 
     async def _await_auth(self, auth_result: asyncio.Future[bool]) -> None:
         """等认证结果，上界 `_AUTH_TIMEOUT_SECONDS`；超时只降级（不计就绪、不断开）。"""
