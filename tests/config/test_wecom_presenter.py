@@ -43,3 +43,13 @@ def test_texts_are_present():
     assert texts.ABSTENTION_TEXT
     assert texts.SOURCES_TITLE
     assert "{}" in texts.TRACE_FOOTER_TEMPLATE
+
+
+def test_feedback_id_enabled_by_default(monkeypatch):
+    monkeypatch.delenv("WECOM_FEEDBACK_ID_ENABLED", raising=False)
+    reloaded = importlib.reload(wecom_presenter)
+    try:
+        assert reloaded.FEEDBACK_ID_ENABLED is True
+    finally:
+        monkeypatch.undo()
+        importlib.reload(wecom_presenter)

@@ -29,8 +29,9 @@ FIRST_FRAME_TIMEOUT_SECONDS: float = float(
 TRACE_FOOTER_ENABLED: bool = os.getenv(
     "WECOM_TRACE_FOOTER_ENABLED", "true"
 ).lower() in ("1", "true", "yes")
-# 首帧反馈标识是否可用（Spike E10 结论落地前默认关）
-FEEDBACK_ID_ENABLED: bool = os.getenv("WECOM_FEEDBACK_ID_ENABLED", "false").lower() in (
+# 首帧反馈标识是否可用：Spike E10 实测**可用**（回执帧 `body.event.feedback_event.id`
+# 原样回传，见 docs/agents/wecom-sdk-facts.md），故默认开启；置 false 则退化为 footer+日志两路
+FEEDBACK_ID_ENABLED: bool = os.getenv("WECOM_FEEDBACK_ID_ENABLED", "true").lower() in (
     "1",
     "true",
     "yes",

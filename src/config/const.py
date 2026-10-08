@@ -1,8 +1,9 @@
 """诊断日志标签、业务常量。"""
 
 import re
+import uuid
 from enum import Enum
-from typing import ClassVar
+from typing import ClassVar, Final
 
 
 class _Labels(dict):
@@ -460,3 +461,11 @@ def resolve_source_tier(url: str, kind: str) -> int:
 WECOM_CALLBACK_PATH: str = "/wecom/callback"
 # 企微默认 handler 的占位回复文案：尚未接入检索时先行回执，待业务接线后替换
 WECOM_REPLY_PLACEHOLDER: str = "已收到，稍后接入检索…"
+
+# ── 企业微信智能机器人通道 ──
+# 会话/用户标识派生的固定命名空间：**必须是固定字面 UUID**（不得随机/进程内生成），
+# 否则 session_id 每次重启都变、企微会话与历史每重启断链（design D2）。
+WECOM_NS: Final[uuid.UUID] = uuid.UUID("a3f1c2d4-5e6b-4c7d-8e9f-0a1b2c3d4e5f")
+# 反馈回执事件名（回执帧字段路径为 body.event.feedback_event.{id,type}；
+# 实测见 docs/agents/wecom-sdk-facts.md 的 E10）
+WECOM_EVENT_FEEDBACK: Final[str] = "feedback_event"
