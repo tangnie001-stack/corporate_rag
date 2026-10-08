@@ -58,7 +58,7 @@
 ## 5. 驱动可靠性补丁
 
 - [ ] 5.1 认证等待：`start()` 等待认证结果（**上界 ≤5s**），成功才算就绪；**凭证类失败**（信号仅限 SDK SUBSCRIBE 响应 `errcode≠0`——实测错误凭证为 **`853000`** / `errmsg=invalid bot_id or secret`；**不含普通 `on_error`**）→ 可见告警、**主动 `disconnect()` 并置停重连标志**、不计入成功；**等待超时**→ 只置降级（不计入成功）、**不断开不停重连**（交 SDK 自愈）；**未就绪驱动仍登记入 `_drivers` 供 `stop()` 关闭，锚点只计认证就绪者**；**逐台启动改为 `asyncio.gather(..., return_exceptions=True)` 并行**以免拖垮启动（按 E3 结论实现）
-- [ ] 5.2 被顶处置：驱动**订阅 `event.disconnected_event`** → 记 warning + 标记该台不就绪 + **主动 `disconnect()` 且不再抢回**（E4 实测：不处置会形成无限互踢，周期 313s / 2.2s 不固定）；同时把 `event.disconnected_event` 补进 `_EVENT_EVENTS`
+- [x] 5.2 被顶处置（**驱动部分已完成**，`eaa85ee` 经 merge 并入）：驱动**单独注册驱动级处理器**订阅 `event.disconnected_event`（刻意**不**放进 `_EVENT_EVENTS`——被顶是连接归属问题，不应污染业务 handler 的输入面）→ 记 warning + 主动 `disconnect()` 且不再抢回 + 暴露只读 `is_displaced`（幂等）；**就绪口径与启动锚点对该标志的消费仍待 5.1**
 
 ## 6. 澄清回填
 
