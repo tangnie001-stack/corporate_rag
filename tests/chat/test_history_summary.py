@@ -1,0 +1,187 @@
+"""跨轮历史摘要核心逻辑的单测（不发起真实 LLM 调用）。"""
+
+from unittest.mock import AsyncMock
+
+import pytest
+
+from src.chat import history_summary
+from src.infra.llm.chat_message import ChatMessage
+from src.infra.llm.token_count import count_tokens
+
+
+def test_strip_citation_numbers_removes_only_bracket_digits():
+    """只剥离 [数字]，不误伤年份与 Markdown 链接。"""
+    raw = "结论见 [1]，2024 年数据见 [12]，链接 [文档](http://x)。"
+    out = history_summary.strip_citation_numbers(raw)
+    assert "[1]" not in out
+    assert "[12]" not in out
+    assert "2024" in out
+    assert "[文档](http://x)" in out
+
+
+def test_validate_summary_rejects_not_smaller():
+    """摘要不比被丢弃段小 → 不采用。"""
+    ok, reason = history_summary.validate_summary(
+        text="短", discarded_tokens=1, previous_tokens=None
+    )
+    assert ok is False
+    assert reason == "not_smaller"
+
+
+def test_validate_summary_rejects_growth():
+    """就地更新时新摘要不得比上一版更长 → 违反即不采用。"""
+    text = "长" * 200
+    ok, reason = history_summary.validate_summary(
+        text=text,
+        discarded_tokens=10**6,
+        previous_tokens=max(1, count_tokens(text) - 1),
+    )
+    assert ok is False
+    assert reason == "grew"
+
+
+def test_validate_summary_accepts_normal():
+    """同时满足两条时不拒绝。"""
+    text = "摘要正文"
+    ok, reason = history_summary.validate_summary(
+        text=text, discarded_tokens=10**6, previous_tokens=None
+    )
+    assert ok is True
+    assert reason == ""
+
+
+@pytest.mark.asyncio
+async def test_summarize_history_degrades_on_llm_failure(monkeypatch):
+    """LLM 抛异常 → degraded 结果，不抛出去。"""
+    llm = AsyncMock()
+    llm.ainvoke.side_effect = RuntimeError("boom")
+    monkeypatch.setattr(history_summary, "get_summary_llm", lambda: llm)
+    discarded = [
+        ChatMessage(role="user", content="q"),
+        ChatMessage(role="assistant", content="a"),
+    ]
+    result = await history_summary.summarize_history("", discarded)
+    assert result.degraded is True
+    assert result.text == ""
+    assert "boom" in result.reason
+
+
+@pytest.mark.asyncio
+async def test_summarize_history_rejects_truncated(monkeypatch):
+    """结束原因为截断 → 不采用（四条不变量之「拒绝截断摘要」）。"""
+    llm = AsyncMock()
+    llm.ainvoke.return_value = _fake_response("半截摘要", finish_reason="length")
+    monkeypatch.setattr(history_summary, "get_summary_llm", lambda: llm)
+    discarded = [ChatMessage(role="user", content="q" * 500)]
+    result = await history_summary.summarize_history("", discarded)
+    assert result.degraded is True
+    assert result.reason == "truncated"
+
+
+@pytest.mark.asyncio
+async def test_summarize_history_returns_text_and_covered(monkeypatch):
+    """成功路径：返回摘要正文，covered 等于本次被丢弃段条数。"""
+    llm = AsyncMock()
+    llm.ainvoke.return_value = _fake_response("## 用户目标\n看年报")
+    monkeypatch.setattr(history_summary, "get_summary_llm", lambda: llm)
+    # 被丢弃段须显著大于摘要正文，否则会命中「更小」不变量被判 not_smaller
+    # （该不变量由 test_validate_summary_* 单独覆盖，本用例只验成功路径）。
+    discarded = [
+        ChatMessage(role="user", content="q1" * 200),
+        ChatMessage(role="assistant", content="a1" * 200),
+    ]
+    result = await history_summary.summarize_history("", discarded)
+    assert result.degraded is False
+    assert result.text == "## 用户目标\n看年报"
+    assert result.covered == 2
+
+
+@pytest.mark.asyncio
+async def test_summarize_history_incremental_prompt_carries_previous_summary(
+    monkeypatch,
+):
+    """增量路径：送给模型的 user prompt 含「上一版摘要：」标记与既有摘要正文。"""
+    llm = AsyncMock()
+    llm.ainvoke.return_value = _fake_response("## 用户目标\n看年报")
+    monkeypatch.setattr(history_summary, "get_summary_llm", lambda: llm)
+    previous_text = "旧摘要正文" * 50
+    discarded = [
+        ChatMessage(role="user", content="q" * 400),
+        ChatMessage(role="assistant", content="a" * 400),
+    ]
+    result = await history_summary.summarize_history(previous_text, discarded)
+    assert result.degraded is False
+    # 断言实际送给模型的入参：system + user 两条，user 正文须内嵌上一版摘要。
+    messages = llm.ainvoke.await_args.args[0]
+    assert messages[0]["role"] == "system"
+    assert messages[1]["role"] == "user"
+    user_prompt = messages[1]["content"]
+    assert "上一版摘要：" in user_prompt
+    assert previous_text in user_prompt
+
+
+@pytest.mark.asyncio
+async def test_summarize_history_degrades_when_summary_grew(monkeypatch):
+    """不变量④：增量更新时新摘要比上一版更长 → degraded(grew)，不外抛。"""
+    llm = AsyncMock()
+    llm.ainvoke.return_value = _fake_response("长" * 200)
+    monkeypatch.setattr(history_summary, "get_summary_llm", lambda: llm)
+    previous_text = "短摘要"
+    discarded = [ChatMessage(role="user", content="q" * 1000)]
+    result = await history_summary.summarize_history(previous_text, discarded)
+    assert result.degraded is True
+    assert result.reason == "grew"
+    assert result.text == ""
+    assert result.covered == 1
+
+
+@pytest.mark.asyncio
+async def test_summarize_history_covered_equals_discarded_prefix(monkeypatch):
+    """covered 恒等于本次被丢弃段条数（累计前缀长度），与上一版摘要的 covered 无关。
+
+    被丢弃段本身即累计前缀，故不存在"累加"语义；此处额外验证存在上一版摘要时
+    covered 仍只记本次前缀长度，不叠加（防重复计数回归）。
+    """
+    llm = AsyncMock()
+    llm.ainvoke.return_value = _fake_response("## 用户目标\n看年报")
+    monkeypatch.setattr(history_summary, "get_summary_llm", lambda: llm)
+    previous_text = "旧摘要正文" * 50
+    discarded = [
+        ChatMessage(role="user", content="q" * 400),
+        ChatMessage(role="assistant", content="a" * 400),
+        ChatMessage(role="user", content="q" * 400),
+    ]
+    result = await history_summary.summarize_history(previous_text, discarded)
+    assert result.degraded is False
+    assert result.text == "## 用户目标\n看年报"
+    assert result.covered == 3
+
+
+@pytest.mark.asyncio
+async def test_summarize_history_degrades_when_template_missing(monkeypatch):
+    """模板缺失（get_content 抛 KeyError）也必须走 degraded，绝不穿透本函数。"""
+    llm = AsyncMock()
+    llm.ainvoke.return_value = _fake_response("## 用户目标\n看年报")
+    monkeypatch.setattr(history_summary, "get_summary_llm", lambda: llm)
+
+    def _boom(_template_id: str) -> str:
+        raise KeyError(_template_id)
+
+    monkeypatch.setattr(history_summary.loader, "get_content", _boom)
+    discarded = [ChatMessage(role="user", content="q")]
+    result = await history_summary.summarize_history("", discarded)
+    assert result.degraded is True
+    assert result.text == ""
+    assert result.covered == 1
+    llm.ainvoke.assert_not_awaited()
+
+
+def _fake_response(content: str, finish_reason: str = "stop"):
+    """构造带 response_metadata 的假模型响应。"""
+
+    class _Resp:
+        def __init__(self) -> None:
+            self.content = content
+            self.response_metadata = {"finish_reason": finish_reason}
+
+    return _Resp()

@@ -101,7 +101,7 @@ class _StreamCapture:
 
 # 合并队列元素类型：LangGraph 事件（StreamEvent）或工具经 ctx.clarify_channel
 # 投递的事件 dict（ask_user/delegate），或哨兵
-_QueueItem: TypeAlias = StreamEvent | dict | _EndMarker | _ErrorMarker
+_QueueItem: TypeAlias = StreamEvent | dict | _EndMarker | _ErrorMarker  # noqa: UP040  # 既存代码：改写为 `type` 语句改变惰性求值语义，非本 change 范围
 
 
 def _extract_model_name(output) -> str:
@@ -566,6 +566,7 @@ async def _run_generation(
     abort_signal: asyncio.Event | None = None,
     direct_skill: str = "",
     user_id: str = "",
+    summary: str = "",
 ) -> str:
     """后台生成任务：迭代图事件转换为带 seq 事件写入缓冲，返回完整回答。
 
@@ -602,6 +603,8 @@ async def _run_generation(
             stream_chat 解析 `/xxx` 后经 launch_context 传入，写进初始 state
         user_id: 触发本轮的用户标识（请求内捕获后显式传入）。空串表示未取到，
             写入 trace 前会转成 None —— `update_current_trace` 只过滤 None、不过滤空串
+        summary: 跨轮历史摘要正文（默认空=无摘要）；由 stream_chat 预取后经
+            launch_context 传入，写入初始 state 供 seed 点作为独立历史消息注入
 
     Returns:
         完整回答（全部 token 累积结果）
@@ -641,7 +644,7 @@ async def _run_generation(
         metadata=trace_metadata,
     )
     initial_state = AgentState.make_initial_state(
-        session_id, kb_id, query, history, deep_thinking, direct_skill
+        session_id, kb_id, query, history, deep_thinking, direct_skill, summary
     )
     capture = _StreamCapture()
     tool_trace = ToolTraceCollector(
@@ -972,6 +975,10 @@ class AgentService:
         history = await self._chat_manager.get_history_async(session_id) or []
         await self._chat_manager.add_message_async(session_id, "user", query)
 
+        # 跨轮历史摘要：在此预取（本层持有 ChatManager），经 launch_context 传到
+        # 图状态——图节点不访问存储。
+        summary_text, _ = await self._chat_manager.get_summary_async(session_id)
+
         # 新一轮生成前清空该 session 缓冲，避免同一会话二次提问回放上一轮事件
         streaming_manager.clear_buffer(session_id)
 
@@ -1002,6 +1009,7 @@ class AgentService:
             "kb_id": kb_id,
             "query": query,
             "deep_thinking": deep_thinking,
+            "summary": summary_text,
         }
         # bind-once：读会话已绑定值，解析本轮生效智能体（首轮绑定 / 沿用 /
         # 不一致忽略 + warning），写入 ctx.agent 供 fork 执行者选择与 agent_used 回传

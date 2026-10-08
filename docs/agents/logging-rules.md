@@ -100,6 +100,10 @@
   不截）；`budget` 为绝对预算、`used` 为裁剪后实际估算 token、`kept` 为保留的历史条数
 - `context budget high`（agent / warning）——单轮内模型调用输入达上限；**仅告警不处置**
   （不截断、不改写）。`used` 为本轮输入估算 token、`limit` 为当前上限
+- `summary done`（session / info）——跨轮历史摘要成功生成并落 Redis；`covered` 为本次
+  摘要覆盖到的消息条数、`tokens` 为摘要文本 token 数
+- `summary fallback`（session / warning）——摘要生成失败或未采用，回退纯裁剪；**不阻断
+  用户流程**。`reason` 为降级原因、`err` 为底层错误信息
 
 **不再扩 `iteration done`**：其「消息数拆分」意图已由 `prompt messages` 在组装点承载，
 不重复记录同一事实（避免后人再提）。

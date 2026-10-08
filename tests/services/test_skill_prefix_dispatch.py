@@ -56,6 +56,7 @@ def _make_service(
     chat_manager = AsyncMock()
     chat_manager.get_history_async.return_value = []
     chat_manager.get_session_agent_async.return_value = bound_agent
+    chat_manager.get_summary_async.return_value = ("", 0)
     chat_manager.add_message_async = AsyncMock()
     chat_manager.save_user_async = AsyncMock()
     chat_manager.bind_session_agent_async = AsyncMock(return_value=True)

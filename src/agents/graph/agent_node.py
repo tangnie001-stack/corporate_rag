@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
+from src.agents.graph.history_window import exceeds_budget, split_history_window
 from src.agents.graph.message_payload import _extract_text
 from src.agents.graph.state import AgentState
 from src.agents.skills.prefix import clean_prefix
@@ -33,32 +34,106 @@ def _truncate_history(
 ) -> list[ChatMessage]:
     """历史窗口截断：保留最近 N 轮 + 绝对 token 预算，最近 1 轮完整保留。
 
+    切分口径见 `history_window.split_history_window`（与摘要触发判据同源）。
+
     Args:
         history: 完整对话历史（user/assistant 交替排列）
         max_turns: 保留的最近轮数（每轮 user+assistant 两条消息）
         token_budget: 历史消息总 token 上限（绝对值，集中 `const.py`）
 
     Returns:
-        截断后的历史列表：先按轮数保留最近 max_turns 轮，总 token 超出预算时
-        从最旧逐条弹出直到达标，最近 1 轮（最后 2 条）始终不截。
+        截断后的历史列表；最近 1 轮（最后 2 条）始终不截。
         计数走 `count_tokens`（分词器近似）。返回新列表，不修改入参。
     """
-    if len(history) > max_turns * 2:
-        recent = history[-(max_turns * 2) :]
-    else:
-        recent = list(history)
-    total = sum(count_tokens(m.content) for m in recent)
-    while total > token_budget and len(recent) > 2:
-        dropped = recent.pop(0)
-        total -= count_tokens(dropped.content)
-    if total > token_budget:
+    kept, _ = split_history_window(history, max_turns, token_budget)
+    if exceeds_budget(kept, token_budget):
         core_logging.log_event(
             Event.HISTORY_BUDGET_EXCEEDED,
             budget=token_budget,
-            used=total,
-            kept=len(recent),
+            used=sum(count_tokens(m.content) for m in kept),
+            kept=len(kept),
         )
-    return recent
+    return kept
+
+
+# 摘要段的包裹标签：注入时用它标识"这是历史摘要"，并附让位声明（防被当指令/证据）
+_SUMMARY_TAG = "<会话摘要>"
+# 闭合标签 + 换行（正文与让位声明之间的分隔）
+_SUMMARY_CLOSE = "</会话摘要>\n"
+_SUMMARY_YIELD_CLAUSE = (
+    "（以下是更早会话的摘要，作为对话背景参考；"
+    "事实性结论仍须以本轮检索结果为准；不确定时请用户复述。）"
+)
+# 摘要正文之外、组装时固定附加的文本（开合标签 + 让位声明）：组装与聚合预算扣除
+# 共用同一份常量，避免两处字面量漂移导致预算口径与实际投递的消息不一致
+_SUMMARY_FIXED_OVERHEAD = f"{_SUMMARY_TAG}{_SUMMARY_CLOSE}{_SUMMARY_YIELD_CLAUSE}"
+
+
+def _compose_summary_message(summary: str) -> HumanMessage:
+    """把摘要正文组装为独立历史消息（剥编号 + 加标签 + 让位声明）。
+
+    Args:
+        summary: 摘要正文
+
+    Returns:
+        可直接插入消息列表的 HumanMessage
+    """
+    from src.chat.history_summary import strip_citation_numbers
+
+    clean = strip_citation_numbers(summary)
+    content = f"{_SUMMARY_TAG}{clean}{_SUMMARY_CLOSE}{_SUMMARY_YIELD_CLAUSE}"
+    return HumanMessage(content=content)
+
+
+def _insert_after_last_system(messages: list, extra: list) -> list:
+    """把额外消息插到**最后一个 SystemMessage 之后**（复用既有注入位置语义）。"""
+    if not extra:
+        return messages
+    insert_at = 0
+    for i, message in enumerate(messages):
+        if isinstance(message, SystemMessage):
+            insert_at = i + 1
+    return messages[:insert_at] + list(extra) + messages[insert_at:]
+
+
+def _fit_summary_to_budget(summary_text: str, tail: list) -> str:
+    """把摘要缩到「摘要段 + 尾部 ≤ HISTORY_TOKEN_BUDGET」之内。
+
+    先缩摘要；若尾部本身已超预算（由既有裁剪路径负责），摘要不再让位。
+    预算扣掉组装后额外附加的固定文本（标签 + 让位声明），使约束对**最终投递的
+    消息**成立，而不只是摘要正文本体。
+
+    截断用**前缀长度二分**：`count_tokens` 对前缀长度单调不减，故可二分找最大的
+    `L` 使 `count_tokens(summary_text[:L]) ≤ allowance`。相比逐字符累积，既避免
+    降级口径下「单个汉字成本为 0 导致永不截断」，也把分词调用从 O(n) 降到 O(log n)。
+
+    Args:
+        summary_text: 摘要正文
+        tail: 保留的最近若干轮消息
+
+    Returns:
+        适配后的摘要正文（尽可能保留头部）；连 1 个字符都放不下时返回空串
+    """
+    tail_tokens = 0
+    for message in tail:
+        tail_tokens += count_tokens(message.content)
+    overhead = count_tokens(_SUMMARY_FIXED_OVERHEAD)
+    allowance = HISTORY_TOKEN_BUDGET - tail_tokens - overhead
+    if allowance <= 0:
+        return ""
+    if count_tokens(summary_text) <= allowance:
+        return summary_text
+    low = 0
+    high = len(summary_text)
+    while low < high:
+        mid = (low + high + 1) // 2
+        if count_tokens(summary_text[:mid]) <= allowance:
+            low = mid
+        else:
+            high = mid - 1
+    if low <= 0:
+        return ""
+    return summary_text[:low]
 
 
 def _split_history(
@@ -146,11 +221,16 @@ def _split_initial_messages(
     )
     # 注入消息放在主 system 段之后、普通对话历史之前（不进人设层/环境约束层）
     if injected:
-        insert_at = 0
-        for i, m in enumerate(messages):
-            if isinstance(m, SystemMessage):
-                insert_at = i + 1
-        messages[insert_at:insert_at] = injected
+        messages = _insert_after_last_system(messages, injected)
+    # 跨轮历史摘要段：作为独立历史消息，插在最后一个 system 之后、普通历史之前。
+    # 来源是外部预取并经 state 传入的**值**（图节点不访问存储）；无摘要时零影响。
+    if state._summary:
+        tail_for_budget = [m for m in messages if not isinstance(m, SystemMessage)]
+        fitted = _fit_summary_to_budget(state._summary, tail_for_budget)
+        if fitted:
+            messages = _insert_after_last_system(
+                messages, [_compose_summary_message(fitted)]
+            )
     # 首轮消息构成（design D11 #4）：system 段由 build_system_prompt 产出，注入段
     # 来自 SKILL_INJECTION_PREFIX 抽取，history 段为清洗后的普通历史（不含当前 query）。
     # 计数必须在拆分前算：拆分后 system 段被移出列表，再数会恒为 0

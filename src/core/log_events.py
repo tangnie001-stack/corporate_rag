@@ -99,6 +99,10 @@ class Event(str, Enum):
     # [session] 预设预绑定 skill 预加载跳过（声明名查不到，不影响其余技能）
     SKILL_PRELOAD_SKIP = "skill preload skip"
     SKILL_RESOLVED = "skill resolved"
+    # [session] 跨轮历史摘要成功写入（覆盖条数 / 摘要 token 量）
+    SUMMARY_DONE = "summary done"
+    # [session] 跨轮历史摘要降级（未采用摘要，回退纯裁剪）
+    SUMMARY_FALLBACK = "summary fallback"
 
     # [db] 数据库层事件（3.4 批迁移登记：vector_store / file_store）
     BUCKET_CREATED = "bucket created"

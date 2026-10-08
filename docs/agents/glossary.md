@@ -70,6 +70,8 @@
 - **回合预算 middleware（`AgentTurnBudget`）**：循环的回合上限承载件，`after_model` 自增 `_turn_count` 并按有效上限判定（委派轮放宽 `MAX_DELEGATE_BONUS`），命中时记 `iteration limit` 并声明 `jump_to=end`；**回合上限的唯一来源**是 `build_agent(max_turns=…)`（非 `None` 时由装配入口追加本件，仅主角色装配）
 - **历史预算（`HISTORY_TOKEN_BUDGET`）**：跨轮历史注入的 token 上限，**绝对值**，集中 `src/config/const.py`，与模型窗口解耦（弃用「窗口 × 比例」口径）。`agent_node` 的 `_truncate_history` 在轮数粗筛（`HISTORY_MAX_TURNS`）后按最旧逐条弹出至达标，**最近 1 轮始终不截**；仍超预算时记 `history budget exceeded`
 - **轮内累积上限（`TURN_INPUT_TOKEN_LIMIT`）**：单轮内模型调用输入 token 的**告警阈值**；`AgentSpanMiddleware` 在模型调用前经 `count_messages_tokens` 度量，达上限记 `context budget high`。本阶段**只告警、不处置**（压缩属摘要层）
+- **跨轮摘要（cross-turn summary）**：把超出历史预算的更旧对话压成结构化摘要（用户目标 / 已达成的决定 / 未解约束 / 关键事实与数字 / 下一步），持久化在 Redis `chat_summary:{session_id}`，供后续轮次在 seed 点只读注入；触发判据与「历史预算」同口径（落在"将被丢弃的那一段"）
+- **摘要覆盖边界（`covered`）**：摘要已覆盖到的消息条数（按条数计，与 Redis List 索引对应），用于增量更新与避免重复摘要
 - **system 提供方式**：`build_agent` 的 `system` 参数两条通道 —— **静态串**（子角色，`system=<str>`，人设 + 执行契约直接进 `create_agent`）与**经运行态携带**（主角色，`system=None`，system 段由 `agent` 节点组装写入图状态 `_system_messages`，运行时由 `SystemMessagesMiddleware` 施加到每次模型调用）
 - **循环后阶段（post-loop stage）**：外层图在 `agent` 节点之后、循环本体之外的节点（`agent_finalize` / `verify` / `format`）。领域逻辑（答案提取、完整性校验、引用格式化）留在此处，**不进**装配产物；model↔tools 循环本体则内化在装配产物内部
 

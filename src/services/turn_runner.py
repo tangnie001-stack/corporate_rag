@@ -160,6 +160,22 @@ async def _run_with_finalize(
         # 净化正文写 Redis 对话历史（get_history_async 供下一轮 prompt 上下文，
         # 与 MySQL 落库内容一致）；取消/异常的部分回答保持仅 MySQL，不写 Redis
         await svc.chat_manager.add_message_async(session_id, "assistant", purified)
+        # 跨轮历史摘要：只在**正常完成**分支、且 assistant 已写入历史之后发起。
+        # 取消/异常分支不写 Redis assistant（历史末尾会是未作答的 user 问），
+        # 以其为输入会把悬空问题当成史实，故那两条路径不触发。
+        # `chat_manager.redis` 为 None（无 Redis / 内存降级）时不生成摘要——
+        # best-effort 守卫需要 SETNX，此时行为等同于本 change 之前。
+        # 整段 best-effort：历史读取或调度构造异常一律吞掉，绝不因此跳过本回合的
+        # done 终态事件（与调度模块"绝不影响用户可见流程"一致）。
+        try:
+            from src.services.summary_scheduler import maybe_schedule_summary
+
+            summary_history = await svc.chat_manager.get_history_async(session_id) or []
+            maybe_schedule_summary(
+                svc.chat_manager, svc.chat_manager.redis, session_id, summary_history
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("summary schedule skipped: {}", exc)
         manager.add_event(session_id, "done", {"trace_id": trace_id or ""})
     finally:
         current_request_ctx.reset(ctx_token)
@@ -313,6 +329,7 @@ def _make_answer_builder(
             abort_signal=signal,
             direct_skill=launch_ctx["direct_skill"],
             user_id=user_id,
+            summary=launch_ctx.get("summary", ""),
             # @observe 包装器在调用前取走 langfuse_observation_id（静态签名看不到），
             # 类型检查无法感知该 kwarg
             langfuse_observation_id=current_trace_id.get() or "",  # type: ignore[reportCallIssue]

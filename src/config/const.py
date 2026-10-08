@@ -90,6 +90,20 @@ SESSION_LOCK_TTL = ASK_USER_TIMEOUT + 60
 # 候选年份并入的最近完整年度数（排除进行中的当年）：KB 只覆盖 2024 时"这几年"仍能
 # 解析出 [2023, 2025] 等缺失年份触发联网询问
 TEMPORAL_RECENT_N_YEARS = 3
+# 跨轮历史摘要：触发判据落在「将被丢弃的那一段」的 token 量上（不是全量历史——
+# 保留尾部覆盖全量时被丢弃段为空，以全量判据会导致每轮调用摘要模型却永不落地）。
+# 经验值：0.75 × HISTORY_TOKEN_BUDGET，给摘要产出留 1/4 余量，待线上观测标定。
+HISTORY_SUMMARY_TRIGGER_TOKENS = 12288
+# 摘要产出的输出上限（token）。经验值来源：本地参考项目 deepseek-harness 摘要上限 8192、
+# WeKnora 提示 "under 500 words"、ragflow 摘要预算 1200 字符；再受本项目
+# 「摘要段 + 尾部 ≤ HISTORY_TOKEN_BUDGET」聚合约束收敛。该上限同时是
+# 「拒绝截断摘要」不变量的判据前提（无上限则截断无从判定）。
+SUMMARY_MAX_TOKENS = 2048
+# 摘要并发锁 TTL（秒）：独立于 SESSION_LOCK_TTL——回合收尾时轮次锁即将释放，
+# 两者语义与生命周期不同，不可复用同一键。取摘要调用超时 + 30s 余量。
+SUMMARY_LOCK_TTL = 90
+# 摘要模型调用的超时保险丝（秒）：超时按失败降级，防长尾占用锁。
+SUMMARY_TIMEOUT_S = 60
 
 # ── delegate（主从委派）护栏常量 ──
 # 来源：agent-delegation-skills change（fork 超时/结果截断/inline 规模约束）+

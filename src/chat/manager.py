@@ -18,6 +18,7 @@ import redis.asyncio as redis_async
 
 from src.chat.delegate_budget import delegate_budget
 from src.chat.persistence import PersistenceService
+from src.chat.summary_store import SummaryStoreMixin
 from src.config import REDIS_TTL, REDIS_URL
 from src.core import logging as core_logging
 from src.core.log_events import Event
@@ -25,12 +26,14 @@ from src.infra.db.repos import ChatRepo
 from src.infra.llm.chat_message import ChatMessage
 
 
-class ChatManager:
+class ChatManager(SummaryStoreMixin):
     """对话历史管理器 — Redis 优先，内存降级。
 
     构造时尝试连接 Redis，连接失败则静默降级为内存存储（dict）。
     内存模式下数据仅在当前进程存活，重启后丢失，适合本地开发调试。
     Redis 模式下数据持久化，支持多实例共享同一会话历史。
+
+    摘要存储由 `SummaryStoreMixin` 提供（Redis 优先、内存降级）。
 
     Redis 数据结构：
       Key:   "chat_history:{session_id}"
@@ -55,6 +58,8 @@ class ChatManager:
         self._in_memory: bool = False
         # 内存降级时的存储：session_id -> [msg_dict, ...]
         self._memory_store: dict[str, list[dict]] = {}
+        # 内存降级时的摘要存储（由 SummaryStoreMixin 初始化）
+        self._init_summary_store()
         self._persistence: PersistenceService | None = None
         self._init_redis(self._redis_url)
 
@@ -313,6 +318,7 @@ class ChatManager:
         await self._ensure_redis_async()
         if self._in_memory:
             self._memory_store.pop(session_id, None)
+            self._memory_summaries.pop(session_id, None)
             return
         key = self._session_key(session_id)
         assert self._redis is not None
@@ -320,3 +326,5 @@ class ChatManager:
             await self._redis.delete(key)
         except Exception as e:  # noqa: BLE001
             core_logging.log_event(Event.HISTORY_CLEAR_FAILED, err=str(e))
+        # 摘要与历史同生命周期：走摘要存储自身的清理逻辑，避免重复实现
+        await self.clear_summary_async(session_id)

@@ -143,6 +143,7 @@ async def test_stream_chat_preloads_on_first_round():
     chat_manager = AsyncMock()
     chat_manager.get_history_async.return_value = []
     chat_manager.get_session_agent_async.return_value = "finance-expert"
+    chat_manager.get_summary_async.return_value = ("", 0)
     chat_manager.add_message_async = AsyncMock()
     chat_manager.save_user_async = AsyncMock()
     svc._chat_manager = chat_manager
