@@ -7,9 +7,12 @@ import pytest
 from src.channels.wecom.presenter import WeComPresenter, is_blank
 from src.config.wecom_presenter import WeComPresenterTexts
 from src.utils.sse import (
+    SSEAbstentionEvent,
     SSEAgentUsedEvent,
+    SSECitationEvent,
     SSEDelegateEvent,
     SSEDoneEvent,
+    SSEErrorEvent,
     SSEEvent,
     SSEModelInfoEvent,
     SSEReasoningDeltaEvent,
@@ -217,3 +220,152 @@ async def test_unrendered_events_are_dropped_without_interrupt():
 
     assert len(sink.calls) == 2
     assert sink.contents[0] == "甲"
+
+
+@pytest.mark.asyncio
+async def test_sources_only_in_final_frame():
+    sink = _RecordingSink()
+    presenter = WeComPresenter(sink, "trace_1", min_interval_seconds=0)
+
+    await presenter.run(
+        _stream(
+            [
+                SSETokenEvent(token="甲"),
+                SSECitationEvent(source="财报.pdf", page=3, snippet="…"),
+                SSEDoneEvent(trace_id="trace_1"),
+            ]
+        )
+    )
+
+    assert "参考来源" not in sink.contents[0]
+    assert "财报.pdf" not in sink.contents[0]
+    assert "参考来源" in sink.contents[-1]
+    assert "财报.pdf" in sink.contents[-1]
+    assert "第 3 页" in sink.contents[-1]
+
+
+@pytest.mark.asyncio
+async def test_no_sources_no_sources_block():
+    sink = _RecordingSink()
+    presenter = WeComPresenter(sink, "trace_1", min_interval_seconds=0)
+
+    await presenter.run(_stream([SSETokenEvent(token="甲"), SSEDoneEvent()]))
+
+    assert "参考来源" not in sink.contents[-1]
+
+
+@pytest.mark.asyncio
+async def test_trace_footer_in_final_frame_and_switchable():
+    sink = _RecordingSink()
+    presenter = WeComPresenter(
+        sink, "trace_abc", min_interval_seconds=0, footer_enabled=True
+    )
+    await presenter.run(_stream([SSETokenEvent(token="甲"), SSEDoneEvent()]))
+    assert "trace_abc" in sink.contents[-1]
+
+    sink2 = _RecordingSink()
+    presenter2 = WeComPresenter(
+        sink2, "trace_abc", min_interval_seconds=0, footer_enabled=False
+    )
+    await presenter2.run(_stream([SSETokenEvent(token="甲"), SSEDoneEvent()]))
+    assert "trace_abc" not in sink2.contents[-1]
+
+
+@pytest.mark.asyncio
+async def test_feedback_id_only_on_first_frame():
+    sink = _RecordingSink()
+    presenter = WeComPresenter(
+        sink, "trace_1", min_interval_seconds=0, feedback_enabled=True
+    )
+
+    await presenter.run(
+        _stream(
+            [
+                SSETokenEvent(token="甲"),
+                SSETokenEvent(token="乙"),
+                SSEDoneEvent(trace_id="trace_1"),
+            ]
+        )
+    )
+
+    assert sink.calls[0][2] == {"id": "trace_1"}
+    assert sink.calls[1][2] is None
+
+
+@pytest.mark.asyncio
+async def test_error_is_desensitized():
+    sink = _RecordingSink()
+    presenter = WeComPresenter(sink, "trace_1", min_interval_seconds=0)
+
+    await presenter.run(
+        _stream(
+            [
+                SSETokenEvent(token="甲"),
+                SSEErrorEvent(error="psycopg: connection refused to 10.0.0.5"),
+            ]
+        )
+    )
+
+    final = sink.contents[-1]
+    assert WeComPresenterTexts.ERROR_TEXT in final
+    assert "psycopg" not in final
+    assert "10.0.0.5" not in final
+    assert sink.calls[-1][1] is True
+
+
+@pytest.mark.asyncio
+async def test_abstention_appends_transfer_hint():
+    sink = _RecordingSink()
+    presenter = WeComPresenter(sink, "trace_1", min_interval_seconds=0)
+
+    await presenter.run(
+        _stream(
+            [
+                SSETokenEvent(token="未在文档中找到"),
+                SSEAbstentionEvent(),
+                SSEDoneEvent(trace_id="trace_1"),
+            ]
+        )
+    )
+
+    assert WeComPresenterTexts.ABSTENTION_TEXT in sink.contents[-1]
+
+
+@pytest.mark.asyncio
+async def test_empty_answer_falls_back_and_never_hangs():
+    sink = _RecordingSink()
+    presenter = WeComPresenter(sink, "trace_1", min_interval_seconds=0)
+
+    await presenter.run(_stream([SSEDoneEvent(trace_id="trace_1")]))
+
+    assert sink.calls, "终态帧必发，不得悬挂"
+    assert WeComPresenterTexts.FALLBACK_TEXT in sink.contents[-1]
+    assert sink.calls[-1][1] is True
+
+
+@pytest.mark.asyncio
+async def test_stream_failure_degrades_to_single_final_send():
+    class _FailingSink(_RecordingSink):
+        async def reply_stream(
+            self, content: str, finish: bool, feedback: dict | None = None
+        ) -> None:
+            if not finish:
+                raise RuntimeError("reply ack timeout")
+            await super().reply_stream(content, finish, feedback)
+
+    sink = _FailingSink()
+    presenter = WeComPresenter(
+        sink, "trace_1", min_interval_seconds=0, footer_enabled=False
+    )
+
+    await presenter.run(
+        _stream(
+            [
+                SSETokenEvent(token="甲"),
+                SSETokenEvent(token="乙"),
+                SSEDoneEvent(trace_id="trace_1"),
+            ]
+        )
+    )
+
+    assert sink.calls == [("甲乙", True, None)]

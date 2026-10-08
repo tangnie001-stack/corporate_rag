@@ -9,15 +9,21 @@ from __future__ import annotations
 import time
 from collections.abc import AsyncIterator, Callable
 
+from loguru import logger
+
 from src.channels.base import ReplySink
 from src.config.wecom_presenter import (
+    FEEDBACK_ID_ENABLED,
     MAX_INTERMEDIATE_FRAMES,
     MAX_STREAM_CHARS,
     MIN_SEND_INTERVAL_SECONDS,
+    TRACE_FOOTER_EFFECTIVE,
     WeComPresenterTexts,
 )
 from src.utils.sse import (
+    SSEAbstentionEvent,
     SSEAgentUsedEvent,
+    SSECitationEvent,
     SSEDelegateEvent,
     SSEDoneEvent,
     SSEErrorEvent,
@@ -60,6 +66,8 @@ class WeComPresenter:
         max_frames: int = MAX_INTERMEDIATE_FRAMES,
         max_chars: int = MAX_STREAM_CHARS,
         monotonic: Callable[[], float] = time.monotonic,
+        footer_enabled: bool = TRACE_FOOTER_EFFECTIVE,
+        feedback_enabled: bool = FEEDBACK_ID_ENABLED,
     ) -> None:
         """初始化。
 
@@ -70,6 +78,8 @@ class WeComPresenter:
             max_frames: 承载正文的中间帧数上限（占位帧不计入）
             max_chars: 单流累计正文长度上限（超出保留尾部）
             monotonic: 单调时钟（测试注入以稳定断言节流）
+            footer_enabled: 终态是否附 trace_id footer
+            feedback_enabled: 首帧是否携带反馈标识
         """
         self._sink = sink
         self._trace_id = trace_id
@@ -77,6 +87,8 @@ class WeComPresenter:
         self._max_frames = max_frames
         self._max_chars = max_chars
         self._monotonic = monotonic
+        self._footer_enabled = footer_enabled
+        self._feedback_enabled = feedback_enabled
 
         self._text: str = ""
         self._placeholder: str = WeComPresenterTexts.PLACEHOLDER_TEXT
@@ -84,6 +96,11 @@ class WeComPresenter:
         self._last_sent: str | None = None
         self._last_sent_at: float = float("-inf")
         self._frames_sent: int = 0
+        self._sources: list[SSECitationEvent] = []
+        self._abstained: bool = False
+        self._error: str | None = None
+        self._degraded: bool = False
+        self._feedback_sent: bool = False
 
     async def run(self, events: AsyncIterator[SSEEvent]) -> None:
         """消费上游事件流并完成一轮投影。
@@ -100,7 +117,7 @@ class WeComPresenter:
         await self.finalize()
 
     async def update(self, event: SSEEvent) -> None:
-        """投影单个事件：累积正文 / 记录占位；无渲染通道的事件丢弃。
+        """投影单个事件：累积正文 / 收集引用 / 记录终态标记，必要时发送一帧。
 
         丢弃类事件（思考过程 / 子代理过程 / 任务看板 / 模型信息 / 会话绑定
         智能体）在企微无对应渲染，丢弃且不得中断本轮流。
@@ -113,6 +130,14 @@ class WeComPresenter:
         elif isinstance(event, SSEStatusEvent):
             if is_blank(self._text):
                 self._placeholder = event.message
+        elif isinstance(event, SSECitationEvent):
+            self._sources.append(event)
+        elif isinstance(event, SSEAbstentionEvent):
+            self._abstained = True
+        elif isinstance(event, SSEErrorEvent):
+            # 脱敏：原始异常只进日志，不得外泄给企微用户
+            logger.error("[wecom] presenter got error event err={}", event.error)
+            self._error = WeComPresenterTexts.ERROR_TEXT
         elif isinstance(
             event,
             (
@@ -124,14 +149,61 @@ class WeComPresenter:
             ),
         ):
             return
+        if isinstance(event, SSEDoneEvent):
+            # done 意味着本轮已收尾，这里不再发中间帧，统一由 finalize 发终态帧
+            return
         await self._flush()
 
     async def finalize(self) -> None:
-        """发送终态帧（幂等）。"""
+        """发送终态帧（含引用/兜底/footer）；流式失败时退化为一次性收尾。"""
         if self._final:
             return
         self._final = True
-        await self._send(self._current_content(), finish=True)
+        content = self._render_final()
+        if self._degraded:
+            await self._send_raw(content, finish=True)
+            return
+        sent = await self._send(content, finish=True)
+        if not sent:
+            await self._send_raw(content, finish=True)
+
+    def _render_final(self) -> str:
+        """终态正文：正文 + 脱敏错误 + 转人工提示 + 参考来源 + trace_id footer。"""
+        parts: list[str] = []
+        body = self._render_answer()
+        if not is_blank(body):
+            parts.append(body)
+        if self._error is not None:
+            parts.append(self._error)
+        if self._abstained:
+            parts.append(WeComPresenterTexts.ABSTENTION_TEXT)
+        if not parts:
+            parts.append(WeComPresenterTexts.FALLBACK_TEXT)
+        sources = self._render_sources()
+        if sources:
+            parts.append(sources)
+        if self._footer_enabled:
+            parts.append(
+                WeComPresenterTexts.TRACE_FOOTER_TEMPLATE.format(self._trace_id)
+            )
+        return "\n\n".join(parts)
+
+    def _render_sources(self) -> str:
+        """文末「参考来源」段；无引用返回空串。"""
+        if not self._sources:
+            return ""
+        lines: list[str] = [WeComPresenterTexts.SOURCES_TITLE]
+        for item in self._sources:
+            lines.append(f"- {item.source}（第 {item.page} 页）")
+        return "\n".join(lines)
+
+    def _feedback_arg(self) -> dict | None:
+        """首帧的反馈标识；未开启或已发过则返回 None。"""
+        if not self._feedback_enabled:
+            return None
+        if self._feedback_sent:
+            return None
+        return {"id": self._trace_id}
 
     def _render_answer(self) -> str:
         """当前累积正文；超过长度上限时保留尾部。"""
@@ -151,7 +223,7 @@ class WeComPresenter:
 
     async def _flush(self) -> None:
         """按节流与上限规则决定是否发送当前快照。"""
-        if self._final:
+        if self._final or self._degraded:
             return
         carries_answer = self._has_answer()
         content = self._current_content()
@@ -161,17 +233,38 @@ class WeComPresenter:
             return
         if self._monotonic() - self._last_sent_at < self._min_interval_seconds:
             return
-        await self._send(content, finish=False)
-        if carries_answer:
+        sent = await self._send(content, finish=False)
+        if sent and carries_answer:
             self._frames_sent += 1
 
-    async def _send(self, content: str, finish: bool) -> None:
-        """发送一帧并记录发送内容与时刻。
+    async def _send(self, content: str, finish: bool) -> bool:
+        """发送一帧；失败时置降级标志并返回 False（不抛异常）。
 
         Args:
             content: 本帧内容
             finish: 是否为终态帧
+
+        Returns:
+            True 表示发送成功
         """
-        await self._sink.reply_stream(content, finish)
+        try:
+            await self._sink.reply_stream(
+                content, finish, feedback=self._feedback_arg()
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.error("[wecom] presenter reply failed finish={} err={}", finish, e)
+            self._degraded = True
+            return False
+        self._feedback_sent = True
         self._last_sent = content
         self._last_sent_at = self._monotonic()
+        return True
+
+    async def _send_raw(self, content: str, finish: bool) -> None:
+        """降级收尾：单次发送最终内容，失败只记日志。"""
+        try:
+            await self._sink.reply_stream(
+                content, finish, feedback=self._feedback_arg()
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.error("[wecom] presenter fallback reply failed err={}", e)
