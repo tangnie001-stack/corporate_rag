@@ -57,11 +57,13 @@
 | `src/services/clarify_service.py` | 澄清答案的**编排**（下沉目标）：定位并 resolve 挂起 Future + 落库用户答案 + 文本格式化 | **新建** |
 | `src/api/clarify.py` | 变**薄**：校验请求体 → 调 service → 映射 200/404 | 修改 |
 | `src/channels/wecom/clarify_parse.py` | **纯函数**：把用户文本解析成站点同构 `answers`（含多问/选项/multi_select/无效判定） | **新建** |
+| `src/channels/wecom/clarify_render.py` | **纯函数**：问题清单 → 企微可读文本块（投影层只调用；让 presenter 保持 <400 行） | **新建** |
 | `src/channels/wecom/presenter.py` | 把 `SSEAskUserEvent` **渲染进累积内容**（取代"显式丢弃"），不 finalize | 修改 |
 | `src/channels/wecom/handler.py` | 入站分流插一层"仅触发者的答案注入"；登记/清除 `_questions` | 修改 |
 | `src/config/wecom_channel.py` | 澄清相关文案（渲染模板 / 无效答案提示） | 修改 |
 | `tests/services/test_clarify_service.py` · `tests/channels/test_wecom_clarify.py` | 上述两处新单元 | **新建** |
-| `tests/api/test_clarify.py` · `tests/channels/test_wecom_presenter.py` · `tests/channels/test_wecom_handler.py` | 契约变更与新增用例 | 修改 |
+| `tests/channels/test_wecom_presenter*.py` · `tests/channels/wecom_presenter_fakes.py` | presenter 测试**拆分**（原文件 620 行已越线）+ 澄清渲染新用例 | 新建/拆分 |
+| `tests/api/test_clarify.py` · `tests/channels/test_wecom_handler.py` | 契约变更与新增用例 | 修改 |
 | `docs/agents/{code-map,glossary}.md` · `docs/openspec/changes/wecom-agent-bridge/{design.md,specs/…,tasks.md}` | 登记（含 spec delta：仅触发者约束） | 修改（Task 4） |
 
 ---
@@ -373,22 +375,48 @@ git commit -m "refactor(services): 澄清答案编排下沉 resolve_clarify_answ
 
 ### Task 2: 投影层呈现澄清问题（取代"显式丢弃"）
 
+> **⚠️ 本任务含两处结构调整（派单前已核实的硬约束，别等评审来提）**
+> 1. `src/channels/wecom/presenter.py` 现 **379 行**，本就贴着 400 红线 ⇒ 渲染逻辑**必须抽成独立模块**（`src/channels/wecom/clarify_render.py`），presenter 只留一行调用；否则会越线。
+> 2. `tests/channels/test_wecom_presenter.py` 现 **620 行**（**已越线**，属阶段 3 累积、此前未被逮到）⇒ 本任务**必须拆分**它（本仓惯例：共享辅助放普通模块、绝对导入），并把本任务的新增用例放进**新的** `tests/channels/test_wecom_presenter_clarify.py`。
+
 **Files:**
+- Create: `src/channels/wecom/clarify_render.py`（纯函数：问题清单 → 文本块）
+- Create: `tests/channels/wecom_presenter_fakes.py`（共享替身：`_RecordingSink`、`_stream(...)` 等，**唯一定义**）
+- Create: `tests/channels/test_wecom_presenter_clarify.py`（本任务的新增/改写用例）
+- Move/Split: `tests/channels/test_wecom_presenter.py` → 拆为"核心投影"与"流式/降级"两个文件（见 Step 1）
 - Modify: `src/channels/wecom/presenter.py`、`src/config/wecom_channel.py`
-- Test: `tests/channels/test_wecom_presenter.py`
 
 **Interfaces:**
 - Consumes: `SSEAskUserEvent`（`src/utils/sse.py`，字段 `questions: list[dict]`，元素 `{id, question, options, multi_select, dimension}`）。
 - Produces:
-  - `WeComChannelTexts.CLARIFY_HEADER: str` / `CLARIFY_HINT: str`（渲染模板）
-  - `WeComPresenter._clarify_text: str`（渲染后的问题块；`_render_answer()` 会把它与正文拼成快照）
+  - `WeComChannelTexts.CLARIFY_HEADER / CLARIFY_ITEM / CLARIFY_OPTIONS / CLARIFY_HINT`
+  - `clarify_render.render_questions(questions: list) -> str`（无有效问题时返回空串）
+  - `WeComPresenter._clarify_text: str`（渲染后的问题块；`_render_answer()` 把它与正文拼成快照）
 
-- [ ] **Step 1: 写失败测试（改掉旧契约用例 + 新增 2 条）**
+- [ ] **Step 0: 拆分越线的 presenter 测试文件（先做，保证后续步骤有干净落点）**
 
-在 `tests/channels/test_wecom_presenter.py` 中：
-1. **改写** `test_ask_user_event_produces_no_frame` → 改名为 `test_ask_user_event_is_rendered_into_content`（**阶段 3 的"不产帧"契约被本阶段显式取代**，change 的 spec delta 同步）：
+1. 新建 `tests/channels/wecom_presenter_fakes.py`：把 `tests/channels/test_wecom_presenter.py` 里**被多处复用**的替身与工具搬进去（如 `_RecordingSink`、`_stream(...)`、以及任何帧构造辅助），成为**唯一定义**；两个/三个测试模块都从 `from tests.channels.wecom_presenter_fakes import …` 引入。
+2. 按**主题**把剩余用例拆成两个文件（示例分法，按实际内容调整并保持主题内聚）：
+   - `tests/channels/test_wecom_presenter.py` —— 核心投影：骨架/快照累积/节流/帧数与长度上限/来源段/终态与 footer/兜底；
+   - `tests/channels/test_wecom_presenter_stream.py` —— 流式与降级：保活（队列 + 超时）、上游异常置错误文案、取消语义、发送失败降级。
+3. **断言一字不改**：只搬文件与 import；拆分后**用例总数不变**（先记下拆前 `pytest tests/channels/test_wecom_presenter.py -q` 的通过数，拆后**跨文件合计必须相等**）。
+4. 结果：`test_wecom_presenter.py`、`test_wecom_presenter_stream.py`、`wecom_presenter_fakes.py` 与（后续的）`test_wecom_presenter_clarify.py` **都 < 400 行**；`wecom_presenter_fakes.py` 不以 `test_` 开头、不被 pytest 收集。
+
+- [ ] **Step 1: 写失败测试（改写旧契约用例 + 新增 2 条，落在 `tests/channels/test_wecom_presenter_clarify.py`）**
+
+见下方代码块（三例）。注意第一例是**改写**阶段 3 的 `test_ask_user_event_produces_no_frame`（**该契约被本阶段显式取代**），**旧用例须从原文件删除、不得并存**。
 
 ```python
+"""投影层对澄清事件的呈现（阶段 4b 取代阶段 3 的"不产帧"契约）。"""
+
+import pytest
+
+from src.channels.wecom.presenter import WeComPresenter
+from src.config.wecom_presenter import WeComPresenterTexts
+from src.utils.sse import SSEAskUserEvent, SSEDoneEvent, SSETokenEvent
+from tests.channels.wecom_presenter_fakes import _RecordingSink, _stream
+
+
 @pytest.mark.asyncio
 async def test_ask_user_event_is_rendered_into_content():
     """澄清事件渲染进累积内容且**不 finalize**（回合未结束，终态帧只能发一次）。"""
@@ -416,11 +444,8 @@ async def test_ask_user_event_is_rendered_into_content():
     assert "选哪个口径？" in content
     assert "营收" in content
     assert sink.calls[-1][1] is False  # 仍是非终态帧：等待用户作答
-```
 
-2. 新增：**答案续跑后同一气泡同时含问题与答案**（快照语义 + 不重复 finalize）：
 
-```python
 @pytest.mark.asyncio
 async def test_clarify_question_and_answer_share_one_bubble():
     sink = _RecordingSink()
@@ -431,8 +456,12 @@ async def test_clarify_question_and_answer_share_one_bubble():
             [
                 SSEAskUserEvent(
                     questions=[
-                        {"id": "q1", "question": "选哪个口径？",
-                         "options": ["营收"], "multi_select": False}
+                        {
+                            "id": "q1",
+                            "question": "选哪个口径？",
+                            "options": ["营收"],
+                            "multi_select": False,
+                        }
                     ]
                 ),
                 SSETokenEvent(token="按营收口径："),
@@ -443,13 +472,10 @@ async def test_clarify_question_and_answer_share_one_bubble():
 
     final = sink.contents[-1]
     assert "选哪个口径？" in final  # 问题仍在（快照累积）
-    assert "按营收口径：" in final   # 后续答案接在同一气泡
-    assert sum(1 for _c, finish in sink.calls if finish) == 1  # 终态帧只一次
-```
+    assert "按营收口径：" in final  # 后续答案接在同一气泡
+    assert sum(1 for _content, finish in sink.calls if finish) == 1  # 终态帧只一次
 
-3. 新增：**没有问题/选项时不得产出空块**：
 
-```python
 @pytest.mark.asyncio
 async def test_ask_user_event_without_questions_renders_nothing():
     sink = _RecordingSink()
@@ -462,7 +488,7 @@ async def test_ask_user_event_without_questions_renders_nothing():
 
 - [ ] **Step 2: 跑测试确认失败**
 
-Run: `POSTGRES_HOST=localhost pytest tests/channels/test_wecom_presenter.py -q`
+Run: `POSTGRES_HOST=localhost pytest tests/channels/test_wecom_presenter_clarify.py -q`
 Expected: FAIL（`test_ask_user_event_is_rendered_into_content` 内容里没有"选哪个口径？"；另两条同理）。
 
 - [ ] **Step 3: 加文案（`src/config/wecom_channel.py`）**
@@ -477,15 +503,75 @@ Expected: FAIL（`test_ask_user_event_is_rendered_into_content` 内容里没有"
     CLARIFY_HINT: str = "请回复上面的问题；超时未回复我会按已有信息继续。"
 ```
 
-- [ ] **Step 4: 实现（`src/channels/wecom/presenter.py`）**
+- [ ] **Step 4: 新建渲染模块（`src/channels/wecom/clarify_render.py`）**
 
-① `__init__` 增字段：
+```python
+"""把澄清问题清单渲染成企微可读文本块（design D14；投影层只调用、不实现）。
+
+纯函数、无副作用：便于单测，也让 `presenter.py` 保持体量（红线 ≤400 行）。
+"""
+
+from __future__ import annotations
+
+from src.config.wecom_channel import WeComChannelTexts
+
+
+def render_questions(questions: list) -> str:
+    """渲染问题清单；无有效问题时返回空串。
+
+    Args:
+        questions: SSEAskUserEvent.questions（元素含 question/options）
+
+    Returns:
+        形如 "需要您补充信息…\\n1. 选哪个口径？（可选：营收、毛利）\\n…" 的文本块
+    """
+    lines: list[str] = []
+    index = 0
+    for item in questions:
+        if not isinstance(item, dict):
+            continue
+        question = str(item.get("question", "")).strip()
+        if not question:
+            continue
+        index += 1
+        line = WeComChannelTexts.CLARIFY_ITEM.format(index=index, question=question)
+        options = item.get("options") or []
+        if options:
+            joined = "、".join(str(option) for option in options)
+            line = f"{line} {WeComChannelTexts.CLARIFY_OPTIONS.format(options=joined)}"
+        lines.append(line)
+    if not lines:
+        return ""
+    lines.append(WeComChannelTexts.CLARIFY_HINT)
+    return "\n".join([WeComChannelTexts.CLARIFY_HEADER, *lines])
+```
+
+同时（可选但推荐）在 `tests/channels/test_wecom_presenter_clarify.py` 追加 1 条**纯函数**用例，钉住"无有效问题返回空串 / 有选项则带选项"：
+
+```python
+def test_render_questions_pure_function():
+    from src.channels.wecom.clarify_render import render_questions
+
+    assert render_questions([]) == ""
+    assert render_questions([{"question": "  "}]) == ""
+    rendered = render_questions(
+        [{"question": "选哪个？", "options": ["甲", "乙"]}]
+    )
+    assert "1. 选哪个？" in rendered
+    assert "甲、乙" in rendered
+```
+
+- [ ] **Step 5: 改 `src/channels/wecom/presenter.py`**
+
+① import 区增：`from src.channels.wecom.clarify_render import render_questions`。
+
+② `__init__` 增字段：
 
 ```python
         self._clarify_text: str = ""
 ```
 
-② `_render_answer()` 改为"问题块在前、正文在后"的快照（**仍是单一返回值**，保持原有截断语义）：
+③ `_render_answer()` 改为"问题块在前、正文在后"的快照（**仍是单一返回值**，保持原有截断语义）：
 
 ```python
     def _render_answer(self) -> str:
@@ -501,13 +587,13 @@ Expected: FAIL（`test_ask_user_event_is_rendered_into_content` 内容里没有"
         return composed
 ```
 
-③ `update` 里把**丢弃分支**换成渲染（保留 `return`，**不 finalize**）：
+④ `update` 里把**丢弃分支**换成渲染（保留 `return`，**不 finalize**）：
 
 ```python
         elif isinstance(event, SSEAskUserEvent):
             # 澄清问题要用户看见：渲染进累积内容（快照），但不 finalize——
             # 回合仍在挂起等待（见 design D14 与通道侧 spec）。
-            rendered = self._render_clarify(event.questions)
+            rendered = render_questions(event.questions)
             if rendered:
                 self._clarify_text = rendered
                 self._last_sent = None  # 绕过"内容未变即跳过"，确保问题发得出去
@@ -515,51 +601,17 @@ Expected: FAIL（`test_ask_user_event_is_rendered_into_content` 内容里没有"
             return
 ```
 
-④ 新增渲染方法（放 `_render_answer` 附近，纯函数、可单测）：
+- [ ] **Step 6: 跑测试确认通过 + 红线自查**
 
-```python
-    def _render_clarify(self, questions: list) -> str:
-        """把澄清问题渲染成企微可读文本块；无有效问题时返回空串。
+Run: `POSTGRES_HOST=localhost pytest tests/channels/ -q`（全绿；含拆分后的各文件）
+Run: `wc -l src/channels/wecom/presenter.py src/channels/wecom/clarify_render.py tests/channels/test_wecom_presenter*.py tests/channels/wecom_presenter_fakes.py`
+Expected: **每个文件都 < 400**；presenter ≈ 390。
 
-        Args:
-            questions: SSEAskUserEvent.questions（元素含 question/options）
-
-        Returns:
-            形如 "需要您补充信息…\n1. 选哪个口径？（可选：营收、毛利）\n…" 的文本块
-        """
-        lines: list[str] = []
-        index = 0
-        for item in questions:
-            if not isinstance(item, dict):
-                continue
-            question = str(item.get("question", "")).strip()
-            if not question:
-                continue
-            index += 1
-            line = WeComChannelTexts.CLARIFY_ITEM.format(index=index, question=question)
-            options = item.get("options") or []
-            if options:
-                joined = "、".join(str(option) for option in options)
-                line = f"{line} {WeComChannelTexts.CLARIFY_OPTIONS.format(options=joined)}"
-            lines.append(line)
-        if not lines:
-            return ""
-        lines.append(WeComChannelTexts.CLARIFY_HINT)
-        return "\n".join([WeComChannelTexts.CLARIFY_HEADER, *lines])
-```
-
-（`from src.config.wecom_channel import WeComChannelTexts`——注意 presenter 现有 import 区，按 isort 顺序插入。）
-
-- [ ] **Step 5: 跑测试确认通过**
-
-Run: `POSTGRES_HOST=localhost pytest tests/channels/test_wecom_presenter.py -q`
-Expected: 全 passed。
-
-- [ ] **Step 6: 提交**
+- [ ] **Step 7: 提交**
 
 ```bash
-git add src/channels/wecom/presenter.py src/config/wecom_channel.py tests/channels/test_wecom_presenter.py
-git commit -m "feat(channels): 澄清问题渲染进气泡（取代显式丢弃），不 finalize 以等待用户作答"
+git add src/channels/wecom/presenter.py src/channels/wecom/clarify_render.py src/config/wecom_channel.py tests/channels/wecom_presenter_fakes.py tests/channels/test_wecom_presenter.py tests/channels/test_wecom_presenter_stream.py tests/channels/test_wecom_presenter_clarify.py
+git commit -m "feat(channels): 澄清问题渲染进气泡（取代显式丢弃，不 finalize）；拆出渲染模块并拆分越线的 presenter 测试"
 ```
 
 ---
