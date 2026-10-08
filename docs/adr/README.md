@@ -112,7 +112,8 @@ docs/adr/NNNN-<kebab-case-短标题>.md
 | [0014](0014-candidate-pool-not-rerank-input-bound.md) | 更正 ADR-0001 的两段陈述（候选池非精排输入上界；多库路径死因） | Accepted | 局部更正 0001 的两段陈述（决策不变） |
 | [0015](0015-langfuse-tool-spans-imperative-api.md) | 工具 span 用命令式 Langfuse client 创建（client 实例取 decorators 单例） | Accepted | 为 `llm-tracing` 扩展观测面；与「纯装饰器」并存，不取代任何在先 ADR |
 | [0016](0016-unify-agent-loop-to-create-agent.md) | 统一 agent 循环到 `create_agent`（唯一装配入口 + 四件套 middleware，领域阶段留外层图） | Accepted | 沿用 0015 的命令式 span 接入方式；代价是 `agent_turn` 的 TTFB（`completion_start_time`）不再设置 |
-| [0017](0017-context-ladder-and-memory-scope.md) | 上下文治理采用四层阶梯（L0 写入侧→L1 瘦身→L2 摘要→L3 记忆）；窗口按 per-model 解析；长期记忆限 episodic + user-semantic，事实仍走 RAG | Accepted | 不取代任何在先 ADR；L0/L1 复用 0016 的 middleware 机制；记忆底座沿用 0004 的单 PostgreSQL（pgvector） |
+| [0017](0017-context-ladder-and-memory-scope.md) | 上下文治理采用四层阶梯（L0 写入侧→L1 瘦身→L2 摘要→L3 记忆）；窗口按 per-model 解析；长期记忆限 episodic + user-semantic，事实仍走 RAG | Accepted | **决策 3 记忆底座已被 0018 取代**；L0/L1 复用 0016 的 middleware 机制；记忆底座沿用 0004 的单 PostgreSQL（pgvector） |
+| [0018](0018-history-vs-memory-keep-own-truth-source.md) | 对话历史与 Agent 记忆分轴；短期记忆真源不迁 LangGraph checkpointer，长期记忆底座自建、不用 Store | Accepted | 局部取代 0017 的决策 3 |
 
 ## 模板
 

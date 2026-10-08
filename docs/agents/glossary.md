@@ -80,6 +80,14 @@
 - **abstention**（拒答）：检索无达标 context 时直接返回拒答文案，不回 LLM
 - **clarification**（追问）：分类器发现缺失实体时向用户发起追问（`CLARIFICATION_ENABLED` 开关控制）
 
+## 记忆与对话历史
+
+- **对话历史（transcript）**：本次会话逐条消息的记录（user / assistant / tool），跟随会话生命周期、**不可有损**（是回放与审计的真相）。真源 = Redis `chat_history:{session_id}`（供上下文组装）+ MySQL `conversation_history`（审计/回放）
+- **Agent 记忆（memory）**：从多次会话中提炼出的、**跨会话**跟随用户的知识（画像 / 偏好 / 经历 / 规则），**可错、可遗忘、可重建**。**本项目当前尚未实现**（属 Phase C，底座见 `docs/adr/0018-history-vs-memory-keep-own-truth-source.md`）
+- **记忆边界**：长期记忆**只承载 episodic + user-semantic**；**事实与知识类问题仍强制走 RAG 取证**，记忆不替代证据检索（依据 ADR-0017 决策 4，ADR-0018 沿用）
+- **`episodic` / `user-semantic`**：记忆的两类内容——前者是"经历过什么"（事件/任务），后者是"用户是谁"（画像 / 偏好 / 规则）
+- 二者的完整区分（含用途与注入形态）见 `docs/agents/memory-model.md`（**唯一归属文档**）
+
 ## Web 搜索兜底
 
 - **kind**：引用来源类型，取值 `kb`（知识库）/ `web`（网络搜索），默认 `kb`；承载于 `SSEInteractionTexts.CITATION_KIND_KB` / `CITATION_KIND_WEB`，贯穿 `RAGContext.kind` 与 citation 事件

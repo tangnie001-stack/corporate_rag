@@ -1,6 +1,6 @@
 # ADR-0017：上下文治理采用四层阶梯；长期记忆限于 episodic + user-semantic
 
-- **Status**：Accepted
+- **Status**：Accepted（**决策 3 记忆底座已被 ADR-0018 取代**，其余仍有效）
 - **Date**：2026-10-08
 - **Deciders**：用户（决策：破坏式升级、直接采用最佳实践）；Claude（调研与综合）
 - **关系**：L0/L1 的横切实现复用 ADR-0016 的 `create_agent` middleware 机制；长期记忆底座沿用 ADR-0004 的单一 PostgreSQL（`pgvector`）；本 ADR **不取代**任何在先 ADR。

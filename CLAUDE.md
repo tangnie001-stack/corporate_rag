@@ -32,6 +32,7 @@ Python 3.11+ / FastAPI / LangChain 1.x + LangGraph / PostgreSQL 15 + pgvector / 
 | docs/agents/knowledge-graph.md | 知识图谱（`.ua/knowledge-graph.json`）的查询配方 / 新鲜度判据 / 自动更新行为 / 已知坑 | **查代码关系、调用方、改动影响面前**（用 `/understand-chat` 或按 id grep + 1-hop 取子图，**勿整包读图**）；图谱疑似过期或需刷新时 |
 | docs/agents/data-flow.md | 数据流链路 | 排查问题、理解系统流程 |
 | docs/agents/glossary.md | 领域词汇表：核心标识符 / 响应信封 / RAG 流水线 / RAGAS 指标等规范术语 | 术语含义不确定、写文档或命名时查阅 |
+| docs/agents/memory-model.md | 记忆模型唯一归属：对话历史 vs Agent 记忆的区分 / 记忆的四个用途 / 注入形态 / 记忆边界（不得作为事实依据） | **设计或评审任何"记忆"能力前**；判断某数据该进历史还是记忆时 |
 | docs/agents/chunking-issues.md | 分块问题排查与修复记录 | 遇到分块问题优先查阅 |
 | docs/agents/defensive-patterns.md | 防御性模式：并发 / SSE / 精排 / 实体 / prompt / DB / 部署的防复发规则 | 写相关领域代码前 |
 | docs/agents/ui-design-flow.md | UI 设计流程与产物路径：全局基线 `docs/design/MASTER.md` / 页面规格 `docs/design/pages/<name>.md` / 效果预览 `docs/design/<name>-mockup.html` | **改 UI / 新增组件前必读**；产出按此流程落 `docs/design/`，改完用 playwright-cli 验证 |
