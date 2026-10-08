@@ -4,6 +4,7 @@
 仅使用 SDK 的公开接口，不调用 run()（它自建事件循环，与 FastAPI 冲突）。
 """
 
+import asyncio
 from typing import Any
 
 from aibot import WSClient, WSClientOptions, generate_req_id
@@ -32,6 +33,10 @@ _EVENT_EVENTS: tuple[str, ...] = (
 # 随后才关闭本连接；该关闭会触发 SDK 自动重连，而重连成功又顶掉对方 ⇒ 形成互踢循环。
 # 故收到即主动断开（SDK 手动断开不触发重连）并交出 client 引用，不抢回。
 _DISPLACED_EVENT: str = "event.disconnected_event"
+
+# 认证等待上界（秒）：SDK 的 connect() 不等认证（实测差 ~0.17s），故由驱动等
+# `authenticated` 事件；超时只降级、不断开（交 SDK 自愈），见 design D11。
+_AUTH_TIMEOUT_SECONDS: float = 5.0
 
 
 class _WsSink:
@@ -82,6 +87,7 @@ class LongConnectionDriver:
         self._handler = handler
         self._client: WSClient | None = None
         self._displaced: bool = False
+        self._ready: bool = False
 
     @property
     def is_displaced(self) -> bool:
@@ -92,19 +98,33 @@ class LongConnectionDriver:
         """
         return self._displaced
 
+    @property
+    def is_ready(self) -> bool:
+        """该台是否已认证就绪。
+
+        未认证（等待超时）／凭证类失败／被更新的连接顶替后均为 False。
+        """
+        if self._displaced:
+            return False
+        return self._ready
+
     async def start(self) -> None:
-        """建立长连接并注册事件处理器。"""
+        """建立长连接、等认证（上界 `_AUTH_TIMEOUT_SECONDS`）并注册事件处理器。"""
         # 已启动则直接返回：重复构造会覆盖 self._client，旧连接的 WebSocket
         # 与收帧循环不会 disconnect，仍会向同一 handler 派帧（重复处理 + 资源泄漏）。
         if self._client is not None:
             return
         client = WSClient(WSClientOptions(bot_id=self._bot_id, secret=self._secret))
+        auth_result: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+        client.on("authenticated", lambda: self._on_authenticated(auth_result))
+        client.on("error", lambda error: self._on_error(error, auth_result, client))
         handler = self._make_handler(client)
         for event in _MESSAGE_EVENTS + _EVENT_EVENTS:
             client.on(event, handler)
         client.on(_DISPLACED_EVENT, self._make_displaced_handler(client))
         await client.connect()
         self._client = client
+        await self._await_auth(auth_result)
 
     async def stop(self) -> None:
         """断开长连接。"""
@@ -112,6 +132,36 @@ class LongConnectionDriver:
             return
         self._client.disconnect()
         self._client = None
+        self._ready = False
+
+    def _on_authenticated(self, auth_result: asyncio.Future[bool]) -> None:
+        """SDK 认证成功：置就绪并唤醒等待（迟到的认证同样置就绪——状态要如实）。"""
+        self._ready = True
+        logger.info("[wecom] bot authenticated bot_id={}", encode_value(self._bot_id))
+        if not auth_result.done():
+            auth_result.set_result(True)
+
+    def _on_error(
+        self, error: BaseException, auth_result: asyncio.Future[bool], client: WSClient
+    ) -> None:
+        """SDK 连接期错误：凭证类失败交 Task 2 处置；其余只记日志。
+
+        本方法在 Task 2 扩展为"识别 Authentication failed → 断开并置致命"。
+        """
+        logger.warning(
+            "[wecom] connect error bot_id={} err={}", encode_value(self._bot_id), error
+        )
+
+    async def _await_auth(self, auth_result: asyncio.Future[bool]) -> None:
+        """等认证结果，上界 `_AUTH_TIMEOUT_SECONDS`；超时只降级（不计就绪、不断开）。"""
+        try:
+            await asyncio.wait_for(asyncio.shield(auth_result), _AUTH_TIMEOUT_SECONDS)
+        except TimeoutError:
+            logger.warning(
+                "[wecom] auth wait timeout bot_id={} timeout={}s",
+                encode_value(self._bot_id),
+                _AUTH_TIMEOUT_SECONDS,
+            )
 
     def _make_displaced_handler(self, client: WSClient):
         """构造"被顶替"处理器：主动断开且不抢回，避免与顶替者互踢。
@@ -124,6 +174,7 @@ class LongConnectionDriver:
             if self._displaced:
                 return
             self._displaced = True
+            self._ready = False
             body = frame.get("body", {})
             logger.warning(
                 "[wecom] bot displaced by newer connection bot_id={} msgid={}"

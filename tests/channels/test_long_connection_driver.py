@@ -249,3 +249,130 @@ async def test_enter_chat_still_reaches_business_handler(monkeypatch):
 
     assert len(seen) == 1
     assert seen[0].event_type == "enter_chat"
+
+
+class _FakeClientWithAuth(_FakeClient):
+    """可手动触发 authenticated / error 的伪 client。"""
+
+    def __init__(self, options: Any, *, emit_auth: bool = True):
+        super().__init__(options)
+        self.disconnect_calls = 0
+        self._emit_auth = emit_auth
+
+    async def connect(self) -> "_FakeClientWithAuth":
+        self.connected = True
+        if self._emit_auth:
+            self.emit("authenticated")
+        return self
+
+    def emit(self, event: str, payload: Any = None) -> None:
+        """同步触发已注册处理器（对标 pyee 的行为）。"""
+        handler = self.handlers.get(event)
+        if handler is None:
+            return
+        if payload is None:
+            handler()
+            return
+        handler(payload)
+
+    def disconnect(self) -> None:
+        self.disconnect_calls += 1
+        self.connected = False
+
+
+def _auth_patch(monkeypatch, *, emit_auth: bool):
+    holder: dict[str, _FakeClientWithAuth] = {}
+
+    def _factory(options):
+        client = _FakeClientWithAuth(options, emit_auth=emit_auth)
+        holder["client"] = client
+        return client
+
+    monkeypatch.setattr(lc, "WSClient", _factory)
+    return holder
+
+
+@pytest.mark.asyncio
+async def test_start_marks_ready_when_authenticated(monkeypatch):
+    holder = _auth_patch(monkeypatch, emit_auth=True)
+
+    async def _handler(msg: InboundMessage, sink: ReplySink) -> None:
+        return
+
+    driver = lc.LongConnectionDriver("BOTID", "SECRET", _handler)
+    await driver.start()
+
+    assert holder["client"].connected is True
+    assert driver.is_ready is True
+
+
+@pytest.mark.asyncio
+async def test_auth_wait_timeout_degrades_without_disconnect(monkeypatch):
+    """超时只降级：不计就绪、**不断开**（交 SDK 自愈），但连接已建立仍须登记。"""
+    holder = _auth_patch(monkeypatch, emit_auth=False)
+    monkeypatch.setattr(lc, "_AUTH_TIMEOUT_SECONDS", 0.01)
+
+    async def _handler(msg: InboundMessage, sink: ReplySink) -> None:
+        return
+
+    driver = lc.LongConnectionDriver("BOTID", "SECRET", _handler)
+    await driver.start()
+
+    assert driver.is_ready is False
+    assert holder["client"].connected is True  # 未断开
+    assert holder["client"].disconnect_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_late_authenticated_still_marks_ready(monkeypatch):
+    """超时后认证才到达：仍应转为就绪（状态要如实）。"""
+    holder = _auth_patch(monkeypatch, emit_auth=False)
+    monkeypatch.setattr(lc, "_AUTH_TIMEOUT_SECONDS", 0.01)
+
+    async def _handler(msg: InboundMessage, sink: ReplySink) -> None:
+        return
+
+    driver = lc.LongConnectionDriver("BOTID", "SECRET", _handler)
+    await driver.start()
+    assert driver.is_ready is False
+
+    holder["client"].emit("authenticated")
+    assert driver.is_ready is True
+
+
+@pytest.mark.asyncio
+async def test_displaced_driver_is_not_ready(monkeypatch):
+    holder = _auth_patch(monkeypatch, emit_auth=True)
+
+    async def _handler(msg: InboundMessage, sink: ReplySink) -> None:
+        return
+
+    driver = lc.LongConnectionDriver("BOTID", "SECRET", _handler)
+    await driver.start()
+    assert driver.is_ready is True
+
+    await holder["client"].handlers["event.disconnected_event"](
+        {
+            "cmd": "aibot_event_callback",
+            "body": {
+                "msgid": "D1",
+                "msgtype": "event",
+                "event": {"eventtype": "disconnected_event"},
+            },
+        }
+    )
+    assert driver.is_ready is False
+
+
+@pytest.mark.asyncio
+async def test_stop_resets_ready(monkeypatch):
+    _auth_patch(monkeypatch, emit_auth=True)
+
+    async def _handler(msg: InboundMessage, sink: ReplySink) -> None:
+        return
+
+    driver = lc.LongConnectionDriver("BOTID", "SECRET", _handler)
+    await driver.start()
+    await driver.stop()
+
+    assert driver.is_ready is False
