@@ -199,6 +199,35 @@ def get_classify_llm() -> ChatOpenAI:
     )
 
 
+def get_summary_llm() -> ChatOpenAI:
+    """创建跨轮历史摘要专用 LLM 实例（关闭思考 + 显式输出上限）。
+
+    与 `get_classify_llm` 的区别：那个是分类器语义、模型走 `CLASSIFY_MODEL`；
+    摘要走独立的 `SUMMARY_MODEL`。必须设 `max_tokens`——否则「拒绝截断摘要」
+    这一不变量失去判据（未设上限时几乎不会出现 length 截断）。
+
+    Returns:
+        关闭思考、带输出上限的 ChatOpenAI 实例
+    """
+    # 注意：`src/config/__init__.py` 只星号导出 `settings`（第 8 行
+    # `from src.config.settings import *`），**不含 `const`** ⇒ 两个常量必须分开取。
+    from src.config import SUMMARY_MODEL
+    from src.config.const import SUMMARY_MAX_TOKENS
+
+    extra_kwargs: dict = json.loads(LLM_KWARGS)
+    extra_kwargs.update(
+        {"extra_body": {"enable_thinking": False}, "max_tokens": SUMMARY_MAX_TOKENS}
+    )
+    return ChatOpenAI(
+        model=SUMMARY_MODEL,
+        temperature=0,
+        api_key=SecretStr(LLM_API_KEY),
+        base_url=LLM_BASE_URL,
+        callbacks=_content_logging_callbacks(),
+        **extra_kwargs,
+    )
+
+
 def get_rerank(model: str = RERANK_MODEL, top_n: int = TOP_K_RERANK) -> DashScopeRerank:
     """创建文本重排序模型实例（固定走 DashScope Rerank API）。
 

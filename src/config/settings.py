@@ -48,6 +48,9 @@ LLM_KWARGS: str = os.getenv("LLM_KWARGS", "{}")
 CLASSIFIER_TEMPERATURE: float = float(os.getenv("CLASSIFIER_TEMPERATURE", "0.1"))
 # 分类/路由专用模型：实体抽取 / 意图判定 / 时间解析使用的小模型（无思考模式）
 CLASSIFY_MODEL: str = os.getenv("CLASSIFY_MODEL", "qwen3.7-flash-2026-07-15")
+# 跨轮历史摘要专用模型：默认沿用主模型，可用 env 覆盖为更便宜的档位。
+# 摘要调用固定关闭思考（实测深思考让输出 token 涨约 2.7 倍，其中 64% 是不可见思考）。
+SUMMARY_MODEL: str = os.getenv("SUMMARY_MODEL", LLM_MODEL)
 # LLM 输入/输出内容记录开关：开启后所有 LLM 调用（含 ragas 指标打分）会
 # 把 prompt 与响应写入日志。默认关闭（避免生产日志被内容刷屏），调试时开启
 LLM_LOG_CONTENT: bool = os.getenv("LLM_LOG_CONTENT", "0").lower() in (

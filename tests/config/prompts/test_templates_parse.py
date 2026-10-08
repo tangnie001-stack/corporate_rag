@@ -1,4 +1,4 @@
-"""21 条模板文件可解析、字段合法、id 唯一。"""
+"""22 条模板文件可解析、字段合法、id 唯一。"""
 
 from pathlib import Path
 
@@ -24,9 +24,9 @@ def _all_templates() -> list[dict]:
 
 
 def test_template_count_and_migrated_ids() -> None:
-    """21 条 = 12 条搬运 + 1 条通用 base（base-general）+ 8 条新增段模板（runtime-contract / sources-general / sources-kb-web-rules / sources-kb-unbound-web / output-presentation / output-delegate-citation / tools-execution / tools-ask-user）。"""
+    """22 条 = 12 条搬运 + 1 条通用 base（base-general）+ 8 条新增段模板（runtime-contract / sources-general / sources-kb-web-rules / sources-kb-unbound-web / output-presentation / output-delegate-citation / tools-execution / tools-ask-user）+ 1 条跨轮历史摘要 task 模板（task-summary-system）。"""
     templates = _all_templates()
-    assert len(templates) == 21
+    assert len(templates) == 22
     required_ids = {
         "tools-delegate",
         "base-financial",
