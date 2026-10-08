@@ -88,13 +88,21 @@ async def summarize_history(
         SummaryResult；degraded=True 时 text 为空、covered 沿用上一次覆盖数
     """
     covered = previous_covered + len(discarded)
-    system_prompt = loader.get_content(SUMMARY_SYSTEM_TEMPLATE_ID)
-    body = _render_discarded(discarded)
-    if previous_text:
-        user_prompt = f"上一版摘要：\n{previous_text}\n\n本次要并入的更早对话：\n{body}"
-    else:
-        user_prompt = f"要压缩的更早对话：\n{body}"
+    # 取模板、拼输入、统计被丢弃段 token 一并纳入降级边界：模板缺失（`get_content`
+    # 抛 `KeyError`）或返回非 str 时也必须走 degraded，绝不穿透本函数。
     try:
+        system_prompt = loader.get_content(SUMMARY_SYSTEM_TEMPLATE_ID)
+        body = _render_discarded(discarded)
+        if previous_text:
+            user_prompt = (
+                f"上一版摘要：\n{previous_text}\n\n本次要并入的更早对话：\n{body}"
+            )
+        else:
+            user_prompt = f"要压缩的更早对话：\n{body}"
+        previous_tokens = None
+        if previous_text:
+            previous_tokens = count_tokens(previous_text)
+        discarded_tokens = sum(count_tokens(m.content) for m in discarded)
         llm = get_summary_llm()
         response = await asyncio.wait_for(
             llm.ainvoke(
@@ -116,10 +124,9 @@ async def summarize_history(
     if finish_reason == "length":
         return SummaryResult("", previous_covered, True, "truncated")
     text = strip_citation_numbers(str(response.content))
-    previous_tokens = count_tokens(previous_text) if previous_text else None
     ok, reason = validate_summary(
         text,
-        discarded_tokens=sum(count_tokens(m.content) for m in discarded),
+        discarded_tokens=discarded_tokens,
         previous_tokens=previous_tokens,
     )
     if not ok:
