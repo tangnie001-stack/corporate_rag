@@ -81,6 +81,10 @@ channels/          接入通道：base(通用抽象) / wecom(parse 入站解析 
 > 本仓库**只**使用其公开接口：`connect()` / `disconnect()` / `on()` / `reply_stream()`。
 > **禁止调用 `run()`** —— 它自建事件循环，与 FastAPI 冲突（有守卫测试 `tests/channels/test_long_connection_no_run.py`）。
 > 契约：每机器人同时只能一条连接（新连接踢旧连接）。依赖与部署影响见 `deploy-runbook.md`。
+>
+> 企微流式投影（接入站点同款 Agent 管线投影层）落在两处：
+> - `src/channels/wecom/presenter.py`：企微流式投影层（事件流 → 企微帧；快照累积 / 节流 / 上限 / 保活）
+> - `src/config/wecom_presenter.py`：企微投影层可调参数与文案
 
 ### prompt 组装与段模板归属
 

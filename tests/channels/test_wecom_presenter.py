@@ -1,5 +1,6 @@
 """WeComPresenter 投影层单测：全部用假 sink，不发真实网络。"""
 
+import asyncio
 from collections.abc import AsyncIterator
 
 import pytest
@@ -49,6 +50,15 @@ def _frozen_clock(value: float = 1000.0):
 
 async def _stream(events: list[SSEEvent]) -> AsyncIterator[SSEEvent]:
     for event in events:
+        yield event
+
+
+async def _slow_stream(
+    events: list[SSEEvent], delays: list[float]
+) -> AsyncIterator[SSEEvent]:
+    """按给定延迟逐个产出事件（用于保活与首帧超时用例）。"""
+    for event, delay in zip(events, delays):
+        await asyncio.sleep(delay)
         yield event
 
 
@@ -369,3 +379,130 @@ async def test_stream_failure_degrades_to_single_final_send():
     )
 
     assert sink.calls == [("甲乙", True, None)]
+
+
+@pytest.mark.asyncio
+async def test_keepalive_fires_during_silence():
+    sink = _RecordingSink()
+    presenter = WeComPresenter(
+        sink, "trace_1", min_interval_seconds=0, keepalive_seconds=0.05
+    )
+
+    await presenter.run(
+        _slow_stream(
+            [SSETokenEvent(token="甲"), SSETokenEvent(token="乙"), SSEDoneEvent()],
+            [0.0, 0.2, 0.0],
+        )
+    )
+
+    # 静默期内至少重发一次当前快照，且内容与上一帧相同
+    assert sink.contents.count("甲") >= 2
+
+
+@pytest.mark.asyncio
+async def test_keepalive_does_not_terminate_upstream():
+    sink = _RecordingSink()
+    presenter = WeComPresenter(
+        sink, "trace_1", min_interval_seconds=0, keepalive_seconds=0.05
+    )
+
+    await presenter.run(
+        _slow_stream(
+            [SSETokenEvent(token="甲"), SSETokenEvent(token="乙"), SSEDoneEvent()],
+            [0.0, 0.2, 0.0],
+        )
+    )
+
+    # 保活发生过之后，上游后续事件仍被消费到终态
+    assert sink.contents[-1].startswith("甲乙")
+    assert sink.calls[-1][1] is True
+
+
+@pytest.mark.asyncio
+async def test_placeholder_frame_when_first_frame_is_late():
+    sink = _RecordingSink()
+    presenter = WeComPresenter(
+        sink,
+        "trace_1",
+        min_interval_seconds=0,
+        first_frame_timeout=0.05,
+        keepalive_seconds=1.0,
+    )
+
+    await presenter.run(
+        _slow_stream([SSETokenEvent(token="甲"), SSEDoneEvent()], [0.2, 0.0])
+    )
+
+    assert sink.contents[0] == WeComPresenterTexts.PLACEHOLDER_TEXT
+
+
+@pytest.mark.asyncio
+async def test_run_ends_when_stream_ends_without_terminal_event():
+    sink = _RecordingSink()
+    presenter = WeComPresenter(sink, "trace_1", min_interval_seconds=0)
+
+    await presenter.run(_stream([SSETokenEvent(token="甲")]))
+
+    assert sink.contents[-1].startswith("甲")
+    assert sink.calls[-1][1] is True
+
+
+@pytest.mark.asyncio
+async def test_keepalive_frames_not_counted_toward_cap():
+    sink = _RecordingSink()
+    presenter = WeComPresenter(
+        sink,
+        "trace_1",
+        min_interval_seconds=0,
+        max_frames=1,
+        keepalive_seconds=0.05,
+    )
+
+    await presenter.run(
+        _slow_stream(
+            [SSETokenEvent(token="甲"), SSETokenEvent(token="乙"), SSEDoneEvent()],
+            [0.0, 0.2, 0.0],
+        )
+    )
+
+    # 正文帧已触顶（"甲乙" 不再作为中间帧发出），但保活帧仍照发（豁免上限）
+    mid_stream = [content for content, finish, _fb in sink.calls if not finish]
+    assert "甲乙" not in mid_stream
+    assert mid_stream.count("甲") >= 2
+    assert sink.contents[-1].startswith("甲乙")
+
+
+@pytest.mark.asyncio
+async def test_run_returns_even_if_upstream_never_ends():
+    async def _endless() -> AsyncIterator[SSEEvent]:
+        yield SSETokenEvent(token="甲")
+        yield SSEDoneEvent(trace_id="trace_1")
+        await asyncio.sleep(30)
+        yield SSETokenEvent(token="不该到达")
+
+    sink = _RecordingSink()
+    presenter = WeComPresenter(sink, "trace_1", min_interval_seconds=0)
+
+    async with asyncio.timeout(2):
+        await presenter.run(_endless())
+
+    assert sink.calls[-1][1] is True
+    assert all("不该到达" not in content for content, _f, _fb in sink.calls)
+
+
+@pytest.mark.asyncio
+async def test_run_finalizes_when_consume_loop_raises(monkeypatch):
+    sink = _RecordingSink()
+    presenter = WeComPresenter(sink, "trace_1", min_interval_seconds=0)
+
+    async def _boom(event: SSEEvent) -> None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(presenter, "update", _boom)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await presenter.run(_stream([SSETokenEvent(token="甲")]))
+
+    # 投影 spec 禁止悬挂未结束的流：异常路径也必须发出终态帧
+    assert sink.calls
+    assert sink.calls[-1][1] is True

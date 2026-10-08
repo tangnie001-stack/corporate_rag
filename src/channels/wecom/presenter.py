@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import AsyncIterator, Callable
 
@@ -14,6 +15,8 @@ from loguru import logger
 from src.channels.base import ReplySink
 from src.config.wecom_presenter import (
     FEEDBACK_ID_ENABLED,
+    FIRST_FRAME_TIMEOUT_SECONDS,
+    KEEPALIVE_INTERVAL_SECONDS,
     MAX_INTERMEDIATE_FRAMES,
     MAX_STREAM_CHARS,
     MIN_SEND_INTERVAL_SECONDS,
@@ -37,6 +40,9 @@ from src.utils.sse import (
 
 # 零宽字符：仅含这些字符的内容视为空白（不得产生空气泡）
 _ZERO_WIDTH_CHARS: tuple[str, ...] = ("\u200b", "\u200c", "\u200d", "\ufeff")
+
+# 队列哨兵：上游事件流已结束（不再有事件入队）
+_EVENTS_END: object = object()
 
 
 def is_blank(text: str) -> bool:
@@ -63,6 +69,8 @@ class WeComPresenter:
         trace_id: str,
         *,
         min_interval_seconds: float = MIN_SEND_INTERVAL_SECONDS,
+        keepalive_seconds: float = KEEPALIVE_INTERVAL_SECONDS,
+        first_frame_timeout: float = FIRST_FRAME_TIMEOUT_SECONDS,
         max_frames: int = MAX_INTERMEDIATE_FRAMES,
         max_chars: int = MAX_STREAM_CHARS,
         monotonic: Callable[[], float] = time.monotonic,
@@ -75,7 +83,9 @@ class WeComPresenter:
             sink: 回复出口
             trace_id: 本轮 trace_id（终态 footer 与首帧反馈标识用）
             min_interval_seconds: 发送最小间隔（节流下限）
-            max_frames: 承载正文的中间帧数上限（占位帧不计入）
+            keepalive_seconds: 无事件时的保活间隔；须小于「首帧起 6 分钟」的收尾时限
+            first_frame_timeout: 首帧最迟等待；超时先发占位帧，不空等到收尾时限
+            max_frames: 承载正文的中间帧数上限（占位帧与保活帧不计入）
             max_chars: 单流累计正文长度上限（超出保留尾部）
             monotonic: 单调时钟（测试注入以稳定断言节流）
             footer_enabled: 终态是否附 trace_id footer
@@ -84,6 +94,8 @@ class WeComPresenter:
         self._sink = sink
         self._trace_id = trace_id
         self._min_interval_seconds = min_interval_seconds
+        self._keepalive_seconds = keepalive_seconds
+        self._first_frame_timeout = first_frame_timeout
         self._max_frames = max_frames
         self._max_chars = max_chars
         self._monotonic = monotonic
@@ -105,14 +117,66 @@ class WeComPresenter:
     async def run(self, events: AsyncIterator[SSEEvent]) -> None:
         """消费上游事件流并完成一轮投影。
 
-        终态由 `done`/`error` 事件或事件流自然结束触发。
+        事件流以队列暴露、对「取下一个事件」施加超时：直接对上游生成器的
+        在途取值施超时取消会终结生成器（`_subscribe_events` 不捕
+        `CancelledError`），恰在需要保活时把长流静默截断。
 
         Args:
             events: 结构化事件流（如 `TurnHandle.events`）
         """
-        async for event in events:
-            await self.update(event)
-            if isinstance(event, (SSEDoneEvent, SSEErrorEvent)):
+        queue: asyncio.Queue = asyncio.Queue()
+        pump = asyncio.create_task(self._pump(events, queue))
+        try:
+            await self._consume(queue)
+        except Exception:
+            # 消费循环意外抛出（不是 error 事件路径）时仍须收尾：投影 spec
+            # 禁止留下未结束的悬挂流；先补发终态帧，再把异常交给调用方
+            await self.finalize()
+            raise
+        finally:
+            pump.cancel()
+            await asyncio.gather(pump, return_exceptions=True)
+
+    async def _pump(
+        self, events: AsyncIterator[SSEEvent], queue: asyncio.Queue
+    ) -> None:
+        """后台泵：把上游事件入队；上游结束或出错时补哨兵。
+
+        Args:
+            events: 上游结构化事件流
+            queue: 投影层消费的队列
+        """
+        try:
+            async for event in events:
+                queue.put_nowait(event)
+        except Exception as e:  # noqa: BLE001
+            logger.error("[wecom] presenter pump aborted err={}", e)
+        finally:
+            queue.put_nowait(_EVENTS_END)
+
+    async def _consume(self, queue: asyncio.Queue) -> None:
+        """消费循环：超时发保活帧（不取消上游），终态或哨兵后收尾。
+
+        Args:
+            queue: 事件队列
+        """
+        first = True
+        while True:
+            if first:
+                timeout = self._first_frame_timeout
+            else:
+                timeout = self._keepalive_seconds
+            try:
+                item = await asyncio.wait_for(queue.get(), timeout)
+            except TimeoutError:
+                await self._flush(keepalive=True)
+                first = False
+                continue
+            if item is _EVENTS_END:
+                break
+            first = False
+            await self.update(item)
+            if isinstance(item, (SSEDoneEvent, SSEErrorEvent)):
                 break
         await self.finalize()
 
@@ -221,20 +285,29 @@ class WeComPresenter:
             return self._render_answer()
         return self._placeholder
 
-    async def _flush(self) -> None:
-        """按节流与上限规则决定是否发送当前快照。"""
+    async def _flush(self, *, keepalive: bool = False) -> None:
+        """按节流与上限规则决定是否发送当前快照。
+
+        保活帧（`keepalive=True`）豁免「内容未变跳过」「空白不发送」「帧数上限」
+        与节流：长静默期累积正文与上一帧相同，不豁免则保活无从发出；保活即
+        重发当前快照，不新造可见文案。
+
+        Args:
+            keepalive: 是否保活帧
+        """
         if self._final or self._degraded:
             return
         carries_answer = self._has_answer()
         content = self._current_content()
-        if content == self._last_sent:
-            return
-        if carries_answer and self._frames_sent >= self._max_frames:
-            return
-        if self._monotonic() - self._last_sent_at < self._min_interval_seconds:
-            return
+        if not keepalive:
+            if content == self._last_sent:
+                return
+            if carries_answer and self._frames_sent >= self._max_frames:
+                return
+            if self._monotonic() - self._last_sent_at < self._min_interval_seconds:
+                return
         sent = await self._send(content, finish=False)
-        if sent and carries_answer:
+        if sent and carries_answer and not keepalive:
             self._frames_sent += 1
 
     async def _send(self, content: str, finish: bool) -> bool:
