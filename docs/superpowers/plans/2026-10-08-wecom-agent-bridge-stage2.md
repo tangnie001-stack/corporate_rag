@@ -1390,6 +1390,24 @@ async def test_run_returns_even_if_upstream_never_ends():
 
     assert sink.calls[-1][1] is True
     assert all("不该到达" not in content for content, _f, _fb in sink.calls)
+
+
+@pytest.mark.asyncio
+async def test_run_finalizes_when_consume_loop_raises(monkeypatch):
+    sink = _RecordingSink()
+    presenter = WeComPresenter(sink, "trace_1", min_interval_seconds=0)
+
+    async def _boom(event: SSEEvent) -> None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(presenter, "update", _boom)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await presenter.run(_stream([SSETokenEvent(token="甲")]))
+
+    # 投影 spec 禁止悬挂未结束的流：异常路径也必须发出终态帧
+    assert sink.calls
+    assert sink.calls[-1][1] is True
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
@@ -1428,6 +1446,11 @@ _EVENTS_END: object = object()
         pump = asyncio.create_task(self._pump(events, queue))
         try:
             await self._consume(queue)
+        except Exception:
+            # 消费循环意外抛出（不是 error 事件路径）时仍须收尾：投影 spec
+            # 禁止留下未结束的悬挂流；先补发终态帧，再把异常交给调用方
+            await self.finalize()
+            raise
         finally:
             pump.cancel()
             await asyncio.gather(pump, return_exceptions=True)
@@ -1510,7 +1533,7 @@ _EVENTS_END: object = object()
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `POSTGRES_HOST=localhost pytest tests/channels/test_wecom_presenter.py -q`
-Expected: 23 passed。
+Expected: 24 passed。
 
 - [ ] **Step 5: 全量回归**
 
@@ -1558,8 +1581,8 @@ git commit -m "feat(channels): 投影层加占位首帧与队列保活，登记 
 | 4.8 流式失败降级为一次性收尾 | Task 4 |
 | 4.11 空回答 / abstention 兜底 | Task 4 |
 | 4.9 占位首帧 | Task 5 |
-| 4.10 长流保活（队列 + 超时，不取消上游） | Task 5 |
-| 4.12 投影层单测（假 sink 覆盖各场景） | Task 2–5 累积（23 个用例） |
+| 4.10 长流保活（队列 + 超时，不取消上游）+ 异常路径仍收尾 | Task 5 |
+| 4.12 投影层单测（假 sink 覆盖各场景） | Task 2–5 累积（24 个用例） |
 
 ## 不在本阶段范围（留给后续阶段）
 
