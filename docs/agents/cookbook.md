@@ -433,6 +433,24 @@ scripts/dev-worktree.sh down
 - **锚点日志 `[wecom] bots connected n=<ok> total=<all>` 是分诊依据**：`n=0` 且 `total>0` 指向「端点不可达」；**没有该行 / `total` 与预期台数不符**指向「未切长连接模式」（仍在 callback 模式 → 不解析 `WECOM_BOTS`）。
 - **目标机 `.env` 须人工同步**（见 `deploy-runbook.md` §1.4）：本地新增/修改的键不会自动上机。
 
+### 活体验证驱动的「被顶处置」（两条连接互顶 + 观察）
+
+**场景**：改动 `LongConnectionDriver` 的连接生命周期（尤其"被顶 / 断开 / 重连"相关）后，需要在**真实平台**上确认行为——单测用假 `WSClient`，看不到 SDK 的重连与平台的踢人动作。SDK 升级后回归同样适用。
+**步骤**：
+1. 确认目标机器人当前**无人连接**（生产侧若在跑，先在生产机 `docker compose -f docker-compose.image.yml stop app`）。
+2. 用**我们自己的驱动**连上去：`.superpowers/spike/verify_displaced_fix.py`，运行方式 **`PYTHONPATH=. .venv/bin/python -u <脚本>`**。
+3. 脚本自动在 5 秒后用**同凭证的第二个原始 SDK 连接**抢占同一机器人，随后观察 **180 秒**。
+**验证**（四条全过才算通过）：
+1. 我们的驱动打出 `[wecom] bot displaced by newer connection bot_id=… msgid=…; disconnecting without reclaim`；
+2. 结算行 `is_displaced=True`、`_client is None=True`；
+3. 全日志 `Establishing WebSocket connection` 共 **2 次**（我们 1 + 顶替者 1），且 warning 之后**再无**新建连（= 没重连）；
+4. 顶替者事件序列仅 `[connected, authenticated]`，收到 `disconnected_event` **0 次**（= 无互踢循环）。
+**注意事项**：
+- **必须 `PYTHONPATH=.`**：`python <脚本路径>` 会把脚本目录放进 `sys.path[0]`，`import src` 直接 `ModuleNotFoundError`；脚本会打印 `驱动实现来自：<路径>`，据此确认跑的是**哪个工作区**的代码。
+- **观察窗必须 ≥ 3 分钟**：服务端关闭被顶连接**有延迟且不固定**（实测 313s / 2.2s）；90 秒的窗口会得出相反的错误结论（本项目第一轮就误判为"不会互踢"）。
+- 只连**一台**机器人，并确保生产侧没在连同一个（否则两边互踢，结论不可信）。
+- 现象机理与全部实测数据见 `docs/agents/wecom-sdk-facts.md`（E4）；通用探针为同目录的 `wecom_sdk_probe.py`。
+
 ## 分区命名
 
 按操作主题分区，例如：`## 评估`、`## 分块`、`## 部署`。新主题首次出现时新建分区。
