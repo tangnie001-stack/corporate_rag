@@ -1,0 +1,30 @@
+"""企微**通道层**的参数与用户可见文案（design D10/D14）。
+
+与投影层参数分档：本模块放通道编排关心的时间窗与容量；投影层的节流/上限/保活
+在 `src/config/wecom_presenter.py`。两者都独立于 `settings.py`（385 行，逼近红线）。
+"""
+
+import os
+
+# ── msgid 去重（D10）──
+# 去重窗口（秒）：窗口内同 msgid 视为重推并丢弃
+DEDUP_TTL_SECONDS: float = float(os.getenv("WECOM_DEDUP_TTL_SECONDS", "600"))
+# 去重表容量上限（超出淘汰最旧）
+DEDUP_CAPACITY: int = int(os.getenv("WECOM_DEDUP_CAPACITY", "500"))
+
+# ── 澄清"会话 → 触发者"登记（D14）──
+# 登记存活时间（秒）：须 ≥ ask_user 等待超时（ASK_USER_TIMEOUT=120s），留清理余量
+TRIGGER_MAP_TTL_SECONDS: float = float(
+    os.getenv("WECOM_TRIGGER_MAP_TTL_SECONDS", "300")
+)
+# 登记表容量上限（超出淘汰最旧）
+TRIGGER_MAP_CAPACITY: int = int(os.getenv("WECOM_TRIGGER_MAP_CAPACITY", "500"))
+
+
+class WeComChannelTexts:
+    """企微通道层对用户可见的文案。"""
+
+    # 同会话已有进行中的生成时回给用户的提示（替站点 409）
+    BUSY_TEXT: str = "正在处理上一条消息，请稍候再发。"
+    # 非文本消息（图片/语音/文件等）的提示：管线只吃文本 query
+    UNSUPPORTED_TEXT: str = "暂只支持文字提问，请把问题打成文字发给我。"
