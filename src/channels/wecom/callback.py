@@ -46,8 +46,14 @@ class _CallbackSink:
     def __init__(self) -> None:
         self.reply: OutboundReply | None = None
 
-    async def reply_stream(self, content: str, finish: bool) -> None:
-        """记录一条流式回复。"""
+    async def reply_stream(
+        self, content: str, finish: bool, feedback: dict | None = None
+    ) -> None:
+        """记录一条流式回复。
+
+        回调模式只支持首次同步回包，回包体也没有反馈字段，故 `feedback` 被
+        忽略（保留参数以满足 `ReplySink` 协议）。
+        """
         self.reply = OutboundReply(kind="stream", content=content, finish=finish)
 
 

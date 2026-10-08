@@ -29,7 +29,12 @@ class _FakeClient:
         self.connected = False
 
     async def reply_stream(
-        self, frame: dict, stream_id: str, content: str, finish: bool = False
+        self,
+        frame: dict,
+        stream_id: str,
+        content: str,
+        finish: bool = False,
+        feedback: dict | None = None,
     ) -> dict:
         self.replies.append((frame, stream_id, content, finish))
         return {}

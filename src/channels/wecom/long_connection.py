@@ -43,9 +43,19 @@ class _WsSink:
         self._frame = frame
         self._stream_id = stream_id
 
-    async def reply_stream(self, content: str, finish: bool) -> None:
-        """发送流式回复。"""
-        await self._client.reply_stream(self._frame, self._stream_id, content, finish)
+    async def reply_stream(
+        self, content: str, finish: bool, feedback: dict | None = None
+    ) -> None:
+        """发送流式回复。
+
+        Args:
+            content: 本帧内容（累积全文）
+            finish: 是否结束流式消息
+            feedback: 反馈信息（仅首帧设置；None 表示不带）
+        """
+        await self._client.reply_stream(
+            self._frame, self._stream_id, content, finish, feedback=feedback
+        )
 
 
 class LongConnectionDriver:
