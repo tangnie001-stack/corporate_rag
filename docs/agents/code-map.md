@@ -54,13 +54,15 @@ api/               纯路由层：请求校验 → 调 service → 返回（不�
 services/          业务编排：app_service → kb / document / chat(agent)
   agent_service.py 图生命周期 + 一次生成的主循环（_run_generation）
   capability_service.py  能力清单：/api/skills、/api/agents 由 registry 派生（fail-open）
+  summary_scheduler.py  跨轮历史摘要调度：触发判据 / best-effort 抢锁 / 后台生成（回合正常完成分支发起）
+  summary_lock.py  跨轮摘要并发守卫（Redis SETNX，前缀 chat_summary_lock:，独立于轮次锁 chat_lock:）
 agents/            LangGraph agent 循环
-  ├─ graph/        workflow(建图) / state / agent_factory(唯一装配入口 build_agent) / middleware(循环四件套) / agent_node(首轮组装 + 循环包装节点) / message_payload(消息→trace 载荷纯函数) / nodes / verify / skill_direct(命令行直出节点)
+  ├─ graph/        workflow(建图) / state / agent_factory(唯一装配入口 build_agent) / middleware(循环四件套) / agent_node(首轮组装 + 循环包装节点) / message_payload(消息→trace 载荷纯函数) / history_window(历史窗口切分纯函数，裁剪与摘要触发判据同口径) / nodes / verify / skill_direct(命令行直出节点)
   ├─ tools/        retrieve_kb、ask_user、search_web、task、registry( + readonly 声明表)
   ├─ skills/       主从委派运行时：loader/registry/executor/delegate_task/models/invocation/prefix(/xxx 解析与清洗纯函数) + fork 执行层 fork_stream/fork_tools/delegate_run
   └─ presets/      智能体预设：models / loader / registry
 rag/               检索与知识库路由：retrieval / fusion(RRF 纯函数) / context / prompt / temporal
-chat/              对话管理：manager(Redis) / persistence(PostgreSQL) / streaming / task_registry / process_log
+chat/              对话管理：manager(Redis) / persistence(PostgreSQL) / streaming / task_registry / process_log / summary_store(摘要读写 mixin，Redis 优先内存降级，宿主 ChatManager) / history_summary(摘要核心：提示词组装 + 调用 + 四条不变量校验)
 chunking/          分块：router(策略路由) / strategies(4 种) / validator / scorer
 parsers/           文档解析：pdf / docx / txt + base / router
 core/              日志：logging / log_events / log_event_specs
@@ -70,7 +72,7 @@ config/            settings(环境变量) / const(常量/文案/枚举) / respon
 infra/             基础设施：db(engine/DSN + transaction 事务边界 + models + repos + vector_store + lexical_query) / llm(tracing 为 Langfuse 开关/flush/trace id 校验唯一入口；langfuse_purge 为保留期删除的 SQL 后端；token_count 为统一 token 计数入口——tiktoken 近似，encoder 缺失时降级 `len(text)//2` 并记一次 warning) / search(tokenizer 为唯一 jieba 分词入口) / auth / redis_client
 middleware/        auth / trace_id / response_processor（统一响应包装）
 cli/               RAGAS 评估、检索对比、trace 回放/清理、症状指标、种子与防腐闸门（check_docs / check_adr）等命令行工具
-models.py          LLM / Embedding / Rerank 工厂（get_llm / get_embedding / get_rerank）
+models.py          LLM / Embedding / Rerank 工厂（get_llm / get_embedding / get_rerank / get_summary_llm）
 utils/             sse 事件类型 / errors / desensitize / auth_crypto
 tools/             工具基类（base.py）
 channels/          接入通道：base(通用抽象) / wecom(parse 入站解析 / crypto 加解密 / callback 回调驱动 / long_connection(长连接驱动，封装官方 aibot SDK))
@@ -245,6 +247,7 @@ Nginx 容器把本目录挂到 `/usr/share/nginx/html` 直接托管，**无 npm 
 | 改工具观测（工具 span 的字段 / 归组 / 过滤） | `src/infra/llm/tool_trace.py`（`ToolTraceCollector`）；消费点在 `src/services/agent_service.py::_run_generation` 的事件循环。口径见 ADR-0015 |
 | 改模型定价 / 让 Langfuse 出成本 | `src/config/settings.py`（`MODEL_*_PRICE_PER_TOKEN`，USD/单 token）+ `src/cli/seed_langfuse_models.py`；操作步骤见 `cookbook.md` |
 | 改 agent 循环 / 提示词 | 文案改 `src/config/prompts/templates/*.yaml`（经 `loader.py` 唯一读取）；循环装配与四件套 middleware 改 `src/agents/graph/agent_factory.py`、`middleware.py`；首轮组装与规则挂载点改 `src/agents/graph/agent_node.py`、`nodes.py`、`src/rag/prompt.py` |
+| 改跨轮历史摘要（触发阈值 / 摘要提示词 / 调度） | 切分口径 `src/agents/graph/history_window.py`；摘要核心 `src/chat/history_summary.py` + 模板 `templates/task-summary-system.yaml`；调度 `src/services/summary_scheduler.py`；锁 `src/services/summary_lock.py`；存储 `src/chat/summary_store.py`；阈值在 `src/config/const.py` |
 | 加/改工具 | `src/agents/tools/`（实现 + 在 `rag_tools.py` 注册）；工具描述文案入 `src/config/` |
 | 加/改 skill 机制 | `src/agents/skills/`（loader/registry/executor/delegate_task）；内容放 `skills/<name>/SKILL.md` |
 | 加/改智能体预设 | 内容放 `agents/<name>.md`；机制在 `src/agents/presets/`（loader/registry） |
