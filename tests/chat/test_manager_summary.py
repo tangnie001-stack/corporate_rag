@@ -5,6 +5,7 @@ import json
 import pytest
 
 from src.chat.manager import ChatManager
+from src.core.log_events import Event
 
 
 async def _noop_ensure_redis() -> None:
@@ -75,8 +76,9 @@ def redis_manager(monkeypatch) -> ChatManager:
 
 @pytest.mark.asyncio
 async def test_summary_roundtrip_in_memory(manager):
-    """无 Redis 时摘要仍可读写（内存降级分支）。"""
-    await manager.save_summary_async("s1", "摘要正文", 6)
+    """无 Redis 时摘要仍可读写（内存降级分支），写回返回 True。"""
+    saved = await manager.save_summary_async("s1", "摘要正文", 6)
+    assert saved is True
     assert await manager.get_summary_async("s1") == ("摘要正文", 6)
 
 
@@ -104,12 +106,35 @@ def test_redis_property_exposes_client(manager):
 
 @pytest.mark.asyncio
 async def test_save_summary_writes_payload_and_ttl(redis_manager):
-    """Redis 分支：写入 payload 为 {text, covered} 并续期 TTL。"""
-    await redis_manager.save_summary_async("s1", "摘要正文", 6)
+    """Redis 分支：写入 payload 为 {text, covered}、续期 TTL，并返回 True。"""
+    saved = await redis_manager.save_summary_async("s1", "摘要正文", 6)
+    assert saved is True
     key = "chat_summary:s1"
     raw = await redis_manager._redis.get(key)
     assert json.loads(raw) == {"text": "摘要正文", "covered": 6}
     assert redis_manager._redis.expire_calls == [(key, 60)]
+
+
+@pytest.mark.asyncio
+async def test_save_summary_returns_false_when_redis_write_fails(
+    redis_manager, monkeypatch
+):
+    """Redis 写异常：不外抛、返回 False，并记 store_failed 降级事件。"""
+    events: list[dict] = []
+
+    def fake_log_event(event, **fields):
+        events.append({"event": event, **fields})
+
+    monkeypatch.setattr("src.chat.summary_store.core_logging.log_event", fake_log_event)
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr(redis_manager._redis, "set", _boom)
+    saved = await redis_manager.save_summary_async("s1", "摘要正文", 6)
+    assert saved is False
+    fallbacks = [e for e in events if e["event"] is Event.SUMMARY_FALLBACK]
+    assert fallbacks and fallbacks[0]["reason"] == "store_failed"
 
 
 @pytest.mark.asyncio

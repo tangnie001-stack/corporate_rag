@@ -30,7 +30,7 @@ class SummaryResult:
     """一次摘要尝试的结果。"""
 
     text: str  # 摘要正文；degraded 时为空串
-    covered: int  # 已摘要到的消息条数（上一次覆盖数 + 本次丢弃段条数）
+    covered: int  # 摘要覆盖到的消息条数 = 被丢弃段条数
     degraded: bool  # 是否降级（未采用摘要）
     reason: str  # 降级原因；成功时为空串
 
@@ -75,19 +75,23 @@ def _render_discarded(discarded: list[ChatMessage]) -> str:
 
 
 async def summarize_history(
-    previous_text: str, previous_covered: int, discarded: list[ChatMessage]
+    previous_text: str, discarded: list[ChatMessage]
 ) -> SummaryResult:
     """生成/更新摘要；任何失败都返回 degraded 结果，绝不外抛。
 
+    被丢弃段是**累计前缀**（`split_history_window` 每次返回保留尾部之外的
+    全部更旧段），本次摘要覆盖的正是这整个前缀，故 `covered = len(discarded)`。
+    不叠加上一版覆盖数——那会把同一批更旧消息重复计数（`covered` 是写进
+    Redis 的持久字段，膨胀值会随会话累积）。
+
     Args:
         previous_text: 上一版摘要正文（无则空串）
-        previous_covered: 上一版摘要已覆盖的消息条数
-        discarded: 本次要压入摘要的更旧消息段（非空）
+        discarded: 本次要压入摘要的更旧消息段（非空，为累计前缀）
 
     Returns:
-        SummaryResult；degraded=True 时 text 为空、covered 沿用上一次覆盖数
+        SummaryResult；degraded=True 时 text 为空、covered 记本次被丢弃段条数
     """
-    covered = previous_covered + len(discarded)
+    covered = len(discarded)
     # 取模板、拼输入、统计被丢弃段 token 一并纳入降级边界：模板缺失（`get_content`
     # 抛 `KeyError`）或返回非 str 时也必须走 degraded，绝不穿透本函数。
     try:
@@ -114,7 +118,7 @@ async def summarize_history(
             timeout=SUMMARY_TIMEOUT_S,
         )
     except Exception as exc:  # noqa: BLE001
-        return SummaryResult("", previous_covered, True, f"llm_error: {exc}")
+        return SummaryResult("", covered, True, f"llm_error: {exc}")
     # 不变量③「拒绝截断摘要」：结束原因为长度截断即视为失败，不采用半截摘要。
     # 该判据成立的前提是 `get_summary_llm()` 已设显式 max_tokens。
     metadata = response.response_metadata
@@ -122,7 +126,7 @@ async def summarize_history(
     if isinstance(metadata, dict):
         finish_reason = str(metadata.get("finish_reason", ""))
     if finish_reason == "length":
-        return SummaryResult("", previous_covered, True, "truncated")
+        return SummaryResult("", covered, True, "truncated")
     text = strip_citation_numbers(str(response.content))
     ok, reason = validate_summary(
         text,
@@ -130,5 +134,5 @@ async def summarize_history(
         previous_tokens=previous_tokens,
     )
     if not ok:
-        return SummaryResult("", previous_covered, True, reason)
+        return SummaryResult("", covered, True, reason)
     return SummaryResult(text, covered, False, "")

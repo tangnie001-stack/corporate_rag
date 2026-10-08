@@ -60,7 +60,7 @@ async def test_summarize_history_degrades_on_llm_failure(monkeypatch):
         ChatMessage(role="user", content="q"),
         ChatMessage(role="assistant", content="a"),
     ]
-    result = await history_summary.summarize_history("", 0, discarded)
+    result = await history_summary.summarize_history("", discarded)
     assert result.degraded is True
     assert result.text == ""
     assert "boom" in result.reason
@@ -73,14 +73,14 @@ async def test_summarize_history_rejects_truncated(monkeypatch):
     llm.ainvoke.return_value = _fake_response("半截摘要", finish_reason="length")
     monkeypatch.setattr(history_summary, "get_summary_llm", lambda: llm)
     discarded = [ChatMessage(role="user", content="q" * 500)]
-    result = await history_summary.summarize_history("", 0, discarded)
+    result = await history_summary.summarize_history("", discarded)
     assert result.degraded is True
     assert result.reason == "truncated"
 
 
 @pytest.mark.asyncio
 async def test_summarize_history_returns_text_and_covered(monkeypatch):
-    """成功路径：返回摘要正文与覆盖条数（= 之前覆盖数 + 本次丢弃段条数）。"""
+    """成功路径：返回摘要正文，covered 等于本次被丢弃段条数。"""
     llm = AsyncMock()
     llm.ainvoke.return_value = _fake_response("## 用户目标\n看年报")
     monkeypatch.setattr(history_summary, "get_summary_llm", lambda: llm)
@@ -90,10 +90,10 @@ async def test_summarize_history_returns_text_and_covered(monkeypatch):
         ChatMessage(role="user", content="q1" * 200),
         ChatMessage(role="assistant", content="a1" * 200),
     ]
-    result = await history_summary.summarize_history("", 4, discarded)
+    result = await history_summary.summarize_history("", discarded)
     assert result.degraded is False
     assert result.text == "## 用户目标\n看年报"
-    assert result.covered == 6
+    assert result.covered == 2
 
 
 @pytest.mark.asyncio
@@ -109,7 +109,7 @@ async def test_summarize_history_incremental_prompt_carries_previous_summary(
         ChatMessage(role="user", content="q" * 400),
         ChatMessage(role="assistant", content="a" * 400),
     ]
-    result = await history_summary.summarize_history(previous_text, 3, discarded)
+    result = await history_summary.summarize_history(previous_text, discarded)
     assert result.degraded is False
     # 断言实际送给模型的入参：system + user 两条，user 正文须内嵌上一版摘要。
     messages = llm.ainvoke.await_args.args[0]
@@ -128,16 +128,20 @@ async def test_summarize_history_degrades_when_summary_grew(monkeypatch):
     monkeypatch.setattr(history_summary, "get_summary_llm", lambda: llm)
     previous_text = "短摘要"
     discarded = [ChatMessage(role="user", content="q" * 1000)]
-    result = await history_summary.summarize_history(previous_text, 5, discarded)
+    result = await history_summary.summarize_history(previous_text, discarded)
     assert result.degraded is True
     assert result.reason == "grew"
     assert result.text == ""
-    assert result.covered == 5
+    assert result.covered == 1
 
 
 @pytest.mark.asyncio
-async def test_summarize_history_incremental_accumulates_covered(monkeypatch):
-    """增量路径成功：covered = 上一版覆盖数 + 本次丢弃段条数（累加而非重置）。"""
+async def test_summarize_history_covered_equals_discarded_prefix(monkeypatch):
+    """covered 恒等于本次被丢弃段条数（累计前缀长度），与上一版摘要的 covered 无关。
+
+    被丢弃段本身即累计前缀，故不存在"累加"语义；此处额外验证存在上一版摘要时
+    covered 仍只记本次前缀长度，不叠加（防重复计数回归）。
+    """
     llm = AsyncMock()
     llm.ainvoke.return_value = _fake_response("## 用户目标\n看年报")
     monkeypatch.setattr(history_summary, "get_summary_llm", lambda: llm)
@@ -147,10 +151,10 @@ async def test_summarize_history_incremental_accumulates_covered(monkeypatch):
         ChatMessage(role="assistant", content="a" * 400),
         ChatMessage(role="user", content="q" * 400),
     ]
-    result = await history_summary.summarize_history(previous_text, 7, discarded)
+    result = await history_summary.summarize_history(previous_text, discarded)
     assert result.degraded is False
     assert result.text == "## 用户目标\n看年报"
-    assert result.covered == 10
+    assert result.covered == 3
 
 
 @pytest.mark.asyncio
@@ -165,10 +169,10 @@ async def test_summarize_history_degrades_when_template_missing(monkeypatch):
 
     monkeypatch.setattr(history_summary.loader, "get_content", _boom)
     discarded = [ChatMessage(role="user", content="q")]
-    result = await history_summary.summarize_history("", 2, discarded)
+    result = await history_summary.summarize_history("", discarded)
     assert result.degraded is True
     assert result.text == ""
-    assert result.covered == 2
+    assert result.covered == 1
     llm.ainvoke.assert_not_awaited()
 
 

@@ -86,19 +86,21 @@ class SummaryScheduler:
             )
             if not discarded:
                 return
-            previous_text, previous_covered = await self._manager.get_summary_async(
-                session_id
-            )
-            result = await summarize_history(previous_text, previous_covered, discarded)
+            previous_text, _ = await self._manager.get_summary_async(session_id)
+            result = await summarize_history(previous_text, discarded)
             if result.degraded:
                 # 核心模块只返回原因、不记日志；由本层统一落 [session] 降级事件。
                 core_logging.log_event(
                     Event.SUMMARY_FALLBACK, reason=result.reason, err=""
                 )
                 return
-            await self._manager.save_summary_async(
+            saved = await self._manager.save_summary_async(
                 session_id, result.text, result.covered
             )
+            if not saved:
+                # 写回失败：store 层已记 SUMMARY_FALLBACK(store_failed)，
+                # 本层不重复记 fallback、也不记「成功落库」的 summary done。
+                return
             core_logging.log_event(
                 Event.SUMMARY_DONE,
                 covered=result.covered,

@@ -7,25 +7,40 @@ from src.config.const import (
     HISTORY_SUMMARY_TRIGGER_TOKENS,
     HISTORY_TOKEN_BUDGET,
 )
+from src.core.log_events import Event
 from src.infra.llm.chat_message import ChatMessage
 from src.infra.llm.token_count import count_tokens
 from src.services import summary_scheduler
 
 
 class _FakeManager:
-    def __init__(self):
+    def __init__(self, save_ok=True):
         self.saved = []
         self.summary = ("", 0)
+        self.save_ok = save_ok
 
     async def get_summary_async(self, session_id):
         return self.summary
 
     async def save_summary_async(self, session_id, text, covered):
+        """记录写回，并按契约返回是否成功落盘。"""
         self.saved.append((session_id, text, covered))
         self.summary = (text, covered)
+        return self.save_ok
 
     async def add_message_async(self, *a, **k):
         return None
+
+
+def _capture_events(monkeypatch) -> list[dict]:
+    """拦截调度层 log_event（日志走 loguru，不能用 caplog）。"""
+    calls: list[dict] = []
+
+    def fake_log_event(event, **fields):
+        calls.append({"event": event, **fields})
+
+    monkeypatch.setattr(summary_scheduler.core_logging, "log_event", fake_log_event)
+    return calls
 
 
 class _FakeLock:
@@ -86,11 +101,12 @@ def test_schedules_when_discarded_exceeds_trigger():
 
 @pytest.mark.asyncio
 async def test_generate_writes_summary_and_emits_done(monkeypatch):
-    """生成成功：写回摘要并释放锁。"""
+    """生成成功且写回成功：写回摘要、释放锁，并记一条 summary done。"""
+    calls = _capture_events(monkeypatch)
     monkeypatch.setattr(
         summary_scheduler,
         "summarize_history",
-        lambda prev_text, prev_covered, discarded: _ok_result(prev_covered, discarded),
+        lambda prev_text, discarded: _ok_result(discarded),
     )
     manager = _FakeManager()
     lock = _FakeLock(ok=True)
@@ -101,6 +117,72 @@ async def test_generate_writes_summary_and_emits_done(monkeypatch):
     await scheduler.generate("s1", history)
     assert manager.saved and manager.saved[0][0] == "s1"
     assert lock.released == 1
+    done = [c for c in calls if c["event"] is Event.SUMMARY_DONE]
+    assert len(done) == 1
+
+
+@pytest.mark.asyncio
+async def test_generate_skips_done_when_writeback_fails(monkeypatch):
+    """写回失败（save 返回 False）：不记 summary done，也不重复记 fallback。
+
+    store 层已记 `SUMMARY_FALLBACK(reason=store_failed)`，调度层不得再记表示
+    「成功落库」的 `summary done`，否则同一回合出现 done + fallback 两条矛盾事件。
+    """
+    calls = _capture_events(monkeypatch)
+    monkeypatch.setattr(
+        summary_scheduler,
+        "summarize_history",
+        lambda prev_text, discarded: _ok_result(discarded),
+    )
+    manager = _FakeManager(save_ok=False)
+    lock = _FakeLock(ok=True)
+    scheduler = summary_scheduler.SummaryScheduler(
+        manager=manager, redis=object(), lock=lock
+    )
+    await scheduler.generate("s1", _big_history())
+    assert manager.saved  # 确实尝试了写回
+    assert lock.released == 1
+    assert [c for c in calls if c["event"] is Event.SUMMARY_DONE] == []
+    assert [c for c in calls if c["event"] is Event.SUMMARY_FALLBACK] == []
+
+
+@pytest.mark.asyncio
+async def test_generate_default_lock_path_reaches_real_module(monkeypatch):
+    """默认路径（不传 lock）确实调到 `src.services.summary_lock` 的模块函数。
+
+    `_LockAdapter` 是生产默认路径：早期曾把 `self._lock` 误指向锁**模块**（模块
+    只导出函数 ⇒ AttributeError 被 except 吞掉 ⇒ 永不生成摘要）。本冒烟测试钉死
+    「默认锁接线可达 + 生成结果被写回」。
+    """
+    calls: list[tuple[str, object, str]] = []
+
+    async def _fake_acquire(redis, session_id):
+        calls.append(("acquire", redis, session_id))
+        return True
+
+    async def _fake_release(redis, session_id):
+        calls.append(("release", redis, session_id))
+
+    monkeypatch.setattr(
+        summary_scheduler.summary_lock, "acquire_summary_lock", _fake_acquire
+    )
+    monkeypatch.setattr(
+        summary_scheduler.summary_lock, "release_summary_lock", _fake_release
+    )
+    monkeypatch.setattr(
+        summary_scheduler,
+        "summarize_history",
+        lambda prev_text, discarded: _ok_result(discarded),
+    )
+    manager = _FakeManager()
+    redis = object()
+    # 不传 lock ⇒ 走生产默认的 _LockAdapter
+    scheduler = summary_scheduler.SummaryScheduler(manager=manager, redis=redis)
+    await scheduler.generate("s1", _big_history())
+    assert [c[0] for c in calls] == ["acquire", "release"]
+    assert calls[0][1] is redis
+    assert calls[0][2] == "s1"
+    assert manager.saved and manager.saved[0][0] == "s1"
 
 
 @pytest.mark.asyncio
@@ -121,7 +203,7 @@ async def test_generate_skips_when_lock_unavailable(monkeypatch):
     assert lock.released == 0
 
 
-async def _ok_result(prev_covered, discarded):
+async def _ok_result(discarded):
     from src.chat.history_summary import SummaryResult
 
-    return SummaryResult("## 用户目标\n摘要", prev_covered + len(discarded), False, "")
+    return SummaryResult("## 用户目标\n摘要", len(discarded), False, "")

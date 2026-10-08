@@ -61,7 +61,7 @@ class SummaryStoreMixin:
 
     async def save_summary_async(
         self, session_id: str, text: str, covered: int
-    ) -> None:
+    ) -> bool:
         """保存跨轮历史摘要（正文 + 已覆盖的消息条数）。
 
         写入成功时续期 TTL，使摘要与对话历史同生命周期。
@@ -70,21 +70,27 @@ class SummaryStoreMixin:
             session_id: 会话 ID
             text: 摘要正文
             covered: 已覆盖到的消息条数
+
+        Returns:
+            是否成功落盘；失败时已记 `SUMMARY_FALLBACK(reason="store_failed")` 并
+            返回 False，调用方据此避免误记表示"成功落库"的 `summary done`。
         """
         await self._ensure_redis_async()
         if self._in_memory:
             self._memory_summaries[session_id] = (text, covered)
-            return
+            return True
         assert self._redis is not None
         try:
             key = self._summary_key(session_id)
             payload = json.dumps({"text": text, "covered": covered}, ensure_ascii=False)
             await self._redis.set(key, payload)
             await self._redis.expire(key, self.ttl)
+            return True
         except Exception as e:  # noqa: BLE001
             core_logging.log_event(
                 Event.SUMMARY_FALLBACK, reason="store_failed", err=str(e)
             )
+            return False
 
     async def get_summary_async(self, session_id: str) -> tuple[str, int]:
         """读取跨轮历史摘要。
