@@ -56,6 +56,73 @@ def _truncate_history(
     return kept
 
 
+# 摘要段的包裹标签：注入时用它标识"这是历史摘要"，并附让位声明（防被当指令/证据）
+_SUMMARY_TAG = "<会话摘要>"
+_SUMMARY_YIELD_CLAUSE = (
+    "（以下是更早会话的摘要，作为对话背景参考；"
+    "事实性结论仍须以本轮检索结果为准；不确定时请用户复述。）"
+)
+
+
+def _compose_summary_message(summary: str) -> HumanMessage:
+    """把摘要正文组装为独立历史消息（剥编号 + 加标签 + 让位声明）。
+
+    Args:
+        summary: 摘要正文
+
+    Returns:
+        可直接插入消息列表的 HumanMessage
+    """
+    from src.chat.history_summary import strip_citation_numbers
+
+    clean = strip_citation_numbers(summary)
+    return HumanMessage(
+        content=f"{_SUMMARY_TAG}{clean}</会话摘要>\n{_SUMMARY_YIELD_CLAUSE}"
+    )
+
+
+def _insert_after_last_system(messages: list, extra: list) -> list:
+    """把额外消息插到**最后一个 SystemMessage 之后**（复用既有注入位置语义）。"""
+    if not extra:
+        return messages
+    insert_at = 0
+    for i, message in enumerate(messages):
+        if isinstance(message, SystemMessage):
+            insert_at = i + 1
+    return messages[:insert_at] + list(extra) + messages[insert_at:]
+
+
+def _fit_summary_to_budget(summary_text: str, tail: list) -> str:
+    """把摘要缩到「摘要 + 尾部 ≤ HISTORY_TOKEN_BUDGET」之内。
+
+    先缩摘要；若尾部本身已超预算（由既有裁剪路径负责），摘要不再让位。
+
+    Args:
+        summary_text: 摘要正文
+        tail: 保留的最近若干轮消息
+
+    Returns:
+        适配后的摘要正文（尽可能保留头部）
+    """
+    tail_tokens = 0
+    for message in tail:
+        tail_tokens += count_tokens(message.content)
+    allowance = HISTORY_TOKEN_BUDGET - tail_tokens
+    if allowance <= 0:
+        return ""
+    if count_tokens(summary_text) <= allowance:
+        return summary_text
+    keep: list[str] = []
+    used = 0
+    for char in summary_text:
+        cost = count_tokens(char)
+        if used + cost > allowance:
+            break
+        keep.append(char)
+        used += cost
+    return "".join(keep)
+
+
 def _split_history(
     history: list[ChatMessage], known: set[str]
 ) -> tuple[list[BaseMessage], list[ChatMessage]]:
@@ -146,6 +213,15 @@ def _split_initial_messages(
             if isinstance(m, SystemMessage):
                 insert_at = i + 1
         messages[insert_at:insert_at] = injected
+    # 跨轮历史摘要段：作为独立历史消息，插在最后一个 system 之后、普通历史之前。
+    # 来源是外部预取并经 state 传入的**值**（图节点不访问存储）；无摘要时零影响。
+    if state._summary:
+        tail_for_budget = [m for m in messages if not isinstance(m, SystemMessage)]
+        fitted = _fit_summary_to_budget(state._summary, tail_for_budget)
+        if fitted:
+            messages = _insert_after_last_system(
+                messages, [_compose_summary_message(fitted)]
+            )
     # 首轮消息构成（design D11 #4）：system 段由 build_system_prompt 产出，注入段
     # 来自 SKILL_INJECTION_PREFIX 抽取，history 段为清洗后的普通历史（不含当前 query）。
     # 计数必须在拆分前算：拆分后 system 段被移出列表，再数会恒为 0

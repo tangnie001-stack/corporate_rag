@@ -73,6 +73,7 @@ async def test_stream_chat_wires_effective_agent():
     chat_manager = AsyncMock()
     chat_manager.get_history_async.return_value = []
     chat_manager.get_session_agent_async.return_value = ""
+    chat_manager.get_summary_async.return_value = ("", 0)
     chat_manager.bind_session_agent_async = AsyncMock(return_value=True)
     svc._chat_manager = chat_manager
     registry = MagicMock()

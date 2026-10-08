@@ -345,6 +345,7 @@ def _make_service() -> tuple[AgentService, AsyncMock]:
     chat_manager = AsyncMock()
     chat_manager.get_history_async.return_value = []
     chat_manager.get_session_agent_async.return_value = ""
+    chat_manager.get_summary_async.return_value = ("", 0)
     chat_manager.add_message_async = AsyncMock()
     service._chat_manager = chat_manager
     service._prompt_manager = Mock()
@@ -440,9 +441,13 @@ class TestStreamChatWrapper:
         async def fake_get_session_agent(session_id):
             return ""
 
+        async def fake_get_summary(session_id):
+            return ("", 0)
+
         svc._chat_manager.get_history_async = fake_get_history
         svc._chat_manager.add_message_async = fake_add
         svc._chat_manager.get_session_agent_async = fake_get_session_agent
+        svc._chat_manager.get_summary_async = fake_get_summary
 
         # 后台任务所需最小图：零事件，避免任务异常噪音
         async def empty_astream(*args, **kwargs):
