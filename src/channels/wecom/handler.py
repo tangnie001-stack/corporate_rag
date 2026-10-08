@@ -289,11 +289,12 @@ class RagChannelHandler:
             try:
                 logger.info(
                     "[wecom] inbound bot_key={} msgid={} chattype={} session_id={}"
-                    " trace_id={} text_len={}",
+                    " user_id={} trace_id={} text_len={}",
                     encode_value(bot_key),
                     msg.msgid,
                     msg.chattype,
                     encode_value(session_id),
+                    encode_value(user_id),
                     encode_value(trace_id),
                     len(msg.text or ""),
                 )
