@@ -93,6 +93,8 @@ channels/          接入通道：base(通用抽象) / wecom(parse 入站解析 
 > - `src/channels/wecom/session.py`：企微会话与用户标识派生（UUIDv5）
 > - `src/channels/wecom/bounded_map.py`：有界 TTL 映射（msgid 去重与澄清触发者登记共用）
 > - `src/config/wecom_channel.py`：企微通道层参数（去重/触发者登记的 TTL 与容量）与通道文案
+> - `src/channels/wecom/long_connection.py`：长连接驱动；**就绪 = 收到 SDK `authenticated` 事件**（等待上界 5s，超时只降级不断开）；凭证类失败与"被顶"均置非就绪
+> - `src/services/wecom_service.py`：驱动注册表（收全部已启动者，供 stop 关闭）+ `is_ready(bot_key)` 查询；锚点 `n=` 只计认证就绪台数
 
 ### prompt 组装与段模板归属
 
