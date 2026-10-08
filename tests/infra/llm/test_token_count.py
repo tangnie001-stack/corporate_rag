@@ -23,6 +23,21 @@ def _raise_encoder() -> None:
     raise RuntimeError("encoder unavailable")
 
 
+@pytest.fixture(autouse=True)
+def _restore_encoder_cooldown(monkeypatch: pytest.MonkeyPatch) -> None:
+    """每个用例前后快照并恢复模块全局 `token_count._encoder_failed_at`，堵住跨用例泄漏。
+
+    `_get_encoder()` 失败时会给模块全局 `_encoder_failed_at` 赋值来置位冷却窗，
+    而 `monkeypatch` 只回滚它自己替换的对象、回滚不了**被测代码内部对模块全局的赋值**。
+    若本文件某用例先触发失败，该全局会残留到同进程的后续文件（冷却窗 60s 内所有
+    count_tokens 静默降级为 len//2）。这里显式快照一次，令 teardown 一律复位到用例
+    开始前的值，使本文件不再污染后续测试（不改被测源码，冷却语义保持原样）。
+    """
+    monkeypatch.setattr(
+        token_count, "_encoder_failed_at", token_count._encoder_failed_at
+    )
+
+
 @pytest.fixture
 def fake_encoder(monkeypatch: pytest.MonkeyPatch) -> None:
     """用假 encoder 替换 _encoder，令确定性用例不发起网络调用。"""

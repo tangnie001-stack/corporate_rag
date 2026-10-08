@@ -101,7 +101,7 @@ class _StreamCapture:
 
 # 合并队列元素类型：LangGraph 事件（StreamEvent）或工具经 ctx.clarify_channel
 # 投递的事件 dict（ask_user/delegate），或哨兵
-_QueueItem: TypeAlias = StreamEvent | dict | _EndMarker | _ErrorMarker  # noqa: UP040
+_QueueItem: TypeAlias = StreamEvent | dict | _EndMarker | _ErrorMarker  # noqa: UP040  # 既存代码：改写为 `type` 语句改变惰性求值语义，非本 change 范围
 
 
 def _extract_model_name(output) -> str:

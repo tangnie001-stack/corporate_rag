@@ -41,11 +41,16 @@ class _FakeLock:
 
 
 def _big_history(turns: int = 20):
-    """构造超过触阈的历史：每轮 user/assistant 各约 500 token。"""
+    """构造超过触阈的历史：每轮 user/assistant 各 1800 字。
+
+    数据规模对**两种计数口径**都留足余量——真分词器约 1 token/字、encoder 不可用时
+    降级口径 `len//2` = 0.5 token/字——使"被丢弃段 > HISTORY_SUMMARY_TRIGGER_TOKENS"
+    在两种口径下都成立，本用例不依赖同进程其他测试留下的计数环境。
+    """
     history = []
     for i in range(turns):
-        history.append(ChatMessage(role="user", content="问" * 700))
-        history.append(ChatMessage(role="assistant", content="答" * 700))
+        history.append(ChatMessage(role="user", content="问" * 1800))
+        history.append(ChatMessage(role="assistant", content="答" * 1800))
     return history
 
 
