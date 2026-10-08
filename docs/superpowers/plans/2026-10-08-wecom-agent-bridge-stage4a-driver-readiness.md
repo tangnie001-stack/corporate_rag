@@ -546,13 +546,16 @@ async def test_anchor_counts_only_authenticated_ready(monkeypatch):
     _install_stub(monkeypatch, not_ready_ids={"aibB"})
 
     messages: list[str] = []
-    monkeypatch.setattr(
-        wecom_service.logger, "info", lambda msg, *args: messages.append(msg % args)
-    )
+    sink_id = logger.add(lambda m: messages.append(m), level="INFO")
+    try:
+        await wecom_service.start()
+    finally:
+        logger.remove(sink_id)
 
-    await wecom_service.start()
-
-    assert any("[wecom] bots connected n=1 total=2" in m for m in messages)
+    anchor = [m for m in messages if "bots connected" in m]
+    assert len(anchor) == 1
+    assert "n=1" in anchor[0]
+    assert "total=2" in anchor[0]
     assert isinstance(wecom_service.get_driver("support"), _StubDriver)
     assert wecom_service.is_ready("support") is False
     assert wecom_service.is_ready("dev") is True
