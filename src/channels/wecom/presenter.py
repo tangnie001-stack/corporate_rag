@@ -157,12 +157,17 @@ class WeComPresenter:
     async def _consume(self, queue: asyncio.Queue) -> None:
         """消费循环：超时发保活帧（不取消上游），终态或哨兵后收尾。
 
+        超时判据是「**是否已发出首帧**」（`_last_sent is None`），而不是「是否
+        收到过事件」：丢弃类事件（思考过程 / 模型信息 / 子代理过程 / 任务看板 /
+        会话绑定智能体）不产生任何帧，若按"收到事件"就切到保活间隔，占位首帧
+        会从 `first_frame_timeout` 掉到 `keepalive_seconds`（默认 240s）——违反
+        「若在合理时限内无任何可渲染内容，SHALL 先发送占位内容，不得空等到超时」。
+
         Args:
             queue: 事件队列
         """
-        first = True
         while True:
-            if first:
+            if self._last_sent is None:
                 timeout = self._first_frame_timeout
             else:
                 timeout = self._keepalive_seconds
@@ -170,11 +175,9 @@ class WeComPresenter:
                 item = await asyncio.wait_for(queue.get(), timeout)
             except TimeoutError:
                 await self._flush(keepalive=True)
-                first = False
                 continue
             if item is _EVENTS_END:
                 break
-            first = False
             await self.update(item)
             if isinstance(item, (SSEDoneEvent, SSEErrorEvent)):
                 break

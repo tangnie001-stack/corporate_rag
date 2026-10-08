@@ -506,3 +506,31 @@ async def test_run_finalizes_when_consume_loop_raises(monkeypatch):
     # 投影 spec 禁止悬挂未结束的流：异常路径也必须发出终态帧
     assert sink.calls
     assert sink.calls[-1][1] is True
+
+
+@pytest.mark.asyncio
+async def test_placeholder_frame_when_first_events_are_unrenderable():
+    sink = _RecordingSink()
+    presenter = WeComPresenter(
+        sink,
+        "trace_1",
+        min_interval_seconds=0,
+        first_frame_timeout=0.05,
+        keepalive_seconds=5.0,
+    )
+
+    await presenter.run(
+        _slow_stream(
+            [
+                SSEReasoningDeltaEvent(reasoning_delta="先想一想"),
+                SSETokenEvent(token="甲"),
+                SSEDoneEvent(),
+            ],
+            [0.0, 0.3, 0.0],
+        )
+    )
+
+    # 首事件不可渲染（reasoning 被丢弃）时，占位帧仍须在 first_frame_timeout 内发出；
+    # keepalive_seconds 故意设 5s —— 若按"收到过事件"切换超时，这里就不会有占位帧
+    assert sink.contents[0] == WeComPresenterTexts.PLACEHOLDER_TEXT
+    assert sink.contents[-1].startswith("甲")
