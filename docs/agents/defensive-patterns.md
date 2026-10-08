@@ -262,6 +262,14 @@
 
 **历史实例**：2026-09-29（`one-loop-two-roles` 归档后回头审计根文档时发现）。同批补上 `extra_docs` / `banned_terms` / 豁免名单 / 行内标记四项机制。
 
+## 接入通道
+
+### SDK `connect()` 不等认证——不得以返回值判定就绪
+
+**现象**：`WSClient.connect()` 返回只代表 WebSocket 已建连并发出认证帧。实测它与 SDK 的 `authenticated` 事件相差约 0.17s，且**认证失败时它照样正常返回**（失败只以 `error` 事件呈现，`errcode=853000`）。
+
+**规则**：就绪一律以 SDK 的 `authenticated` 事件为准（`LongConnectionDriver.is_ready`，见 `src/channels/wecom/long_connection.py`），等待加上界 5s；超时只降级、**不主动断开**（交 SDK 自愈）；凭证类失败（错误信息以 `Authentication failed` 开头）才主动 `disconnect()` 并置致命。反面代价：以返回值判定会让"逐台 try/except"变成死代码、启动锚点 `n=total` **恒真**——排障时无法区分"三台都在线"与"三台都认证失败"。
+
 ## 如何更新
 
 修复非平凡 bug 且属于"可复发缺陷类别"时，按"现象 → 规则"格式追加条目到对应分区。

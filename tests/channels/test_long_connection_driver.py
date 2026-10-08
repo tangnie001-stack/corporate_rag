@@ -1,55 +1,15 @@
-"""长连接驱动单测：mock 官方 aibot.WSClient，不发真实网络。"""
+"""长连接驱动单测：mock 官方 aibot.WSClient，不发真实网络。
 
-from typing import Any
+本模块保留「连接/派发/被顶」组；「认证/就绪/错误判据」组见
+`tests/channels/test_long_connection_auth.py`，共享替身见
+`tests/channels/wecom_driver_fakes.py`。
+"""
 
 import pytest
 
 from src.channels.base import InboundMessage, ReplySink
 from src.channels.wecom import long_connection as lc
-
-
-class _FakeClient:
-    """伪 WSClient：记录构造参数、注册的处理器与回复调用。"""
-
-    def __init__(self, options: Any):
-        self.options = options
-        self.handlers: dict[str, Any] = {}
-        self.connected = False
-        self.replies: list[tuple[Any, str, str, bool]] = []
-
-    def on(self, event: str, f: Any = None) -> Any:
-        self.handlers[event] = f
-        return f
-
-    async def connect(self) -> "_FakeClient":
-        self.connected = True
-        return self
-
-    def disconnect(self) -> None:
-        self.connected = False
-
-    async def reply_stream(
-        self,
-        frame: dict,
-        stream_id: str,
-        content: str,
-        finish: bool = False,
-        feedback: dict | None = None,
-    ) -> dict:
-        self.replies.append((frame, stream_id, content, finish))
-        return {}
-
-
-def _patch_client(monkeypatch):
-    holder: dict[str, _FakeClient] = {}
-
-    def _factory(options):
-        client = _FakeClient(options)
-        holder["client"] = client
-        return client
-
-    monkeypatch.setattr(lc, "WSClient", _factory)
-    return holder
+from tests.channels.wecom_driver_fakes import _FakeClient, _patch_client
 
 
 def _text_frame() -> dict:
