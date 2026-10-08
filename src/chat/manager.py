@@ -18,6 +18,7 @@ import redis.asyncio as redis_async
 
 from src.chat.delegate_budget import delegate_budget
 from src.chat.persistence import PersistenceService
+from src.chat.summary_store import SummaryStoreMixin
 from src.config import REDIS_TTL, REDIS_URL
 from src.core import logging as core_logging
 from src.core.log_events import Event
@@ -25,12 +26,14 @@ from src.infra.db.repos import ChatRepo
 from src.infra.llm.chat_message import ChatMessage
 
 
-class ChatManager:
+class ChatManager(SummaryStoreMixin):
     """对话历史管理器 — Redis 优先，内存降级。
 
     构造时尝试连接 Redis，连接失败则静默降级为内存存储（dict）。
     内存模式下数据仅在当前进程存活，重启后丢失，适合本地开发调试。
     Redis 模式下数据持久化，支持多实例共享同一会话历史。
+
+    摘要存储由 `SummaryStoreMixin` 提供（Redis 优先、内存降级）。
 
     Redis 数据结构：
       Key:   "chat_history:{session_id}"
@@ -55,8 +58,8 @@ class ChatManager:
         self._in_memory: bool = False
         # 内存降级时的存储：session_id -> [msg_dict, ...]
         self._memory_store: dict[str, list[dict]] = {}
-        # 内存降级时的摘要存储：session_id -> (摘要正文, 覆盖条数)
-        self._memory_summaries: dict[str, tuple[str, int]] = {}
+        # 内存降级时的摘要存储（由 SummaryStoreMixin 初始化）
+        self._init_summary_store()
         self._persistence: PersistenceService | None = None
         self._init_redis(self._redis_url)
 
@@ -321,81 +324,7 @@ class ChatManager:
         assert self._redis is not None
         try:
             await self._redis.delete(key)
-            await self._redis.delete(self._summary_key(session_id))
         except Exception as e:  # noqa: BLE001
             core_logging.log_event(Event.HISTORY_CLEAR_FAILED, err=str(e))
-
-    @property
-    def redis(self):
-        """返回底层 Redis 客户端（内存降级时为 None）。
-
-        供摘要锁等外部守卫取用；避免其它层直接摸 `_redis` 私有属性。
-        """
-        return self._redis
-
-    def _summary_key(self, session_id: str) -> str:
-        """生成摘要 Redis key，格式为 "chat_summary:{session_id}"。"""
-        return f"chat_summary:{session_id}"
-
-    async def save_summary_async(
-        self, session_id: str, text: str, covered: int
-    ) -> None:
-        """保存跨轮历史摘要（正文 + 已覆盖的消息条数）。
-
-        写入成功时续期 TTL，使摘要与对话历史同生命周期。
-
-        Args:
-            session_id: 会话 ID
-            text: 摘要正文
-            covered: 已覆盖到的消息条数
-        """
-        await self._ensure_redis_async()
-        if self._in_memory:
-            self._memory_summaries[session_id] = (text, covered)
-            return
-        assert self._redis is not None
-        try:
-            key = self._summary_key(session_id)
-            payload = json.dumps({"text": text, "covered": covered}, ensure_ascii=False)
-            await self._redis.set(key, payload)
-            await self._redis.expire(key, self.ttl)
-        except Exception as e:  # noqa: BLE001
-            core_logging.log_event(
-                Event.SUMMARY_FALLBACK, reason="store_failed", err=str(e)
-            )
-
-    async def get_summary_async(self, session_id: str) -> tuple[str, int]:
-        """读取跨轮历史摘要。
-
-        Returns:
-            (摘要正文, 覆盖条数)；不存在时返回 ("", 0)
-        """
-        await self._ensure_redis_async()
-        if self._in_memory:
-            return self._memory_summaries.get(session_id, ("", 0))
-        assert self._redis is not None
-        try:
-            raw = await self._redis.get(self._summary_key(session_id))
-        except Exception as e:  # noqa: BLE001
-            core_logging.log_event(
-                Event.SUMMARY_FALLBACK, reason="read_failed", err=str(e)
-            )
-            return "", 0
-        if not raw:
-            return "", 0
-        data = json.loads(raw)
-        return str(data.get("text", "")), int(data.get("covered", 0))
-
-    async def clear_summary_async(self, session_id: str) -> None:
-        """清除跨轮历史摘要（会话删除/清空时调用）。"""
-        await self._ensure_redis_async()
-        if self._in_memory:
-            self._memory_summaries.pop(session_id, None)
-            return
-        assert self._redis is not None
-        try:
-            await self._redis.delete(self._summary_key(session_id))
-        except Exception as e:  # noqa: BLE001
-            core_logging.log_event(
-                Event.SUMMARY_FALLBACK, reason="clear_failed", err=str(e)
-            )
+        # 摘要与历史同生命周期：走摘要存储自身的清理逻辑，避免重复实现
+        await self.clear_summary_async(session_id)
