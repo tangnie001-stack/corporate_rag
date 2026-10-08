@@ -24,6 +24,8 @@
 
 ### Modified Capabilities
 - `token-usage-model`: token 计数从 `len(content)//2` 粗估改为分词器（tiktoken）计数；`TokenUsage` 形状与 `total_tokens` 不变量不变。
+- `clarification-interaction`: 「历史注入窗口」要求的预算口径由「context 窗口 30%」改为集中的绝对 token 量 `HISTORY_TOKEN_BUDGET`；补「仅剩最近 1 轮仍超预算」场景（保留该轮并记录 `history budget exceeded`）。
+- `skill-invocation`: 「skill 加载后持续生效」的已知限制注记同步新口径（原引用的 `HISTORY_TOKEN_RATIO` / `2400 token` / 行号已失效）。
 
 ## 明确不做（移出本变更）
 

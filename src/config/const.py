@@ -51,6 +51,11 @@ WEB_BODY_LIMIT: int = 2000
 # ── agent 循环护栏常量 ──
 # 来源：agentic 改造需求（2026-08-26 phase1）；用途：agent 循环的迭代/追问/历史注入/并发控制
 MAX_AGENT_ITERATIONS = 5  # agent 循环最大迭代数，超限强制收尾
+# 单轮内累积输入 token 的告警上限。与 MAX_AGENT_ITERATIONS 联动：迭代越多、
+# 工具结果累积越大；本阶段只度量告警，不做任何压缩（压缩属摘要层）。
+# 初值待标定：按 MAX_AGENT_ITERATIONS=5 轮、单轮工具结果量级推算的保守高水位
+# （实测同轮曾达约 6.2 万 token），待按线上 Langfuse token 分布标定后再调。
+TURN_INPUT_TOKEN_LIMIT = 65536
 MAX_ASK_PER_TURN = 2  # 单 turn 内 ask_user 最大调用次数
 MAX_VERIFY_ASK_PER_TURN = (
     1  # verify"是否联网"询问每轮上限（独立计数，不计入 MAX_ASK_PER_TURN）
@@ -74,8 +79,11 @@ VERIFY_KB_CITATION_MARKER: str = "请为知识库引用标注来源编号"
 FORK_CONFIRM_MARKER: str = "CONFIRM_REQUIRED:"
 """子代理"需确认"信号行首标记（编排层规则检测；子代理不持有 ask_user）。"""
 ASK_USER_TIMEOUT = 120  # ask_user 等待用户回答超时秒数
-HISTORY_MAX_TURNS = 10  # 历史注入保留最近轮数
-HISTORY_TOKEN_RATIO = 0.3  # 历史 token 占 context 窗口上限比例
+HISTORY_MAX_TURNS = 10  # 历史注入保留最近轮数（轮数粗筛）
+# 历史注入的 token 预算（**绝对值**，与模型窗口解耦）。原「窗口 × 比例」口径已废弃：
+# 比例会随窗口漂移，且窗口值本身是假设值。初值取保守量级（远小于任一模型窗口），
+# 待按线上 Langfuse token 分布标定后再调。
+HISTORY_TOKEN_BUDGET = 16384
 # per-session 并发锁 TTL 秒：须大于 ASK_USER_TIMEOUT（ask_user 挂起等待期间锁不能提前
 # 过期，否则并发兜底失效），在超时基础上留 60s 余量
 SESSION_LOCK_TTL = ASK_USER_TIMEOUT + 60

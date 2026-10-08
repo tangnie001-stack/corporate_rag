@@ -528,10 +528,13 @@ async def test_agent_turn_input_includes_system_message(monkeypatch):
 async def test_agent_turn_usage_estimate_includes_system(monkeypatch):
     """用量估算的输入同样含 system 段（漏掉会让每轮估算系统性偏小）。
 
-    口径：`estimate_usage` 把消息 content 以空格连接后 `len // 2`。
-    `"SYS-ONE SYS-TWO hi"` → 18 // 2 = **9**；若只算 `request.messages`（丢 system）
-    则为 `"hi"` → 1 —— 该断言正是用来钉住这一点。
+    期望值由 `count_messages_tokens` 按**含 system 的完整消息列表**现算（与
+    `estimate_usage` 同源），故与环境无关：encoder 可用走分词器、不可用走降级，
+    两边一致。钉住的语义：期望按三条消息（含两条 system）算；若实现退化成只算
+    `request.messages`（丢 system），期望仍是三条、实际变成一条的值，断言照样失败。
     """
+    from src.infra.llm.token_count import count_messages_tokens
+
     recorded = _patch_langfuse(monkeypatch)
     model = _RecordingModel(messages=iter([AIMessage(content="ok")]))
     agent = build_agent(
@@ -547,4 +550,76 @@ async def test_agent_turn_usage_estimate_includes_system(monkeypatch):
             "_system_messages": _sysmsgs("SYS-ONE", "SYS-TWO"),
         }
     )
-    assert recorded[0]["usage"]["input"] == 9
+    expected = count_messages_tokens(
+        [
+            SystemMessage(content="SYS-ONE"),
+            SystemMessage(content="SYS-TWO"),
+            HumanMessage(content="hi"),
+        ]
+    )
+    assert recorded[0]["usage"]["input"] == expected
+
+
+@pytest.mark.asyncio
+async def test_turn_input_budget_logs_when_over_limit(monkeypatch):
+    """轮内输入 token 达上限 → 记 context budget high（含 used/limit）。"""
+    events = _capture_events(monkeypatch)
+    monkeypatch.setattr(
+        "src.agents.graph.middleware.TURN_INPUT_TOKEN_LIMIT", 1, raising=True
+    )
+    model = _RecordingModel(messages=iter([AIMessage(content="ok")]))
+    agent = build_agent(
+        model,
+        tools=[],
+        system=None,
+        middleware_extra=[SystemMessagesMiddleware(), AgentSpanMiddleware()],
+    )
+    await agent.ainvoke(
+        {
+            "messages": [HumanMessage(content="hi")],
+            "kb_id": "kb-1",
+            "_system_messages": _sysmsgs("SYS-ONE", "SYS-TWO"),
+        }
+    )
+    budget_events = [e for e in events if e["event"] == Event.CONTEXT_BUDGET_HIGH]
+    assert len(budget_events) == 1
+    assert budget_events[0]["limit"] == 1
+    assert budget_events[0]["used"] > 1
+
+
+@pytest.mark.asyncio
+async def test_turn_input_budget_silent_when_under_limit(monkeypatch):
+    """未达上限时不记事件（避免日志噪音）。"""
+    events = _capture_events(monkeypatch)
+    model = _RecordingModel(messages=iter([AIMessage(content="ok")]))
+    agent = build_agent(
+        model,
+        tools=[],
+        system=None,
+        middleware_extra=[SystemMessagesMiddleware(), AgentSpanMiddleware()],
+    )
+    await agent.ainvoke({"messages": [HumanMessage(content="hi")], "kb_id": "kb-1"})
+    assert [e for e in events if e["event"] == Event.CONTEXT_BUDGET_HIGH] == []
+
+
+@pytest.mark.asyncio
+async def test_turn_input_measure_failure_degrades(monkeypatch):
+    """度量抛异常时降级：请求照常完成，不产生该事件。"""
+    events = _capture_events(monkeypatch)
+
+    def _boom(_messages):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("src.agents.graph.middleware.count_messages_tokens", _boom)
+    model = _RecordingModel(messages=iter([AIMessage(content="ok")]))
+    agent = build_agent(
+        model,
+        tools=[],
+        system=None,
+        middleware_extra=[SystemMessagesMiddleware(), AgentSpanMiddleware()],
+    )
+    result = await agent.ainvoke(
+        {"messages": [HumanMessage(content="hi")], "kb_id": "kb-1"}
+    )
+    assert result["messages"][-1].content == "ok"
+    assert [e for e in events if e["event"] == Event.CONTEXT_BUDGET_HIGH] == []

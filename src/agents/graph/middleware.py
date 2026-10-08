@@ -21,10 +21,11 @@ from src.agents.graph.message_payload import (
     _observation_output,
 )
 from src.config import settings
-from src.config.const import MAX_DELEGATE_BONUS
+from src.config.const import MAX_DELEGATE_BONUS, TURN_INPUT_TOKEN_LIMIT
 from src.core import logging as core_logging
 from src.core.log_events import Event
 from src.infra.llm.request_context import current_request_ctx
+from src.infra.llm.token_count import count_messages_tokens
 from src.infra.llm.token_usage import estimate_usage
 
 logger = logging.getLogger(__name__)
@@ -202,7 +203,7 @@ def _sent_messages(request: Any) -> list[BaseMessage]:
 
 
 class AgentSpanMiddleware(AgentMiddleware):
-    """主循环观测（模型轮次日志 + Langfuse generation span）。
+    """主循环观测（模型轮次日志 + Langfuse generation span + 轮内输入预算告警）。
 
     必须在 middleware 列表**最内层**：这样它看到的 request 已被前序
     middleware 施加过 system 与 model_settings，温度上报才与实际生效档位一致。
@@ -221,6 +222,7 @@ class AgentSpanMiddleware(AgentMiddleware):
             len(request.messages) + 1
         )  # 最内层：request.messages 已含前插的其余 system
         core_logging.log_event(Event.ITERATION_DONE, iteration=iteration, msgs=msgs)
+        self._measure_turn_input(request)
         turn_start = time.monotonic()
         settings_map = request.model_settings or {}
         if "temperature" in settings_map:
@@ -245,7 +247,25 @@ class AgentSpanMiddleware(AgentMiddleware):
         iteration = request.state.get("_turn_count", 0) + 1
         msgs = len(request.messages) + 1
         core_logging.log_event(Event.ITERATION_DONE, iteration=iteration, msgs=msgs)
+        self._measure_turn_input(request)
         return handler(request)
+
+    def _measure_turn_input(self, request: Any) -> None:
+        """模型调用前度量本轮输入 token；达上限记 context budget high。
+
+        输入取 `_sent_messages`（含 system 段）——与 `_record_turn` 的用量口径同源。
+        本阶段**只度量、不处置**：不截断、不改写任何消息。度量失败降级（记 warning
+        后继续），绝不因观测把一次成功调用变成错误。
+        """
+        try:
+            used = count_messages_tokens(_sent_messages(request))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[agent] context budget measure failed err=%s", exc)
+            return
+        if used >= TURN_INPUT_TOKEN_LIMIT:
+            core_logging.log_event(
+                Event.CONTEXT_BUDGET_HIGH, used=used, limit=TURN_INPUT_TOKEN_LIMIT
+            )
 
     def _record_turn(
         self,

@@ -68,6 +68,8 @@
 - **装配入口（assembly entry）**：`src/agents/graph/agent_factory.py` 的 `build_agent`，主角色与 fork 子代理**共用**的唯一 `create_agent` 调用点（`src/agents/` 下唯一允许调 `create_agent(` 的地方）；装配差异仅由参数（`system` / `max_turns` / `middleware_extra`）提供
 - **循环 middleware 四件套**：`src/agents/graph/middleware.py` 的四个 `AgentMiddleware` —— `SystemMessagesMiddleware`（施加 system 段）/ `ModelParamsMiddleware`（温度分档 + 思考开关）/ `AgentTurnBudget`（回合上限，仅主角色）/ `AgentSpanMiddleware`（观测，**必须在最内层**，由 `build_agent` 装配期守卫）
 - **回合预算 middleware（`AgentTurnBudget`）**：循环的回合上限承载件，`after_model` 自增 `_turn_count` 并按有效上限判定（委派轮放宽 `MAX_DELEGATE_BONUS`），命中时记 `iteration limit` 并声明 `jump_to=end`；**回合上限的唯一来源**是 `build_agent(max_turns=…)`（非 `None` 时由装配入口追加本件，仅主角色装配）
+- **历史预算（`HISTORY_TOKEN_BUDGET`）**：跨轮历史注入的 token 上限，**绝对值**，集中 `src/config/const.py`，与模型窗口解耦（弃用「窗口 × 比例」口径）。`agent_node` 的 `_truncate_history` 在轮数粗筛（`HISTORY_MAX_TURNS`）后按最旧逐条弹出至达标，**最近 1 轮始终不截**；仍超预算时记 `history budget exceeded`
+- **轮内累积上限（`TURN_INPUT_TOKEN_LIMIT`）**：单轮内模型调用输入 token 的**告警阈值**；`AgentSpanMiddleware` 在模型调用前经 `count_messages_tokens` 度量，达上限记 `context budget high`。本阶段**只告警、不处置**（压缩属摘要层）
 - **system 提供方式**：`build_agent` 的 `system` 参数两条通道 —— **静态串**（子角色，`system=<str>`，人设 + 执行契约直接进 `create_agent`）与**经运行态携带**（主角色，`system=None`，system 段由 `agent` 节点组装写入图状态 `_system_messages`，运行时由 `SystemMessagesMiddleware` 施加到每次模型调用）
 - **循环后阶段（post-loop stage）**：外层图在 `agent` 节点之后、循环本体之外的节点（`agent_finalize` / `verify` / `format`）。领域逻辑（答案提取、完整性校验、引用格式化）留在此处，**不进**装配产物；model↔tools 循环本体则内化在装配产物内部
 

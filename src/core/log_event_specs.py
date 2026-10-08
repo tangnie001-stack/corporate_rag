@@ -83,6 +83,12 @@ EVENT_SPECS: dict[str, EventSpec] = {
     "iteration limit": EventSpec(
         "iteration limit", "agent", "warning", ("query", "iteration")
     ),
+    "history budget exceeded": EventSpec(
+        "history budget exceeded", "agent", "warning", ("budget", "used", "kept")
+    ),
+    "context budget high": EventSpec(
+        "context budget high", "agent", "warning", ("used", "limit")
+    ),
     "model turn": EventSpec(
         "model turn",
         "agent",
@@ -359,6 +365,10 @@ EVENT_SPECS: dict[str, EventSpec] = {
         "llm",
         "warning",
         ("est_tokens", "share", "threshold"),
+    ),
+    # tiktoken 分词器不可用，token 计数降级为 len//2（环境级问题，仅告警一次）
+    "token encoder unavailable": EventSpec(
+        "token encoder unavailable", "llm", "warning", ("err",)
     ),
     "prompt messages": EventSpec(
         "prompt messages",
