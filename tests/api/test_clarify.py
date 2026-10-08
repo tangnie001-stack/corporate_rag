@@ -88,3 +88,21 @@ async def test_resolve_already_done():
             ClarifyAnswerBody(session_id="s1", answers=[]), _make_svc()
         )
     assert exc_info.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_resolve_second_submit_404():
+    """同一 session 第二次提交：Future 已被 pop（单次消费），第二次 404。"""
+    fut = asyncio.get_running_loop().create_future()
+    pending_asks["s1"] = fut
+    answers = [{"id": "q1", "selected": ["甲"]}]
+    svc = _make_svc()
+
+    first = await clarify_answer(
+        ClarifyAnswerBody(session_id="s1", answers=answers), svc
+    )
+    assert first.data is True
+
+    with pytest.raises(HTTPException) as exc_info:
+        await clarify_answer(ClarifyAnswerBody(session_id="s1", answers=answers), svc)
+    assert exc_info.value.status_code == 404

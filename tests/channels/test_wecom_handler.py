@@ -57,7 +57,7 @@ def _msg(**overrides: Any) -> InboundMessage:
     return InboundMessage(**base)
 
 
-def _handler(*, start_turn=None, events=None):
+def _handler(*, start_turn=None, events=None, resolve_answer=None):
     """构造被测 handler，返回 (handler, 记录用的容器)。"""
     recorded: dict[str, Any] = {"start_turn_calls": []}
     if events is None:
@@ -69,6 +69,9 @@ def _handler(*, start_turn=None, events=None):
             turn_runner.TurnHandle,
             _FakeTurnHandle(kwargs["session_id"], events),
         )
+
+    async def _default_resolve_answer(svc, *, session_id, answers):
+        return True
 
     async def _get_service():
         return cast(AppService, object())
@@ -84,6 +87,7 @@ def _handler(*, start_turn=None, events=None):
         start_turn=start_turn or _default_start_turn,
         get_service=_get_service,
         resolve_bot_key=_resolve_bot_key,
+        resolve_answer=resolve_answer or _default_resolve_answer,
         dedup=BoundedTtlMap(capacity=10, ttl_seconds=600.0),
         triggers=BoundedTtlMap(capacity=10, ttl_seconds=300.0),
         kb_id="",
@@ -221,7 +225,7 @@ def test_extract_feedback_id_tolerates_malformed_frames():
 
 
 @pytest.mark.asyncio
-async def test_ask_user_event_registers_trigger_and_does_not_reply():
+async def test_ask_user_event_registers_trigger_and_renders_question():
     ask_user = SSEAskUserEvent(questions=[{"id": "q1", "question": "?"}])
     handler, _recorded = _handler(events=[ask_user, SSEDoneEvent()])
     sink = _Sink()
@@ -232,8 +236,9 @@ async def test_ask_user_event_registers_trigger_and_does_not_reply():
         bot_key="dev", chattype="group", chatid="CHAT9", from_userid="U1"
     )
     assert handler.registered_trigger(session_id) == "U1"
-    # 澄清事件不产帧（二期由组 6 呈现问题）：帧 = 终态帧
-    assert len(sink.calls) == 1
+    # 澄清问题渲染进气泡（非终态帧），done 收尾为终态帧
+    assert len(sink.calls) == 2
+    assert sink.calls[0][1] is False
     assert sink.calls[-1][1] is True
 
 

@@ -149,6 +149,15 @@ dash 模式下 `ask_user` 常出纯文本问题（options 空），卡片覆盖�
 - **回填须写历史与消息表**：站点经 `clarify.py` 把答案写 Redis 历史 + MySQL（`chat_manager.add_message_async` + `save_user_async`）⇒ 通道回填路径 SHALL 有同样的写历史 + 写库效果（**经下条所述的共用函数**，不自行实现），否则答案不进上下文、刷新即丢。
 - **答案应用逻辑须下沉共用（不得复制）**：站点把"pop `pending_asks` + `_format_answers_text` + 双写"整段写在 `api/clarify.py`。通道既不得 import `api`、也不得复制一份（与 D12「唯一实现」冲突）⇒ 该逻辑 SHALL 下沉为 `services` 函数（如 `resolve_clarify_answer(session_id, answers)`），`clarify.py` 与桥接共用；tasks 增项。
 
+### D14b 仅触发者回填与呈现（4b 实测/设计）
+- **澄清不是新回合**：原 SSE 流续跑、同一气泡继续累积——`ask_user` 事件渲染进累积内容后，回合不结束，后续生成在同一气泡续写。
+- **呈现方式**：把 `ask_user` 的问题与可选项渲染进累积内容，**不 finalize**（原回合仍挂起等待，终态帧只能发一次）。
+- **仅触发者判据**：`_triggers` 登记值 == 发送者 `from_userid` 时该文本才被当作澄清答案；不一致者不走回填路径（落普通回合，撞锁则回忙提示）。
+- **无效答复不消耗挂起**：解析失败时提示重答，挂起保留，用户可再次作答。
+- **`resolve` 返回 False 时回落**：挂起已超时/已消费（`resolve` 返回 False）时，回落为新回合而非继续等待。
+- **取代关系（supersession）**：本实现为**逐问编号渲染 + 逐条映射**（`clarify_render.py` 逐问编号、`clarify_parse.py` 对多问要求编号并逐条映射），**取代** D14 中"一问一答 / 多问合并为一问"的表述。
+- **与既有 spec 的关系**：本节的来源校验与不消耗语义**细化**既有「澄清答案回填挂起请求」Requirement（见 spec delta）。
+
 ### D15 桥接仅长连接，回调保持 legacy 占位
 桥接 handler 只对长连接路径生效；`WECOM_BOT_MODE=callback` 仍走占位 handler。
 - **理由**：回调 sink 只保留最后一次回包且在 HTTP 请求内同步 `await`，Agent 回合（几十秒）必超回调超时窗口并触发重试风暴；真正的回调流式是"无刷新回调 + response_url 轮询"的独立工程。

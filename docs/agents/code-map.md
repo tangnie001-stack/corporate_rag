@@ -95,6 +95,9 @@ channels/          接入通道：base(通用抽象) / wecom(parse 入站解析 
 > - `src/config/wecom_channel.py`：企微通道层参数（去重/触发者登记的 TTL 与容量）与通道文案
 > - `src/channels/wecom/long_connection.py`：长连接驱动；**就绪 = 收到 SDK `authenticated` 事件**（等待上界 5s，超时只降级不断开）；凭证类失败与"被顶"均置非就绪
 > - `src/services/wecom_service.py`：驱动注册表（收全部已启动者，供 stop 关闭）+ `is_ready(bot_key)` 查询；锚点 `n=` 只计认证就绪台数
+> - `src/services/clarify_service.py`：澄清答案**编排**（下沉目标）：定位并 resolve 挂起 Future + 落库用户答案 + 文本格式化
+> - `src/channels/wecom/clarify_parse.py`：把企微**文本回复**解析成站点同构 `answers=[{id,selected,custom}]`（单问/编号多问/multi_select/无效判定）
+> - 澄清在企微的链路：投影层**渲染问题**（不 finalize）→ 用户回复 → handler 校验**仅触发者** → 解析 → `resolve_clarify_answer` → **原回合续跑、同一气泡继续累积**
 
 ### prompt 组装与段模板归属
 
