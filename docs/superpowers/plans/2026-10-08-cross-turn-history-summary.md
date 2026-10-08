@@ -278,7 +278,10 @@ def get_summary_llm() -> ChatOpenAI:
     Returns:
         关闭思考、带输出上限的 ChatOpenAI 实例
     """
-    from src.config import SUMMARY_MAX_TOKENS, SUMMARY_MODEL
+    # 注意：`src/config/__init__.py` 只星号导出 `settings`（第 8 行
+    # `from src.config.settings import *`），**不含 `const`** ⇒ 两个常量必须分开取。
+    from src.config import SUMMARY_MODEL
+    from src.config.const import SUMMARY_MAX_TOKENS
 
     extra_kwargs: dict = json.loads(LLM_KWARGS)
     extra_kwargs.update(
@@ -294,7 +297,7 @@ def get_summary_llm() -> ChatOpenAI:
     )
 ```
 
-`src/config/__init__.py` 需能导出 `SUMMARY_MODEL` / `SUMMARY_MAX_TOKENS`（该文件按 `settings` 的同类写法导出；若为显式列举式，补上这两个名字）。
+`src/config/__init__.py` **无需改动**——它用星号导入 `settings`，`SUMMARY_MODEL` 自动可用（已核实 `src/config/__init__.py:8`）。
 
 - [ ] **Step 3: 新增摘要提示词模板（`kind: task`）**
 
