@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
+from src.agents.graph.history_window import exceeds_budget, split_history_window
 from src.agents.graph.message_payload import _extract_text
 from src.agents.graph.state import AgentState
 from src.agents.skills.prefix import clean_prefix
@@ -33,32 +34,26 @@ def _truncate_history(
 ) -> list[ChatMessage]:
     """历史窗口截断：保留最近 N 轮 + 绝对 token 预算，最近 1 轮完整保留。
 
+    切分口径见 `history_window.split_history_window`（与摘要触发判据同源）。
+
     Args:
         history: 完整对话历史（user/assistant 交替排列）
         max_turns: 保留的最近轮数（每轮 user+assistant 两条消息）
         token_budget: 历史消息总 token 上限（绝对值，集中 `const.py`）
 
     Returns:
-        截断后的历史列表：先按轮数保留最近 max_turns 轮，总 token 超出预算时
-        从最旧逐条弹出直到达标，最近 1 轮（最后 2 条）始终不截。
+        截断后的历史列表；最近 1 轮（最后 2 条）始终不截。
         计数走 `count_tokens`（分词器近似）。返回新列表，不修改入参。
     """
-    if len(history) > max_turns * 2:
-        recent = history[-(max_turns * 2) :]
-    else:
-        recent = list(history)
-    total = sum(count_tokens(m.content) for m in recent)
-    while total > token_budget and len(recent) > 2:
-        dropped = recent.pop(0)
-        total -= count_tokens(dropped.content)
-    if total > token_budget:
+    kept, _ = split_history_window(history, max_turns, token_budget)
+    if exceeds_budget(kept, token_budget):
         core_logging.log_event(
             Event.HISTORY_BUDGET_EXCEEDED,
             budget=token_budget,
-            used=total,
-            kept=len(recent),
+            used=sum(count_tokens(m.content) for m in kept),
+            kept=len(kept),
         )
-    return recent
+    return kept
 
 
 def _split_history(

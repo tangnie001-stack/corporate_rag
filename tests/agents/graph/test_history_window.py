@@ -11,6 +11,7 @@
 import pytest
 
 from src.agents.graph.agent_node import _truncate_history
+from src.agents.graph.history_window import exceeds_budget, split_history_window
 from src.config.const import HISTORY_MAX_TURNS, HISTORY_TOKEN_BUDGET
 from src.core.log_events import Event
 from src.infra.llm.chat_message import ChatMessage
@@ -84,3 +85,49 @@ def test_recent_round_always_kept_and_logged(_capture_events):
     assert exceptions[0]["budget"] == 100
     assert exceptions[0]["used"] > 100
     assert exceptions[0]["kept"] == 2
+
+
+# `_MSG_X` / `_MSG_Y` / `_TURN_TOKENS` 已在本文件上方（Phase A 引入）定义，
+# 直接复用，**不要重复定义**（会构成逐字重复）。
+
+
+def _three_turns():
+    history = []
+    for _ in range(3):
+        history.append(ChatMessage(role="user", content=_MSG_X))
+        history.append(ChatMessage(role="assistant", content=_MSG_Y))
+    return history
+
+
+def test_split_returns_kept_and_discarded():
+    """切分返回 (kept, discarded)，两段拼起来等于原历史。"""
+    history = _three_turns()
+    kept, discarded = split_history_window(history, max_turns=1, token_budget=10**6)
+    assert kept[-1] is history[-1]
+    assert len(discarded) == len(history) - len(kept)
+    assert discarded + kept == history
+
+
+def test_split_kept_matches_truncate_history():
+    """切分产出的 kept 与 _truncate_history 的返回值逐一相等（同口径）。"""
+    history = _three_turns()
+    budget = _TURN_TOKENS + 1
+    kept, _ = split_history_window(history, max_turns=10, token_budget=budget)
+    assert kept == _truncate_history(history, max_turns=10, token_budget=budget)
+
+
+def test_split_discarded_empty_when_tail_covers_all():
+    """保留尾部覆盖全量时 discarded 为空——生成侧据此跳过（防每轮空转）。"""
+    history = _three_turns()
+    kept, discarded = split_history_window(history, max_turns=10, token_budget=10**6)
+    assert discarded == []
+    assert kept == history
+
+
+def test_exceeds_budget():
+    """预算判定：等于预算不算超。"""
+    history = _three_turns()
+    kept, _ = split_history_window(history, max_turns=10, token_budget=10**6)
+    total = sum(count_tokens(m.content) for m in kept)
+    assert exceeds_budget(kept, total) is False
+    assert exceeds_budget(kept, total - 1) is True
