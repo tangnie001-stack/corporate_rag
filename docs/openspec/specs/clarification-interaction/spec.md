@@ -3,7 +3,6 @@
 ## Purpose
 TBD - created by syncing change agentic-clarification. Update Purpose after sync.
 ## Requirements
-
 ### Requirement: ask_user 工具化澄清
 
 系统 SHALL 提供 `ask_user` 工具（LangChain @tool），注册在 agent 循环的工具集中；模型在推理过程中需要补充信息（缺失实体/需要确认）时自主调用该工具。工具参数含 `questions` 数组，每个元素携带 `id`、`question`、`dimension`（company/period/metric 或 free）、`multi_select`（可选）。工具调用后系统 SHALL 将问题通过 SSE 事件推送前端，并阻塞等待用户答案；用户答案回传后作为工具结果（ToolMessage）回喂，agent 在同一 turn 内继续推理，不得重开流程。
@@ -54,15 +53,20 @@ TBD - created by syncing change agentic-clarification. Update Purpose after sync
 
 ### Requirement: 历史注入窗口
 
-系统 SHALL 为 agent 循环历史注入采用"最近 N 轮 + token 双上限"：保留最近 N 轮（默认 10）user/assistant 文本；历史总 token 超过 context 窗口 30% 时从最旧截断；最近 1 轮完整注入。滚动摘要列为后续增强。
+系统 SHALL 为 agent 循环历史注入采用「最近 N 轮 + **绝对 token 预算**」：保留最近 `HISTORY_MAX_TURNS`（默认 10）轮 user/assistant 文本；历史总 token 超过 `HISTORY_TOKEN_BUDGET`（`src/config/const.py` 的集中绝对值，初值 16384）时从最旧逐条截断；最近 1 轮完整注入。token 计数 SHALL 经统一入口 `src/infra/llm/token_count.py`（分词器近似），SHALL NOT 使用字符数粗估算。裁剪后仅剩最近 1 轮仍超预算时，系统 SHALL 保留该轮并记录 `history budget exceeded` 事件（含预算、实际用量与保留条数），SHALL NOT 静默超出。滚动摘要列为后续增强。
 
 #### Scenario: 话题漂移上下文保留
 - **WHEN** 用户 A→B→A 话题漂移，A 在最近 N 轮窗口内
 - **THEN** A 的上下文保留在注入历史中，回到 A 时模型可继续
 
-#### Scenario: 超窗截断
-- **WHEN** 历史轮数超过 N 或总 token 超阈值
+#### Scenario: 超预算截断
+- **WHEN** 历史轮数超过 `HISTORY_MAX_TURNS` 或总 token 超过 `HISTORY_TOKEN_BUDGET`
 - **THEN** 从最旧截断，保留最近 N 轮与最近 1 轮完整内容
+
+#### Scenario: 仅剩最近 1 轮仍超预算
+- **WHEN** 裁剪至仅剩最近 1 轮时总 token 仍超过 `HISTORY_TOKEN_BUDGET`
+- **THEN** 系统完整保留最近 1 轮
+- **AND** 记录 `history budget exceeded`（含 `budget` / `used` / `kept`），不静默超出
 
 ### Requirement: 澄清触发与频率护栏
 

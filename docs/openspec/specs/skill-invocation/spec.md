@@ -2,10 +2,7 @@
 
 ## Purpose
 TBD - created by syncing change session-agent-and-skill-invocation. Update Purpose after archive.
-
 ## Requirements
-
-
 ### Requirement: `/xxx` 前缀显式调用 skill
 
 系统 SHALL 支持用户在消息中显式调用 skill：消息以 `/` 开头，其后为 skill 名，格式 `/name 剩余文本`（name = skill 名，剩余文本 = 该次调用的任务文本）。后端 SHALL 解析该前缀并路由到对应 skill，**不依赖模型判断**。前端 SHALL 在新建对话页与历史对话页提供**两个等价入口**：输入框行首 `/` 命令补全、输入区技能选择器（下拉，选中即插入 `/name `）；二者共用同一份候选数据与同一个后端解析，不新增第二条调用通道。
@@ -39,7 +36,7 @@ TBD - created by syncing change session-agent-and-skill-invocation. Update Purpo
 
 `/xxx` 触发 SHALL 将 skill 内容作为一条隐藏消息注入会话上下文。**触发粒度为消息级，生效范围为会话级**：后续轮次 SHALL 仍然看到该 skill 内容，直到**被历史窗口截断或新会话**。
 
-⚠ **已知限制（2026-09-18 记录，本变更不改行为）**：生效边界由 `_truncate_history`（`src/agents/graph/agent_node.py:30-59`）决定 —— 它按"最近 `HISTORY_MAX_TURNS`（=10）轮 + token 预算 `context_window × HISTORY_TOKEN_RATIO` = 2400 token"截断，且**截断发生在注入消息被抽出之前**（`:79` 先截断、`:91-95` 后抽取）。因此：① 会话超过 10 轮后，注入消息作为"最旧的"被静默丢弃；② 一条 `inline` skill（约 1500 token）会占掉 60% 以上的历史预算，加速自身被截。**系统当前没有上下文压缩机制**（该截断是丢弃，不是压缩）。该限制与预算问题已登记 `requirements_pool.md`，不在本变更修。
+⚠ **已知限制**：生效边界由 `_truncate_history`（`src/agents/graph/agent_node.py`）决定 —— 它按「最近 `HISTORY_MAX_TURNS`（=10）轮 + 绝对 token 预算 `HISTORY_TOKEN_BUDGET`（`src/config/const.py`）」截断，且**截断发生在注入消息被抽出之前**（先截断、后抽取）。因此：① 会话超过 10 轮后，注入消息作为"最旧的"被静默丢弃；② 一条 `inline` skill 会占掉相当比例的历史预算，加速自身被截。**系统当前没有上下文压缩机制**（该截断是丢弃，不是压缩）。
 
 #### Scenario: 后续轮次仍受影响
 

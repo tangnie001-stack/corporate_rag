@@ -39,3 +39,19 @@ The `total_tokens` field SHALL always be the sum of `prompt_tokens + completion_
 > `TokenUsage` 是**普通 dataclass**、不做字段间推导（`total_tokens` 默认 `0`），所以该不变量由**构造点**保证：构造时必须显式传入与两项之和相等的 `total_tokens`。故本场景的断言对象是"**经由既有构造入口产出的实例**"，而不是"任意手工构造的实例" —— 后者可以为假且不代表任何真实路径。
 >
 > 原场景以已不存在的 `generate_node` 为读取点。本变更另删除了两个 `total_tokens` 的构造/消费点（`stream_answer` 内部、`LangfuseTracer.end_generation`），存留的构造入口见 `estimate_usage()`。
+
+### Requirement: Token 计数 SHALL 使用项目统一分词器
+
+系统的 token 计数 SHALL 通过项目统一的分词器实现（`tiktoken`，已为现有依赖）。`estimate_usage()` 与上下文/历史预算的计数 SHALL 复用同一计数入口，SHALL NOT 使用 `len(content) // 2` 之类的字符数粗估。
+
+#### Scenario: estimate_usage 使用分词器计数
+
+- **WHEN** LLM 未提供 `usage_metadata` 而以 `estimate_usage()` 兜底
+- **THEN** 其 token 数 SHALL 由分词器对文本计数得出
+- **AND** 返回的 `TokenUsage` 形状与 `total_tokens` 不变量（= `prompt_tokens + completion_tokens`）SHALL 保持不变
+
+#### Scenario: 历史/上下文预算复用同一计数入口
+
+- **WHEN** 计算历史窗口或上下文的 token 用量
+- **THEN** SHALL 调用同一计数入口
+- **AND** 代码中 SHALL NOT 存在内联的字符数算术粗估作为计数依据
