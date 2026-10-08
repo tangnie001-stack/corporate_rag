@@ -23,6 +23,7 @@ from src.config.wecom_presenter import (
     TRACE_FOOTER_EFFECTIVE,
     WeComPresenterTexts,
 )
+from src.core.logging import encode_value
 from src.utils.sse import (
     SSEAbstentionEvent,
     SSEAgentUsedEvent,
@@ -110,6 +111,8 @@ class WeComPresenter:
         self._last_sent: str | None = None
         self._last_sent_at: float = float("-inf")
         self._frames_sent: int = 0
+        # 全部成功发送的帧数（含占位/保活/终态；供发送日志的 index 用，非上限判据）
+        self._frames_total: int = 0
         self._sources: list[SSECitationEvent] = []
         self._abstained: bool = False
         self._error: str | None = None
@@ -335,10 +338,9 @@ class WeComPresenter:
         Returns:
             True 表示发送成功
         """
+        feedback_arg = self._feedback_arg()
         try:
-            await self._sink.reply_stream(
-                content, finish, feedback=self._feedback_arg()
-            )
+            await self._sink.reply_stream(content, finish, feedback=feedback_arg)
         except Exception as e:  # noqa: BLE001
             logger.error("[wecom] presenter reply failed finish={} err={}", finish, e)
             self._degraded = True
@@ -346,6 +348,17 @@ class WeComPresenter:
         self._feedback_sent = True
         self._last_sent = content
         self._last_sent_at = self._monotonic()
+        self._frames_total += 1
+        feedback_id = ""
+        if feedback_arg is not None:
+            feedback_id = encode_value(str(feedback_arg.get("id", "")))
+        logger.info(
+            "[wecom] reply frame sent index={} finish={} chars={} feedback_id={}",
+            self._frames_total,
+            finish,
+            len(content),
+            feedback_id,
+        )
         return True
 
     async def _send_raw(self, content: str, finish: bool) -> None:
@@ -356,3 +369,11 @@ class WeComPresenter:
             )
         except Exception as e:  # noqa: BLE001
             logger.error("[wecom] presenter fallback reply failed err={}", e)
+            return
+        self._frames_total += 1
+        logger.info(
+            "[wecom] reply frame sent index={} finish={} chars={} fallback=true",
+            self._frames_total,
+            finish,
+            len(content),
+        )
