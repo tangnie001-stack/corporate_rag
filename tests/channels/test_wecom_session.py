@@ -59,6 +59,11 @@ def test_session_id_and_user_id_differ_for_same_identifier():
     assert session_id != derive_user_id("U1")
 
 
+def test_user_id_is_pinned_by_literal_expected_value():
+    """钉住 `wecom-user|{from_userid}` 前缀：改掉它会静默重键全部用户行。"""
+    assert derive_user_id("U1") == "6333fb86-144e-5486-853c-7a7bc7c65c3a"
+
+
 def test_title_is_readable_and_bounded():
     title = build_session_title(
         bot_key="finance", chattype="group", chatid="CHAT9", from_userid="U9"
@@ -66,6 +71,14 @@ def test_title_is_readable_and_bounded():
     assert "finance" in title
     assert "CHAT9" in title
     assert len(title) <= 256  # sessions.title 列宽
+
+
+def test_title_is_truncated_to_column_width():
+    """超长外部 id 不得撑爆 `sessions.title`（String(256)）。"""
+    title = build_session_title(
+        bot_key="dev", chattype="group", chatid="C" * 300, from_userid="U1"
+    )
+    assert len(title) == 256
 
 
 def test_namespace_is_cross_process_stable():

@@ -11,6 +11,9 @@ import uuid
 
 from src.config.const import WECOM_NS
 
+# sessions.title 的列宽（见 src/infra/db/models/chat.py）；外部 id 可能超长，故截断兜底
+_TITLE_MAX_CHARS: int = 256
+
 
 def derive_session_id(
     *, bot_key: str, chattype: str, chatid: str | None, from_userid: str
@@ -59,7 +62,7 @@ def build_session_title(
         from_userid: 触发者 userid
 
     Returns:
-        形如 `[企微·finance] 群聊 CHAT9` 的标题
+        形如 `[企微·finance] 群聊 CHAT9` 的标题；超过 `sessions.title` 列宽时截断
     """
     if chattype == "group":
         scope = "群聊"
@@ -67,4 +70,7 @@ def build_session_title(
     else:
         scope = "单聊"
         ident = from_userid
-    return f"[企微·{bot_key}] {scope} {ident}"
+    title = f"[企微·{bot_key}] {scope} {ident}"
+    if len(title) > _TITLE_MAX_CHARS:
+        return title[:_TITLE_MAX_CHARS]
+    return title

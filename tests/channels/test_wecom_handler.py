@@ -73,6 +73,8 @@ def _handler(*, start_turn=None, events=None):
     def _resolve_bot_key(aibotid: str) -> str | None:
         if aibotid == "AIB1":
             return "dev"
+        if aibotid == "AIB2":
+            return "support"
         return None
 
     handler = RagChannelHandler(
@@ -126,6 +128,18 @@ async def test_duplicate_msgid_is_dropped():
 
     assert len(recorded["start_turn_calls"]) == 1
     assert len(sink.calls) == first_call_count  # 重推不产生任何新帧
+
+
+@pytest.mark.asyncio
+async def test_same_msgid_from_two_bots_both_run():
+    """去重键含 bot_key：同一 msgid 来自两台不同机器人不算重推。"""
+    handler, recorded = _handler()
+    sink = _Sink()
+
+    await handler(_msg(aibotid="AIB1", msgid="M-SHARED"), sink)
+    await handler(_msg(aibotid="AIB2", msgid="M-SHARED"), sink)
+
+    assert len(recorded["start_turn_calls"]) == 2
 
 
 @pytest.mark.asyncio

@@ -139,7 +139,8 @@ class RagChannelHandler:
         if bot_key is None:
             logger.warning("[wecom] unknown bot aibotid={}", encode_value(msg.aibotid))
             return
-        if not self._dedup.mark_if_new(msg.msgid, ""):
+        # 去重表被三台机器人共享，键须含 bot_key，避免跨 bot 同 msgid 被误判为重推
+        if not self._dedup.mark_if_new(f"{bot_key}|{msg.msgid}", ""):
             logger.info(
                 "[wecom] duplicate msgid dropped bot_key={} msgid={}",
                 encode_value(bot_key),
