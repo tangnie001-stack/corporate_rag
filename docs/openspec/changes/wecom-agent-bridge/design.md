@@ -155,6 +155,8 @@ dash 模式下 `ask_user` 常出纯文本问题（options 空），卡片覆盖�
 - **仅触发者判据**：`_triggers` 登记值 == 发送者 `from_userid` 时该文本才被当作澄清答案；不一致者不走回填路径（落普通回合，撞锁则回忙提示）。
 - **无效答复不消耗挂起**：解析失败时提示重答，挂起保留，用户可再次作答。
 - **`resolve` 返回 False 时回落**：挂起已超时/已消费（`resolve` 返回 False）时，回落为新回合而非继续等待。
+- **取代关系（supersession）**：本实现为**逐问编号渲染 + 逐条映射**（`clarify_render.py` 逐问编号、`clarify_parse.py` 对多问要求编号并逐条映射），**取代** D14 中"一问一答 / 多问合并为一问"的表述。
+- **与既有 spec 的关系**：本节的来源校验与不消耗语义**细化**既有「澄清答案回填挂起请求」Requirement（见 spec delta）。
 
 ### D15 桥接仅长连接，回调保持 legacy 占位
 桥接 handler 只对长连接路径生效；`WECOM_BOT_MODE=callback` 仍走占位 handler。
