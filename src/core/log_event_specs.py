@@ -164,6 +164,10 @@ EVENT_SPECS: dict[str, EventSpec] = {
         "info",
         ("skill", "context", "context_source", "body_chars"),
     ),
+    "summary done": EventSpec("summary done", "session", "info", ("covered", "tokens")),
+    "summary fallback": EventSpec(
+        "summary fallback", "session", "warning", ("reason", "err")
+    ),
     # [db] 向量检索 / 文件存储（3.4 批）
     "bucket created": EventSpec("bucket created", "db", "info", ("bucket",)),
     "file upload failed": EventSpec(

@@ -70,17 +70,21 @@ async def lifespan(app: FastAPI):
 
 
 async def _clear_stale_chat_locks() -> None:
-    """启动时清空 chat_lock:* 键：重启后进程内无任何生成任务，残留锁必然过期。
+    """启动时清空残留的轮次锁与摘要锁键：重启后进程内无任何生成任务，残留锁必然过期。
 
     Redis 的 chat_lock 由 chat_stream 用 SETNX + TTL 设置，进程被杀时
     可能残留（TTL 兜底 180s），若不清理会阻塞重启后首个新请求的并发锁获取。
+    摘要锁（chat_summary_lock:*）同属"进程内持有、进程被杀即泄漏"的键，一并清理。
     清理失败不阻塞启动：Redis 不可用或超时都只记录 warning。
     """
     try:
         from src.infra.redis_client import get_redis_client
+        from src.services.summary_lock import SUMMARY_LOCK_PREFIX
 
         redis = get_redis_client()
+        # 摘要锁若不清理，该会话此后 best-effort 永远拿不到锁 ⇒ 永不再生成摘要
         keys = await redis.keys("chat_lock:*")
+        keys += await redis.keys(f"{SUMMARY_LOCK_PREFIX}*")
         if keys:
             await redis.delete(*keys)
             core_logging.log_event(Event.STALE_LOCKS_CLEARED, count=len(keys))
