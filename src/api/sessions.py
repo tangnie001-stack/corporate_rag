@@ -10,7 +10,6 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
-from src.api.chat import _release_session_lock
 from src.api.dependencies import get_app_service
 from src.api.model.request import (
     SessionCancelRequest,
@@ -24,6 +23,7 @@ from src.chat.task_registry import task_registry
 from src.config.const import SKILL_INJECTION_PREFIX
 from src.config.response_codes import Code
 from src.services.app_service import AppService
+from src.services.chat_lock import release_session_lock
 from src.utils.errors import BusinessError
 from src.utils.sse import SSEDoneEvent, to_sse
 
@@ -196,7 +196,7 @@ async def delete_session(
     streaming_manager.unregister(session_id)
     streaming_manager.clear_buffer(session_id)
     try:
-        await _release_session_lock(svc.chat_manager._redis, session_id)
+        await release_session_lock(svc.chat_manager._redis, session_id)
     except Exception as e:  # noqa: BLE001
         logger.warning("Session lock release failed on delete: {}", e)
 

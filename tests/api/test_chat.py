@@ -14,6 +14,7 @@ client = TestClient(app)
 
 def test_chat_stream_returns_sse():
     """POST /api/chat/stream returns SSE event stream."""
+    from src.chat.streaming import streaming_manager
     from src.infra.llm.request_context import RequestContext
     from src.utils.sse import SSEDoneEvent, SSETokenEvent
 
@@ -22,6 +23,11 @@ def test_chat_stream_returns_sse():
         yield SSEDoneEvent(trace_id="")
 
     async def fake_stream_chat(kb_id, session_id, query, deep_thinking=False, agent=""):
+        # start_turn 从进程内事件缓冲订阅（真实 stream_chat 返回的订阅即缓冲
+        # 消费者），故假 stream_chat 必须把事件写入缓冲，端点才能订阅到。
+        streaming_manager.clear_buffer(session_id)
+        streaming_manager.add_event(session_id, "token", {"token": "净利润"})
+        streaming_manager.add_event(session_id, "done", {"trace_id": ""})
         return (
             _sub(),
             {
@@ -40,7 +46,7 @@ def test_chat_stream_returns_sse():
     app.dependency_overrides[get_app_service] = lambda: mock_svc
 
     try:
-        with patch("src.api.chat._run_with_finalize", new=AsyncMock()):
+        with patch("src.services.turn_runner._run_with_finalize", new=AsyncMock()):
             response = client.post(
                 "/api/chat/stream",
                 json={"session_id": "s1", "kb_id": "kb-1", "query": "净利润多少"},
@@ -50,31 +56,74 @@ def test_chat_stream_returns_sse():
         assert response.headers["content-type"].startswith("text/event-stream")
         assert "净利润" in response.text
     finally:
+        streaming_manager.clear_buffer("s1")
         app.dependency_overrides.pop(get_app_service, None)
 
 
 def test_chat_stream_passes_user_id():
-    """chat_stream 应从请求上下文提取 user_id 传给流生成器。
+    """chat_stream 应从请求上下文提取 user_id 传给编排入口。
 
     回归场景：会话持久化时未传 user_id，导致会话列表按用户过滤后为空。
     """
     mock_svc = AsyncMock()
     app.dependency_overrides[get_app_service] = lambda: mock_svc
     try:
-        with patch("src.api.chat._stream_rag_response") as mock_gen:
+        with patch(
+            "src.services.turn_runner.start_turn", new_callable=AsyncMock
+        ) as mock_start:
 
-            async def _ag():
-                yield b""
+            async def _empty_events():
+                if False:  # pragma: no cover - 仅提供异步迭代器协议
+                    yield None
 
-            mock_gen.return_value = _ag()
+            handle = MagicMock()
+            handle.events = _empty_events()
+            mock_start.return_value = handle
             client.post(
                 "/api/chat/stream",
                 json={"session_id": "s1", "kb_id": "kb-1", "query": "hi"},
                 cookies={"user_id": "user-123"},
             )
-            # 第 5 个位置参数应为 user_id（auth middleware 从 user_id cookie 提取）
-            args = mock_gen.call_args.args
-            assert args[4] == "user-123"
+            # user_id 作为关键字参数传给 start_turn（auth middleware 从 user_id cookie 提取）
+            assert mock_start.call_args.kwargs["user_id"] == "user-123"
+    finally:
+        app.dependency_overrides.pop(get_app_service, None)
+
+
+def test_chat_stream_emits_error_and_done_when_subscription_raises():
+    """订阅迭代抛异常时，端点仍产出 error + done 终止帧（连接不中断）。
+
+    回归场景：_frames 订阅 handle.events 时若 from_payload 遇畸形载荷抛异常，
+    旧实现以 except 兜底为 error + done 终止态；若丢失该兜底，客户端只表现为
+    连接中断且无终态（违反站点外部行为不变）。
+    """
+    from src.utils.sse import SSETokenEvent
+
+    mock_svc = AsyncMock()
+    app.dependency_overrides[get_app_service] = lambda: mock_svc
+
+    async def _exploding_events():
+        yield SSETokenEvent("部分")
+        raise RuntimeError("boom")
+
+    try:
+        with patch(
+            "src.services.turn_runner.start_turn", new_callable=AsyncMock
+        ) as mock_start:
+            handle = MagicMock()
+            handle.events = _exploding_events()
+            mock_start.return_value = handle
+            response = client.post(
+                "/api/chat/stream",
+                json={"session_id": "s1", "kb_id": "kb-1", "query": "hi"},
+            )
+        assert response.status_code == 200
+        assert "event: error" in response.text
+        assert "event: done" in response.text
+        assert "boom" in response.text
+        # 终止帧顺序：error 在前、done 在后，且 done 为末帧
+        assert response.text.index("event: error") < response.text.index("event: done")
+        assert response.text.rstrip().endswith("}")
     finally:
         app.dependency_overrides.pop(get_app_service, None)
 
@@ -85,6 +134,7 @@ def test_chat_stream_passes_deep_thinking():
     回归场景：前端「深度思考」开关打开时，请求应携带 deep_thinking=true，
     最终传递给 agent LLM 的 enable_thinking 参数；若断链则开关无效。
     """
+    from src.chat.streaming import streaming_manager
     from src.infra.llm.request_context import RequestContext
     from src.utils.sse import SSEDoneEvent, SSETokenEvent
 
@@ -96,6 +146,9 @@ def test_chat_stream_passes_deep_thinking():
 
     async def fake_stream_chat(kb_id, session_id, query, deep_thinking=False, agent=""):
         captured["deep_thinking"] = deep_thinking
+        # 缓冲写入终止态：start_turn 从进程内缓冲订阅，否则端点无终态可收
+        streaming_manager.clear_buffer(session_id)
+        streaming_manager.add_event(session_id, "done", {"trace_id": ""})
         return (
             _sub(),
             {
@@ -115,7 +168,7 @@ def test_chat_stream_passes_deep_thinking():
 
     try:
         # 后台任务（_run_with_finalize）mock 掉，本用例只验证 deep_thinking 透传
-        with patch("src.api.chat._run_with_finalize", new=AsyncMock()):
+        with patch("src.services.turn_runner._run_with_finalize", new=AsyncMock()):
             response = client.post(
                 "/api/chat/stream",
                 json={
@@ -128,6 +181,7 @@ def test_chat_stream_passes_deep_thinking():
         assert response.status_code == 200
         assert captured["deep_thinking"] is True
     finally:
+        streaming_manager.clear_buffer("s1")
         app.dependency_overrides.pop(get_app_service, None)
 
 
@@ -137,6 +191,7 @@ def test_chat_stream_passes_agent():
     回归场景：前端选择会话智能体时，请求应携带 agent=预设名，
     最终经 bind-once 绑定到会话并回传 agent_used；若断链则绑定失效。
     """
+    from src.chat.streaming import streaming_manager
     from src.infra.llm.request_context import RequestContext
     from src.utils.sse import SSEDoneEvent, SSETokenEvent
 
@@ -148,6 +203,9 @@ def test_chat_stream_passes_agent():
 
     async def fake_stream_chat(kb_id, session_id, query, deep_thinking=False, agent=""):
         captured["agent"] = agent
+        # 缓冲写入终止态：start_turn 从进程内缓冲订阅，否则端点无终态可收
+        streaming_manager.clear_buffer(session_id)
+        streaming_manager.add_event(session_id, "done", {"trace_id": ""})
         return (
             _sub(),
             {
@@ -166,7 +224,7 @@ def test_chat_stream_passes_agent():
     app.dependency_overrides[get_app_service] = lambda: mock_svc
 
     try:
-        with patch("src.api.chat._run_with_finalize", new=AsyncMock()):
+        with patch("src.services.turn_runner._run_with_finalize", new=AsyncMock()):
             response = client.post(
                 "/api/chat/stream",
                 json={
@@ -179,15 +237,16 @@ def test_chat_stream_passes_agent():
         assert response.status_code == 200
         assert captured["agent"] == "finance-expert"
     finally:
+        streaming_manager.clear_buffer("s1")
         app.dependency_overrides.pop(get_app_service, None)
 
 
 @pytest.mark.asyncio
 async def test_normal_answer_persisted():
     """正常回答（有 token 无澄清）时后台任务将完整回答落库为 complete。"""
-    from src.api.chat import _run_with_finalize
     from src.chat.streaming import StreamingRunManager
     from src.infra.llm.request_context import RequestContext
+    from src.services.turn_runner import _run_with_finalize
 
     statuses = []
     svc = MagicMock()

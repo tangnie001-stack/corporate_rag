@@ -95,16 +95,37 @@ class StreamingRunManager:
     def __init__(self) -> None:
         self._session_tasks: dict[str, asyncio.Task] = {}
         self._abort_signals: dict[str, asyncio.Event] = {}
+        # 进程内原子预留：try_reserve 判定与预留之间无 await，供编排闸门在
+        # Redis 不可用时也能拒绝同 session 并发（预留由 register 替换为任务，
+        # 或由 release_reservation 显式释放）
+        self._reserved: set[str] = set()
         self._stream_buffers: dict[str, list[tuple[int, str, Any]]] = {}
         self._buffer_done_at: dict[str, float] = {}
         self._seq_counters: dict[str, int] = {}
 
+    def try_reserve(self, session_id: str) -> bool:
+        """同步原子预留：会话未运行且未预留时标记预留并返回 True。
+
+        判定（is_running）与预留（加入 _reserved）之间无 await 点，保证同一
+        事件循环内两个并发请求不会同时通过。预留由后续 register 替换为任务
+        引用，或由 release_reservation 显式释放（幂等）。
+        """
+        if self.is_running(session_id):
+            return False
+        self._reserved.add(session_id)
+        return True
+
+    def release_reservation(self, session_id: str) -> None:
+        """释放预留（幂等：无预留时为 no-op）。"""
+        self._reserved.discard(session_id)
+
     def register(
         self, session_id: str, task: asyncio.Task, abort_signal: asyncio.Event
     ) -> None:
-        """登记任务与对应 abort 信号；任务完成时由调用方 unregister。"""
+        """登记任务与对应 abort 信号；替换预留为任务引用；完成时由调用方 unregister。"""
         self._session_tasks[session_id] = task
         self._abort_signals[session_id] = abort_signal
+        self._reserved.discard(session_id)
         core_logging.log_event(Event.TASK_REGISTERED)
 
     def unregister(self, session_id: str) -> None:
@@ -121,9 +142,12 @@ class StreamingRunManager:
         if self._session_tasks.get(session_id) is task:
             self._session_tasks.pop(session_id, None)
             self._abort_signals.pop(session_id, None)
+            self._reserved.discard(session_id)
 
     def is_running(self, session_id: str) -> bool:
-        """该 session 是否已有活跃生成任务。"""
+        """该 session 是否已有活跃生成任务或处于预留中。"""
+        if session_id in self._reserved:
+            return True
         task = self._session_tasks.get(session_id)
         return task is not None and not task.done()
 
