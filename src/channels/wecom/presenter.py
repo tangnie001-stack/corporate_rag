@@ -26,6 +26,7 @@ from src.config.wecom_presenter import (
 from src.utils.sse import (
     SSEAbstentionEvent,
     SSEAgentUsedEvent,
+    SSEAskUserEvent,
     SSECitationEvent,
     SSEDelegateEvent,
     SSEDoneEvent,
@@ -88,7 +89,8 @@ class WeComPresenter:
             max_frames: 承载正文的中间帧数上限（占位帧与保活帧不计入）
             max_chars: 单流累计正文长度上限（超出保留尾部）
             monotonic: 单调时钟（测试注入以稳定断言节流）
-            footer_enabled: 终态是否附 trace_id footer
+            footer_enabled: 终态是否附 trace_id footer；传入 False 但反馈标识
+                不可用时仍会强制开启（投影能力 SHALL）
             feedback_enabled: 首帧是否携带反馈标识
         """
         self._sink = sink
@@ -99,7 +101,7 @@ class WeComPresenter:
         self._max_frames = max_frames
         self._max_chars = max_chars
         self._monotonic = monotonic
-        self._footer_enabled = footer_enabled
+        self._footer_enabled = footer_enabled or not feedback_enabled
         self._feedback_enabled = feedback_enabled
 
         self._text: str = ""
@@ -120,6 +122,9 @@ class WeComPresenter:
         事件流以队列暴露、对「取下一个事件」施加超时：直接对上游生成器的
         在途取值施超时取消会终结生成器（`_subscribe_events` 不捕
         `CancelledError`），恰在需要保活时把长流静默截断。
+
+        取消由站点以 `SSEDoneEvent(cancelled=True)` 在带内送达，故本层不处理
+        asyncio 级取消（外部取消 `run` 会走 `finally` 的泵清理，不发终态帧）。
 
         Args:
             events: 结构化事件流（如 `TurnHandle.events`）
@@ -150,7 +155,10 @@ class WeComPresenter:
             async for event in events:
                 queue.put_nowait(event)
         except Exception as e:  # noqa: BLE001
+            # 上游抛异常（不是 error 事件路径）：置脱敏错误文案，收尾时由 finalize
+            # 呈现；原始异常只进日志，绝不进发给企微的内容（D18）
             logger.error("[wecom] presenter pump aborted err={}", e)
+            self._error = WeComPresenterTexts.ERROR_TEXT
         finally:
             queue.put_nowait(_EVENTS_END)
 
@@ -187,7 +195,7 @@ class WeComPresenter:
         """投影单个事件：累积正文 / 收集引用 / 记录终态标记，必要时发送一帧。
 
         丢弃类事件（思考过程 / 子代理过程 / 任务看板 / 模型信息 / 会话绑定
-        智能体）在企微无对应渲染，丢弃且不得中断本轮流。
+        智能体 / 澄清）在企微无对应渲染，丢弃且不得中断本轮流。
 
         Args:
             event: 单个结构化事件
@@ -215,6 +223,10 @@ class WeComPresenter:
                 SSEAgentUsedEvent,
             ),
         ):
+            return
+        elif isinstance(event, SSEAskUserEvent):
+            # 澄清事件不产帧：真正呈现与回填属组 6；本层只声明契约，
+            # 触发者登记由 handler 旁路完成（见 handler.py）
             return
         if isinstance(event, SSEDoneEvent):
             # done 意味着本轮已收尾，这里不再发中间帧，统一由 finalize 发终态帧

@@ -10,6 +10,7 @@ from src.config.wecom_presenter import WeComPresenterTexts
 from src.utils.sse import (
     SSEAbstentionEvent,
     SSEAgentUsedEvent,
+    SSEAskUserEvent,
     SSECitationEvent,
     SSEDelegateEvent,
     SSEDoneEvent,
@@ -275,7 +276,11 @@ async def test_trace_footer_in_final_frame_and_switchable():
 
     sink2 = _RecordingSink()
     presenter2 = WeComPresenter(
-        sink2, "trace_abc", min_interval_seconds=0, footer_enabled=False
+        sink2,
+        "trace_abc",
+        min_interval_seconds=0,
+        footer_enabled=False,
+        feedback_enabled=True,
     )
     await presenter2.run(_stream([SSETokenEvent(token="甲"), SSEDoneEvent()]))
     assert "trace_abc" not in sink2.contents[-1]
@@ -365,7 +370,11 @@ async def test_stream_failure_degrades_to_single_final_send():
 
     sink = _FailingSink()
     presenter = WeComPresenter(
-        sink, "trace_1", min_interval_seconds=0, footer_enabled=False
+        sink,
+        "trace_1",
+        min_interval_seconds=0,
+        footer_enabled=False,
+        feedback_enabled=True,
     )
 
     await presenter.run(
@@ -378,7 +387,8 @@ async def test_stream_failure_degrades_to_single_final_send():
         )
     )
 
-    assert sink.calls == [("甲乙", True, None)]
+    # 降级路径下中间帧发送失败，终态帧成为首个成功帧，故携带反馈标识
+    assert sink.calls == [("甲乙", True, {"id": "trace_1"})]
 
 
 @pytest.mark.asyncio
@@ -534,3 +544,77 @@ async def test_placeholder_frame_when_first_events_are_unrenderable():
     # keepalive_seconds 故意设 5s —— 若按"收到过事件"切换超时，这里就不会有占位帧
     assert sink.contents[0] == WeComPresenterTexts.PLACEHOLDER_TEXT
     assert sink.contents[-1].startswith("甲")
+
+
+@pytest.mark.asyncio
+async def test_upstream_exception_yields_desensitized_terminal():
+    async def _boom():
+        yield SSETokenEvent(token="甲")
+        raise RuntimeError("psycopg: connection refused to 10.0.0.5")
+
+    sink = _RecordingSink()
+    presenter = WeComPresenter(
+        sink, "trace_1", min_interval_seconds=0, footer_enabled=False
+    )
+
+    await presenter.run(_boom())
+
+    final = sink.contents[-1]
+    assert WeComPresenterTexts.ERROR_TEXT in final
+    assert "psycopg" not in final
+    assert "10.0.0.5" not in final
+    assert sink.calls[-1][1] is True
+
+
+@pytest.mark.asyncio
+async def test_ask_user_event_produces_no_frame():
+    sink = _RecordingSink()
+    presenter = WeComPresenter(sink, "trace_1", min_interval_seconds=0)
+
+    await presenter.run(
+        _stream(
+            [
+                SSETokenEvent(token="甲"),
+                SSEAskUserEvent(questions=[{"id": "q1", "question": "?"}]),
+                SSEDoneEvent(trace_id="trace_1"),
+            ]
+        )
+    )
+
+    # 契约：澄清事件不产帧（二期由组 6 处理）；帧数 = 1 中间帧 + 1 终态帧
+    assert len(sink.calls) == 2
+    assert sink.contents[-1].startswith("甲")
+
+
+@pytest.mark.asyncio
+async def test_footer_forced_on_when_feedback_unavailable_at_instance_level():
+    sink = _RecordingSink()
+    presenter = WeComPresenter(
+        sink,
+        "trace_abc",
+        min_interval_seconds=0,
+        footer_enabled=False,
+        feedback_enabled=False,
+    )
+
+    await presenter.run(_stream([SSETokenEvent(token="甲"), SSEDoneEvent()]))
+
+    assert "trace_abc" in sink.contents[-1]
+
+
+@pytest.mark.asyncio
+async def test_cancelled_done_event_still_finalizes():
+    sink = _RecordingSink()
+    presenter = WeComPresenter(sink, "trace_1", min_interval_seconds=0)
+
+    await presenter.run(
+        _stream(
+            [
+                SSETokenEvent(token="甲"),
+                SSEDoneEvent(trace_id="trace_1", cancelled=True),
+            ]
+        )
+    )
+
+    assert sink.contents[-1].startswith("甲")
+    assert sink.calls[-1][1] is True
