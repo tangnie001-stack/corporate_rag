@@ -20,7 +20,7 @@
 - [ ] 1.2 下沉入口：在 `services/` 实现 `start_turn(...)`（含 `set_chat_repo` 前置、原子闸门、**预留在多早退路径释放**、落库（可选 `title`）、生成、终态收尾），见 design D12
 - [ ] 1.3 编排替换：`src/api/chat.py` 改为调用 `start_turn`（`TurnBusy` → 409）；`src/api/sessions.py` 的锁释放函数 import 从 `api.chat` 改为 services
 - [ ] 1.4 依赖注入：`AppService` 单例访问器下沉到 `services/`，`api/dependencies` 变转发薄壳（design D20）
-- [ ] 1.5 下沉澄清答案应用：把 `api/clarify.py` 的"pop `pending_asks` + 格式化 + Redis/MySQL 双写"提取为 services 函数，站点与通道共用（design D14）
+- [x] 1.5 下沉澄清答案应用：把 `api/clarify.py` 的"pop `pending_asks` + 格式化 + Redis/MySQL 双写"提取为 services 函数，站点与通道共用（design D14）
 - [ ] 1.6 回归：`POSTGRES_HOST=localhost pytest tests/` 全绿 + 前端 SSE 冒烟，确认站点行为未变
 
 ## 2. 通道协议与配置
@@ -65,10 +65,12 @@
 
 ## 6. 澄清回填
 
-- [ ] 6.1 **仅触发澄清者**的入站文本回填 `pending_asks`（不重开回合）；他人消息按普通消息处理（会话正忙回"正在处理上一条"）
-- [ ] 6.2 `ask_user` 事件呈现为**一条编号问题**（多问合并），用户整段回答作为单个自定义答案回填
-- [ ] 6.3 回填调用**下沉后的同一答案应用函数**（写 Redis 历史 + MySQL），不得复制站点逻辑（见 1.5）
-- [ ] 6.4 澄清回填单测（触发者回填 / 他人不误吞 / 无挂起走普通 / 多问合并 / 双写 / 超时）
+- [x] 6.1 **仅触发澄清者**的入站文本回填 `pending_asks`（不重开回合）；他人消息按普通消息处理（会话正忙回"正在处理上一条"）
+- [x] 6.2 `ask_user` 事件呈现为**一条编号问题**（多问合并），用户整段回答作为单个自定义答案回填
+- [x] 6.3 回填调用**下沉后的同一答案应用函数**（写 Redis 历史 + MySQL），不得复制站点逻辑（见 1.5）
+- [x] 6.4 澄清回填单测（触发者回填 / 他人不误吞 / 无挂起走普通 / 多问合并 / 双写 / 超时）
+
+> 4b 已完成并并入 dev-wsl（merge 待合并）；确认点 C（真实连网：@dev 触发澄清 → 气泡见问题 → 回复 → 同气泡出答案；群内非触发者插话不被当答案）待验证。
 
 ## 7. 验证与文档
 

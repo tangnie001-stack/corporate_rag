@@ -104,6 +104,8 @@
 - **长连接驱动（LongConnectionDriver）**：接入通道的另一种实现，由本服务主动连企微 WebSocket（封装官方 `aibot` SDK），无需公网回调地址与加解密；与回调驱动由 `WECOM_BOT_MODE` 二选一。见 `src/channels/wecom/long_connection.py`。
 - **多机器人配置（`WECOM_BOTS`）**：企微智能机器人的多台配置，JSON 数组（**必须单行**），每台 `{key, bot_id, secret}`；解析与校验见 `src/config/wecom_bots.py`，由 `wecom_service.start()` 在受 `WECOM_BOT_ENABLED` 门控下调用。
 - **保留键 `callback`**：`callback` 是长连接机器人 `key` 的保留字；回调 legacy 驱动以该键存入驱动注册表。
+- **澄清回填（clarify backfill）**：企微无站点那样的作答 UI，用户以**文本回复**作答；通道把文本解析成站点同构 `answers` 并注入挂起的 `ask_user` 回合。**仅触发者**：只有登记在案（`_triggers`）的触发者其回复才被当作答案。
+- **澄清呈现**：把 `SSEAskUserEvent` 渲染成气泡内容（问题 + 可选项 + 提示）；**不 finalize**，因为原回合仍在挂起等待。
 
 ## Harness（本项目定位）
 
