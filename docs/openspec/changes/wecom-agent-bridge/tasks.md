@@ -38,9 +38,10 @@
 - [x] 3.6 `wecom_service` 将**长连接**的占位 handler 换成 `RagChannelHandler`；`callback` 模式保持占位不变
 - [x] 3.7 澄清挂起时登记"会话 → 触发者 userid"映射（**TTL + 上限**），供回填时校验来源（见 6.1）
 - [x] 3.8 消费 `event.feedback_event`：取回反馈标识并还原 `trace_id` 落日志（按 E10 结论定字段）
-- [x] 3.9 ~~反馈回执解析分流~~
+- [x] 3.9 ~~反馈回执解析分流~~ —— **Spike E10 实测后删除**：回执帧同时带 `msgid` 与 `msgtype`，不会在 SDK 门禁或 `parse_inbound` 被丢弃（见 `docs/agents/wecom-sdk-facts.md`）
+
+
 > 阶段 3 已完成并并入 `dev-wsl`（merge `bffa728`）。**确认点 B（真实连网）通过**：@ `dev` 得到站点同款 Agent 回答（`[wecom] inbound bot_key=dev …` → 落库前置 → 任务注册 → prompt 组装 → model turn → format done，error 日志 0 行）；同轮实测并修复两处：投影期日志 trace 归属、投影期异常补发第二帧终态。
-—— **Spike E10 实测后删除**：回执帧同时带 `msgid` 与 `msgtype`，不会在 SDK 门禁或 `parse_inbound` 被丢弃（见 `docs/agents/wecom-sdk-facts.md`）
 
 ## 4. 输出投影层
 
