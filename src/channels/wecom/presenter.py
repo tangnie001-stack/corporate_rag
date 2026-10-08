@@ -191,7 +191,7 @@ class WeComPresenter:
                 continue
             if item is _EVENTS_END:
                 # 澄清已渲染但尚无正文：回合仍在等用户作答，不 finalize（终态帧只能发一次）
-                if self._clarify_text and is_blank(self._text):
+                if self._clarify_text and is_blank(self._text) and self._error is None:
                     return
                 break
             await self.update(item)

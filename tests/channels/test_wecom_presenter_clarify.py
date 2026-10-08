@@ -85,3 +85,27 @@ def test_render_questions_pure_function():
     rendered = render_questions([{"question": "选哪个？", "options": ["甲", "乙"]}])
     assert "1. 选哪个？" in rendered
     assert "甲、乙" in rendered
+
+
+@pytest.mark.asyncio
+async def test_clarify_then_upstream_exception_still_finalizes_desensitized():
+    """已渲染澄清问题后上游异常：仍须 finalize 并发出脱敏错误文案，不得悬挂流。"""
+
+    async def _boom():
+        yield SSEAskUserEvent(
+            questions=[{"id": "q1", "question": "选哪个口径？", "options": ["营收"]}]
+        )
+        raise RuntimeError("psycopg: connection refused to 10.0.0.5")
+
+    sink = _RecordingSink()
+    presenter = WeComPresenter(
+        sink, "trace_1", min_interval_seconds=0, footer_enabled=False
+    )
+
+    await presenter.run(_boom())
+
+    final = sink.contents[-1]
+    assert sink.calls[-1][1] is True  # 发了终态帧
+    assert WeComPresenterTexts.ERROR_TEXT in final  # 脱敏错误文案
+    assert "psycopg" not in final  # 不含原始异常串
+    assert "10.0.0.5" not in final
