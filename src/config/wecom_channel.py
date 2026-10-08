@@ -33,3 +33,7 @@ class WeComChannelTexts:
     CLARIFY_ITEM: str = "{index}. {question}"
     CLARIFY_OPTIONS: str = "（可选：{options}）"
     CLARIFY_HINT: str = "请回复上面的问题；超时未回复我会按已有信息继续。"
+    # 澄清答复无法解析时的提示（**不消耗**挂起，用户可重答）
+    CLARIFY_INVALID_TEXT: str = (
+        "没看懂您的回复。请按上面的编号逐条作答，或直接回复选项文字。"
+    )

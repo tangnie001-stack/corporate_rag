@@ -11,12 +11,14 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 
 from loguru import logger
 
 from src.channels.base import InboundMessage, ReplySink
 from src.channels.wecom.bounded_map import BoundedTtlMap
+from src.channels.wecom.clarify_parse import parse_answers
 from src.channels.wecom.presenter import WeComPresenter
 from src.channels.wecom.session import (
     build_session_title,
@@ -29,13 +31,15 @@ from src.config.wecom_presenter import WeComPresenterTexts
 from src.core.logging import encode_value
 from src.infra.llm.trace_context import current_trace_id
 from src.infra.llm.tracing import new_trace_id
-from src.services import turn_runner
+from src.services import clarify_service, turn_runner
 from src.services.app_service import AppService
 from src.utils.sse import SSEAskUserEvent, SSEEvent
 
 # 单轮生成入口签名（生产传 `services.turn_runner.start_turn`；测试注入替身）
 StartTurnCallable = Callable[..., Awaitable[turn_runner.TurnHandle]]
 GetServiceCallable = Callable[[], Awaitable[AppService]]
+# 澄清答复注入入口签名（生产传 `clarify_service.resolve_clarify_answer`；测试注入替身）
+ResolveAnswerCallable = Callable[..., Awaitable[bool]]
 
 
 def extract_feedback_id(raw: dict) -> str | None:
@@ -73,6 +77,7 @@ class RagChannelHandler:
         resolve_bot_key: Callable[[str], str | None],
         dedup: BoundedTtlMap,
         triggers: BoundedTtlMap,
+        resolve_answer: ResolveAnswerCallable,
         kb_id: str = "",
     ) -> None:
         """初始化。
@@ -83,6 +88,7 @@ class RagChannelHandler:
             resolve_bot_key: aibotid → bot_key（生产传 `wecom_service._resolve_bot_key`）
             dedup: msgid 去重表（有界）
             triggers: 澄清"会话 → 触发者"登记表（有界）
+            resolve_answer: 澄清答复注入入口（生产传 `clarify_service.resolve_clarify_answer`）
             kb_id: 本轮默认知识库（空串 = 不检索，与站点逻辑一致）
         """
         self._start_turn = start_turn
@@ -90,6 +96,11 @@ class RagChannelHandler:
         self._resolve_bot_key = resolve_bot_key
         self._dedup = dedup
         self._triggers = triggers
+        self._resolve_answer = resolve_answer
+        self._questions: BoundedTtlMap = BoundedTtlMap(
+            capacity=wecom_channel.TRIGGER_MAP_CAPACITY,
+            ttl_seconds=wecom_channel.TRIGGER_MAP_TTL_SECONDS,
+        )
         self._kb_id = kb_id
 
     @classmethod
@@ -114,6 +125,7 @@ class RagChannelHandler:
             start_turn=start_turn,
             get_service=get_service,
             resolve_bot_key=resolve_bot_key,
+            resolve_answer=clarify_service.resolve_clarify_answer,
             dedup=BoundedTtlMap(
                 capacity=wecom_channel.DEDUP_CAPACITY,
                 ttl_seconds=wecom_channel.DEDUP_TTL_SECONDS,
@@ -160,6 +172,8 @@ class RagChannelHandler:
                 wecom_channel.WeComChannelTexts.UNSUPPORTED_TEXT, finish=True
             )
             return
+        if await self._try_resolve_clarify(bot_key, msg, sink):
+            return
         await self._run_turn(bot_key, msg, sink)
 
     def _handle_event(self, bot_key: str, msg: InboundMessage) -> None:
@@ -193,6 +207,61 @@ class RagChannelHandler:
             encode_value(feedback_id),
             msg.msgid,
         )
+
+    async def _try_resolve_clarify(
+        self, bot_key: str, msg: InboundMessage, sink: ReplySink
+    ) -> bool:
+        """若本条消息是"澄清触发者的答复"，解析并注入挂起的回合。
+
+        非触发者的消息**不**进入本路径（会落到 `_run_turn`，由会话闸门给出忙提示）。
+
+        Args:
+            bot_key: 机器人别名
+            msg: 入站消息（text 非空）
+            sink: 回复出口
+
+        Returns:
+            True 表示已作为澄清答复处理（调用方**不得**再开新回合）
+        """
+        session_id = derive_session_id(
+            bot_key=bot_key,
+            chattype=msg.chattype,
+            chatid=msg.chatid,
+            from_userid=msg.from_userid,
+        )
+        trigger = self._triggers.get(session_id)
+        if trigger is None or trigger != msg.from_userid:
+            return False
+        raw_questions = self._questions.get(session_id)
+        if raw_questions is None:
+            self._triggers.put(session_id, "")  # 登记与问题不一致：作废，走原路径
+            return False
+        questions = json.loads(raw_questions)
+        answers = parse_answers(msg.text or "", questions)
+        if answers is None:
+            logger.info(
+                "[wecom] clarify answer invalid session_id={} text_len={}",
+                encode_value(session_id),
+                len(msg.text or ""),
+            )
+            await sink.reply_stream(
+                wecom_channel.WeComChannelTexts.CLARIFY_INVALID_TEXT, finish=True
+            )
+            return True  # 已回应，但**不消耗**挂起（用户可重答）
+        svc = await self._get_service()
+        delivered = await self._resolve_answer(
+            svc, session_id=session_id, answers=answers
+        )
+        self._triggers.put(session_id, "")
+        self._questions.put(session_id, "")
+        logger.info(
+            "[wecom] clarify answer delivered={} session_id={} answers={}",
+            delivered,
+            encode_value(session_id),
+            len(answers),
+        )
+        # False 表示挂起已超时/已消费：由调用方回落为新回合
+        return delivered
 
     async def _run_turn(
         self, bot_key: str, msg: InboundMessage, sink: ReplySink
@@ -293,6 +362,9 @@ class RagChannelHandler:
         async for event in events:
             if isinstance(event, SSEAskUserEvent):
                 self._triggers.put(session_id, from_userid)
+                self._questions.put(
+                    session_id, json.dumps(event.questions, ensure_ascii=False)
+                )
                 logger.info(
                     "[wecom] clarify pending registered session_id={} trace_id={}",
                     encode_value(session_id),
