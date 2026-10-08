@@ -1408,6 +1408,34 @@ async def test_run_finalizes_when_consume_loop_raises(monkeypatch):
     # 投影 spec 禁止悬挂未结束的流：异常路径也必须发出终态帧
     assert sink.calls
     assert sink.calls[-1][1] is True
+
+
+@pytest.mark.asyncio
+async def test_placeholder_frame_when_first_events_are_unrenderable():
+    sink = _RecordingSink()
+    presenter = WeComPresenter(
+        sink,
+        "trace_1",
+        min_interval_seconds=0,
+        first_frame_timeout=0.05,
+        keepalive_seconds=5.0,
+    )
+
+    await presenter.run(
+        _slow_stream(
+            [
+                SSEReasoningDeltaEvent(reasoning_delta="先想一想"),
+                SSETokenEvent(token="甲"),
+                SSEDoneEvent(),
+            ],
+            [0.0, 0.3, 0.0],
+        )
+    )
+
+    # 首事件不可渲染（reasoning 被丢弃）时，占位帧仍须在 first_frame_timeout 内发出；
+    # keepalive_seconds 故意设 5s —— 若按"收到过事件"切换超时，这里就不会有占位帧
+    assert sink.contents[0] == WeComPresenterTexts.PLACEHOLDER_TEXT
+    assert sink.contents[-1].startswith("甲")
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
@@ -1473,24 +1501,27 @@ _EVENTS_END: object = object()
     async def _consume(self, queue: asyncio.Queue) -> None:
         """消费循环：超时发保活帧（不取消上游），终态或哨兵后收尾。
 
+        超时判据是「**是否已发出首帧**」（`_last_sent is None`），而不是「是否
+        收到过事件」：丢弃类事件（思考过程 / 模型信息 / 子代理过程 / 任务看板 /
+        会话绑定智能体）不产生任何帧，若按"收到事件"就切到保活间隔，占位首帧
+        会从 `first_frame_timeout` 掉到 `keepalive_seconds`（默认 240s）——违反
+        「若在合理时限内无任何可渲染内容，SHALL 先发送占位内容，不得空等到超时」。
+
         Args:
             queue: 事件队列
         """
-        first = True
         while True:
-            if first:
+            if self._last_sent is None:
                 timeout = self._first_frame_timeout
             else:
                 timeout = self._keepalive_seconds
             try:
                 item = await asyncio.wait_for(queue.get(), timeout)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 await self._flush(keepalive=True)
-                first = False
                 continue
             if item is _EVENTS_END:
                 break
-            first = False
             await self.update(item)
             if isinstance(item, (SSEDoneEvent, SSEErrorEvent)):
                 break
@@ -1533,7 +1564,7 @@ _EVENTS_END: object = object()
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `POSTGRES_HOST=localhost pytest tests/channels/test_wecom_presenter.py -q`
-Expected: 24 passed。
+Expected: 25 passed。
 
 - [ ] **Step 5: 全量回归**
 
@@ -1582,7 +1613,7 @@ git commit -m "feat(channels): 投影层加占位首帧与队列保活，登记 
 | 4.11 空回答 / abstention 兜底 | Task 4 |
 | 4.9 占位首帧 | Task 5 |
 | 4.10 长流保活（队列 + 超时，不取消上游）+ 异常路径仍收尾 | Task 5 |
-| 4.12 投影层单测（假 sink 覆盖各场景） | Task 2–5 累积（24 个用例） |
+| 4.12 投影层单测（假 sink 覆盖各场景） | Task 2–5 累积（25 个用例） |
 
 ## 不在本阶段范围（留给后续阶段）
 
