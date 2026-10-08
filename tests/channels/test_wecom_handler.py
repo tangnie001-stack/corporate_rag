@@ -10,6 +10,7 @@ from src.channels.wecom.handler import RagChannelHandler, extract_feedback_id
 from src.channels.wecom.session import derive_session_id
 from src.config.const import WECOM_EVENT_FEEDBACK
 from src.config.wecom_channel import WeComChannelTexts
+from src.infra.llm.trace_context import current_trace_id
 from src.services import turn_runner
 from src.services.app_service import AppService
 from src.utils.sse import SSEAskUserEvent, SSEDoneEvent, SSETokenEvent
@@ -232,3 +233,65 @@ async def test_ask_user_event_registers_trigger_and_does_not_reply():
     # 澄清事件不产帧（二期由组 6 呈现问题）：帧 = 终态帧
     assert len(sink.calls) == 1
     assert sink.calls[-1][1] is True
+
+
+@pytest.mark.asyncio
+async def test_events_stream_sees_current_turn_trace_id():
+    """投影阶段（消费 handle.events）读到的 current_trace_id 必须是本轮 trace。
+
+    回归：trace 的 try/finally 曾只包住 start_turn，presenter.run 之前已 reset，
+    投影层读到的回退成外层（应用启动）trace，导致发帧/降级日志整段挂错 trace。
+    """
+    seen: dict[str, Any] = {}
+    old_trace = "trace_outer_old"
+    current_trace_id.set(old_trace)
+
+    async def _events():
+        seen["trace_in_events"] = current_trace_id.get()
+        yield SSETokenEvent(token="甲")
+        yield SSEDoneEvent()
+
+    class _Handle:
+        def __init__(self) -> None:
+            self.session_id = "s"
+            self.events = _events()
+
+    async def _start_turn(svc, **kwargs):
+        seen["trace_in_start"] = current_trace_id.get()
+        return cast(turn_runner.TurnHandle, _Handle())
+
+    handler, _recorded = _handler(start_turn=_start_turn)
+    sink = _Sink()
+
+    try:
+        await handler(_msg(), sink)
+
+        assert seen["trace_in_start"] is not None
+        assert seen["trace_in_start"].startswith("trace_")
+        # 投影阶段与 start_turn 阶段须观测到同一本轮 trace
+        assert seen["trace_in_events"] == seen["trace_in_start"]
+        assert seen["trace_in_events"] != old_trace
+        # 回合结束后复位回外层值
+        assert current_trace_id.get() == old_trace
+    finally:
+        current_trace_id.set(None)
+
+
+@pytest.mark.asyncio
+async def test_trace_reset_on_start_turn_failure():
+    """start_turn 抛非 TurnBusy 异常时，_run_turn 返回后须复位到调用前的旧值。"""
+    old_trace = "trace_outer_old"
+    current_trace_id.set(old_trace)
+
+    async def _boom(svc, **kwargs):
+        raise RuntimeError("boom")
+
+    handler, _recorded = _handler(start_turn=_boom)
+    sink = _Sink()
+
+    try:
+        await handler(_msg(), sink)
+
+        assert current_trace_id.get() == old_trace
+    finally:
+        current_trace_id.set(None)

@@ -238,6 +238,14 @@ class RagChannelHandler:
                     from_userid=msg.from_userid,
                 ),
             )
+            # 投影阶段必须在同一 trace 上下文内：presenter / _tap 的日志是本轮
+            # 发帧/降级/澄清登记的来源，提前 reset 会让它们回退到外层（应用启动）trace
+            presenter = WeComPresenter(sink, trace_id)
+            await presenter.run(
+                self._tap(
+                    handle.events, session_id=session_id, from_userid=msg.from_userid
+                )
+            )
         except turn_runner.TurnBusy:
             logger.warning(
                 "[wecom] session busy bot_key={} session_id={} trace_id={}",
@@ -260,11 +268,6 @@ class RagChannelHandler:
             return
         finally:
             current_trace_id.reset(token)
-
-        presenter = WeComPresenter(sink, trace_id)
-        await presenter.run(
-            self._tap(handle.events, session_id=session_id, from_userid=msg.from_userid)
-        )
 
     async def _tap(
         self,
