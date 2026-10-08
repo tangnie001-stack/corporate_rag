@@ -27,6 +27,12 @@ _EVENT_EVENTS: tuple[str, ...] = (
     "event.feedback_event",
 )
 
+# 驱动级事件（不进业务 handler）：被更新的连接顶替时由服务端推送。
+# 实测（见 docs/agents/wecom-sdk-facts.md 的 E4）：服务端先推该事件（此刻本连接 WS 无异常），
+# 随后才关闭本连接；该关闭会触发 SDK 自动重连，而重连成功又顶掉对方 ⇒ 形成互踢循环。
+# 故收到即主动断开（SDK 手动断开不触发重连）并交出 client 引用，不抢回。
+_DISPLACED_EVENT: str = "event.disconnected_event"
+
 
 class _WsSink:
     """ReplySink 实现：把回复转成 SDK 的流式回复调用。"""
@@ -75,6 +81,16 @@ class LongConnectionDriver:
         self._secret = secret
         self._handler = handler
         self._client: WSClient | None = None
+        self._displaced: bool = False
+
+    @property
+    def is_displaced(self) -> bool:
+        """该台是否已被更新的连接顶替。
+
+        被顶后驱动已主动断开且不再抢回（防互踢）；就绪口径与启动锚点对它的反映
+        见 change `wecom-agent-bridge` 的 D11 与 tasks 5.1。
+        """
+        return self._displaced
 
     async def start(self) -> None:
         """建立长连接并注册事件处理器。"""
@@ -86,6 +102,7 @@ class LongConnectionDriver:
         handler = self._make_handler(client)
         for event in _MESSAGE_EVENTS + _EVENT_EVENTS:
             client.on(event, handler)
+        client.on(_DISPLACED_EVENT, self._make_displaced_handler(client))
         await client.connect()
         self._client = client
 
@@ -95,6 +112,30 @@ class LongConnectionDriver:
             return
         self._client.disconnect()
         self._client = None
+
+    def _make_displaced_handler(self, client: WSClient):
+        """构造"被顶替"处理器：主动断开且不抢回，避免与顶替者互踢。
+
+        幂等：重复到达直接返回。断开后交出 `_client` 引用，使后续 `stop()` 成为
+        no-op、并允许运维侧显式重启该台（重新 `start()` 才会再次抢回归属）。
+        """
+
+        async def _handle_displaced(frame: dict[str, Any]) -> None:
+            if self._displaced:
+                return
+            self._displaced = True
+            body = frame.get("body", {})
+            logger.warning(
+                "[wecom] bot displaced by newer connection bot_id={} msgid={}"
+                "; disconnecting without reclaim",
+                encode_value(self._bot_id),
+                body.get("msgid", ""),
+            )
+            client.disconnect()
+            if self._client is client:
+                self._client = None
+
+        return _handle_displaced
 
     def _make_handler(self, client: WSClient):
         """构造 SDK 事件处理器：帧 → InboundMessage → 业务 handler。"""
