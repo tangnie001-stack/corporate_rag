@@ -59,7 +59,8 @@
 ### D5 快照式发送（累积全文）
 每帧发送截至该帧的完整正文，而非增量。
 - **依据**：企微整段替换语义（LangBot `:718`）。
-- **E1 为确认项（显式变更点）**：官方 SDK 预期同为快照；若 E1 **反证为追加**，则须**先修订**投影能力中「快照式流式投影」需求再实施（不得静默偏离）；该分叉见 Open Questions。
+- **E1 已确认（2026-10-08 实测，见 `docs/agents/wecom-sdk-facts.md`）**：官方 SDK 同为**快照**（同一 stream 发 `甲`→`甲乙`→`甲乙丙`，气泡最终显示 `甲乙丙`）。
+  原先预留的"若反证为追加则先修订投影 spec"的**分叉关闭**，投影能力按快照实现即可。
 
 ### D6 节流 + 帧数/长度上限 + 长流保活
 发送间隔 ≥100ms、内容未变跳过、空白/零宽帧跳过；中间帧数上限、单流内容上限（保留尾部）；**流式期间每 ≤4min 发一次非终态帧**以防 6min 收尾时限。
@@ -79,7 +80,7 @@
 ### D9 trace_id：自生成 + 三路返回
 handler 入口用既有 `new_trace_id()` 生成 `trace_<uuid>` → set `current_trace_id`（Langfuse/日志携带）；三路返回：首帧 `feedback.id`、日志锚点、终态 footer（**受配置开关控制；反馈标识不可用时强制开启**）。
 - **理由**：企微无 HTTP 头，`X-Trace-ID` 不可用；复用 `new_trace_id()` 与站点同源，故 Langfuse 行为一致。
-- **待验**：`feedback.id` 取值约束与 `feedback_event` 承载字段名（Spike E10）；**不可用时 footer 强制开启**（作为唯一人工可读路），并登记（不表述为"退化为两路"）。
+- **E10 已确认（2026-10-08 实测）**：`feedback` 承载**可用** —— 首帧带 `feedback={"id": trace_id}` 后该条消息出现 👍/👎 按钮，用户点赞的回执帧里 `body.event.feedback_event.id` **原样回传**该值（`type` 表示赞/踩）。因此**三路全部可用**，footer 按配置开关即可（**不必**"反馈不可用时强制开启"，该退化分支保留但不触发）。
 - **协议前提（须扩 `ReplySink`）**：现有 `ReplySink.reply_stream(content, finish)` **无 feedback 参数**，两实现（`callback.py` / `long_connection.py`）与相关测试绑定该协议 ⇒ 须扩展为可选参数 `feedback: dict | None = None`（callback 实现忽略），否则该路落不了地。
 
 ### D10 `msgid` 去重：TTL + 上限双淘汰
@@ -88,14 +89,16 @@ handler 入口用既有 `new_trace_id()` 生成 `trace_<uuid>` → set `current_
 - **局限（接受）**：进程内，重启后窗口清空——企微极少重推，接受；如需强保证另议。
 
 ### D11 驱动可靠性两补丁（保活不在此层）
-**认证等待** + **被顶停重连**；保活归投影层（D6）。
-- **理由**：官方 SDK `connect()` 不等认证即返回（`ws.py`），逐台 `try/except` 现为死代码、启动锚点 `n=total` 恒真失真；被顶后自动重连会互踢。**保活需要知道有没有活跃流，只有投影层持有 stream/req_id**，放驱动会反向依赖流状态。
-- **依据**：LangBot `_wait_for_auth:794`；openakita `_displaced`。
-- **认证失败须主动停重连**：SDK 认证失败只走 `on_error`、**自身不调度重连**；风暴发生在**服务端随后关闭该未认证连接**时——每次 TCP 建连都把 `_reconnect_attempts` 归零（`ws.py:134`），故 `max_reconnect_attempts` 永不触发。驱动 SHALL 在**凭证类认证失败**时**主动 `disconnect()` 并置"停重连"标志**（不依赖 SDK 尝试计数）；**判定信号仅限** SDK SUBSCRIBE 响应的 `errcode≠0` / SDK 抛出的 `Authentication failed` 错误——**普通连接失败/接收错误的 `on_error` 不构成凭证类**（据此行动会把瞬时错误变成永久离线）。**等待超时不触发该动作**（只置降级、交 SDK 自愈）。E3 记录服务端是否关闭该连接。
+**认证等待** + **被顶处置**；保活归投影层（D6）。**E3/E4 已实测，结论见 `docs/agents/wecom-sdk-facts.md`。**
+- **理由**：官方 SDK `connect()` **不等认证**即返回（实测差 ~0.17s），逐台 `try/except` 现为死代码、启动锚点 `n=total` 失真；被顶会形成互踢循环。**保活需要知道有没有活跃流，只有投影层持有 stream/req_id**，放驱动会反向依赖流状态。
+- **认证等待与失败判据（E3 实测）**：驱动 SHALL 等 **`authenticated` 事件**才判定该台就绪；失败以 **`error` 事件**呈现，**凭证类判据 = `errcode=853000`**（`errmsg` 形如 `invalid bot_id or secret`）——**普通连接失败/接收错误的 `on_error` 不构成凭证类**（据此行动会把瞬时错误变成永久离线）。SDK 认证失败**既不抛也不断连**、且**自己不重连**，故驱动 SHALL 主动 `disconnect()` 并置"就绪=否"，避免留下挂着的未认证连接。**等待超时不触发断开**（只置降级、交 SDK 自愈），且等待 SHALL 有上界（≤5s）。
+- **被顶处置（E4 实测，方向修正）**：被顶是**三步**——① 服务端给旧连接推业务事件 `event.disconnected_event`（此刻 WS 无异常）；② 服务端**随后**才关闭旧连接（实测延迟 **313s / 2.2s**，不固定，原因 `no close frame received or sent`）；③ 该关闭触发 SDK `disconnected` → 自动重连（1s 退避）→ **重连成功的一方立刻顶掉另一方** ⇒ **互踢循环自我维持**。
+  ⇒ 驱动 SHALL **订阅 `event.disconnected_event`**，收到即：记 warning + 标记该台**不就绪** + **主动 `disconnect()` 且不再抢回**。只"停重连"不够——必须在收到该事件时**立即断开自己**，否则服务端仍会在它自己的时机关闭并触发 SDK 重连，循环照旧。
+  ⚠️ **当前生产驱动未订阅该事件**（`long_connection.py` 的 `_EVENT_EVENTS` 缺它）⇒ 一旦两连接重叠（滚动重启 / 双进程）会**静默无限互踢**。
 - **注册表语义拆分（防关机泄漏）**：`_drivers` SHALL 收**所有已启动**的驱动（供 `stop()` 关闭，**含未认证就绪者**）；锚点的"认证成功台数"另计（按"认证就绪"标志/集合），**二者不得混用同一计数**——否则超时驱动不入表会让 `stop()` 泄漏该活连接。
 - **等待须有上界且并行启动**：三台现为逐台 `await driver.start()`，加"等认证"后串行阻塞启动，而主规格有"SHALL NOT 阻塞应用启动" ⇒ 认证等待 SHALL 有上界（≤5s），且逐台启动 SHALL 并行（`asyncio.gather(..., return_exceptions=True)`）以不阻塞启动（保留单台降级语义）。
-- **规范归属（一事一档）**：驱动层行为（认证等待 / 被顶停重连）**唯一**由本 change 的能力 `wecom-agent-bridge` 规范；`wecom-channel` 的 delta 只收紧"装配 / 降级 / 锚点台账"口径，不重复规范驱动行为。
-- **停重连的适用范围**：仅"**被顶替 / 凭证类致命断开**"停重连；**普通瞬时断开仍 SHALL 交 SDK 自愈**（不得因抖动停止重连），判据以 E4 结论为准。
+- **规范归属（一事一档）**：驱动层行为（认证等待 / 被顶处置）**唯一**由本 change 的能力 `wecom-agent-bridge` 规范；`wecom-channel` 的 delta 只收紧"装配 / 降级 / 锚点台账"口径，不重复规范驱动行为。
+- **停重连的适用范围**：仅"**被顶替 / 凭证类致命断开**"停重连；**普通瞬时断开仍 SHALL 交 SDK 自愈**（不得因抖动停止重连）。
 
 ### D12 下沉入口：`services` 层单一 `start_turn(...)` → 事件流（含闸门与收尾）
 在 `services/` 提供**唯一编排入口**，产出**结构化 `SSEEvent` 流**（不搬文本层），内部依次完成站点编排的全部前置与收尾：
@@ -202,11 +205,18 @@ dash 模式下 `ask_user` 常出纯文本问题（options 空），卡片覆盖�
 
 ## Open Questions
 
-- **E1**：官方 SDK `reply_stream` 是快照还是追加？→ 决定 D5 实现分叉。
-- **E3**：SDK 是否暴露可等待的认证事件、认证失败是否静默？→ 定 D11 实现方式。
-- **E4**：SDK 被顶后事件与重连行为？→ 定"停重连"判据。
-- **E10**：`feedback.id` 约束与 `feedback_event` 字段名？→ 定 D9 承载；**不可用则 footer 强制开启**（不表述为"退化两路"）。
-- **E11**：**首帧前是否有时限**、占位首帧是否有效规避？→ 定是否必须立即发首帧。
-- **E7**：6min 时限对我们 SDK 是否成立、4min 保活是否有效？
-- **E5**（仅影响后续卡片）：`template_card_event` 回调帧的 key/身份字段名。
-- **（架构评审 OQ1，已定）**：下沉入口形态与依赖注入点 → 见 **D12**（`start_turn` 产出 `SSEEvent` 流 + 原子闸门 + 落库前置）与 **D20**（services 层单例访问器）。
+**全部已关闭（2026-10-08 Spike 实测；结论与证据见 `docs/agents/wecom-sdk-facts.md`）**：
+
+| # | 原问题 | 实测结论 |
+|---|---|---|
+| E1 | `reply_stream` 是快照还是追加？ | **快照**（整段替换）→ D5 分叉关闭 |
+| E2 | 重复帧 / 空白帧能否安全跳过？ | 平台**接受**且**无可见瑕疵** → 跳过是优化、非必需 |
+| E3 | 是否暴露可等待的认证事件、失败是否静默？ | **有 `authenticated` 事件**（`connect()` 不等它）；失败只走 `error`（`errcode=853000`），**不断连、不重连** |
+| E4 | 被顶后的事件与重连行为？ | `disconnected_event`（立即）→ 服务端延迟关闭（313s / 2.2s）→ SDK 自动重连 → **互踢循环**；D11 已按此改写 |
+| E5 | `template_card_event` 的 key / 身份字段？ | `body.event.template_card_event.event_key` + `.task_id`；帧带 `from.userid`/`chattype`/`msgid`/`msgtype` → **卡片路可用** |
+| E6 | 帧节奏与 ack？ | 单帧 ack **0.24~0.45s**；30 帧无超时 → 100ms 节流不是瓶颈 |
+| E7 | 6min 时限是否成立、4min 保活是否有效？ | 保活下流**存活 8.5 分钟以上** → 240s 保活有效 |
+| E8 | Markdown 渲染能力？ | **全量渲染**（含表格、代码块） |
+| E10 | `feedback.id` 与 `feedback_event` 字段名？ | `body.event.feedback_event.id` **原样回传** → 三路可用，footer 不必强制开启 |
+| E11 | 首帧前是否有时限？ | 空等 **120s** 后首帧仍可发（6 分钟级未测，非必要） |
+| OQ1（架构评审） | 下沉入口形态与依赖注入点 | 已定 → 见 **D12** / **D20** |

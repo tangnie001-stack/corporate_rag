@@ -1,18 +1,18 @@
 ## 0. Spike：官方 aibot SDK 行为事实表（实施前置，人工确认）
 
-- [ ] 0.1 前置：**改 `docker-compose.image.yml` 的 `environment`（或加 override）关掉线上 wecom 再重建** —— `.env` 被 compose `environment` 覆盖，置 `.env` 无效；本地 `.env` 只放一台机器人（单行），避免与线上连接互踢
-- [ ] 0.2 写临时探针脚本 `scripts/spike/wecom_sdk_probe.py`（`WSClient` + `on(...)` 打印原始 body，CLI 选实验号；跑完即删）
-- [ ] 0.3 E1 快照语义：同 stream 发 `甲`→`甲乙`→`甲乙丙`→`甲乙丙`(final)，人工看气泡最终内容，判定"整段替换 or 追加"
-- [ ] 0.4 E2 重复/空白帧：插"内容未变"帧与空白/零宽帧，观测能否安全跳过、是否产生空气泡
-- [ ] 0.5 E3 认证等待：正常 connect 记录 `connect()` 返回时刻 vs `authenticated` 事件；错 secret connect 观测是否抛/是否仅 `on_error`/是否静默假连/是否持续重连
-- [ ] 0.6 E4 被顶号：同 bot 先后建 A/B 两条连接，观测 A 的 `disconnected`/`reconnecting` 序列与是否无限互踢
-- [ ] 0.7 E5 卡片回调结构：发 `button_interaction` 卡，人工点按钮，抓 `template_card_event` body，记录 key 字段名与 userid/chatid 回带（仅影响后续卡片）
-- [ ] 0.8 E6 帧节奏与 ack：连发 30 帧，记录每帧耗时与是否出现 5s `Reply ack timeout`
-- [ ] 0.9 E7 长流保活：开流并每 4min 发 `finish=false`，跨越约 7min，验证 6min 时限与保活有效性
-- [ ] 0.10 E8 Markdown 渲染：发标题/列表/代码块/表格/链接，记录哪些语法被渲染（定"参考来源"排版）
-- [ ] 0.11 E10 trace_id 闭环：首帧带 `feedback={"id":"trace_test"}`，人工点赞，抓 `feedback_event` body（记录承载字段、`feedback.id` 约束、**该帧是否含 `msgid`**、**是否含 `msgtype`**、**SDK 是否 emit `event.feedback_event`**）；并确认终态 footer 的渲染观感
-- [ ] 0.12 E11 首帧前时限与占位首帧：测"长时间不发首帧是否被断"，以及先发占位帧能否有效规避
-- [ ] 0.13 产出「官方 aibot SDK 行为事实表」（结论+证据+对设计影响），**人工确认 blocker E1/E3/E4/E5**（确认点 A）；据结论锁定 D5（快照语义）与 D9（feedback 承载，**不可用则 footer 强制开启**）；**若 E1 反证为追加，须先修订投影 spec 的「快照式流式投影」需求再实施**
+- [x] 0.1 前置：**改 `docker-compose.image.yml` 的 `environment`（或加 override）关掉线上 wecom 再重建** —— `.env` 被 compose `environment` 覆盖，置 `.env` 无效；本地 `.env` 只放一台机器人（单行），避免与线上连接互踢
+- [x] 0.2 写临时探针脚本 `scripts/spike/wecom_sdk_probe.py`（`WSClient` + `on(...)` 打印原始 body，CLI 选实验号；跑完即删）
+- [x] 0.3 E1 快照语义：同 stream 发 `甲`→`甲乙`→`甲乙丙`→`甲乙丙`(final)，人工看气泡最终内容，判定"整段替换 or 追加"
+- [x] 0.4 E2 重复/空白帧：插"内容未变"帧与空白/零宽帧，观测能否安全跳过、是否产生空气泡
+- [x] 0.5 E3 认证等待：正常 connect 记录 `connect()` 返回时刻 vs `authenticated` 事件；错 secret connect 观测是否抛/是否仅 `on_error`/是否静默假连/是否持续重连
+- [x] 0.6 E4 被顶号：同 bot 先后建 A/B 两条连接，观测 A 的 `disconnected`/`reconnecting` 序列与是否无限互踢
+- [x] 0.7 E5 卡片回调结构：发 `button_interaction` 卡，人工点按钮，抓 `template_card_event` body，记录 key 字段名与 userid/chatid 回带（仅影响后续卡片）
+- [x] 0.8 E6 帧节奏与 ack：连发 30 帧，记录每帧耗时与是否出现 5s `Reply ack timeout`
+- [x] 0.9 E7 长流保活：开流并每 4min 发 `finish=false`，跨越约 7min，验证 6min 时限与保活有效性
+- [x] 0.10 E8 Markdown 渲染：发标题/列表/代码块/表格/链接，记录哪些语法被渲染（定"参考来源"排版）
+- [x] 0.11 E10 trace_id 闭环：首帧带 `feedback={"id":"trace_test"}`，人工点赞，抓 `feedback_event` body（记录承载字段、`feedback.id` 约束、**该帧是否含 `msgid`**、**是否含 `msgtype`**、**SDK 是否 emit `event.feedback_event`**）；并确认终态 footer 的渲染观感
+- [x] 0.12 E11 首帧前时限与占位首帧：测"长时间不发首帧是否被断"，以及先发占位帧能否有效规避
+- [x] 0.13 产出「官方 aibot SDK 行为事实表」（结论+证据+对设计影响），**人工确认 blocker E1/E3/E4/E5**（确认点 A）；据结论锁定 D5（快照语义）与 D9（feedback 承载，**不可用则 footer 强制开启**）；**若 E1 反证为追加，须先修订投影 spec 的「快照式流式投影」需求再实施**
 
 ## 1. 前置与结构
 
@@ -38,7 +38,7 @@
 - [ ] 3.6 `wecom_service` 将**长连接**的占位 handler 换成 `RagChannelHandler`；`callback` 模式保持占位不变
 - [ ] 3.7 澄清挂起时登记"会话 → 触发者 userid"映射（**TTL + 上限**），供回填时校验来源（见 6.1）
 - [ ] 3.8 消费 `event.feedback_event`：取回反馈标识并还原 `trace_id` 落日志（按 E10 结论定字段）
-- [ ] 3.9 反馈回执解析分流：若该帧缺 `msgid`，驱动按事件类型在 `parse_inbound` 前分流（或放宽事件帧解析），保证其到达业务（按 E10 结论）
+- [x] 3.9 ~~反馈回执解析分流~~ —— **Spike E10 实测后删除**：回执帧同时带 `msgid` 与 `msgtype`，不会在 SDK 门禁或 `parse_inbound` 被丢弃（见 `docs/agents/wecom-sdk-facts.md`）
 
 ## 4. 输出投影层
 
@@ -57,8 +57,8 @@
 
 ## 5. 驱动可靠性补丁
 
-- [ ] 5.1 认证等待：`start()` 等待认证结果（**上界 ≤5s**），成功才算就绪；**凭证类失败**（信号仅限 SDK SUBSCRIBE `errcode≠0` / `Authentication failed`，**不含普通 `on_error`**）→ 可见告警、**主动 `disconnect()` 并置停重连标志**、不计入成功；**等待超时**→ 只置降级（不计入成功）、**不断开不停重连**（交 SDK 自愈）；**未就绪驱动仍登记入 `_drivers` 供 `stop()` 关闭，锚点只计认证就绪者**；**逐台启动改为 `asyncio.gather(..., return_exceptions=True)` 并行**以免拖垮启动（按 E3 结论实现）
-- [ ] 5.2 被顶号停止重连（按 E4 结论实现），避免互踢
+- [ ] 5.1 认证等待：`start()` 等待认证结果（**上界 ≤5s**），成功才算就绪；**凭证类失败**（信号仅限 SDK SUBSCRIBE 响应 `errcode≠0`——实测错误凭证为 **`853000`** / `errmsg=invalid bot_id or secret`；**不含普通 `on_error`**）→ 可见告警、**主动 `disconnect()` 并置停重连标志**、不计入成功；**等待超时**→ 只置降级（不计入成功）、**不断开不停重连**（交 SDK 自愈）；**未就绪驱动仍登记入 `_drivers` 供 `stop()` 关闭，锚点只计认证就绪者**；**逐台启动改为 `asyncio.gather(..., return_exceptions=True)` 并行**以免拖垮启动（按 E3 结论实现）
+- [ ] 5.2 被顶处置：驱动**订阅 `event.disconnected_event`** → 记 warning + 标记该台不就绪 + **主动 `disconnect()` 且不再抢回**（E4 实测：不处置会形成无限互踢，周期 313s / 2.2s 不固定）；同时把 `event.disconnected_event` 补进 `_EVENT_EVENTS`
 
 ## 6. 澄清回填
 
