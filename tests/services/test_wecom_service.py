@@ -296,7 +296,9 @@ class _RecorderSink:
     def __init__(self) -> None:
         self.replies: list[tuple[str, bool]] = []
 
-    async def reply_stream(self, content: str, finish: bool) -> None:
+    async def reply_stream(
+        self, content: str, finish: bool, feedback: dict | None = None
+    ) -> None:
         self.replies.append((content, finish))
 
 

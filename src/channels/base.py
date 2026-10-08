@@ -26,8 +26,17 @@ class InboundMessage:
 class ReplySink(Protocol):
     """一条入站消息对应的回复出口；由驱动决定落到 HTTP 响应还是 WS 帧。"""
 
-    async def reply_stream(self, content: str, finish: bool) -> None:
-        """回复流式消息；finish=True 表示结束。"""
+    async def reply_stream(
+        self, content: str, finish: bool, feedback: dict | None = None
+    ) -> None:
+        """回复流式消息。
+
+        Args:
+            content: 本帧内容（企微为累积全文：每次刷新整段替换气泡）
+            finish: True 表示结束本轮
+            feedback: 反馈信息（仅首帧有效，值为 {"id": trace_id}）；
+                不支持该能力的通道忽略之
+        """
         ...
 
 
