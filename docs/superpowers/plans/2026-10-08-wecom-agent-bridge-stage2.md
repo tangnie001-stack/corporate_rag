@@ -1078,7 +1078,7 @@ Expected: FAIL —— 多条新用例失败（引用不出现、footer 缺失、
 
 `src/channels/wecom/presenter.py` 增量改写：
 
-- import 增 `TRACE_FOOTER_EFFECTIVE, FEEDBACK_ID_ENABLED`、`SSEAbstentionEvent, SSECitationEvent, SSEErrorEvent`
+- import 增 `TRACE_FOOTER_EFFECTIVE, FEEDBACK_ID_ENABLED`、`SSEAbstentionEvent, SSECitationEvent, SSEErrorEvent`，并**增 `from loguru import logger`**（本任务新增的脱敏与发送失败日志要用它）
 - 签名增 `footer_enabled: bool = TRACE_FOOTER_EFFECTIVE`、`feedback_enabled: bool = FEEDBACK_ID_ENABLED`
 - 状态增 `self._sources: list[SSECitationEvent] = []`、`self._abstained: bool = False`、`self._error: str | None = None`、`self._degraded: bool = False`、`self._feedback_sent: bool = False`；并保存 `self._footer_enabled = footer_enabled`、`self._feedback_enabled = feedback_enabled`
 
@@ -1499,11 +1499,13 @@ _EVENTS_END: object = object()
             if self._monotonic() - self._last_sent_at < self._min_interval_seconds:
                 return
         sent = await self._send(content, finish=False)
-        if sent and carries_answer:
+        if sent and carries_answer and not keepalive:
             self._frames_sent += 1
 ```
 
-> `_send` 返回 `False` 时会置 `_degraded`，后续 `_flush` 直接早退；`_consume` 因不再接收可发内容而继续等待直到哨兵（上游一结束即收尾），故"发送失败"不会造成死循环。
+> 帧计数必须排除保活帧（`and not keepalive`）：否则长静默期的保活会把正文帧额度吃光，"保活帧不计入上限"被违反，正文反而更早触顶。
+
+> `_send` 返回 `False` 时会置 `_degraded`，此后 `_flush` 直接早退（不再重试发送），消费侧只等哨兵/终态后收尾，故"发送失败"不会造成失败重试风暴。
 
 - [ ] **Step 4: 跑测试确认通过**
 
