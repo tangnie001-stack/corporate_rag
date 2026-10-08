@@ -30,15 +30,17 @@
 
 ## 3. 桥接 handler
 
-- [ ] 3.1 `session_id` = `uuid5(WECOM_NS, "wecom|{bot_key}|{group|single}|{id}")`、`user_id` = `uuid5(WECOM_NS, "wecom-user|{from_userid}")`（均 36 字符稳定）；**`WECOM_NS` 为 `const.py` 中的固定字面常量**（不得随机/进程内），并加"跨进程稳定"单测；`bot_key`/`chatid`/`userid` 记入日志与 `sessions.title`
-- [ ] 3.2 `msgid` 去重模块（TTL + 上限双淘汰）+ 单测（重复丢弃、有界淘汰）
-- [ ] 3.3 每轮生成用既有 `new_trace_id()` 生成 `trace_<uuid>` 并 set `current_trace_id`；日志锚点同时带 `trace_id`/`bot_key`/`msgid`
-- [ ] 3.4 `RagChannelHandler`：调用 `start_turn`、订阅事件、交给投影层（`kb_id` 本轮传空）；`TurnBusy` → 回"正在处理上一条"
-- [ ] 3.5 同会话并发冲突：由 `start_turn` 的原子闸门保证，通道只翻译 `TurnBusy`，不静默丢
-- [ ] 3.6 `wecom_service` 将**长连接**的占位 handler 换成 `RagChannelHandler`；`callback` 模式保持占位不变
-- [ ] 3.7 澄清挂起时登记"会话 → 触发者 userid"映射（**TTL + 上限**），供回填时校验来源（见 6.1）
-- [ ] 3.8 消费 `event.feedback_event`：取回反馈标识并还原 `trace_id` 落日志（按 E10 结论定字段）
-- [x] 3.9 ~~反馈回执解析分流~~ —— **Spike E10 实测后删除**：回执帧同时带 `msgid` 与 `msgtype`，不会在 SDK 门禁或 `parse_inbound` 被丢弃（见 `docs/agents/wecom-sdk-facts.md`）
+- [x] 3.1 `session_id` = `uuid5(WECOM_NS, "wecom|{bot_key}|{group|single}|{id}")`、`user_id` = `uuid5(WECOM_NS, "wecom-user|{from_userid}")`（均 36 字符稳定）；**`WECOM_NS` 为 `const.py` 中的固定字面常量**（不得随机/进程内），并加"跨进程稳定"单测；`bot_key`/`chatid`/`userid` 记入日志与 `sessions.title`
+- [x] 3.2 `msgid` 去重模块（TTL + 上限双淘汰）+ 单测（重复丢弃、有界淘汰）
+- [x] 3.3 每轮生成用既有 `new_trace_id()` 生成 `trace_<uuid>` 并 set `current_trace_id`；日志锚点同时带 `trace_id`/`bot_key`/`msgid`
+- [x] 3.4 `RagChannelHandler`：调用 `start_turn`、订阅事件、交给投影层（`kb_id` 本轮传空）；`TurnBusy` → 回"正在处理上一条"
+- [x] 3.5 同会话并发冲突：由 `start_turn` 的原子闸门保证，通道只翻译 `TurnBusy`，不静默丢
+- [x] 3.6 `wecom_service` 将**长连接**的占位 handler 换成 `RagChannelHandler`；`callback` 模式保持占位不变
+- [x] 3.7 澄清挂起时登记"会话 → 触发者 userid"映射（**TTL + 上限**），供回填时校验来源（见 6.1）
+- [x] 3.8 消费 `event.feedback_event`：取回反馈标识并还原 `trace_id` 落日志（按 E10 结论定字段）
+- [x] 3.9 ~~反馈回执解析分流~~
+> 阶段 3 已完成并并入 `dev-wsl`（merge `bffa728`）。**确认点 B（真实连网）通过**：@ `dev` 得到站点同款 Agent 回答（`[wecom] inbound bot_key=dev …` → 落库前置 → 任务注册 → prompt 组装 → model turn → format done，error 日志 0 行）；同轮实测并修复两处：投影期日志 trace 归属、投影期异常补发第二帧终态。
+—— **Spike E10 实测后删除**：回执帧同时带 `msgid` 与 `msgtype`，不会在 SDK 门禁或 `parse_inbound` 被丢弃（见 `docs/agents/wecom-sdk-facts.md`）
 
 ## 4. 输出投影层
 
