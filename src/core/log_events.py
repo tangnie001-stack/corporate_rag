@@ -27,6 +27,7 @@ LOG_PREFIXES: frozenset[str] = frozenset(
         "app",
         "delegate",
         "wecom",
+        "clarify",
     }
 )
 
