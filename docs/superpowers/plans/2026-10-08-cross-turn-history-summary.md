@@ -47,12 +47,10 @@
 在 `tests/agents/graph/test_history_window.py` **追加**（原有用例保持不动）：
 
 ```python
-from src.agents.graph.history_window import split_history_window
-from src.infra.llm.token_count import count_tokens
+from src.agents.graph.history_window import exceeds_budget, split_history_window
 
-_MSG_X = "x" * 2000
-_MSG_Y = "y" * 2000
-_TURN_TOKENS = count_tokens(_MSG_X) + count_tokens(_MSG_Y)
+# `_MSG_X` / `_MSG_Y` / `_TURN_TOKENS` 已在本文件上方（Phase A 引入）定义，
+# 直接复用，**不要重复定义**（会构成逐字重复）。
 
 
 def _three_turns():
@@ -444,16 +442,18 @@ Expected: FAIL —— `ModuleNotFoundError: No module named 'src.chat.history_su
 只做"把一段历史压成摘要"的纯逻辑与一次 LLM 调用，不读写存储、不碰并发锁
 （存储归 `ChatManager`，编排归回合收尾处）。任何失败都返回 `degraded` 结果，
 绝不外抛——调用方据此回退到纯裁剪。
+
+本模块**不记日志**：降级信号由编排层（`summary_scheduler`）按 `degraded` 与
+`reason` 统一落 `[session]` 事件，避免同一失败在两处重复记录、也避免本模块
+依赖事件注册表（事件在后续任务才登记）。
 """
 
 import asyncio
 import re
 from dataclasses import dataclass
 
-from src.config.const import HISTORY_SUMMARY_TRIGGER_TOKENS, SUMMARY_TIMEOUT_S
+from src.config.const import SUMMARY_TIMEOUT_S
 from src.config.prompts import loader
-from src.core import logging as core_logging
-from src.core.log_events import Event
 from src.infra.llm.chat_message import ChatMessage
 from src.infra.llm.token_count import count_tokens
 from src.models import get_summary_llm
@@ -545,7 +545,6 @@ async def summarize_history(
             timeout=SUMMARY_TIMEOUT_S,
         )
     except Exception as exc:  # noqa: BLE001
-        core_logging.log_event(Event.SUMMARY_FALLBACK, reason="llm_error", err=str(exc))
         return SummaryResult("", previous_covered, True, f"llm_error: {exc}")
     # 不变量③「拒绝截断摘要」：结束原因为长度截断即视为失败，不采用半截摘要。
     # 该判据成立的前提是 `get_summary_llm()` 已设显式 max_tokens。
@@ -554,7 +553,6 @@ async def summarize_history(
     if isinstance(metadata, dict):
         finish_reason = str(metadata.get("finish_reason", ""))
     if finish_reason == "length":
-        core_logging.log_event(Event.SUMMARY_FALLBACK, reason="truncated", err="")
         return SummaryResult("", previous_covered, True, "truncated")
     text = strip_citation_numbers(str(response.content))
     previous_tokens = count_tokens(previous_text) if previous_text else None
@@ -564,7 +562,6 @@ async def summarize_history(
         previous_tokens=previous_tokens,
     )
     if not ok:
-        core_logging.log_event(Event.SUMMARY_FALLBACK, reason=reason, err="")
         return SummaryResult("", previous_covered, True, reason)
     return SummaryResult(text, covered, False, "")
 ```
@@ -1136,6 +1133,10 @@ class SummaryScheduler:
             )
             result = await summarize_history(previous_text, previous_covered, discarded)
             if result.degraded:
+                # 核心模块只返回原因、不记日志；由本层统一落 [session] 降级事件。
+                core_logging.log_event(
+                    Event.SUMMARY_FALLBACK, reason=result.reason, err=""
+                )
                 return
             await self._manager.save_summary_async(
                 session_id, result.text, result.covered
@@ -1276,7 +1277,8 @@ def test_summary_and_tail_fit_budget():
     from src.agents.graph.agent_node import _fit_summary_to_budget
 
     tail = [HumanMessage(content="尾" * 3000)]
-    over = "摘" * 2000
+    # 摘要远大于「预算 − 尾部」的余量，强制触发截断（否则该用例恒真、测不到东西）
+    over = "摘" * 20000
     fitted = _fit_summary_to_budget(over, tail)
     total = count_tokens(fitted) + sum(count_tokens(m.content) for m in tail)
     assert total <= HISTORY_TOKEN_BUDGET
