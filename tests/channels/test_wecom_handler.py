@@ -221,7 +221,7 @@ def test_extract_feedback_id_tolerates_malformed_frames():
 
 
 @pytest.mark.asyncio
-async def test_ask_user_event_registers_trigger_and_does_not_reply():
+async def test_ask_user_event_registers_trigger_and_renders_question():
     ask_user = SSEAskUserEvent(questions=[{"id": "q1", "question": "?"}])
     handler, _recorded = _handler(events=[ask_user, SSEDoneEvent()])
     sink = _Sink()
@@ -232,8 +232,9 @@ async def test_ask_user_event_registers_trigger_and_does_not_reply():
         bot_key="dev", chattype="group", chatid="CHAT9", from_userid="U1"
     )
     assert handler.registered_trigger(session_id) == "U1"
-    # 澄清事件不产帧（二期由组 6 呈现问题）：帧 = 终态帧
-    assert len(sink.calls) == 1
+    # 澄清问题渲染进气泡（非终态帧），done 收尾为终态帧
+    assert len(sink.calls) == 2
+    assert sink.calls[0][1] is False
     assert sink.calls[-1][1] is True
 
 

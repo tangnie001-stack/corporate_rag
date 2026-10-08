@@ -13,6 +13,7 @@ from collections.abc import AsyncIterator, Callable
 from loguru import logger
 
 from src.channels.base import ReplySink
+from src.channels.wecom.clarify_render import render_questions
 from src.config.wecom_presenter import (
     FEEDBACK_ID_ENABLED,
     FIRST_FRAME_TIMEOUT_SECONDS,
@@ -106,6 +107,7 @@ class WeComPresenter:
         self._feedback_enabled = feedback_enabled
 
         self._text: str = ""
+        self._clarify_text: str = ""
         self._placeholder: str = WeComPresenterTexts.PLACEHOLDER_TEXT
         self._final: bool = False
         self._last_sent: str | None = None
@@ -188,6 +190,9 @@ class WeComPresenter:
                 await self._flush(keepalive=True)
                 continue
             if item is _EVENTS_END:
+                # 澄清已渲染但尚无正文：回合仍在等用户作答，不 finalize（终态帧只能发一次）
+                if self._clarify_text and is_blank(self._text):
+                    return
                 break
             await self.update(item)
             if isinstance(item, (SSEDoneEvent, SSEErrorEvent)):
@@ -198,7 +203,7 @@ class WeComPresenter:
         """投影单个事件：累积正文 / 收集引用 / 记录终态标记，必要时发送一帧。
 
         丢弃类事件（思考过程 / 子代理过程 / 任务看板 / 模型信息 / 会话绑定
-        智能体 / 澄清）在企微无对应渲染，丢弃且不得中断本轮流。
+        智能体）在企微无对应渲染，丢弃且不得中断本轮流；澄清事件渲染进内容但不 finalize。
 
         Args:
             event: 单个结构化事件
@@ -228,8 +233,13 @@ class WeComPresenter:
         ):
             return
         elif isinstance(event, SSEAskUserEvent):
-            # 澄清事件不产帧：真正呈现与回填属组 6；本层只声明契约，
-            # 触发者登记由 handler 旁路完成（见 handler.py）
+            # 澄清问题要用户看见：渲染进累积内容（快照），但不 finalize——
+            # 回合仍在挂起等待（见 design D14 与通道侧 spec）。
+            rendered = render_questions(event.questions)
+            if rendered:
+                self._clarify_text = rendered
+                self._last_sent = None  # 绕过"内容未变即跳过"，确保问题发得出去
+                await self._flush()
             return
         if isinstance(event, SSEDoneEvent):
             # done 意味着本轮已收尾，这里不再发中间帧，统一由 finalize 发终态帧
@@ -288,10 +298,16 @@ class WeComPresenter:
         return {"id": self._trace_id}
 
     def _render_answer(self) -> str:
-        """当前累积正文；超过长度上限时保留尾部。"""
-        if len(self._text) > self._max_chars:
-            return self._text[-self._max_chars :]
-        return self._text
+        """当前累积内容（澄清问题块 + 正文）；超过长度上限时保留尾部。"""
+        if self._clarify_text and self._text:
+            composed = f"{self._clarify_text}\n\n{self._text}"
+        elif self._clarify_text:
+            composed = self._clarify_text
+        else:
+            composed = self._text
+        if len(composed) > self._max_chars:
+            return composed[-self._max_chars :]
+        return composed
 
     def _has_answer(self) -> bool:
         """累积正文是否非空白。"""
