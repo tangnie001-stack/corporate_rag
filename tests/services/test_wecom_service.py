@@ -6,6 +6,7 @@ import pytest
 from loguru import logger
 
 from src.channels.base import InboundMessage
+from src.channels.wecom.handler import RagChannelHandler
 from src.config import settings
 from src.config.const import WECOM_REPLY_PLACEHOLDER
 from src.config.wecom_bots import CALLBACK_BOT_KEY
@@ -358,3 +359,39 @@ async def test_handler_silent_for_event(monkeypatch):
     sink = _RecorderSink()
     await wecom_service._default_handler(_inbound("aibA", msgtype="event"), sink)
     assert sink.replies == []
+
+
+@pytest.mark.asyncio
+async def test_long_connection_uses_bridge_handler(monkeypatch):
+    """长连接改用桥接 handler（RagChannelHandler），不再用占位 handler。"""
+    monkeypatch.setattr(settings, "WECOM_BOT_ENABLED", True)
+    monkeypatch.setattr(settings, "WECOM_BOT_MODE", "long_connection")
+    _bots_env(monkeypatch, [("dev", "aibA", "s1")])
+    created = _install_stub(monkeypatch)
+
+    await wecom_service.start()
+
+    handler = created[0].handler
+    assert isinstance(handler, RagChannelHandler)
+
+
+@pytest.mark.asyncio
+async def test_callback_mode_keeps_placeholder_handler(monkeypatch):
+    """回调模式仍是占位 handler（桥接仅长连接，design D15）。"""
+    monkeypatch.setattr(settings, "WECOM_BOT_ENABLED", True)
+    monkeypatch.setattr(settings, "WECOM_BOT_MODE", "callback")
+    monkeypatch.setattr(settings, "WECOM_BOT_TOKEN", "t")
+    monkeypatch.setattr(settings, "WECOM_BOT_ENCODING_AES_KEY", "a" * 43)
+
+    captured: dict[str, object] = {}
+    real_driver = wecom_service.CallbackDriver
+
+    def _factory(crypto, handler):
+        captured["handler"] = handler
+        return real_driver(crypto, handler)
+
+    monkeypatch.setattr(wecom_service, "CallbackDriver", _factory)
+
+    await wecom_service.start()
+
+    assert captured["handler"] is wecom_service._default_handler

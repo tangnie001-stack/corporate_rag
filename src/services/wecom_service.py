@@ -2,7 +2,7 @@
 
 多机器人（长连接）：每台一个驱动，集中存放于驱动注册表；逐台装配/降级/关停。
 回调保留为 legacy 单机器人（存于保留键 `callback`）。
-本轮 handler 只打日志并回写死回复；后续替换为「调 agent 跑 RAG」。
+长连接复用同一桥接 handler（跑站点同款 Agent 管线）；回调仍用占位 handler（只打日志并回写死回复）。
 """
 
 from loguru import logger
@@ -10,11 +10,14 @@ from loguru import logger
 from src.channels.base import ChannelDriver, InboundMessage, ReplySink
 from src.channels.wecom.callback import CallbackDriver
 from src.channels.wecom.crypto import WeComCrypto
+from src.channels.wecom.handler import RagChannelHandler
 from src.channels.wecom.long_connection import LongConnectionDriver
 from src.config import settings
 from src.config.const import WECOM_REPLY_PLACEHOLDER
 from src.config.wecom_bots import CALLBACK_BOT_KEY, load_wecom_bots
 from src.core.logging import encode_value
+from src.services import turn_runner
+from src.services.app_service import get_app_service
 
 # 接入模式取值
 _MODE_CALLBACK = "callback"
@@ -65,6 +68,22 @@ async def _default_handler(msg: InboundMessage, sink: ReplySink) -> None:
     await sink.reply_stream(WECOM_REPLY_PLACEHOLDER, finish=True)
 
 
+def _build_bridge_handler() -> RagChannelHandler:
+    """构造长连接用的桥接 handler（每次 start 重建：去重/触发者表随进程生命周期）。
+
+    依赖注入而非在通道层 import 本模块：`channels/wecom/handler.py` 只依赖
+    `services` 的叶子模块，避免与 `wecom_service → handler` 形成环。
+
+    Returns:
+        配置齐备的 RagChannelHandler
+    """
+    return RagChannelHandler.build_default(
+        start_turn=turn_runner.start_turn,
+        get_service=get_app_service,
+        resolve_bot_key=_resolve_bot_key,
+    )
+
+
 def _validate_credentials() -> None:
     """callback 模式启动期校验：凭证非法即抛，不留请求期降级。"""
     if not settings.WECOM_BOT_TOKEN:
@@ -101,8 +120,9 @@ async def start() -> None:
 
     _bot_key_by_aibotid = {bot.bot_id: bot.key for bot in bots}
     _drivers = {}
+    bridge_handler = _build_bridge_handler()
     for bot in bots:
-        driver = LongConnectionDriver(bot.bot_id, bot.secret, _default_handler)
+        driver = LongConnectionDriver(bot.bot_id, bot.secret, bridge_handler)
         try:
             await driver.start()
         except Exception as e:  # noqa: BLE001

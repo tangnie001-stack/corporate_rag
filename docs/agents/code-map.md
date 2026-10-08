@@ -85,6 +85,12 @@ channels/          接入通道：base(通用抽象) / wecom(parse 入站解析 
 > 企微流式投影（接入站点同款 Agent 管线投影层）落在两处：
 > - `src/channels/wecom/presenter.py`：企微流式投影层（事件流 → 企微帧；快照累积 / 节流 / 上限 / 保活）
 > - `src/config/wecom_presenter.py`：企微投影层可调参数与文案
+>
+> 企微桥接通道层落点：
+> - `src/channels/wecom/handler.py`：入站 → 站点同款 Agent 管线的桥接 handler（标识/去重/trace_id/事件分流）
+> - `src/channels/wecom/session.py`：企微会话与用户标识派生（UUIDv5）
+> - `src/channels/wecom/bounded_map.py`：有界 TTL 映射（msgid 去重与澄清触发者登记共用）
+> - `src/config/wecom_channel.py`：企微通道层参数（去重/触发者登记的 TTL 与容量）与通道文案
 
 ### prompt 组装与段模板归属
 
