@@ -71,6 +71,14 @@ def test_two_questions_without_numbering_is_invalid():
     assert parse_answers("营收和 2024 年", _TWO) is None
 
 
+def test_two_questions_partial_numbering_is_invalid():
+    assert parse_answers("1) 营收", _TWO) is None
+
+
+def test_two_questions_out_of_range_numbering_is_invalid():
+    assert parse_answers("1) 营收\n3) 越界", _TWO) is None
+
+
 def test_blank_text_is_invalid():
     assert parse_answers("   ", _ONE) is None
 
@@ -193,6 +201,9 @@ async def test_invalid_answer_prompts_and_keeps_pending():
     assert resolves == []
     assert sink.calls == [(WeComChannelTexts.CLARIFY_INVALID_TEXT, True)]
     assert recorder["start_turn_calls"] == []
+    # 无效答复**不消耗**挂起：触发者与问题清单都保留，用户可重答
+    assert handler._triggers.get(session_id) == "U1"
+    assert handler._questions.get(session_id) is not None
 
 
 @pytest.mark.asyncio

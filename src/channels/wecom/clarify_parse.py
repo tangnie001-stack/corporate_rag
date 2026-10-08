@@ -3,7 +3,8 @@
 站点前端有专用作答 UI（逐问提交结构化 answers）；企微只能用**文本回填**，
 故本模块把一段文本映射成 `[{id, selected, custom}]`：
 - 单问：命中选项（原文/序号）→ `selected`；否则整段作为 `custom`
-- 多问：要求**编号回复**（`1) …` / `1. …` / `1、…`），逐条映射；无法编号 → 判定无效
+- 多问：要求**编号回复**（`1) …` / `1. …` / `1、…`），编号须**完整覆盖** `1..N`
+  且无越界，逐条映射；无法完整编号 → 判定无效
 - `multi_select`：先按顿号/逗号/空格切分再与选项比对
 
 返回 `None` 表示"这段文本不能作为答案"，调用方应提示用户重答且**不消耗**挂起。
@@ -36,7 +37,6 @@ def _match_options(text: str, options: list[str], *, multi: bool) -> list[str]:
     if not options:
         return []
     candidates = [_normalize(text)]
-    lowered = text.lower()
     if multi:
         candidates = [part for part in _SEPARATORS.split(text) if part]
     hits: list[str] = []
@@ -48,11 +48,7 @@ def _match_options(text: str, options: list[str], *, multi: bool) -> list[str]:
                 if option not in hits:
                     hits.append(option)
                 break
-    if hits:
-        return hits
-    if len(options) == 1 and lowered == _normalize(options[0]).lower():
-        return [options[0]]
-    return []
+    return hits
 
 
 def _select_by_index(text: str, options: list[str]) -> list[str]:
@@ -118,10 +114,10 @@ def parse_answers(text: str, questions: list) -> list[dict] | None:
             continue
         position = int(matched.group(1))
         numbered[position] = _normalize(matched.group(2))
-    if not numbered:
+    expected = set(range(1, len(valid) + 1))
+    if set(numbered) != expected:
         return None
     answers: list[dict] = []
     for position, question in enumerate(valid, start=1):
-        body = numbered.get(position, "")
-        answers.append(_answer_for(body, question))
+        answers.append(_answer_for(numbered[position], question))
     return answers
