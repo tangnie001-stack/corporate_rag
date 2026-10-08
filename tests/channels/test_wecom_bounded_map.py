@@ -25,6 +25,23 @@ def test_mark_if_new_reports_first_sight_only():
     assert table.mark_if_new("M2", "") is True
 
 
+def test_mark_if_new_hit_does_not_renew_ttl():
+    """命中不续期：窗口自首次写入起算，重推不得延长它（D10 的有界性来源）。"""
+    read, advance = _clock()
+    table = BoundedTtlMap(capacity=10, ttl_seconds=100.0, monotonic=read)
+
+    assert table.mark_if_new("M1", "") is True
+    # 窗口内反复重推：每次都应是"已见过"，且累计时间越过 ttl 后必须重新视为新消息
+    advance(60.0)
+    assert table.mark_if_new("M1", "") is False
+    advance(39.0)
+    assert (
+        table.mark_if_new("M1", "") is False
+    )  # 累计 99s，若命中续期则此处仍会 False、但下面会红
+    advance(2.0)
+    assert table.mark_if_new("M1", "") is True  # 累计 101s > ttl → 已过期
+
+
 def test_ttl_eviction_allows_reprocessing_after_window():
     read, advance = _clock()
     table = BoundedTtlMap(capacity=10, ttl_seconds=100.0, monotonic=read)
