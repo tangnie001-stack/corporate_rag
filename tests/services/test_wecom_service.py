@@ -1,6 +1,7 @@
-"""企微编排单测：驱动注册表启停、逐台降级、fail-fast、callback legacy。"""
+"""企微编排单测：驱动注册表启停、逐台降级、fail-fast、callback legacy。
 
-import json
+共享替身与工厂见 tests/services/wecom_service_fakes.py；状态复位见 tests/services/conftest.py。
+"""
 
 import pytest
 from loguru import logger
@@ -11,75 +12,13 @@ from src.config import settings
 from src.config.const import WECOM_REPLY_PLACEHOLDER
 from src.config.wecom_bots import CALLBACK_BOT_KEY
 from src.services import wecom_service
-
-
-def _bots_env(monkeypatch, items: list[tuple[str, str, str]]) -> None:
-    """把 (key, bot_id, secret) 列表写进 WECOM_BOTS 环境变量（单行 JSON）。"""
-    data = [{"key": k, "bot_id": i, "secret": s} for (k, i, s) in items]
-    monkeypatch.setenv("WECOM_BOTS", json.dumps(data, separators=(",", ":")))
-
-
-class _StubDriver:
-    name = "wecom_long_connection"
-
-    def __init__(
-        self, bot_id: str, secret: str, handler: object, *, fail: bool = False
-    ):
-        self.bot_id = bot_id
-        self.secret = secret
-        self.handler = handler
-        self.started = False
-        self.stopped = False
-        self._fail = fail
-
-    async def start(self) -> None:
-        if self._fail:
-            raise RuntimeError("connect failed")
-        self.started = True
-
-    async def stop(self) -> None:
-        self.stopped = True
-
-
-class _StopFailingDriver(_StubDriver):
-    async def stop(self) -> None:
-        raise RuntimeError("disconnect failed")
-
-
-class _StopFailingByBotIdDriver(_StubDriver):
-    """stop() 按 bot_id 决定是否抛错：仅指定台失败，其余台正常断开。"""
-
-    def __init__(self, bot_id: str, secret: str, handler: object, *, failing_id: str):
-        super().__init__(bot_id, secret, handler)
-        self._failing_id = failing_id
-
-    async def stop(self) -> None:
-        if self.bot_id == self._failing_id:
-            raise RuntimeError("disconnect failed")
-        self.stopped = True
-
-
-def _install_stub(monkeypatch, *, fail_ids: set[str] | None = None):
-    """把 LongConnectionDriver 换成 stub 工厂；返回创建记录列表。"""
-    created: list[_StubDriver] = []
-    fail_ids = fail_ids or set()
-
-    def _factory(bot_id, secret, handler):
-        driver = _StubDriver(bot_id, secret, handler, fail=bot_id in fail_ids)
-        created.append(driver)
-        return driver
-
-    monkeypatch.setattr(wecom_service, "LongConnectionDriver", _factory)
-    return created
-
-
-@pytest.fixture(autouse=True)
-def _reset_state():
-    wecom_service._drivers = {}
-    wecom_service._bot_key_by_aibotid = {}
-    yield
-    wecom_service._drivers = {}
-    wecom_service._bot_key_by_aibotid = {}
+from tests.services.wecom_service_fakes import (
+    _bots_env,
+    _install_stub,
+    _StopFailingByBotIdDriver,
+    _StopFailingDriver,
+    _StubDriver,
+)
 
 
 @pytest.mark.asyncio
@@ -185,7 +124,7 @@ async def test_unknown_mode_is_fail_fast(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_long_connection_logs_anchor(monkeypatch):
-    """启动锚点日志：成功台数 / 总台数（供冒烟区分"端点不可达"与"未切模式"）。"""
+    """启动锚点日志：认证就绪台数 / 总台数（供冒烟区分"端点不可达"与"未切模式"）。"""
     monkeypatch.setattr(settings, "WECOM_BOT_ENABLED", True)
     monkeypatch.setattr(settings, "WECOM_BOT_MODE", "long_connection")
     _bots_env(monkeypatch, [("dev", "aibA", "s1"), ("support", "aibB", "s2")])

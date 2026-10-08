@@ -5,6 +5,9 @@
 长连接复用同一桥接 handler（跑站点同款 Agent 管线）；回调仍用占位 handler（只打日志并回写死回复）。
 """
 
+import asyncio
+from typing import Protocol, runtime_checkable
+
 from loguru import logger
 
 from src.channels.base import ChannelDriver, InboundMessage, ReplySink
@@ -22,6 +25,17 @@ from src.services.app_service import get_app_service
 # 接入模式取值
 _MODE_CALLBACK = "callback"
 _MODE_LONG_CONNECTION = "long_connection"
+
+
+@runtime_checkable
+class _ReadyProbe(Protocol):
+    """可查询认证就绪态的驱动（长连接）；callback 驱动不含该属性。"""
+
+    @property
+    def is_ready(self) -> bool:
+        """该台是否已认证就绪。"""
+        ...
+
 
 # 驱动注册表：键 = bot_key（长连接）或保留键 callback（回调 legacy）
 _drivers: dict[str, ChannelDriver] = {}
@@ -119,23 +133,30 @@ async def start() -> None:
         raise RuntimeError("WECOM_BOT_MODE=long_connection 但 WECOM_BOTS 为空")
 
     _bot_key_by_aibotid = {bot.bot_id: bot.key for bot in bots}
-    _drivers = {}
+    _drivers.clear()
     bridge_handler = _build_bridge_handler()
+    built: list[tuple[str, LongConnectionDriver]] = []
     for bot in bots:
         driver = LongConnectionDriver(bot.bot_id, bot.secret, bridge_handler)
-        try:
-            await driver.start()
-        except Exception as e:  # noqa: BLE001
-            # 通道可选：单台连接失败不拖垮其余台，也不阻塞应用启动
+        built.append((bot.key, driver))
+    results = await asyncio.gather(
+        *(driver.start() for _key, driver in built), return_exceptions=True
+    )
+    ready_count = 0
+    for (bot_key, driver), result in zip(built, results, strict=True):
+        if isinstance(result, BaseException):
             logger.warning(
                 "[wecom] bot connect failed bot_key={} err={}",
-                encode_value(bot.key),
-                e,
+                encode_value(bot_key),
+                result,
             )
             continue
-        _drivers[bot.key] = driver
-
-    logger.info("[wecom] bots connected n={} total={}", len(_drivers), len(bots))
+        # 已建立连接的驱动一律登记（含未认证就绪者），否则 stop() 无法关闭它
+        _drivers[bot_key] = driver
+        # 连接失败的台既不注册也不计数；就绪台数只统计已登记者
+        if driver.is_ready:
+            ready_count += 1
+    logger.info("[wecom] bots connected n={} total={}", ready_count, len(bots))
 
 
 async def stop() -> None:
@@ -160,6 +181,29 @@ def get_driver(bot_key: str) -> ChannelDriver:
     if driver is None:
         raise RuntimeError(f"wecom driver 未启动或不存在: {bot_key}")
     return driver
+
+
+def is_ready(bot_key: str) -> bool:
+    """该台是否可用。
+
+    长连接按驱动就绪判定（未认证超时／凭证类失败／被顶后为 False）；
+    callback 模式无握手，装配成功即视为可用。
+
+    以 `_ReadyProbe` 结构化探测而非绑定具体驱动类：生产里即 `LongConnectionDriver`，
+    测试中驱动类可被替身替换，绑定具体类会随替换失效。
+
+    Args:
+        bot_key: 机器人别名
+
+    Returns:
+        True 表示该台可用；未注册或未就绪为 False
+    """
+    driver = _drivers.get(bot_key)
+    if driver is None:
+        return False
+    if isinstance(driver, _ReadyProbe):
+        return driver.is_ready
+    return True
 
 
 def get_callback_driver() -> CallbackDriver:
