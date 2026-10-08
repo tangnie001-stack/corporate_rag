@@ -214,30 +214,54 @@ class RagChannelHandler:
         trace_id = new_trace_id()
         token = current_trace_id.set(trace_id)
         try:
-            logger.info(
-                "[wecom] inbound bot_key={} msgid={} chattype={} session_id={}"
-                " trace_id={} text_len={}",
-                encode_value(bot_key),
-                msg.msgid,
-                msg.chattype,
-                encode_value(session_id),
-                encode_value(trace_id),
-                len(msg.text or ""),
-            )
-            svc = await self._get_service()
-            handle = await self._start_turn(
-                svc,
-                session_id=session_id,
-                kb_id=self._kb_id,
-                query=msg.text,
-                user_id=user_id,
-                title=build_session_title(
-                    bot_key=bot_key,
-                    chattype=msg.chattype,
-                    chatid=msg.chatid,
-                    from_userid=msg.from_userid,
-                ),
-            )
+            # 内层 try 只管"回合启动"失败：这是唯一需要向用户回兜底的阶段。
+            # 投影阶段（presenter.run）已有自己的收尾契约（先 finalize 再抛），
+            # 其异常不得再回用户一次，否则同一条流会出现两帧 finish=True。
+            try:
+                logger.info(
+                    "[wecom] inbound bot_key={} msgid={} chattype={} session_id={}"
+                    " trace_id={} text_len={}",
+                    encode_value(bot_key),
+                    msg.msgid,
+                    msg.chattype,
+                    encode_value(session_id),
+                    encode_value(trace_id),
+                    len(msg.text or ""),
+                )
+                svc = await self._get_service()
+                handle = await self._start_turn(
+                    svc,
+                    session_id=session_id,
+                    kb_id=self._kb_id,
+                    query=msg.text,
+                    user_id=user_id,
+                    title=build_session_title(
+                        bot_key=bot_key,
+                        chattype=msg.chattype,
+                        chatid=msg.chatid,
+                        from_userid=msg.from_userid,
+                    ),
+                )
+            except turn_runner.TurnBusy:
+                logger.warning(
+                    "[wecom] session busy bot_key={} session_id={} trace_id={}",
+                    encode_value(bot_key),
+                    encode_value(session_id),
+                    encode_value(trace_id),
+                )
+                await sink.reply_stream(
+                    wecom_channel.WeComChannelTexts.BUSY_TEXT, finish=True
+                )
+                return
+            except Exception as e:  # noqa: BLE001
+                logger.exception(
+                    "[wecom] turn start failed bot_key={} session_id={} err={}",
+                    encode_value(bot_key),
+                    encode_value(session_id),
+                    e,
+                )
+                await sink.reply_stream(WeComPresenterTexts.ERROR_TEXT, finish=True)
+                return
             # 投影阶段必须在同一 trace 上下文内：presenter / _tap 的日志是本轮
             # 发帧/降级/澄清登记的来源，提前 reset 会让它们回退到外层（应用启动）trace
             presenter = WeComPresenter(sink, trace_id)
@@ -246,26 +270,6 @@ class RagChannelHandler:
                     handle.events, session_id=session_id, from_userid=msg.from_userid
                 )
             )
-        except turn_runner.TurnBusy:
-            logger.warning(
-                "[wecom] session busy bot_key={} session_id={} trace_id={}",
-                encode_value(bot_key),
-                encode_value(session_id),
-                encode_value(trace_id),
-            )
-            await sink.reply_stream(
-                wecom_channel.WeComChannelTexts.BUSY_TEXT, finish=True
-            )
-            return
-        except Exception as e:  # noqa: BLE001
-            logger.exception(
-                "[wecom] turn start failed bot_key={} session_id={} err={}",
-                encode_value(bot_key),
-                encode_value(session_id),
-                e,
-            )
-            await sink.reply_stream(WeComPresenterTexts.ERROR_TEXT, finish=True)
-            return
         finally:
             current_trace_id.reset(token)
 

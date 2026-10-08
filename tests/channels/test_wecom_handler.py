@@ -7,9 +7,11 @@ import pytest
 from src.channels.base import InboundMessage
 from src.channels.wecom.bounded_map import BoundedTtlMap
 from src.channels.wecom.handler import RagChannelHandler, extract_feedback_id
+from src.channels.wecom.presenter import WeComPresenter
 from src.channels.wecom.session import derive_session_id
 from src.config.const import WECOM_EVENT_FEEDBACK
 from src.config.wecom_channel import WeComChannelTexts
+from src.config.wecom_presenter import WeComPresenterTexts
 from src.infra.llm.trace_context import current_trace_id
 from src.services import turn_runner
 from src.services.app_service import AppService
@@ -295,3 +297,33 @@ async def test_trace_reset_on_start_turn_failure():
         assert current_trace_id.get() == old_trace
     finally:
         current_trace_id.set(None)
+
+
+@pytest.mark.asyncio
+async def test_projection_failure_does_not_double_finalize(monkeypatch):
+    """投影期已先发终态帧再抛时，handler 不得再补 ERROR_TEXT 终态帧（终态唯一）。
+
+    投影契约：`presenter.run` 在消费循环意外抛异常时先 `finalize()` 发出终态帧，
+    再把异常抛出。该异常属于**投影阶段**、非回合启动失败，handler 不应再回用户
+    一次，否则同一流出现两帧 `finish=True`，后一帧把已呈现的正确内容覆盖成
+    脱敏错误文案。
+    """
+    handler, _recorded = _handler(events=[SSETokenEvent(token="甲")])
+    sink = _Sink()
+
+    async def _boom(self, event):
+        raise RuntimeError("projection boom")
+
+    monkeypatch.setattr(WeComPresenter, "update", _boom)
+
+    raised: Exception | None = None
+    try:
+        await handler(_msg(), sink)
+    except Exception as e:  # noqa: BLE001
+        raised = e
+
+    finish_frames = [call for call in sink.calls if call[1] is True]
+    assert len(finish_frames) == 1
+    assert finish_frames[0][0] != WeComPresenterTexts.ERROR_TEXT
+    # 异常照旧向驱动层传播（由长连接驱动吞掉），handler 不再回用户一次
+    assert isinstance(raised, RuntimeError)
