@@ -119,6 +119,11 @@ class LongConnectionDriver:
         # 与收帧循环不会 disconnect，仍会向同一 handler 派帧（重复处理 + 资源泄漏）。
         if self._client is not None:
             return
+        # 早退守卫放行 = 本次 start() 代表一次重启/首启：清掉旧会话状态。
+        # 若不清 _displaced，被顶后重启虽重新认证（_ready=True），is_ready 仍被
+        # _displaced 永久卡死为 False；_ready 一并复位，避免残留旧就绪。
+        self._displaced = False
+        self._ready = False
         client = WSClient(WSClientOptions(bot_id=self._bot_id, secret=self._secret))
         auth_result: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
         client.on("authenticated", lambda: self._on_authenticated(auth_result))

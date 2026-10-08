@@ -140,3 +140,34 @@ async def test_non_credential_error_does_not_disconnect(monkeypatch):
 
     client.emit("authenticated")
     assert driver.is_ready is True
+
+
+@pytest.mark.asyncio
+async def test_restart_after_displacement_clears_displaced(monkeypatch):
+    """被顶后显式重启同一驱动实例：应清 `_displaced` 并重新认证就绪。"""
+    holder = _auth_patch(monkeypatch, emit_auth=True)
+
+    async def _handler(msg: InboundMessage, sink: ReplySink) -> None:
+        return
+
+    driver = lc.LongConnectionDriver("BOTID", "SECRET", _handler)
+    await driver.start()
+    assert driver.is_ready is True
+    first = holder["client"]
+
+    await first.handlers["event.disconnected_event"](
+        {
+            "cmd": "aibot_event_callback",
+            "body": {
+                "msgid": "D1",
+                "msgtype": "event",
+                "event": {"eventtype": "disconnected_event"},
+            },
+        }
+    )
+    assert driver.is_ready is False
+    assert driver._client is None  # 已交接：早退守卫会放行下一次 start()
+
+    await driver.start()
+    assert driver._displaced is False
+    assert driver.is_ready is True
