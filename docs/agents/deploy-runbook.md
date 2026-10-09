@@ -45,11 +45,11 @@
 
 ### 1.4 密钥与挂载路径
 
-- 密钥**只放** `/opt/wwww/corporate_rag/.env`；**制品与流水线都不携带 `.env`**（镜像、制品、云效变量都不会把它送上机）。
+- 密钥**只放** `/opt/www/corporate_rag/.env`；**制品与流水线都不携带 `.env`**（镜像、制品、云效变量都不会把它送上机）。
 - **`.env` 当前由人工从开发机拷到目标机**（尚无自动下发），拷完收紧权限：
   ```bash
-  scp .env root@<ECS-IP>:/opt/wwww/corporate_rag/.env
-  ssh root@<ECS-IP> 'chmod 600 /opt/wwww/corporate_rag/.env'
+  scp .env root@<ECS-IP>:/opt/www/corporate_rag/.env
+  ssh root@<ECS-IP> 'chmod 600 /opt/www/corporate_rag/.env'
   ```
   ⇒ **本地新增/修改的键不会自动上机**：凡涉及 `.env` 的改动（如新增 `WECOM_BOTS`），都要先手工同步到目标机、再重跑部署（或 `deploy.sh start`），否则容器读不到新键、对应功能静默不生效。
 - 企微长连接的多机器人配置写在 `WECOM_BOTS`，值是**一行 JSON**（`[{"key":"dev","bot_id":"<BotID>","secret":"<Secret>"}, {"key":"support","bot_id":"<BotID>","secret":"<Secret>"}]`）：**必须单行** —— 多行会导致 JSON 解析失败、通道启动报错（`WECOM_BOT_MODE=long_connection` 且 `WECOM_BOTS` 为空同样启动报错）。
@@ -103,7 +103,7 @@ Git 提交 ──▶ ① 构建并推送 app 镜像 ──▶ ② 打包部署�
 - ③ **流水线的最后一步是「部署」步骤** —— 它**先匹配发布单**再决定怎么走：
   - **匹配到发布单** → **直接发布**（继续执行 ④ 主机部署）；
   - **匹配不到**（首次，或换了应用 / 分支）→ 该步骤**挂在最后一步等人工** —— 到**部署页面点「创建发布单」**，创建成功后它继续。
-- ④ **主机部署**（**在目标机执行**）：制品下发 → 解压到 `/opt/wwww/corporate_rag` → 依次跑 4 个槽位脚本（见 §2.4）。
+- ④ **主机部署**（**在目标机执行**）：制品下发 → 解压到 `/opt/www/corporate_rag` → 依次跑 4 个槽位脚本（见 §2.4）。
 
 > ⚠️ 两点别搞反：①「主机部署」是**流水线的最后一步**（不是流水线之外的纯手工动作）；② **人工创建发布单只在"匹配不到"时需要** —— 一旦发布单建立，**后续运行直接发布、不再需要人工确认**。
 
@@ -146,14 +146,14 @@ Git 提交 ──▶ ① 构建并推送 app 镜像 ──▶ ② 打包部署�
 
 ### 2.4 主机部署四槽位（配在**部署页面**上）
 
-这四个槽位**配在云效「部署」页面的主机部署里**（不是配在流水线里），由**人工在部署页面点「创建部署单」**后按顺序执行。制品由平台下发到目标机（路径以部署配置为准，常见 `/home/admin/app/package.tgz`），下面的启动槽位把它解压到标准发布路径 `/opt/wwww/corporate_rag`。
+这四个槽位**配在云效「部署」页面的主机部署里**（不是配在流水线里），由**人工在部署页面点「创建部署单」**后按顺序执行。制品由平台下发到目标机（路径以部署配置为准，常见 `/home/admin/app/package.tgz`），下面的启动槽位把它解压到标准发布路径 `/opt/www/corporate_rag`。
 
 调用顺序：**停止 → 启动 → 健康检查 → 清理**。原则：**破坏性动作必须排在启动之后**。
 
 **停止槽位（只做预检，不停服）**：
 ```bash
-if [ -f /opt/wwww/corporate_rag/scripts/deploy/deploy.sh ]; then
-  cd /opt/wwww/corporate_rag && bash scripts/deploy/deploy.sh preflight
+if [ -f /opt/www/corporate_rag/scripts/deploy/deploy.sh ]; then
+  cd /opt/www/corporate_rag && bash scripts/deploy/deploy.sh preflight
 else
   echo "[preflight] 首次部署：机上尚无 deploy.sh，跳过（无旧版本需保护）"
 fi
@@ -162,7 +162,7 @@ fi
 **启动槽位**：
 ```bash
 set -euo pipefail
-ROOT=/opt/wwww/corporate_rag
+ROOT=/opt/www/corporate_rag
 # ★ 必须用「平台为这张部署单下发的制品」—— 回滚时它指向旧版本。
 #   不要自己拼 URL / 写死版本，否则回滚会拉回最新版（回滚失效的典型成因）。
 ART="${package_download_path:-/home/admin/app/package.tgz}"
@@ -179,12 +179,12 @@ bash scripts/deploy/deploy.sh start
 
 **健康检查槽位**：
 ```bash
-cd /opt/wwww/corporate_rag && bash scripts/deploy/deploy.sh health_check
+cd /opt/www/corporate_rag && bash scripts/deploy/deploy.sh health_check
 ```
 
 **清理槽位**：
 ```bash
-cd /opt/wwww/corporate_rag && bash scripts/deploy/deploy.sh clean
+cd /opt/www/corporate_rag && bash scripts/deploy/deploy.sh clean
 ```
 
 > 为什么"停止"只做预检：若它真停服，之后任一步失败（制品损坏、拉镜像失败）会把服务留在**下线**状态。停旧起新由启动阶段的 `compose up -d` 一次完成，失败时旧版本保持在线。
@@ -213,12 +213,12 @@ cd /opt/wwww/corporate_rag && bash scripts/deploy/deploy.sh clean
 
 1. **装 Docker + compose 插件**（Alinux 4：`dnf install -y docker-compose-plugin`）。
 2. **ACR 登录**（app 镜像在私有库）：`docker login <ACR>` 一次（凭据落 `/root/.docker/config.json`），或用 `ACR_USER`/`ACR_PASSWORD`。
-3. **放 `.env`**：从团队渠道取键清单，填真实值，`chmod 600 /opt/wwww/corporate_rag/.env`（**当前为人工拷上机，方式与影响见 §1.4**）。
+3. **放 `.env`**：从团队渠道取键清单，填真实值，`chmod 600 /opt/www/corporate_rag/.env`（**当前为人工拷上机，方式与影响见 §1.4**）。
 4. **安全组**：只放行 22 + 80。
 5. **系统**：swap ≥2 GB、系统盘 ≥60 GB（本地演练构建时 build cache 可达数 GB）。
 6. **拉起服务**（等价于流水线的启动槽位）：
    ```bash
-   cd /opt/wwww/corporate_rag
+   cd /opt/www/corporate_rag
    bash scripts/deploy/deploy.sh            # 8 步：环境判定→依赖→前置检查→ACR 登录→拉镜像→起栈→迁移→健康检查
    ```
    前置检查会校验：`docker-compose.image.yml` / `.env` 非空 / `deploy/nginx/*` / `deploy/postgres/init/`；缺任一报错而非静默降级。
@@ -230,7 +230,7 @@ cd /opt/wwww/corporate_rag && bash scripts/deploy/deploy.sh clean
 - **在 app 容器内执行**（`alembic/` 与 `alembic.ini` 已打进镜像），由 `deploy.sh` 的迁移步骤自动完成（含等待 PostgreSQL 就绪 + 幂等重试）。
 - 手工重跑（幂等）：
   ```bash
-  cd /opt/wwww/corporate_rag
+  cd /opt/www/corporate_rag
   docker compose -f docker-compose.image.yml exec app alembic upgrade head
   ```
 - **顺序**：迁移**先于冒烟**（首版建 8 张表，第二版加 `knowledge_base.domain` 列）。

@@ -22,7 +22,7 @@
 #   「cp .env.example .env」这条通往「半空 .env + compose 兜底弱口令」的捷径）。
 #
 # 制品布局刻意与仓库根一致：deploy.sh 会 cd 到自身路径的上两级，
-#   解压到 /opt/wwww/corporate_rag 后正好指回根目录。
+#   解压到 /opt/www/corporate_rag 后正好指回根目录。
 #
 # 为什么 compose 文件**不改名**成 docker-compose.yml：
 #   目标机目录可能同时存在 docker-compose.override.yml（调试期挂 ./src ./skills ./agents）。
