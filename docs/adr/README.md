@@ -114,6 +114,7 @@ docs/adr/NNNN-<kebab-case-短标题>.md
 | [0016](0016-unify-agent-loop-to-create-agent.md) | 统一 agent 循环到 `create_agent`（唯一装配入口 + 四件套 middleware，领域阶段留外层图） | Accepted | 沿用 0015 的命令式 span 接入方式；代价是 `agent_turn` 的 TTFB（`completion_start_time`）不再设置 |
 | [0017](0017-context-ladder-and-memory-scope.md) | 上下文治理采用四层阶梯（L0 写入侧→L1 瘦身→L2 摘要→L3 记忆）；窗口按 per-model 解析；长期记忆限 episodic + user-semantic，事实仍走 RAG | Accepted | **决策 3 记忆底座已被 0018 取代**；L0/L1 复用 0016 的 middleware 机制；记忆底座沿用 0004 的单 PostgreSQL（pgvector） |
 | [0018](0018-history-vs-memory-keep-own-truth-source.md) | 对话历史与 Agent 记忆分轴；短期记忆真源不迁 LangGraph checkpointer，长期记忆底座自建、不用 Store | Accepted | 局部取代 0017 的决策 3 |
+| [0019](0019-langfuse-public-exposure.md) | Langfuse 放开公网访问（`:3000` 对外），接受 EOL 服务的暴露风险 | Accepted | 局部取代 0011 的「暴露面收敛到仅回环」 |
 
 ## 模板
 

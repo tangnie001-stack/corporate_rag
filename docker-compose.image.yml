@@ -132,7 +132,10 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
     ports:
-      - "127.0.0.1:3000:3000"
+      # 对外暴露（原为 "127.0.0.1:3000:3000" 仅回环）。需配套：
+      #   ① 安全组放行 3000；② 目标机 .env 的 NEXTAUTH_URL 必须等于实际访问地址
+      #   （如 http://<公网IP>:3000），否则登录后会被重定向回 localhost:3000。
+      - "3000:3000"
     environment:
       DATABASE_URL: postgresql://langfuse:${LANGFUSE_POSTGRES_PASS:-langfuse_pass}@postgres:5432/langfuse
       NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
@@ -140,6 +143,9 @@ services:
       SALT: ${LANGFUSE_SALT:-changeme}
       ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
       TELEMETRY_ENABLED: ${TELEMETRY_ENABLED:-false}
+      # 关闭自助注册：:3000 对外后，防止陌生人自行开号（v2.95.11 镜像服务端运行时读该变量）。
+      # 仅在已播种 admin 之外不再新增账号；缺省 false 保持 dev 行为不变。
+      AUTH_DISABLE_SIGNUP: ${AUTH_DISABLE_SIGNUP:-false}
       # v2 的 Next.js standalone 默认绑回环，且 Docker 会把 HOSTNAME 设为容器 ID
       # → 必须显式绑 0.0.0.0，否则 app 经 langfuse-web:3000 不可达（静默走本地兜底）
       HOSTNAME: "0.0.0.0"

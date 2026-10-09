@@ -39,8 +39,9 @@
 
 ### 1.3 端口与安全组
 
-- **对外只开 nginx 的 80**；安全组**只放行 22 与 80**。
-- 其余端口一律绑回环或由安全组封闭：app `127.0.0.1:8000`、redis / postgres / minio / langfuse-web 均不对外。
+- **对外开 nginx 的 80 与 Langfuse 的 3000**；安全组**放行 22、80、3000**。
+- 其余端口一律绑回环或由安全组封闭：app `127.0.0.1:8000`、redis / postgres / minio 均不对外。
+- **langfuse-web `3000:3000` 对外**（2026-10-09 由 `127.0.0.1:3000:3000` 改为对外，改的是 `docker-compose.image.yml`）：需配套目标机 `.env` 的 ① `NEXTAUTH_URL=http://<ECS-IP>:3000`（否则登录后会被重定向回 `localhost:3000` 打不开）与 ② `AUTH_DISABLE_SIGNUP=true`（关闭自助注册，防陌生人开号）。二者中 `AUTH_DISABLE_SIGNUP` 须经 compose 的 `environment:` 透传 —— 该服务**没有** `env_file`，只写进 `.env` 不会进容器。
 - 冒烟与健康检查走 `http://127.0.0.1/api/health`（经 nginx:80 → app:8000），与对外路径一致。
 
 ### 1.4 密钥与挂载路径
@@ -308,7 +309,7 @@ cd /opt/www/corporate_rag && bash scripts/deploy/deploy.sh clean
 | 项 | 当前口径 | 待定 |
 |---|---|---|
 | HTTPS | 纯 HTTP（nginx 只有 80） | 是否上 443 + 证书来源 / SLB 终止 TLS |
-| Langfuse | 保留在栈内（绑回环，不对外） | 长期去留、是否需对外查看 |
+| Langfuse | 保留在栈内，**对外暴露在 `:3000`**（2026-10-09 由绑回环改为对外，见 §1.3；依赖 `NEXTAUTH_URL` 配套） | 长期去留；是否改走 nginx 反代（免开 3000 端口）或加 HTTPS |
 | `docker-compose.prod.yml` | 不参与本目标形态 | 废弃 / 删除 / 与目标形态对齐 |
 | 备份口径 | 见 §7（MinIO 必备） | 频率、保留期、是否上 OSS |
 | 托管化 | 单机自建（PG / Redis / MinIO 同机） | 是否迁 RDS / Redis / OSS / SLB |
