@@ -65,27 +65,28 @@
 
 ### 2.0 发布全流程（端到端）
 
-**默认发布分支：`dev-wsl`。** 一次发布按下面顺序走（0–2 在开发机/目标机，其余在云效网页）：
+**默认发布分支：`dev-wsl`。** 一次发布按下面顺序走（1–4 在开发机/目标机，其余在云效网页）：
 
 | # | 步骤 | 在哪 | 入口 / 命令 |
 |---|---|---|---|
-| 0 | **同步 `.env`（仅本次有 `.env` 变更时）** | 开发机 → 目标机 | `scp .env root@<ECS-IP>:/opt/www/corporate_rag/.env` + `chmod 600`（见 §1.4）。**必须排在发布之前**（新制品不含 `.env`；缺键会让部署 `fail`）。**无 `.env` 变更、或不是本次发布的第一步操作 ⇒ 跳过** |
-| 1 | **前置检查**：工作区干净 + 本地 `dev-wsl` 已推送、未落后 | 开发机 | `git fetch && git status -sb`（**说"开始部署"时由助手代查**）|
-| 2 | **推代码** | 开发机 | `git push origin dev-wsl` |
-| 3 | **GitHub → Codeup 同步代码**（当前**手动**）| 云效网页 | `https://deploytest-cn-shanghai.devops.aliyuncs.com/codeup/deploytest/tangnie001-stack/corporate_rag/settings/mirror_sync` |
-| 4 | **流水线自动开始**（Codeup 有提交 → 钩子触发：构建推镜像 → 打包制品 → **部署**）| 云效网页 | `https://deploytest-cn-shanghai.devops.aliyuncs.com/flow/my?page=1` |
-| 5 | **人工创建发布单**（**仅"匹配不到发布单"时**需要：流水线最后一步会挂起等你；匹配到则**跳过此步、直接发布**）| 云效网页 | 同上（流水线页）|
-| 6 | **主机部署执行**（四槽位 `preflight → start → health_check → clean`；由流水线最后一步触发）| 目标机 | 自动；日志在部署页 |
-| 7 | **冒烟**（见 §5；缺任一步不算成功）| 浏览器 | `http://<ECS-IP>/` |
-| 8 | **查看版本 / 回滚** | 云效网页 | `https://deploytest-cn-shanghai.devops.aliyuncs.com/appstack/app/deploy-app/versions` |
+| 1 | **同步 `.env`**（**仅本次有 `.env` 变更时**） | 开发机 → 目标机 | `scp .env root@<ECS-IP>:/opt/www/corporate_rag/.env` + `chmod 600`（见 §1.4）。**必须排在发布之前**（新制品不含 `.env`；缺键会让部署 `fail`）。**无变更 ⇒ 跳过** |
+| 2 | **登录 ACR 镜像凭证**（**仅首次上机**，之后一律跳过） | 目标机 | `docker login --username=hi31383397@aliyun.com crpi-u3ezxc1o5hirfddw.cn-shanghai.personal.cr.aliyuncs.com`（密码见 §1.4 / 团队渠道，**勿入库**；凭据落 `/root/.docker/config.json`）。无 TTY 时改用 `--password-stdin` |
+| 3 | **前置检查**：工作区干净 + 本地 `dev-wsl` 已推送、未落后 | 开发机 | `git fetch && git status -sb`（**说"开始部署"时由助手代查**）|
+| 4 | **推代码** | 开发机 | `git push origin dev-wsl` |
+| 5 | **GitHub → Codeup 同步代码**（当前**手动**）| 云效网页 | `https://deploytest-cn-shanghai.devops.aliyuncs.com/codeup/deploytest/tangnie001-stack/corporate_rag/settings/mirror_sync` |
+| 6 | **流水线自动开始**（Codeup 有提交 → 钩子触发：构建推镜像 → 打包制品 → **部署**）| 云效网页 | `https://deploytest-cn-shanghai.devops.aliyuncs.com/flow/my?page=1` |
+| 7 | **人工创建发布单**（**仅"匹配不到发布单"时**需要：流水线最后一步会挂起等你；匹配到则**跳过此步、直接发布**）| 云效网页 | 同上（流水线页）|
+| 8 | **主机部署执行**（四槽位 `preflight → start → health_check → clean`；由流水线最后一步触发）| 目标机 | 自动；日志在部署页 |
+| 9 | **冒烟**（见 §5；缺任一步不算成功）| 浏览器 | `http://<ECS-IP>/` |
+| 10 | **查看版本 / 回滚** | 云效网页 | `https://deploytest-cn-shanghai.devops.aliyuncs.com/appstack/app/deploy-app/versions` |
 
-> **第 1 步可以交给助手**：只要说「开始部署」，助手会先 `git fetch` 并比对本地 `dev-wsl` 与 `origin/dev-wsl`，确认没有未推送 / 落后的提交（并检查工作区是否干净）再往下走。
+> **第 3 步可以交给助手**：只要说「开始部署」，助手会先 `git fetch` 并比对本地 `dev-wsl` 与 `origin/dev-wsl`，确认没有未推送 / 落后的提交（并检查工作区是否干净）再往下走。
 
 #### 2.0.1 代码从 GitHub 到 Codeup（两条路，只留一条）
 
 流水线**代码源是 Codeup**，而开发机只推 **GitHub** ⇒ 中间必须把提交搬到 Codeup：
 
-1. **手动「镜像同步」（当前口径）**：到 §2.0 第 3 步的同步设置页点「立即同步」。零维护，代价是每次发布多一步人工。
+1. **手动「镜像同步」（当前口径）**：到 §2.0 第 5 步的同步设置页点「立即同步」。零维护，代价是每次发布多一步人工。
 2. **自动化（未实施）**：在 **GitHub Actions** 里 `git push --mirror` 到 Codeup（GitHub 侧网络好、几秒），Codeup 的 push 事件再触发流水线。
 
 ⚠️ **两条路只应保留一条** —— Codeup 的镜像同步是**强制覆盖**；若既手动镜像同步、又让本地/Actions 直推 Codeup，两边会互相打架。直接"一次推两边"（`git remote set-url --add --push`）同理，且 Codeup 需另配凭据，不如走第 2 条。
@@ -215,7 +216,12 @@ cd /opt/www/corporate_rag && bash scripts/deploy/deploy.sh clean
 ## 3. 首次上机
 
 1. **装 Docker + compose 插件**（Alinux 4：`dnf install -y docker-compose-plugin`）。
-2. **ACR 登录**（app 镜像在私有库）：`docker login <ACR>` 一次（凭据落 `/root/.docker/config.json`），或用 `ACR_USER`/`ACR_PASSWORD`。
+2. **ACR 登录**（app 镜像在私有库，**只在上机时做一次**，凭据落 `/root/.docker/config.json`）：
+   ```bash
+   docker login --username=hi31383397@aliyun.com \
+     crpi-u3ezxc1o5hirfddw.cn-shanghai.personal.cr.aliyuncs.com
+   ```
+   密码从团队渠道取（**不写进仓库**）；也可用 `ACR_USER`/`ACR_PASSWORD` 环境变量。无 TTY 时加 `--password-stdin`。
 3. **放 `.env`**：从团队渠道取键清单，填真实值，`chmod 600 /opt/www/corporate_rag/.env`（**当前为人工拷上机，方式与影响见 §1.4**）。
 4. **安全组**：只放行 22 + 80。
 5. **系统**：swap ≥2 GB、系统盘 ≥60 GB（本地演练构建时 build cache 可达数 GB）。
