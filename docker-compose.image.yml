@@ -132,17 +132,18 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
     ports:
-      # 对外暴露（原为 "127.0.0.1:3000:3000" 仅回环）。需配套：
-      #   ① 安全组放行 3000；② 目标机 .env 的 NEXTAUTH_URL 必须等于实际访问地址
-      #   （如 http://<公网IP>:3000），否则登录后会被重定向回 localhost:3000。
+      # 对外暴露（原为 "127.0.0.1:3000:3000" 仅回环）。需配套：安全组放行 3000。
+      # 对外地址由下面的 NEXTAUTH_URL 提供（已硬编码）。
       - "3000:3000"
     environment:
       DATABASE_URL: postgresql://langfuse:${LANGFUSE_POSTGRES_PASS:-langfuse_pass}@postgres:5432/langfuse
       # 对外门牌号：NextAuth 用它拼绝对 URL（跳转 / 邮件里的链接 / SSO 回调）。
-      # 必须等于实际访问地址；写死 localhost 会让上述链接指向用户自己的机器。
-      # 用 `:?` 而非 `:-默认值` —— 缺键/空值即报错，避免静默用 localhost 兜底
-      # （与 docker-compose.prod.yml 的写法一致；口径见 runbook §1.3）。
-      NEXTAUTH_URL: ${NEXTAUTH_URL:?NEXTAUTH_URL is required}
+      # **硬编码而非变量插值**：这是"生产独有"的值（dev 是 localhost、生产是公网地址），
+      # 走 .env 会被"从开发机拷 .env 上机"覆盖成 localhost（2026-10-10 实测踩中：
+      # 部署成功但值仍是 localhost，因为源文件就是 localhost）。
+      # 同 WECOM_BOT_ENABLED / AUTH_DISABLE_SIGNUP 的做法 —— 不进 deploy.sh 的 .env 必填清单。
+      # 换域名 / 换机器时改这一行并重新发布。
+      NEXTAUTH_URL: "http://8.133.218.201:3000"
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-changeme}
       SALT: ${LANGFUSE_SALT:-changeme}
       ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
