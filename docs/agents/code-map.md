@@ -268,6 +268,7 @@ Nginx 容器把本目录挂到 `/usr/share/nginx/html` 直接托管，**无 npm 
 | 改分块 | `src/chunking/`（`strategies/` 加策略 + `router.py` 挂路由）；排查见 `docs/agents/chunking-issues.md` |
 | 改常量 / 文案 / 阈值 | `src/config/`（`settings.py` 环境变量、`prompts/` 提示词、`const.py` 常量与 SSE 文案） |
 | 加日志事件 / 前缀 | `src/core/log_events.py`、`log_event_specs.py`；规范见 `docs/agents/logging-rules.md` |
+| 改渠道标识 / 加新渠道 | 渠道常量 `src/config/const.py`（`Channel`）；contextvar `src/infra/llm/trace_context.py`；写入口 `src/api/chat.py`、`src/channels/wecom/handler.py`、`src/services/turn_runner.py`；日志段位见 `docs/agents/logging-rules.md`，排障见 `docs/agents/troubleshooting.md` |
 | 改数据库 schema / 迁移 | `src/infra/db/models/`（ORM）+ `alembic/versions/`（迁移）；见本文「关系型存储（PostgreSQL）」 |
 | 改部署 / 容器 | `docker-compose*.yml`、`Dockerfile`；操作见 `docs/agents/cookbook.md` |
 | **加/改接入通道（企微回调/长连接）** | `src/channels/`（`base.py` 抽象 + `wecom/`）；路由 `src/api/wecom.py`；装配 `src/services/wecom_service.py`；配置 `src/config/wecom_bots.py` |

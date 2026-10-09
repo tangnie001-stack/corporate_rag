@@ -31,6 +31,7 @@ Python 3.11+ / FastAPI / LangChain 1.x + LangGraph / PostgreSQL 15 + pgvector / 
 | docs/agents/code-map.md | 代码结构唯一归属：顶层目录 / 后端 `src/` 分层与模块职责 / 前端 `deploy/nginx/html` 页面与 SSE 消费 / 常见改动落点速查 | **改动代码前定位文件时必读** |
 | docs/agents/knowledge-graph.md | 知识图谱（`.ua/knowledge-graph.json`）的查询配方 / 新鲜度判据 / 自动更新行为 / 已知坑 | **查代码关系、调用方、改动影响面前**（用 `/understand-chat` 或按 id grep + 1-hop 取子图，**勿整包读图**）；图谱疑似过期或需刷新时 |
 | docs/agents/data-flow.md | 数据流链路 | 排查问题、理解系统流程 |
+| docs/agents/troubleshooting.md | **以 trace_id 为中心的排障指导唯一归属**：trace-first 原则（缺观测就补日志）/ 环境（本地·生产）× 渠道（站点·企微·飞书）矩阵 / 本地与生产 SOP / 渠道差异 / 症状→该查哪个事件 / "查不到→加日志"落点清单 | **排查任何问题、查 Bug 前必读**；既有观测不足以定位、要决定往哪加 trace 日志时 |
 | docs/agents/glossary.md | 领域词汇表：核心标识符 / 响应信封 / RAG 流水线 / RAGAS 指标等规范术语 | 术语含义不确定、写文档或命名时查阅 |
 | docs/agents/memory-model.md | 记忆模型唯一归属：对话历史 vs Agent 记忆的区分 / 记忆的四个用途 / 注入形态 / 记忆边界（不得作为事实依据） | **设计或评审任何"记忆"能力前**；判断某数据该进历史还是记忆时 |
 | docs/agents/selection-baseline.md | 选型对齐基线唯一归属：原则（生产验证 > 领域契合 > 可迁移深度）/ 本域基线四家 / **对齐状态表**（对齐·偏离·未做）/ 怎么用与维护 | **做技术选型、或要偏离既有做法前**；评审方案时判断"这是不是成熟做法" |

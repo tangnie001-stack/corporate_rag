@@ -41,8 +41,12 @@
   （非 debug）。当前守卫：`agent resolved` 在请求与绑定都为空时不记、`skill dispatch`
   在 `kind=plain` 时不记。
 
-## trace_id / session_id
-由 `src/core/logging.py` patcher 自动注入日志行第 3/4 段，业务不手写。
+## trace_id / session_id / channel
+由 `src/core/logging.py` patcher 自动注入日志行第 3/4/5 段（trace_id / session_id /
+channel），业务不手写。channel 取值见 `src/config/const.py` 的 `Channel`
+（`web` 站点 / `wecom` 企业微信 / `feishu` 预留），未设置时以 `none` 占位、**不留空段**
+（下游按段位解析；第 3 段 trace_id 的口径见「症状指标」）。各渠道在跑一轮之前写入
+`current_channel`，落点与排障用法见 `docs/agents/troubleshooting.md`。
 
 ## 事件全集
 以 `src/core/log_events.py` 的 `Event` 枚举 + `EVENT_SPECS` 为准，本文件不抄录（防双维护）。

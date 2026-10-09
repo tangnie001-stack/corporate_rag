@@ -83,3 +83,15 @@ async def login(body: LoginRequest) -> LoginResponse:
 ## 问题排查规则
 
 遇到同一问题修了两次以上仍未解决时，必须先到网上搜索相关资料（官方 Issue、社区讨论、技术博客）确认根因和方案，再用搜索结果佐证，不能靠猜或试。
+
+### 以 trace_id 为中心（trace-first）
+
+- 排查任何问题前 SHALL 先取得并围绕 `trace_id`：同一个值贯穿 响应头 `X-Trace-ID` /
+  日志行第 3 段 / SSE `done` / Langfuse trace 根 四处，先拿到它再谈定位。
+- **查不到 = 观测缺口**：既有事件与日志不足以定位根因时，SHALL 在对应位置新增日志事件
+  （用 `log_event` + 在 `EVENT_SPECS` 登记，规范见 `docs/agents/logging-rules.md`），
+  以数据驱动收敛；禁止在无新证据时靠猜测改动行为。
+- 渠道由日志行第 5 段 `channel`（`web` / `wecom` / `feishu`；未设 = `none`）与 Langfuse
+  trace 的 `metadata.channel` 标识，用于分渠道排障。
+- 完整排障指导（环境 × 渠道矩阵、本地/生产 SOP、症状→事件映射、"查不到→补日志"落点）见
+  `docs/agents/troubleshooting.md`。

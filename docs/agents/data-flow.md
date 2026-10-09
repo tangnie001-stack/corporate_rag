@@ -291,22 +291,30 @@ SSE 消费侧按事件类型接线（`agent_service._convert_event`，src/servic
 ### trace_id 贯穿（一次对话请求）
 
 同一条 `trace_id`（格式 `trace_<uuid>`）贯穿请求入口 → 后台任务 → Langfuse trace 根 → 每轮
-generation；响应头 / 日志行 / SSE `done` / Langfuse 四处共用同一个值：
+generation；响应头 / 日志行 / SSE `done` / Langfuse 四处共用同一个值。渠道标识 `channel`
+（`web` / `wecom` / `feishu`，见 `src/config/const.py` 的 `Channel`）走同一套 contextvar
+机制，落日志行第 5 段与 Langfuse `metadata.channel`：
 
 ```
 中间件 trace_id_middleware                      src/middleware/trace_id.py
   X-Trace-ID 头 → ?trace_id → new_trace_id()，逐候选经 is_valid_trace_id 白名单校验
   → request.state.trace_id + current_trace_id contextvar → 响应头 X-Trace-ID
-→ API 层 chat.py：create_task 前捕获 current_trace_id（后台任务不共享请求 context）
-  → _run_with_finalize(trace_id=...) 写 SSE done 终态事件
-  → answer_builder 按调用时读取 current_trace_id 传入 _run_generation
+→ 渠道入口写 current_channel
+  站点 API chat.py set Channel.WEB；企微 handler._run_turn set/reset Channel.WECOM
+→ API 层 chat.py：create_task 前捕获 current_trace_id / current_channel（后台任务不共享请求 context）
+  → _run_with_finalize(trace_id=..., channel=...) 写 SSE done 终态事件
+  → 任务入口 set current_trace_id / current_channel（finally reset），
+    answer_builder 按调用时读取 current_trace_id 传入 _run_generation
 → trace 根 _run_generation（@observe name=chat_turn）    src/services/agent_service.py
   入参 langfuse_observation_id=<trace_id> → 根 observation id 即 trace id
-  → update_current_trace 写 input / session_id / metadata
+  → update_current_trace 写 input / session_id / metadata（含 channel）
 → generation agent_turn（命令式 span，middleware 内）    src/agents/graph/middleware.py
   每轮推理一个 generation（trace 根的子 observation），显式回填 model / input / output / usage；
   `completion_start_time`（TTFB）在该层不可得，故不设置（见 ADR-0016）
 ```
+
+日志行的段位（第 3/4/5 段 = trace_id / session_id / channel）见 `docs/agents/logging-rules.md`；
+按 trace_id 分环境/分渠道排障的完整指导见 `docs/agents/troubleshooting.md`。
 
 trace 产出受 `LANGFUSE_ENABLE` 开关治理；开关、flush 与 trace id 校验的唯一入口是
 `src/infra/llm/tracing.py`（口径见 glossary.md「可观测后端」）。
