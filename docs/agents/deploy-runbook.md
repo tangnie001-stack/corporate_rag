@@ -202,9 +202,10 @@ cd /opt/www/corporate_rag && bash scripts/deploy/deploy.sh clean
 4. **`docker compose restart` 不吃 `.env`** —— 改 `.env` 后要 `docker compose up -d --force-recreate app`。
 5. **制品下载**：用云效内建「下载制品」；若自己 `curl`，务必 `-fL`（`-f` 让 HTTP 错误直接失败，避免把错误响应体当成包）。
 6. **第 4 步报「非交互环境无法输入密码 —— 请用 ACR_USER / ACR_PASSWORD 环境变量提供凭据」** —— 说明**该机没有 ACR 凭据**（流水线的部署槽位无 TTY，输不了密码；常见于**机器重建**或从未登录过）。两条修法，任选其一：① 在目标机上**手工登录一次**（§2.0 第 2 步 / §3 第 2 条，凭据固化到 `/root/.docker/config.json`，之后永久免登录）；② 把 `ACR_USER`/`ACR_PASSWORD` 配到**部署槽位的环境变量**里。验证：`docker manifest inspect <app 镜像> >/dev/null && echo LOGIN_OK`。
-7. **ECS 与 ACR 必须同地域 —— 香港机房拿不到大陆个人版 ACR 的镜像**（2026-10-09 实测结论）：报错形如 `Get "https://aliregistry-<region>.oss-<region>.aliyuncs.com/docker/registry/v2/blobs/…": dial tcp …: i/o timeout`。ACR 个人版把镜像层放在**同地域 OSS**：ECS 跨地域时 **auth 端点通**（`curl …/v2/` → `401`、0.17s）但 **blob 端点整段超时**（`curl https://aliregistry-cn-shanghai.oss-cn-shanghai.aliyuncs.com/` → `000` / 20s）⇒ `docker manifest inspect` 与 `compose pull` 必失败。
-   - ⚠️ **不是"只有 app 镜像受影响"**：`docker-compose.image.yml` 用的 **6 个镜像全在这台 cn-shanghai ACR**（5 个公开基镜像 + app）⇒ 跨地域机上**一个都拉不下来**；`docker save/load` 应急要搬 6 个镜像、且**每次发布都要重复**，不实用。
-   - ✅ **结论（唯一低成本解）**：**ECS 必须与 ACR 同地域**。若确需香港/海外机器，只能 ① 把 ACR 换成当地实例（**个人版无香港地域，需企业版**），或 ② 给 dockerd 配大陆中转代理（`/etc/systemd/system/docker.service.d/http-proxy.conf` 里设 `HTTPS_PROXY`）——但需一台**常驻**的大陆中转。
+7. **ECS 与 ACR 必须同地域 —— 香港机房拿不到大陆个人版 ACR 的镜像**（2026-10-09 实测）：报错形如 `Get "https://aliregistry-<region>.oss-<region>.aliyuncs.com/docker/registry/v2/blobs/…": dial tcp …: i/o timeout`。ACR 把 **config 与镜像层**放在**同地域 OSS**：ECS 跨地域时 **registry 侧可达**（`curl …/v2/` → `401`、0.17s；`docker manifest inspect` **能把 manifest 取回来**）但 **OSS blob 取不到**（`curl https://aliregistry-cn-shanghai.oss-cn-shanghai.aliyuncs.com/` → `000` / 20s；`docker pull` 取 config blob 时 ~31s 超时）⇒ `compose pull` / `docker pull` 必失败。
+   - ⚠️ **别用 `docker manifest inspect` 判断"能不能拉"** —— 它走 registry 侧、**能过**；真正卡死的是层/配置 blob（实测它甚至会打出完整 manifest 再报 `unsupported manifest format`，极具误导性）。
+   - ⚠️ **不是"只有 app 镜像受影响"**：`docker-compose.image.yml` 的 **6 个镜像全在这台 cn-shanghai ACR**（5 个公开基镜像 `deploy_base:*` + app `deploy_store_local:*`）⇒ 跨地域机上**一个都拉不下来**（实测：**公开库与私有库表现完全一致**——公开库只是免登录，blob 仍在同一 OSS）；`docker save/load` 应急要搬 6 个镜像且**每次发布都要重复**，不实用。
+   - ✅ **结论（唯一低成本解）**：**ECS 必须与 ACR 同地域**。若确需香港/海外机器，只能 ① 把 ACR 换成当地实例（**个人版无香港地域，需企业版**），或 ② 给 dockerd 配**常驻**的大陆中转代理（`/etc/systemd/system/docker.service.d/http-proxy.conf` 里设 `HTTPS_PROXY`）。
 
 ### 2.6 新增 pip 依赖的影响（以企微长连接 SDK 为例）
 
