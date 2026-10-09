@@ -65,10 +65,11 @@
 
 ### 2.0 发布全流程（端到端）
 
-**默认发布分支：`dev-wsl`。** 一次发布按下面顺序走（1–2 在开发机，其余在云效网页）：
+**默认发布分支：`dev-wsl`。** 一次发布按下面顺序走（0–2 在开发机/目标机，其余在云效网页）：
 
 | # | 步骤 | 在哪 | 入口 / 命令 |
 |---|---|---|---|
+| 0 | **同步 `.env`（仅本次有 `.env` 变更时）** | 开发机 → 目标机 | `scp .env root@<ECS-IP>:/opt/www/corporate_rag/.env` + `chmod 600`（见 §1.4）。**必须排在发布之前**（新制品不含 `.env`；缺键会让部署 `fail`）。**无 `.env` 变更、或不是本次发布的第一步操作 ⇒ 跳过** |
 | 1 | **前置检查**：工作区干净 + 本地 `dev-wsl` 已推送、未落后 | 开发机 | `git fetch && git status -sb`（**说"开始部署"时由助手代查**）|
 | 2 | **推代码** | 开发机 | `git push origin dev-wsl` |
 | 3 | **GitHub → Codeup 同步代码**（当前**手动**）| 云效网页 | `https://deploytest-cn-shanghai.devops.aliyuncs.com/codeup/deploytest/tangnie001-stack/corporate_rag/settings/mirror_sync` |
