@@ -8,10 +8,33 @@ from collections import Counter
 from src.cli.symptom_metrics import SymptomStats, collect, format_report
 
 
-def _line(trace_id: str, message: str, level: str = "INFO") -> str:
-    """构造一行合法日志（四段 + module:func:line - message）。"""
+def _line(
+    trace_id: str, message: str, level: str = "INFO", channel: str = "web"
+) -> str:
+    """构造一行合法日志（五段 + module:func:line - message）。
+
+    段位契约见 src/core/logging.py：第 3 段 trace_id、第 4 段 session_id、
+    第 5 段 channel。
+    """
     ts = "2026-09-22 10:00:00.000"
-    return f"{ts}|{level}|{trace_id}|sess-1|agent_node:make_agent_loop_node:174 - {message}\n"
+    return (
+        f"{ts}|{level}|{trace_id}|sess-1|{channel}"
+        f"|agent_node:make_agent_loop_node:174 - {message}\n"
+    )
+
+
+def test_parse_line_ignores_channel_segment():
+    """第 5 段 channel 不得进入 message、也不得影响 trace 取值；旧四段行仍兼容。"""
+    from src.cli.symptom_metrics import parse_line
+
+    line = _line(
+        "t1", "[agent] iteration limit query=q1 iteration=8", "WARNING", "wecom"
+    )
+    assert parse_line(line) == ("t1", "[agent] iteration limit query=q1 iteration=8")
+
+    # 向前兼容：无 channel 段的历史行仍可解析
+    legacy = "2026-09-22 10:00:00.000|INFO|t2|sess-1|agent_node:fn:174 - hi\n"
+    assert parse_line(legacy) == ("t2", "hi")
 
 
 def test_counts_iteration_limit_per_trace(tmp_path):

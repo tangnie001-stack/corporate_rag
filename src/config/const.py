@@ -193,6 +193,23 @@ class TaskStatus:
     CANCELLED: str = "cancelled"  # 取消
 
 
+class Channel:
+    """会话来源渠道标识（日志行第 5 段与 Langfuse trace metadata.channel）。
+
+    由各渠道入口在跑一轮之前写入 `current_channel`（见
+    `src/infra/llm/trace_context.py`），供日志 patcher 与 Langfuse 落点读取；
+    未设置时以 `CHANNEL_DEFAULT` 占位（不得留空段，也不得用 `-`）。
+    """
+
+    WEB: str = "web"  # 站点（HTTP API）
+    WECOM: str = "wecom"  # 企业微信（长连接 / 回调）
+    FEISHU: str = "feishu"  # 预留：飞书渠道
+
+
+# 渠道未设置时的日志占位（非空、不含 "|" 与 " - "，保证日志行可解析）
+CHANNEL_DEFAULT: str = "none"
+
+
 # execution 自动登记标题模板（task-board）：{skill} 为命中 skill 名；
 # 放 const 集中管理（CLAUDE.md 硬编码集中规则），delegate_task 登记用
 DELEGATE_TASK_TITLE_TMPL = "{skill} · 领域专家分析"

@@ -35,7 +35,9 @@ class InterceptHandler(logging.Handler):
         )
 
 
-_LOG_FORMAT = "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<7} | {extra[trace_id]:36} | {extra[session_id]:36} | {name}:{function}:{line} - {message}"
+# 段位契约（下游按段位解析，勿改序）：第 3 段 trace_id、第 4 段 session_id、第 5 段 channel。
+# channel 由 patcher 从 current_channel 注入，未设时以 CHANNEL_DEFAULT（none）占位，不留空段。
+_LOG_FORMAT = "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<7} | {extra[trace_id]:36} | {extra[session_id]:36} | {extra[channel]} | {name}:{function}:{line} - {message}"
 _LOG_DIR = os.getenv("LOG_DIR", "logs")
 
 # ==== 数据链路追踪日志常量 ====
@@ -87,12 +89,14 @@ def log_sql_result(method: str, sql, rows, **extra) -> None:
 
 
 def _setup_trace_id_patcher() -> None:
-    """配置 Loguru patcher，自动注入当前请求的 trace_id / session_id。
+    """配置 Loguru patcher，自动注入当前请求的 trace_id / session_id / channel。
 
-    从 trace_context 模块的 ContextVar 中读取当前 trace_id 与 session_id，
-    写入每一条日志记录的 extra 字段。
-    如果 ContextVar 为空（CLI 模式），自动生成一个 trace_id。
+    从 trace_context 模块的 ContextVar 中读取当前 trace_id、session_id 与
+    channel，写入每一条日志记录的 extra 字段。
+    如果 ContextVar 为空（CLI 模式），自动生成一个 trace_id；channel 未设置时
+    以 `CHANNEL_DEFAULT` 占位。
     """
+    from src.config.const import CHANNEL_DEFAULT
     from src.infra.llm.trace_context import current_trace_id as _trace_var
 
     # CLI 模式：没有外部传入的 trace_id 时自动生成
@@ -103,6 +107,9 @@ def _setup_trace_id_patcher() -> None:
 
     def _patcher(record):
         from src.infra.llm.trace_context import (
+            current_channel as _channel_var,
+        )
+        from src.infra.llm.trace_context import (
             current_session_id as _session_var,
         )
         from src.infra.llm.trace_context import (
@@ -111,8 +118,12 @@ def _setup_trace_id_patcher() -> None:
 
         record["extra"]["trace_id"] = _trace_var.get() or ""
         record["extra"]["session_id"] = _session_var.get() or ""
+        record["extra"]["channel"] = _channel_var.get() or CHANNEL_DEFAULT
 
-    logger.configure(extra={"trace_id": "", "session_id": ""}, patcher=_patcher)
+    logger.configure(
+        extra={"trace_id": "", "session_id": "", "channel": CHANNEL_DEFAULT},
+        patcher=_patcher,
+    )
 
 
 def setup_logging(configure_trace_id: bool = False) -> None:
@@ -130,8 +141,13 @@ def setup_logging(configure_trace_id: bool = False) -> None:
     # 移除默认 sink，防止重复
     logger.remove()
 
-    # 确保 extra 字典至少包含 trace_id / session_id 键（即使未配置 patcher）
-    logger.configure(extra={"trace_id": "", "session_id": ""})
+    # 确保 extra 字典至少包含 trace_id / session_id / channel 键（即使未配置 patcher）。
+    # 注意：loguru 的 configure(extra=...) 是**替换**语义，三个键必须齐全，漏键即渲染 KeyError。
+    from src.config.const import CHANNEL_DEFAULT
+
+    logger.configure(
+        extra={"trace_id": "", "session_id": "", "channel": CHANNEL_DEFAULT}
+    )
 
     logger.add(
         f"{_LOG_DIR}/app_{{time:YYYY-MM-DD}}.log",
