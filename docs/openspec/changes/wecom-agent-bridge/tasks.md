@@ -77,5 +77,7 @@
 - [ ] 7.1 单台灰度 E2E：@ 该机器人给出站点同款 Agent 回答（**确认点 B**）
 - [ ] 7.2 鲁棒验收：长流不断（含澄清等待期）、重复 msgid 不重复、断线可恢复、引用/来源正确、错误文案脱敏（**确认点 C**）
 - [ ] 7.3 群聊验收：群内多人共享上下文、并发冲突提示正确、澄清仅触发者可回填（**确认点 D**）
-- [ ] 7.4 登记 `docs/agents/defensive-patterns.md`（SDK 补丁与投影层防复发）与 `docs/agents/code-map.md`（通道层落点）
-- [ ] 7.5 收尾：按 compose `environment`（或 override）恢复线上 wecom 开关（`.env` 无效），更新 `deploy-runbook` 相关说明
+- [x] 7.4 登记 `docs/agents/defensive-patterns.md`（SDK 补丁与投影层防复发）与 `docs/agents/code-map.md`（通道层落点）——「接入通道」分区含驱动 1 条 + 投影层 2 条防复发规则；code-map 通道层落点已齐（presenter/handler/session/bounded_map/long_connection/clarify_parse/clarify_service + 澄清链路）
+- [x] 7.5 收尾：按 compose `environment`（或 override）恢复线上 wecom 开关（`.env` 无效），更新 `deploy-runbook` 相关说明——`docker-compose.image.yml` 已强制 `WECOM_BOT_ENABLED: "true"`；runbook §1.4 已补开关归属与"先同步 .env 再上新 compose"的顺序陷阱
+
+> **组 7 状态（2026-10-09）**：7.4 / 7.5 已完成。7.1（确认点 B）**已通过**——生产三台机器人实测给出站点同款回答（但未走"先单台灰度再全量"的流程，是三台同时上线）。**7.2 / 7.3 待运行时验收**：其中两项为**结构性不可验**——"引用/来源正确"需通道侧绑定知识库（人设/KB 按机器人绑定属后续 change，当前 `kb_id` 传空 ⇒ 不检索）、"重复 msgid 不重复"需平台重推（我们造不出）；澄清相关两项（等待期长流不断 / 仅触发者回填）依赖模型真的调用 `ask_user`，而三次尝试均未被触发（工具描述"能回答就不要调用"+ 会话历史 priming）。
