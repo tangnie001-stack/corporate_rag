@@ -90,6 +90,39 @@ def test_chat_stream_passes_user_id():
         app.dependency_overrides.pop(get_app_service, None)
 
 
+def test_chat_stream_sets_channel_web():
+    """chat_stream 在编排前把渠道标为 web（供日志第 5 段与 Langfuse metadata 读取）。"""
+    from src.config.const import Channel
+    from src.infra.llm.trace_context import current_channel
+
+    mock_svc = AsyncMock()
+    app.dependency_overrides[get_app_service] = lambda: mock_svc
+    try:
+        seen: list[str] = []
+        with patch(
+            "src.services.turn_runner.start_turn", new_callable=AsyncMock
+        ) as mock_start:
+
+            async def _empty_events():
+                if False:  # pragma: no cover - 仅提供异步迭代器协议
+                    yield None
+
+            async def _capture(*args, **kwargs):
+                seen.append(current_channel.get())
+                handle = MagicMock()
+                handle.events = _empty_events()
+                return handle
+
+            mock_start.side_effect = _capture
+            client.post(
+                "/api/chat/stream",
+                json={"session_id": "s1", "kb_id": "kb-1", "query": "hi"},
+            )
+        assert seen == [Channel.WEB]
+    finally:
+        app.dependency_overrides.pop(get_app_service, None)
+
+
 def test_chat_stream_emits_error_and_done_when_subscription_raises():
     """订阅迭代抛异常时，端点仍产出 error + done 终止帧（连接不中断）。
 

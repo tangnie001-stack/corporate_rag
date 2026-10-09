@@ -26,10 +26,10 @@ from src.channels.wecom.session import (
     derive_user_id,
 )
 from src.config import wecom_channel
-from src.config.const import WECOM_EVENT_FEEDBACK
+from src.config.const import WECOM_EVENT_FEEDBACK, Channel
 from src.config.wecom_presenter import WeComPresenterTexts
 from src.core.logging import encode_value
-from src.infra.llm.trace_context import current_trace_id
+from src.infra.llm.trace_context import current_channel, current_trace_id
 from src.infra.llm.tracing import new_trace_id
 from src.services import clarify_service, turn_runner
 from src.services.app_service import AppService
@@ -282,6 +282,9 @@ class RagChannelHandler:
         user_id = derive_user_id(msg.from_userid)
         trace_id = new_trace_id()
         token = current_trace_id.set(trace_id)
+        # 渠道标识：本轮日志第 5 段与 Langfuse metadata 均据此标记为企微；
+        # 与 trace_id 同款成对 set/reset（投影阶段也须在同一渠道上下文内）。
+        channel_token = current_channel.set(Channel.WECOM)
         try:
             # 内层 try 只管"回合启动"失败：这是唯一需要向用户回兜底的阶段。
             # 投影阶段（presenter.run）已有自己的收尾契约（先 finalize 再抛），
@@ -342,6 +345,7 @@ class RagChannelHandler:
             )
         finally:
             current_trace_id.reset(token)
+            current_channel.reset(channel_token)
 
     async def _tap(
         self,

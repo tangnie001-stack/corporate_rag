@@ -20,8 +20,10 @@ from src.chat.streaming import (
     _subscribe_events,
     streaming_manager,
 )
+from src.config.const import CHANNEL_DEFAULT
 from src.infra.llm.request_context import RequestContext, current_request_ctx
 from src.infra.llm.trace_context import (
+    current_channel,
     current_session_id,
     current_trace_id,
 )
@@ -59,13 +61,14 @@ async def _run_with_finalize(
     release_lock: Callable[[], None],
     ctx: RequestContext,
     trace_id: str = "",
+    channel: str = "",
 ) -> None:
     """后台任务主体：跑生成，完成后按结果收尾落库，finally 释放锁并注销。
 
     后台任务与调用方处于不同 asyncio task，其 contextvars 是 create_task 在
     创建时复制的一份快照；本函数仍在入口显式 set
-    current_request_ctx / current_trace_id / current_session_id（工具与节点
-    经 contextvar 读取 clarify_channel / tool_contexts / 日志格式段等），
+    current_request_ctx / current_trace_id / current_session_id / current_channel
+    （工具与节点经 contextvar 读取 clarify_channel / tool_contexts / 日志格式段等），
     是为不依赖该快照（create_task 之后写入的值到不了任务内，中间件顺序变化
     也会静默丢失），finally 中 reset。
     trace_id 由调用方在 create_task 前从 current_trace_id.get() 捕获并显式
@@ -97,6 +100,9 @@ async def _run_with_finalize(
             current_request_ctx / current_session_id
         trace_id: 请求级 trace_id（调用方启动任务前捕获），任务入口 set 到
             current_trace_id，done 终态事件据此写入
+        channel: 请求级渠道标识（调用方启动任务前从 current_channel 捕获），
+            任务入口 set 到 current_channel，供日志第 5 段与 Langfuse metadata 使用；
+            空串按 CHANNEL_DEFAULT（none）占位
     """
     task = asyncio.current_task()
     assert task is not None, (
@@ -105,6 +111,7 @@ async def _run_with_finalize(
     ctx_token = current_request_ctx.set(ctx)
     trace_token = current_trace_id.set(trace_id or None)
     session_token = current_session_id.set(ctx.session_id)
+    channel_token = current_channel.set(channel or CHANNEL_DEFAULT)
     try:
         await answer_builder()
     except asyncio.CancelledError:
@@ -181,6 +188,7 @@ async def _run_with_finalize(
         current_request_ctx.reset(ctx_token)
         current_trace_id.reset(trace_token)
         current_session_id.reset(session_token)
+        current_channel.reset(channel_token)
         release_lock()
         manager.unregister_if_current(session_id, task)
 
@@ -370,6 +378,7 @@ def _spawn_generation_task(
             release_lock_cb,
             ctx,
             trace_id=current_trace_id.get() or "",
+            channel=current_channel.get() or "",
         )
     )
     streaming_manager.register(launch_ctx["session_id"], task, signal)

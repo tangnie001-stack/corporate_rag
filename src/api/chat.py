@@ -12,6 +12,8 @@ from loguru import logger
 
 from src.api.dependencies import get_app_service
 from src.api.model.request import ChatStreamRequest
+from src.config.const import Channel
+from src.infra.llm.trace_context import current_channel
 from src.services import turn_runner
 from src.services.app_service import AppService
 from src.utils.sse import SSEDoneEvent, SSEErrorEvent, to_sse
@@ -47,6 +49,9 @@ async def chat_stream(
     agent = body.agent
     user_id = getattr(request.state, "user_id", "") if request else ""
     trace_id = getattr(request.state, "trace_id", "") if request else ""
+    # 渠道标识：HTTP 入口恒为站点（web），供日志第 5 段与 Langfuse metadata 读取。
+    # 在 start_turn 之前设置，使落库前置 / 闸门等同请求域日志也带渠道。
+    current_channel.set(Channel.WEB)
 
     try:
         handle = await turn_runner.start_turn(

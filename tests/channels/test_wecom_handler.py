@@ -9,10 +9,10 @@ from src.channels.wecom.bounded_map import BoundedTtlMap
 from src.channels.wecom.handler import RagChannelHandler, extract_feedback_id
 from src.channels.wecom.presenter import WeComPresenter
 from src.channels.wecom.session import derive_session_id
-from src.config.const import WECOM_EVENT_FEEDBACK
+from src.config.const import WECOM_EVENT_FEEDBACK, Channel
 from src.config.wecom_channel import WeComChannelTexts
 from src.config.wecom_presenter import WeComPresenterTexts
-from src.infra.llm.trace_context import current_trace_id
+from src.infra.llm.trace_context import current_channel, current_trace_id
 from src.services import turn_runner
 from src.services.app_service import AppService
 from src.utils.sse import SSEAskUserEvent, SSEDoneEvent, SSETokenEvent
@@ -59,12 +59,14 @@ def _msg(**overrides: Any) -> InboundMessage:
 
 def _handler(*, start_turn=None, events=None, resolve_answer=None):
     """构造被测 handler，返回 (handler, 记录用的容器)。"""
-    recorded: dict[str, Any] = {"start_turn_calls": []}
+    recorded: dict[str, Any] = {"start_turn_calls": [], "channels_at_start": []}
     if events is None:
         events = [SSETokenEvent(token="甲"), SSEDoneEvent()]
 
     async def _default_start_turn(svc, **kwargs):
         recorded["start_turn_calls"].append(kwargs)
+        # 启动回合时的渠道上下文（应为 wecom）——用于验证 set 生效
+        recorded["channels_at_start"].append(current_channel.get())
         return cast(
             turn_runner.TurnHandle,
             _FakeTurnHandle(kwargs["session_id"], events),
@@ -111,6 +113,18 @@ async def test_text_message_runs_turn_and_replies():
     assert len(call["user_id"]) == 36
     assert sink.calls[-1][1] is True
     assert sink.calls[-1][0].startswith("甲")
+
+
+@pytest.mark.asyncio
+async def test_channel_is_wecom_during_turn_and_reset_after():
+    """渠道标识：回合内 current_channel == wecom，回合结束后复位。"""
+    handler, recorded = _handler()
+    sink = _Sink()
+
+    await handler(_msg(), sink)
+
+    assert recorded["channels_at_start"] == [Channel.WECOM]
+    assert current_channel.get() == "", "回合结束后应 reset（不污染外层上下文）"
 
 
 @pytest.mark.asyncio
