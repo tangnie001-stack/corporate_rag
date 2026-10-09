@@ -41,7 +41,7 @@
 
 - **对外开 nginx 的 80 与 Langfuse 的 3000**；安全组**放行 22、80、3000**。
 - 其余端口一律绑回环或由安全组封闭：app `127.0.0.1:8000`、redis / postgres / minio 均不对外。
-- **langfuse-web `3000:3000` 对外**（2026-10-09 由 `127.0.0.1:3000:3000` 改为对外，改的是 `docker-compose.image.yml`）：需配套目标机 `.env` 的 ① `NEXTAUTH_URL=http://<ECS-IP>:3000`（否则登录后会被重定向回 `localhost:3000` 打不开）与 ② `AUTH_DISABLE_SIGNUP=true`（关闭自助注册，防陌生人开号）。二者中 `AUTH_DISABLE_SIGNUP` 须经 compose 的 `environment:` 透传 —— 该服务**没有** `env_file`，只写进 `.env` 不会进容器。
+- **langfuse-web `3000:3000` 对外**（2026-10-09 由 `127.0.0.1:3000:3000` 改为对外，改的是 `docker-compose.image.yml`）：需配套目标机 `.env` 的 `NEXTAUTH_URL=http://<ECS-IP>:3000`（否则登录后会被重定向回 `localhost:3000` 打不开）。**自助注册已在部署档里硬编码关闭**（`AUTH_DISABLE_SIGNUP: "true"`）—— 该服务没有 `env_file`，故它不写进 `.env`、也就**不进 `deploy.sh` 第 3 步的必填清单**（避免"改 compose 加键 ⇒ 忘同步 `.env` ⇒ 部署 fail"）。
 - 冒烟与健康检查走 `http://127.0.0.1/api/health`（经 nginx:80 → app:8000），与对外路径一致。
 
 ### 1.4 密钥与挂载路径

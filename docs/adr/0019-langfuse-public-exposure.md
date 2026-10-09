@@ -29,7 +29,7 @@
 
 ## 决策
 
-**选 B，并叠加 `AUTH_DISABLE_SIGNUP=true` 关闭自助注册。** 把 `docker-compose.image.yml` 的 `langfuse-web` 端口由 `"127.0.0.1:3000:3000"` 改为 `"3000:3000"`；安全组放行 3000；目标机 `.env` 设 `NEXTAUTH_URL=http://8.133.218.201:3000` 与 `AUTH_DISABLE_SIGNUP=true`（后者须经 compose 的 `environment:` 透进容器 —— 该服务**没有** `env_file`）。**不引入 IP 白名单 / `auth_basic` 这类网络层认证**（用户裁定）。
+**选 B，并叠加 `AUTH_DISABLE_SIGNUP=true` 关闭自助注册。** 把 `docker-compose.image.yml` 的 `langfuse-web` 端口由 `"127.0.0.1:3000:3000"` 改为 `"3000:3000"`，并**在部署档里硬编码** `AUTH_DISABLE_SIGNUP: "true"`（与 app 的 `WECOM_BOT_ENABLED: "true"` 同款做法）；安全组放行 3000；目标机 `.env` 设 `NEXTAUTH_URL=http://8.133.218.201:3000`。**不引入 IP 白名单 / `auth_basic` 这类网络层认证**（用户裁定）。
 
 ## 理由
 
@@ -49,7 +49,7 @@
 
 - **ADR-0011 为 `2.95.11`（EOL、无安全补丁承诺）设置的结构性对冲「暴露面收敛到仅回环」被移除**。缓解降级为两条：① 关闭自助注册（`AUTH_DISABLE_SIGNUP=true`，陌生人无法自行开号）；② Langfuse 自身的账号登录。**仍无网络层防护**（无 IP 白名单 / 无 `auth_basic` / 无限流）；且若 `.env` 的 `NEXTAUTH_SECRET` / `LANGFUSE_SALT` 仍是占位符，这两条防线的强度都要打问号。
 - 依赖 `.env` 的 `NEXTAUTH_URL` 与**实际访问地址严格一致**，否则登录后重定向失效（这是本方案最容易踩的坑）。
-- `AUTH_DISABLE_SIGNUP` 须经 compose `environment:` 透传 —— 该服务**没有** `env_file: .env`，只把变量写进 `.env` 不会进容器。
+- `AUTH_DISABLE_SIGNUP` **必须走 compose 的 `environment:`**（该服务**没有** `env_file: .env`）。本决策选择**硬编码**该值，而非 `${VAR}` + `.env` —— 后者会让这个键进入 `deploy.sh` 第 3 步的 `.env` 必填清单，**主机 `.env` 缺键即部署失败**（2026-10-09 实测踩中：制品已是新版，却因缺键在部署第 3 步中止，端口改动始终没生效）。
 
 **不解决的问题**（明确列出，避免后人误以为这条 ADR 管了它）：
 
