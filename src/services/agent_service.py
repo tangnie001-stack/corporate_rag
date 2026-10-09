@@ -38,7 +38,11 @@ from src.chat.streaming import (
     streaming_manager,
 )
 from src.config import TOP_K_RERANK, settings
-from src.config.const import SKILL_INJECTION_PREFIX, SSEInteractionTexts
+from src.config.const import (
+    CHANNEL_DEFAULT,
+    SKILL_INJECTION_PREFIX,
+    SSEInteractionTexts,
+)
 from src.config.prompts import loader
 from src.core import logging as core_logging
 from src.core.log_events import Event, Signal
@@ -48,7 +52,7 @@ from src.infra.llm.chat_message import ChatMessage
 from src.infra.llm.prompt_manager import PromptManager
 from src.infra.llm.request_context import RequestContext
 from src.infra.llm.tool_trace import ToolTraceCollector
-from src.infra.llm.trace_context import current_trace_id
+from src.infra.llm.trace_context import current_channel, current_trace_id
 from src.services.capability_service import CapabilityService
 from src.utils.sse import (
     SSEAbstentionEvent,
@@ -631,6 +635,7 @@ async def _run_generation(
         "skill_action": ctx.skill_action,
         "loaded_skills": list(ctx.loaded_skills),
         "has_skills": ctx.has_skills,
+        "channel": current_channel.get() or CHANNEL_DEFAULT,
     }
     if direct_skill:
         trace_metadata["direct_skill"] = direct_skill

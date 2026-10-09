@@ -205,6 +205,48 @@ async def test_run_generation_writes_user_tags_metadata(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_generation_writes_channel_metadata(monkeypatch):
+    """渠道标识写入 trace metadata.channel（供浏览器按渠道筛 trace）。"""
+    from src.config.const import Channel
+    from src.infra.llm.trace_context import current_channel
+
+    captured: dict = {}
+
+    class _SpyContext:
+        def update_current_trace(self, **kwargs):
+            captured.update(kwargs)
+
+        def update_current_observation(self, **kwargs):
+            pass
+
+    monkeypatch.setattr(agent_service, "langfuse_context", _SpyContext())
+
+    mgr = StreamingRunManager()
+    fake_graph = Mock()
+    fake_graph.astream_events = _fake_astream
+    ctx = RequestContext(session_id="s1", kb_id="kb1")
+    ctx.clarify_channel = asyncio.Queue()
+
+    chan_tok = current_channel.set(Channel.WECOM)
+    try:
+        await _run_generation(
+            "s1",
+            "kb1",
+            "q",
+            [],
+            False,
+            ctx,
+            mgr,
+            graph=fake_graph,
+            langfuse_observation_id="trace_unit_channel",  # type: ignore[reportCallIssue]
+        )
+    finally:
+        current_channel.reset(chan_tok)
+
+    assert captured["metadata"]["channel"] == Channel.WECOM
+
+
+@pytest.mark.asyncio
 async def test_blank_user_id_is_not_written_as_empty_string(monkeypatch):
     """未登录时 current_user_id 是空串；必须转 None，否则空串会被写进 trace。"""
     captured: dict = {}
