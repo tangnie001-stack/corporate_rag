@@ -270,6 +270,18 @@
 
 **规则**：就绪一律以 SDK 的 `authenticated` 事件为准（`LongConnectionDriver.is_ready`，见 `src/channels/wecom/long_connection.py`），等待加上界 5s；超时只降级、**不主动断开**（交 SDK 自愈）；凭证类失败（错误信息以 `Authentication failed` 开头）才主动 `disconnect()` 并置致命。反面代价：以返回值判定会让"逐台 try/except"变成死代码、启动锚点 `n=total` **恒真**——排障时无法区分"三台都在线"与"三台都认证失败"。
 
+### 投影层：终态帧只能发一次——"出错回一句兜底"不得覆盖已有终态
+
+**现象**：`WeComPresenter.run` 消费事件流时若抛非取消异常，会**先 `finalize()`（发出终态帧）再抛出**。若把 `presenter.run` 放进带 `except Exception` 的回退块（本意是"出错时回一句脱敏文案"），同一条流上会出现**两帧 `finish=True`**，后一帧把用户**已经看到的正确终态覆盖成错误文案**。
+
+**规则**：面向用户的兜底**只作用于回合启动阶段**（`start_turn` 之前）；投影阶段自成收尾契约，其异常**向上传播**（由驱动层吞掉）即可，**不得在 `except` 里再回一帧**。见 `src/channels/wecom/handler.py`。
+
+### 投影层：任何"跳过 finalize"的判据必须显式排除错误态
+
+**现象**：为满足"澄清等待期不结束流式回复"而加的守卫（"已有澄清问题且正文为空 ⇒ 不 finalize"）若不加 `_error is None`，会命中**上游异常收尾**路径 ⇒ 吞掉脱敏错误文案、**不发终态帧**、气泡永久停在"流式中"。
+
+**规则**：凡"跳过 finalize"的判据，一律**显式排除错误态**（`self._error is None`）；**"不留悬挂流"是投影层硬不变量**——上游异常时必须 finalize（脱敏文案 + `finish=true`）。
+
 ## 如何更新
 
 修复非平凡 bug 且属于"可复发缺陷类别"时，按"现象 → 规则"格式追加条目到对应分区。
