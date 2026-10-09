@@ -15,7 +15,7 @@
 - 实测整栈占用 **≈715 MiB**（app 254 / langfuse-web 212 / minio 144 / postgres 83 / nginx 12 / redis 10），CPU 近 0（推理在远端）
 - 镜像分两库：**公开** `deploy_base`（redis / pgvector / minio / langfuse / nginx / python 基镜像，免登录）+ **私有** `deploy_store_local`（app，含 `src/ scripts/ skills/ agents/ alembic/`，故不进公开库）
 - **发布链路（一条云效流水线）**：Git → 构建并推送 app 镜像（`dockerTag=${BUILD_NUMBER}`）→ 打包部署制品（`pack-deploy-artifact.sh` 用**同一个** `BUILD_NUMBER` 注入 compose 的 `image:`）→ **部署**（流水线最后一步：**匹配到发布单就直接发布**；**匹配不到则挂起，等人工在部署页面点「创建发布单」**，创建成功后继续、此后无需人工确认）
-- 目标机 `/opt/wwww/corporate_rag` 上存在：`.env`（人工放置、600）、`docker-compose.image.yml`、`deploy/**`、`scripts/deploy/deploy.sh`、`data/ragas/`
+- 目标机 `/opt/www/corporate_rag` 上存在：`.env`（人工放置、600）、`docker-compose.image.yml`、`deploy/**`、`scripts/deploy/deploy.sh`、`data/ragas/`
 - 迁移在 **app 容器内**执行（`alembic/` 与 `alembic.ini` 已 `COPY` 进镜像）
 
 **初稿的三条断言已被实现推翻**（本 change 据此更新）：
@@ -70,7 +70,7 @@
 
 ### D6 制品形态 = 流水线打出的部署包（tgz）+ ACR 镜像
 
-**理由**：制品由 `pack-deploy-artifact.sh` 生成（白名单：`docker-compose.image.yml` + `scripts/deploy/deploy.sh` + `deploy/**`），经「主机部署」下发解压到 `/opt/wwww/corporate_rag`。`src/` 等代码随镜像走，宿主不再需要。
+**理由**：制品由 `pack-deploy-artifact.sh` 生成（白名单：`docker-compose.image.yml` + `scripts/deploy/deploy.sh` + `deploy/**`），经「主机部署」下发解压到 `/opt/www/corporate_rag`。`src/` 等代码随镜像走，宿主不再需要。
 
 **代价**：目标机不再是"代码工作副本"，回滚靠镜像 tag 而非 `git checkout`；`.env` 必须人工放置（制品不含密钥）。
 

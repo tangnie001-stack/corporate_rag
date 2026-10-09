@@ -23,7 +23,7 @@
 # 非交互登录 ACR（可选）：
 #   ACR_USER=xxx ACR_PASSWORD=yyy bash scripts/deploy/deploy.sh
 #
-# 标准发布路径：/opt/wwww/corporate_rag（/opt/wwww 为多站点父目录）
+# 标准发布路径：/opt/www/corporate_rag（/opt/www 为多站点父目录）
 #   —— 在别处执行会打印提醒；所有文档 / 备份定时任务都引用该路径
 #
 # 两点前提：
@@ -37,7 +37,7 @@ set -euo pipefail
 
 COMPOSE_FILE="docker-compose.image.yml"
 ACR="crpi-u3ezxc1o5hirfddw.cn-shanghai.personal.cr.aliyuncs.com"
-EXPECTED_ROOT="/opt/wwww/corporate_rag"                               # 标准发布路径
+EXPECTED_ROOT="/opt/www/corporate_rag"                               # 标准发布路径
 ECS_METADATA="http://100.100.100.200/latest/meta-data/instance-id"    # 阿里云 ECS 元数据服务
 METADATA_HOST="100.100.100.200"
 HEALTH_URL="http://127.0.0.1/api/health"   # 经 nginx:80，与对外路径一致
