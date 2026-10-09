@@ -201,6 +201,7 @@ cd /opt/www/corporate_rag && bash scripts/deploy/deploy.sh clean
 3. **Alinux 4 自带 `docker` 与 `docker-ce` 互斥** —— 只补 `docker-compose-plugin` 即通（别装 `docker-ce` 全家桶）。
 4. **`docker compose restart` 不吃 `.env`** —— 改 `.env` 后要 `docker compose up -d --force-recreate app`。
 5. **制品下载**：用云效内建「下载制品」；若自己 `curl`，务必 `-fL`（`-f` 让 HTTP 错误直接失败，避免把错误响应体当成包）。
+6. **第 4 步报「非交互环境无法输入密码 —— 请用 ACR_USER / ACR_PASSWORD 环境变量提供凭据」** —— 说明**该机没有 ACR 凭据**（流水线的部署槽位无 TTY，输不了密码；常见于**机器重建**或从未登录过）。两条修法，任选其一：① 在目标机上**手工登录一次**（§2.0 第 2 步 / §3 第 2 条，凭据固化到 `/root/.docker/config.json`，之后永久免登录）；② 把 `ACR_USER`/`ACR_PASSWORD` 配到**部署槽位的环境变量**里。验证：`docker manifest inspect <app 镜像> >/dev/null && echo LOGIN_OK`。
 
 ### 2.6 新增 pip 依赖的影响（以企微长连接 SDK 为例）
 
