@@ -35,8 +35,9 @@ DASHSCOPE_BASE_URL: str = os.getenv(
 LLM_MODEL: str = os.getenv("LLM_MODEL", "qwen3.7-flash-2026-07-15")
 # LLM API Key（如未设置，自动 fallback 到 DASHSCOPE_API_KEY）
 LLM_API_KEY: str = os.getenv("LLM_API_KEY") or os.getenv("DASHSCOPE_API_KEY", "")
-# LLM API 地址（默认指向 LiteLLM Proxy，可改为直连地址）
-LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "http://litellm-proxy:4000")
+# LLM API 地址（默认直连 DashScope；如需经 LiteLLM 网关，设为 http://litellm-proxy:4000
+# 并显式启用其 disabled profile —— 见 docs/adr/0020-no-model-gateway-direct-provider.md）
+LLM_BASE_URL: str = os.getenv("LLM_BASE_URL") or DASHSCOPE_BASE_URL
 # LLM 温度参数：越低回答越确定性（适合金融场景），0.1 几乎不产生随机性
 LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.1"))
 # 主 agent 采样温度（chat-temperature-policy）：绑 KB 沿用 LLM_TEMPERATURE（默认 0.1）；
@@ -106,10 +107,8 @@ EMBEDDING_API_KEY: str = (
     or os.getenv("DASHSCOPE_API_KEY")
     or os.getenv("LLM_API_KEY", "")
 )
-# Embedding API 地址（fallback: LLM_BASE_URL）
-EMBEDDING_BASE_URL: str = os.getenv("EMBEDDING_BASE_URL") or os.getenv(
-    "LLM_BASE_URL", "http://litellm-proxy:4000"
-)
+# Embedding API 地址（fallback: LLM_BASE_URL → DashScope 直连）
+EMBEDDING_BASE_URL: str = os.getenv("EMBEDDING_BASE_URL") or LLM_BASE_URL
 # 向量输出维度：固定维度后切换模型无需重建向量列
 EMBEDDING_DIMENSION: int = int(os.getenv("EMBEDDING_DIMENSION", "1024"))
 # Embedding API 单次 batch 上限（DashScope 限制 20 条，超出需分批）

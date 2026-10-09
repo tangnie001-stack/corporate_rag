@@ -69,9 +69,9 @@ TBD - created by archiving change kb-routing-and-litellm-gateway. Update Purpose
 
 #### Scenario: DashScope 默认值
 - **WHEN** `.env` 中只设置了 `DASHSCOPE_API_KEY`
-- **THEN** `LLM_MODEL` 默认为 `qwen3.7-max`
+- **THEN** `LLM_MODEL` 取内置默认（模型 ID 随选型迭代，以 `src/config/settings.py` 为准）
 - **THEN** `EMBEDDING_MODEL` 默认为 `qwen3.7-text-embedding`
-- **THEN** `LLM_BASE_URL` 默认回退到 DashScope 直连地址 `https://dashscope.aliyuncs.com/compatible-mode/v1`
+- **THEN** `LLM_BASE_URL` 默认取 `DASHSCOPE_BASE_URL`（`https://dashscope.aliyuncs.com/compatible-mode/v1`）
 - **THEN** `EMBEDDING_BASE_URL` 默认同 `LLM_BASE_URL`
-- **THEN** `LITELLM_MASTER_KEY` 有缺省值 `sk-test-123456`
-- **THEN** 系统不依赖 LiteLLM Proxy 即可运行
+- **THEN** `LITELLM_MASTER_KEY` 属**网关链路**配置，应用不读取（见 `model-gateway` 规格）
+- **THEN** 系统不依赖 LiteLLM Proxy 即可运行（网关是可选路径，见 `model-gateway` 规格）
