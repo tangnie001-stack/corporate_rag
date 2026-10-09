@@ -144,8 +144,9 @@ services:
       ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
       TELEMETRY_ENABLED: ${TELEMETRY_ENABLED:-false}
       # 关闭自助注册：:3000 对外后，防止陌生人自行开号（v2.95.11 镜像服务端运行时读该变量）。
-      # **硬编码而非 ${VAR}**：与 app 的 WECOM_BOT_ENABLED 同款做法 —— 这是"生产独有"的值，
+      # **硬编码而非变量插值**：与 app 的 WECOM_BOT_ENABLED 同款做法 —— 这是"生产独有"的值，
       # 写死在部署档里，既不进 deploy.sh 的 .env 必填清单（否则缺键即 fail），也不受 .env 漂移影响。
+      # 注：本文件里不要出现形如变量占位符的字面量文本（含注释），会被 deploy.sh 的必填推导误捕。
       AUTH_DISABLE_SIGNUP: "true"
       # v2 的 Next.js standalone 默认绑回环，且 Docker 会把 HOSTNAME 设为容器 ID
       # → 必须显式绑 0.0.0.0，否则 app 经 langfuse-web:3000 不可达（静默走本地兜底）
