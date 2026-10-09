@@ -70,7 +70,7 @@
 | # | 步骤 | 在哪 | 入口 / 命令 |
 |---|---|---|---|
 | 1 | **同步 `.env`**（**仅本次有 `.env` 变更时**） | 开发机 → 目标机 | `scp .env root@<ECS-IP>:/opt/www/corporate_rag/.env` + `chmod 600`（见 §1.4）。**必须排在发布之前**（新制品不含 `.env`；缺键会让部署 `fail`）。**无变更 ⇒ 跳过** |
-| 2 | **登录 ACR 镜像凭证**（**仅首次上机**，之后一律跳过） | 目标机 | `docker login --username=hi31383397@aliyun.com crpi-u3ezxc1o5hirfddw.cn-shanghai.personal.cr.aliyuncs.com`（密码见 §1.4 / 团队渠道，**勿入库**；凭据落 `/root/.docker/config.json`）。无 TTY 时改用 `--password-stdin` |
+| 2 | **登录 ACR 镜像凭证**（**仅首次上机**，之后一律跳过） | 目标机 | `docker login --username=hi31383397@aliyun.com crpi-u3ezxc1o5hirfddw.cn-shanghai.personal.cr.aliyuncs.com`（密码从**团队渠道**取，**不入库**）。登录成功后凭据落 `/root/.docker/config.json`，**后续发布不再需要密码**（`deploy.sh` 先 `docker manifest inspect`，过了就跳过登录）。仅当需要在**无 TTY** 环境自动登录时，才以**环境变量** `ACR_USER`/`ACR_PASSWORD` 提供（`deploy.sh` **不读 `.env`**，须由部署槽位注入） |
 | 3 | **前置检查**：工作区干净 + 本地 `dev-wsl` 已推送、未落后 | 开发机 | `git fetch && git status -sb`（**说"开始部署"时由助手代查**）|
 | 4 | **推代码** | 开发机 | `git push origin dev-wsl` |
 | 5 | **GitHub → Codeup 同步代码**（当前**手动**）| 云效网页 | `https://deploytest-cn-shanghai.devops.aliyuncs.com/codeup/deploytest/tangnie001-stack/corporate_rag/settings/mirror_sync` |
@@ -221,7 +221,10 @@ cd /opt/www/corporate_rag && bash scripts/deploy/deploy.sh clean
    docker login --username=hi31383397@aliyun.com \
      crpi-u3ezxc1o5hirfddw.cn-shanghai.personal.cr.aliyuncs.com
    ```
-   密码从团队渠道取（**不写进仓库**）；也可用 `ACR_USER`/`ACR_PASSWORD` 环境变量。无 TTY 时加 `--password-stdin`。
+   密码从**团队渠道**取，**不写进仓库**（写进仓库 = 永久留在 Git 历史）。
+   登录一次即固化到 `/root/.docker/config.json`，**之后发布不再需要密码**；
+   仅无 TTY 自动化时用 `ACR_USER`/`ACR_PASSWORD` **环境变量**（`echo "$ACR_PASSWORD" | docker login -u "$ACR_USER" --password-stdin <registry>`）——
+   注意 `deploy.sh` **不读 `.env`**，这两个键放 `.env` 无效。
 3. **放 `.env`**：从团队渠道取键清单，填真实值，`chmod 600 /opt/www/corporate_rag/.env`（**当前为人工拷上机，方式与影响见 §1.4**）。
 4. **安全组**：只放行 22 + 80。
 5. **系统**：swap ≥2 GB、系统盘 ≥60 GB（本地演练构建时 build cache 可达数 GB）。
