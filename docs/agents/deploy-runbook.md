@@ -216,6 +216,7 @@ cd /opt/www/corporate_rag && bash scripts/deploy/deploy.sh clean
 
 ## 3. 首次上机
 
+0. ⚠️ **换机 / 新旧并行期**：两台机都开 `WECOM_BOT_ENABLED` 会**抢同一批机器人的长连接**（后连者顶掉先连者，日志出现 `disconnected_event`，表现为三台机器人时而回话时而不回）。切换顺序：**先在旧机 `bash scripts/deploy/deploy.sh stop`** → 再上机新机 → 确认新机锚点 `[wecom] bots connected n=3 total=3` → 最后下线旧机。另外新机的 PG / MinIO / Redis 是**空卷**：站点侧数据（知识库、会话、文件）从零开始，需要保留就必须另行搬迁数据卷（alembic 迁移只保证 schema，**不搬数据**）。
 1. **装 Docker + compose 插件**（Alinux 4：`dnf install -y docker-compose-plugin`）。
 2. **ACR 登录**（app 镜像在私有库，**只在上机时做一次**，凭据落 `/root/.docker/config.json`）：
    ```bash
